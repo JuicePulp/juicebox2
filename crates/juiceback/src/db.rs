@@ -1,6 +1,6 @@
 //! SQLite schema, migrations, and CRUD operations for application data.
 
-use rusqlite::{params, Connection, OptionalExtension, Result};
+use rusqlite::{Connection, OptionalExtension, Result, params};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -719,8 +719,7 @@ fn row_to_fetch_job(row: &rusqlite::Row) -> rusqlite::Result<FetchJob> {
     })
 }
 
-const FETCH_JOB_COLUMNS: &str =
-    "id, user_id, source_url, status, error, file_id, created_at, updated_at, stage, bytes_received";
+const FETCH_JOB_COLUMNS: &str = "id, user_id, source_url, status, error, file_id, created_at, updated_at, stage, bytes_received";
 
 pub fn insert_fetch_job(
     conn: &Connection,
@@ -2088,9 +2087,11 @@ mod tests {
         let imported = get_client_files(&conn, "user-1").unwrap();
         assert_eq!(imported.len(), 1);
         assert_eq!(imported[0].n, "a.txt");
-        assert!(!serde_json::to_string(&imported)
-            .unwrap()
-            .contains("valid-token"));
+        assert!(
+            !serde_json::to_string(&imported)
+                .unwrap()
+                .contains("valid-token")
+        );
     }
 
     #[test]
@@ -2299,16 +2300,18 @@ mod tests {
     fn complete_reservation_propagates_database_errors() {
         let conn = setup_db();
         conn.execute("DROP TABLE files", []).unwrap();
-        assert!(complete_reservation(
-            &conn,
-            "final.txt",
-            "text/plain",
-            4,
-            "reserved",
-            "secret",
-            None,
-        )
-        .is_err());
+        assert!(
+            complete_reservation(
+                &conn,
+                "final.txt",
+                "text/plain",
+                4,
+                "reserved",
+                "secret",
+                None,
+            )
+            .is_err()
+        );
     }
 
     #[test]

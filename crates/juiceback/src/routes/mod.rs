@@ -2,20 +2,19 @@
 //! its like the conductor of an orchestra but the orchestra is HTTP requests
 
 use axum::{
-    async_trait,
+    Json, Router, async_trait,
     body::Body,
     extract::{DefaultBodyLimit, FromRequestParts, Query, State},
-    http::{header, request::Parts, HeaderMap, HeaderValue, Method, Request, Response, StatusCode},
+    http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode, header, request::Parts},
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
-    Json, Router,
 };
-use std::net::SocketAddr;
 use sentry::integrations::tower::NewSentryLayer;
 use serde_json::json;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 
@@ -23,7 +22,7 @@ use crate::db;
 use crate::error::AppError;
 use crate::routes::api_doc::ApiDoc;
 use crate::state::AppState;
-use crate::utils::{ban_check_middleware, client_ip_middleware, TrustedClientIpKeyExtractor};
+use crate::utils::{TrustedClientIpKeyExtractor, ban_check_middleware, client_ip_middleware};
 
 /// Axum extractor for user identity that gets injected by middleware and used by handlers
 #[derive(Clone)]
@@ -179,7 +178,9 @@ async fn rate_limit_error_mapper(req: Request<Body>, next: middleware::Next) -> 
     }
     let mut mapped = AppError::RateLimited.into_response();
     if let Some(after) = response.headers().get("x-ratelimit-after").cloned() {
-        mapped.headers_mut().insert("x-ratelimit-after", after.clone());
+        mapped
+            .headers_mut()
+            .insert("x-ratelimit-after", after.clone());
         mapped.headers_mut().insert(header::RETRY_AFTER, after);
     }
     mapped
@@ -256,7 +257,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .collect();
         CorsLayer::new()
             .allow_origin(origins)
-            .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
             .allow_credentials(true)
             .allow_headers([
                 header::CONTENT_TYPE,

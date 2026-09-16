@@ -48,14 +48,10 @@ fn main() {
         return;
     }
 
-    dotenvy::dotenv().ok();
-
     // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
     // Uses SENTRY_DSN_JUICEBACK if set, otherwise falls back to SENTRY_DSN.
-    let _sentry_guard = std::env::var("SENTRY_DSN_JUICEBACK")
-        .or_else(|_| std::env::var("SENTRY_DSN"))
-        .ok()
-        .filter(|dsn| !dsn.is_empty())
+    let _sentry_guard = juicebox_config::optional_secret("SENTRY_DSN_JUICEBACK")
+        .or_else(|| juicebox_config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
             sentry::init((
                 dsn.as_str(),
@@ -76,7 +72,7 @@ fn main() {
             ))
         });
 
-    let config = Config::load().expect("Failed to load configuration");
+    let config = Config::try_load().expect("Failed to load configuration");
 
     tracing_subscriber::registry()
         .with(

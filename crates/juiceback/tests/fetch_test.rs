@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Request, StatusCode};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -236,10 +236,12 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
     let file = &result["file"];
     assert_eq!(file["mime_type"], "video/mp4");
     assert_eq!(file["size_bytes"], 14); // len("fake-mp4-bytes")
-    assert!(file["url"]
-        .as_str()
-        .unwrap()
-        .starts_with("http://localhost:6402/f/"));
+    assert!(
+        file["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://localhost:6402/f/")
+    );
     assert!(!file["delete_token"].as_str().unwrap().is_empty());
 
     // Ownership: without the session cookie we are a different anon user.
@@ -322,10 +324,12 @@ async fn cobalt_error_becomes_friendly_failure() {
     let result =
         wait_for_completion(&app, start["job_id"].as_str().unwrap(), &cookie.unwrap()).await;
     assert_eq!(result["status"], "failed");
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("isn't supported"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("isn't supported")
+    );
 }
 
 #[tokio::test]
@@ -373,10 +377,12 @@ async fn oversized_stream_is_rejected() {
     let result =
         wait_for_completion(&app, start["job_id"].as_str().unwrap(), &cookie.unwrap()).await;
     assert_eq!(result["status"], "failed");
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("maximum file size"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("maximum file size")
+    );
 }
 
 #[tokio::test]
@@ -472,10 +478,12 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         wait_for_completion(&app, start["job_id"].as_str().unwrap(), &cookie.unwrap()).await;
     assert_eq!(result["status"], "failed");
     // youtube link: message must explain the streaming-token enforcement
-    assert!(result["error"]
-        .as_str()
-        .unwrap()
-        .contains("YouTube blocked extraction"));
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("YouTube blocked extraction")
+    );
 }
 
 #[tokio::test]
@@ -718,36 +726,49 @@ async fn fetch_job_progress_lifecycle() {
 
     juiceback::db::insert_fetch_job(&conn, "job1", "user1", "https://youtu.be/x").unwrap();
 
-    let job = juiceback::db::get_fetch_job(&conn, "job1").unwrap().unwrap();
+    let job = juiceback::db::get_fetch_job(&conn, "job1")
+        .unwrap()
+        .unwrap();
     assert_eq!(job.status, "pending");
     assert_eq!(job.stage, "");
     assert_eq!(job.bytes_received, 0);
 
     // processing tick
     juiceback::db::update_fetch_job_progress(&conn, "job1", "cobalt", "processing", 0).unwrap();
-    let job = juiceback::db::get_fetch_job(&conn, "job1").unwrap().unwrap();
+    let job = juiceback::db::get_fetch_job(&conn, "job1")
+        .unwrap()
+        .unwrap();
     assert_eq!(job.status, "processing");
     assert_eq!(job.stage, "cobalt");
 
     // downloading ticks with growing byte count
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 512).unwrap();
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 4096).unwrap();
-    let job = juiceback::db::get_fetch_job(&conn, "job1").unwrap().unwrap();
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 512)
+        .unwrap();
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 4096)
+        .unwrap();
+    let job = juiceback::db::get_fetch_job(&conn, "job1")
+        .unwrap()
+        .unwrap();
     assert_eq!(job.status, "downloading");
     assert_eq!(job.bytes_received, 4096);
 
     // completion must be possible from a non-pending intermediate state,
     // and must record the final byte total via a last progress write.
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 8192).unwrap();
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 8192)
+        .unwrap();
     let updated = juiceback::db::finish_fetch_job(&conn, "job1", "done", "", "file1").unwrap();
     assert!(updated);
-    let job = juiceback::db::get_fetch_job(&conn, "job1").unwrap().unwrap();
+    let job = juiceback::db::get_fetch_job(&conn, "job1")
+        .unwrap()
+        .unwrap();
     assert_eq!(job.status, "done");
     assert_eq!(job.file_id, "file1");
 
     // terminal state is immutable: late tasks can't overwrite it.
     juiceback::db::update_fetch_job_progress(&conn, "job1", "late", "downloading", 1).unwrap();
-    let job = juiceback::db::get_fetch_job(&conn, "job1").unwrap().unwrap();
+    let job = juiceback::db::get_fetch_job(&conn, "job1")
+        .unwrap()
+        .unwrap();
     assert_eq!(job.status, "done");
     assert_eq!(job.stage, "transfer"); // untouched by the late write
 }
@@ -759,7 +780,7 @@ async fn fetch_job_progress_lifecycle() {
 async fn empty_stream_retries_primary_after_delay() {
     let server = MockServer::start().await;
 
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::Ordering;
     let calls_counter = std::sync::atomic::AtomicUsize::new(0);
     let calls = std::sync::Arc::new(calls_counter);
     let base = server.uri();
@@ -847,7 +868,10 @@ fn ytdlp_args_are_wired_correctly() {
     assert!(s.contains("--cookies /tmp/cookies.txt"));
     assert!(s.contains("--remote-components ejs:github"));
     assert!(s.contains("/tmp/potdir/"));
-    assert_eq!(args.last().unwrap(), "https://www.youtube.com/watch?v=sPyAQQklc1s");
+    assert_eq!(
+        args.last().unwrap(),
+        "https://www.youtube.com/watch?v=sPyAQQklc1s"
+    );
 }
 
 #[test]

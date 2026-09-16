@@ -2,10 +2,10 @@
 //! gzip uploads get buffered, decompressed, then sent. very based
 
 use axum::{
-    extract::{ConnectInfo, Multipart, Path, State},
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
     Json,
+    extract::{ConnectInfo, Multipart, Path, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use serde::Serialize;
@@ -16,12 +16,12 @@ use utoipa::ToSchema;
 
 use crate::db::{self, FileRecord};
 use crate::error::AppError;
-use crate::routes::noscript;
 use crate::routes::UserId;
+use crate::routes::noscript;
 use crate::state::AppState;
 use crate::upload_mode::UploadMode;
 
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 
 /// JSON response returned by a successful upload.
 #[derive(Serialize, ToSchema)]
@@ -867,7 +867,7 @@ pub async fn direct_upload_complete_handler(
     UserId(user_id): UserId,
     Json(body): Json<DirectUploadCompleteRequest>,
 ) -> Result<Json<UploadResponse>, AppError> {
-    use jsonwebtoken::{decode as jwt_decode, Algorithm, DecodingKey, Validation};
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode as jwt_decode};
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["exp"]);
     validation.set_issuer(&[crate::auth::ISS_TICKET]);
@@ -946,10 +946,10 @@ pub async fn direct_upload_complete_handler(
         db::CompleteReservationResult::Completed(_) => {}
         db::CompleteReservationResult::NotFound => return Err(AppError::NotFound),
         db::CompleteReservationResult::NotUploading => {
-            return Err(AppError::Conflict("upload is already complete".into()))
+            return Err(AppError::Conflict("upload is already complete".into()));
         }
         db::CompleteReservationResult::InvalidToken => {
-            return Err(AppError::Unauthorized("invalid upload ownership".into()))
+            return Err(AppError::Unauthorized("invalid upload ownership".into()));
         }
     }
 
@@ -1141,15 +1141,15 @@ pub async fn upload_handler(
         {
             db::CompleteReservationResult::Completed(record) => record,
             db::CompleteReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reserve_id".into()))
+                return Err(AppError::BadRequest("invalid reserve_id".into()));
             }
             db::CompleteReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()))
+                return Err(AppError::BadRequest("reservation is not uploading".into()));
             }
             db::CompleteReservationResult::InvalidToken => {
                 return Err(AppError::Forbidden(
                     "invalid reservation delete token".into(),
-                ))
+                ));
             }
         };
 
@@ -1609,7 +1609,7 @@ pub async fn ultrafast_complete_handler(
 
     // Validate ticket JWT for ownership check (proves this device was authorized for this file).
     if let Some(ref ticket_str) = body.ticket {
-        use jsonwebtoken::{decode as jwt_decode, Algorithm, DecodingKey, Validation};
+        use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode as jwt_decode};
 
         let mut ticket_validation = Validation::new(Algorithm::HS256);
         ticket_validation.set_required_spec_claims(&["exp"]);
@@ -1757,12 +1757,12 @@ pub async fn ultrafast_complete_handler(
         db::CompleteReservationResult::Completed(_) => {}
         db::CompleteReservationResult::NotFound => return Err(AppError::NotFound),
         db::CompleteReservationResult::NotUploading => {
-            return Err(AppError::BadRequest("reservation is not uploading".into()))
+            return Err(AppError::BadRequest("reservation is not uploading".into()));
         }
         db::CompleteReservationResult::InvalidToken => {
             return Err(AppError::Forbidden(
                 "invalid reservation delete token".into(),
-            ))
+            ));
         }
     }
 
@@ -1886,7 +1886,15 @@ mod tests {
     #[test]
     fn ttl_is_monotonic_in_size() {
         let mut prev = 0_i64;
-        for size in [1, 1024, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, u64::MAX] {
+        for size in [
+            1,
+            1024,
+            1_000_000,
+            10_000_000,
+            100_000_000,
+            1_000_000_000,
+            u64::MAX,
+        ] {
             let ttl = compute(size);
             assert!(ttl >= prev, "ttl regressed: {ttl} < {prev} at size {size}");
             prev = ttl;

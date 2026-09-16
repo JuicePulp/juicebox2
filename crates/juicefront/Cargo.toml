@@ -18,6 +18,8 @@ serde.workspace = true
 toml.workspace = true
 anyhow.workspace = true
 juicebox-config = { path = "../juicebox-config" }
+sentry = { version = "0.48", features = ["tower", "tower-axum-matched-path"] }
+sentry-tracing = "0.48"
 
 [lints]
 workspace = true

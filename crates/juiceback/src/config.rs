@@ -1,11 +1,12 @@
-//! config loaded from env vars. very straightforward, nothing to see here
+//! Configuration loaded from a TOML file with environment overrides.
+//! Secrets always come from the environment, never from TOML.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 /// Holds every setting juiceback needs to run.
-///
-/// All values come from environment variables with sensible fallbacks.
-/// Check out Config::load to see what variables are available.
 #[derive(Clone)]
 pub struct Config {
     pub host: String,
@@ -20,8 +21,7 @@ pub struct Config {
     pub juicehost_api_key: String,
     pub juicehost_url: String,
     /// Public URL that remote devices can use to reach juicehost. Falls back to
-    /// PUBLIC_BASE_URL when PUBLIC_JUICEHOST_URL is unset. Must NOT be a loopback
-    /// address or remote devices will try to upload to their own localhost.
+    /// PUBLIC_BASE_URL when PUBLIC_JUICEHOST_URL is unset.
     pub public_juicehost_url: String,
     pub juiceback_origin: String,
     pub jwt_secret: String,
@@ -29,7 +29,7 @@ pub struct Config {
     pub ip_encryption_key: String,
     /// Secret pepper for HMAC ban-lookup digests.
     pub ip_pepper: String,
-    /// Comma-separated list of allowed CORS origins.
+    /// List of allowed CORS origins.
     pub cors_origins: Vec<String>,
     /// Webhook URL for report notifications (Discord, Slack, etc.).
     pub report_webhook_url: Option<String>,
@@ -46,7 +46,7 @@ pub struct Config {
     /// Email address reports appear to come from.
     pub report_email_sender: Option<String>,
     /// Path to the QUIC TLS certificate file for cert pinning.
-    pub quic_cert_path: Option<std::path::PathBuf>,
+    pub quic_cert_path: Option<PathBuf>,
     /// CIDRs whose peers are allowed to supply forwarding headers.
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
     pub report_retention_days: u64,
@@ -157,248 +157,505 @@ impl std::fmt::Debug for Config {
     }
 }
 
-impl Config {
-    /// Load settings from the environment. see env vars below if you care.
-    pub fn load() -> Result<Self, String> {
-        let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("PORT")
-            .unwrap_or_else(|_| "6401".to_string())
-            .parse::<u16>()
-            .map_err(|e| format!("Invalid PORT: {}", e))?;
+/// TOML file layout for juiceback. Every section is optional.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct FileConfig {
+    #[serde(default)]
+    pub server: ServerFile,
+    #[serde(default)]
+    pub urls: UrlsFile,
+    #[serde(default)]
+    pub cors: CorsFile,
+    #[serde(default)]
+    pub report: ReportFile,
+    #[serde(default)]
+    pub cloudflare: CloudflareFile,
+    #[serde(default)]
+    pub cobalt: CobaltFile,
+    #[serde(default)]
+    pub dte: DteFile,
+    #[serde(default)]
+    pub features: FeaturesFile,
+    #[serde(default)]
+    pub regions: RegionsFile,
+    #[serde(default)]
+    pub sentry: juicebox_config::SentrySettings,
+}
 
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct ServerFile {
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub quic_port: Option<u16>,
+    #[serde(default = "default_database_path")]
+    pub database_path: String,
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
+    #[serde(default = "default_db_pool_size")]
+    pub db_pool_size: u32,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+    #[serde(default = "default_cleanup_interval_minutes")]
+    pub cleanup_interval_minutes: u64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct UrlsFile {
+    #[serde(default = "default_public_base_url")]
+    pub public_base_url: String,
+    #[serde(default = "default_juicehost_url")]
+    pub juicehost_url: String,
+    #[serde(default)]
+    pub public_juicehost_url: Option<String>,
+    #[serde(default)]
+    pub juiceback_origin: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CorsFile {
+    #[serde(default = "default_cors_origins")]
+    pub origins: Vec<String>,
+}
+
+impl Default for CorsFile {
+    fn default() -> Self {
+        Self {
+            origins: default_cors_origins(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReportFile {
+    #[serde(default = "default_report_retention_days")]
+    pub retention_days: u64,
+    #[serde(default = "default_report_retention_days")]
+    pub feedback_retention_days: u64,
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub smtp_host: Option<String>,
+    #[serde(default = "default_smtp_port")]
+    pub smtp_port: Option<u16>,
+    #[serde(default)]
+    pub smtp_username: Option<String>,
+    #[serde(default)]
+    pub email_recipient: Option<String>,
+    #[serde(default)]
+    pub email_sender: Option<String>,
+}
+
+impl Default for ReportFile {
+    fn default() -> Self {
+        Self {
+            retention_days: default_report_retention_days(),
+            feedback_retention_days: default_report_retention_days(),
+            webhook_url: None,
+            smtp_host: None,
+            smtp_port: default_smtp_port(),
+            smtp_username: None,
+            email_recipient: None,
+            email_sender: None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct CloudflareFile {
+    #[serde(default)]
+    pub zone_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct CobaltFile {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cobalt_api_url")]
+    pub api_url: String,
+    #[serde(default)]
+    pub session_api_url: Option<String>,
+    #[serde(default = "default_fetch_empty_retry_delay")]
+    pub fetch_empty_retry_delay_secs: u64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct DteFile {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_dte_assumed_bps")]
+    pub assumed_bps: f64,
+    #[serde(default = "default_dte_safety_mult")]
+    pub safety_mult: f64,
+    #[serde(default = "default_dte_base_overhead")]
+    pub base_overhead_secs: i64,
+    #[serde(default = "default_dte_min_ttl")]
+    pub min_ttl_secs: i64,
+    #[serde(default = "default_dte_max_ttl")]
+    pub max_ttl_secs: i64,
+    #[serde(default = "default_dte_mint_limit")]
+    pub mint_limit: u32,
+    #[serde(default = "default_dte_mint_window")]
+    pub mint_window_secs: u64,
+    #[serde(default = "default_dte_mint_burst")]
+    pub mint_burst: u32,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct FeaturesFile {
+    #[serde(default = "default_secure_cookies")]
+    pub secure_cookies: bool,
+    #[serde(default)]
+    pub direct_upload_enabled: bool,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RegionsFile {
+    #[serde(default)]
+    pub public_juicehosts: Option<HashMap<String, String>>,
+}
+
+fn default_host() -> String {
+    String::from("127.0.0.1")
+}
+
+const fn default_port() -> u16 {
+    6401
+}
+
+fn default_database_path() -> String {
+    String::from("./delta.db")
+}
+
+const fn default_rate_limit_per_minute() -> u32 {
+    10
+}
+
+const fn default_db_pool_size() -> u32 {
+    8
+}
+
+fn default_log_level() -> String {
+    String::from("info")
+}
+
+const fn default_cleanup_interval_minutes() -> u64 {
+    30
+}
+
+fn default_public_base_url() -> String {
+    String::from("http://localhost:6402")
+}
+
+fn default_juicehost_url() -> String {
+    String::from("http://127.0.0.1:6402")
+}
+
+fn default_cors_origins() -> Vec<String> {
+    vec![String::from("http://localhost:6400")]
+}
+
+const fn default_report_retention_days() -> u64 {
+    90
+}
+
+const fn default_smtp_port() -> Option<u16> {
+    Some(465)
+}
+
+fn default_cobalt_api_url() -> String {
+    String::from("http://localhost:7272")
+}
+
+const fn default_fetch_empty_retry_delay() -> u64 {
+    crate::constants::FETCH_EMPTY_RETRY_DELAY_SECS
+}
+
+fn default_dte_assumed_bps() -> f64 {
+    crate::constants::DTE_ASSUMED_BPS
+}
+
+fn default_dte_safety_mult() -> f64 {
+    crate::constants::DTE_SAFETY_MULT
+}
+
+fn default_dte_base_overhead() -> i64 {
+    crate::constants::DTE_BASE_OVERHEAD_SECS
+}
+
+fn default_dte_min_ttl() -> i64 {
+    crate::constants::DTE_MIN_TTL_SECS
+}
+
+fn default_dte_max_ttl() -> i64 {
+    crate::constants::DTE_MAX_TTL_SECS
+}
+
+const fn default_dte_mint_limit() -> u32 {
+    crate::constants::DTE_MINT_LIMIT
+}
+
+const fn default_dte_mint_window() -> u64 {
+    crate::constants::DTE_MINT_WINDOW_SECS
+}
+
+const fn default_dte_mint_burst() -> u32 {
+    crate::constants::DTE_MINT_BURST
+}
+
+const fn default_secure_cookies() -> bool {
+    true
+}
+
+/// Candidate config file locations, first hit wins.
+fn candidate_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("JUICEBACK_CONFIG") {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            paths.push(PathBuf::from(trimmed));
+        }
+    }
+    for name in ["juiceback.toml", "config.toml"] {
+        paths.push(PathBuf::from(name));
+        paths.push(PathBuf::from("/etc/juicebox").join(name));
+    }
+    paths
+}
+
+fn load_file_config() -> FileConfig {
+    for path in candidate_paths() {
+        if path.exists() {
+            return load_one_file(&path);
+        }
+    }
+    tracing::warn!("no juiceback config file found, using defaults");
+    FileConfig::default()
+}
+
+fn load_one_file(path: &Path) -> FileConfig {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        tracing::warn!("config file {} unreadable, using defaults", path.display());
+        return FileConfig::default();
+    };
+    match toml::from_str::<FileConfig>(&text) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            tracing::warn!(
+                "config file {} invalid ({err}), using defaults",
+                path.display()
+            );
+            FileConfig::default()
+        }
+    }
+}
+
+impl Config {
+    /// Load configuration from a TOML file with environment overrides.
+    pub fn try_load() -> Result<Self, String> {
+        Self::try_load_from(&load_file_config())
+    }
+
+    /// Load configuration from the environment only (tests / compat).
+    #[allow(dead_code)]
+    pub fn from_env() -> Result<Self, String> {
+        Self::try_load_from(&FileConfig::default())
+    }
+
+    fn try_load_from(file: &FileConfig) -> Result<Self, String> {
+        let host = std::env::var("HOST").unwrap_or_else(|_| file.server.host.clone());
+        let port = std::env::var("PORT")
+            .unwrap_or_else(|_| file.server.port.to_string())
+            .parse::<u16>()
+            .map_err(|e| format!("Invalid PORT: {e}"))?;
         let quic_port = std::env::var("QUIC_PORT")
             .ok()
             .and_then(|p| p.parse::<u16>().ok())
+            .or(file.server.quic_port)
             .unwrap_or(port + 1);
 
         let database_path =
-            std::env::var("DATABASE_PATH").unwrap_or_else(|_| "./delta.db".to_string());
-
+            std::env::var("DATABASE_PATH").unwrap_or_else(|_| file.server.database_path.clone());
         let rate_limit_per_minute = std::env::var("RATE_LIMIT_PER_MINUTE")
-            .unwrap_or_else(|_| "10".to_string())
+            .unwrap_or_else(|_| file.server.rate_limit_per_minute.to_string())
             .parse::<u32>()
-            .map_err(|e| format!("Invalid RATE_LIMIT_PER_MINUTE: {}", e))?;
-
+            .map_err(|e| format!("Invalid RATE_LIMIT_PER_MINUTE: {e}"))?;
         let db_pool_size = std::env::var("DB_POOL_SIZE")
-            .unwrap_or_else(|_| "8".to_string())
+            .unwrap_or_else(|_| file.server.db_pool_size.to_string())
             .parse::<u32>()
-            .map_err(|e| format!("Invalid DB_POOL_SIZE: {}", e))?;
-
+            .map_err(|e| format!("Invalid DB_POOL_SIZE: {e}"))?;
         let public_base_url = std::env::var("PUBLIC_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:6402".to_string())
+            .unwrap_or_else(|_| file.urls.public_base_url.clone())
             .trim_end_matches('/')
             .to_string();
-
-        let log_level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
-
+        let log_level =
+            std::env::var("LOG_LEVEL").unwrap_or_else(|_| file.server.log_level.clone());
         let cleanup_interval_minutes = std::env::var("CLEANUP_INTERVAL_MINUTES")
-            .unwrap_or_else(|_| "30".to_string())
+            .unwrap_or_else(|_| file.server.cleanup_interval_minutes.to_string())
             .parse::<u64>()
-            .map_err(|e| format!("Invalid CLEANUP_INTERVAL_MINUTES: {}", e))?;
+            .map_err(|e| format!("Invalid CLEANUP_INTERVAL_MINUTES: {e}"))?;
 
-        let juicehost_api_key = std::env::var("JUICEHOST_API_KEY").unwrap_or_default();
+        // Secrets are env-only, never from TOML.
+        let juicehost_api_key =
+            juicebox_config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
+        let jwt_secret =
+            juicebox_config::required_secret("JWT_SECRET").map_err(|e| e.to_string())?;
+        let ip_encryption_key =
+            juicebox_config::required_secret("IP_ENCRYPTION_KEY").map_err(|e| e.to_string())?;
+        let ip_pepper = juicebox_config::optional_secret("IP_PEPPER").unwrap_or_default();
+        let ticket_jwt_secret = juicebox_config::optional_secret("TICKET_JWT_SECRET")
+            .unwrap_or_else(|| jwt_secret.clone());
+        let smtp_password = juicebox_config::optional_secret("SMTP_PASSWORD");
+        let cobalt_api_key = juicebox_config::optional_secret("COBALT_API_KEY").unwrap_or_default();
+        let cobalt_session_api_key = juicebox_config::optional_secret("COBALT_SESSION_API_KEY");
+        let cf_api_token = juicebox_config::optional_secret("CF_API_TOKEN");
 
-        let juicehost_url = std::env::var("JUICEHOST_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:6402".to_string())
-            .trim_end_matches('/')
-            .to_string();
-
-        let public_juicehost_url = std::env::var("PUBLIC_JUICEHOST_URL")
-            .unwrap_or_else(|_| public_base_url.clone())
-            .trim_end_matches('/')
-            .to_string();
-
-        let juiceback_origin = std::env::var("JUICEBACK_ORIGIN")
-            .unwrap_or_else(|_| format!("http://{}:{}", host, port))
-            .trim_end_matches('/')
-            .to_string();
-
-        let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-            let generated = uuid::Uuid::new_v4().to_string();
-            tracing::warn!(
-                "JWT_SECRET not set, using generated random secret (admins will be invalidated on restart)"
-            );
-            generated
-        });
-
-        let ip_encryption_key = std::env::var("IP_ENCRYPTION_KEY").unwrap_or_else(|_| {
-            use rand::RngCore;
-            let mut key = [0_u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut key);
-            let generated = hex::encode(key);
-            tracing::warn!(
-                "IP_ENCRYPTION_KEY not set, using generated key (existing encrypted IPs will be invalid on restart)"
-            );
-            generated
-        });
-
+        // IP encryption key must decode to exactly 32 bytes.
         let encryption_key_bytes = hex::decode(&ip_encryption_key)
             .map_err(|_| "IP_ENCRYPTION_KEY must be a hexadecimal string".to_string())?;
         if encryption_key_bytes.len() != 32 {
             return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
         }
 
-        let ip_pepper = std::env::var("IP_PEPPER").unwrap_or_else(|_| {
-            let generated = uuid::Uuid::new_v4().to_string();
-            tracing::warn!(
-                "IP_PEPPER not set, using generated pepper (bans will be invalidated on restart)"
-            );
-            generated
-        });
+        let juicehost_url = std::env::var("JUICEHOST_URL")
+            .unwrap_or_else(|_| file.urls.juicehost_url.clone())
+            .trim_end_matches('/')
+            .to_string();
+        let public_juicehost_url = std::env::var("PUBLIC_JUICEHOST_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.urls.public_juicehost_url.clone())
+            .unwrap_or_else(|| public_base_url.clone())
+            .trim_end_matches('/')
+            .to_string();
+        let juiceback_origin = std::env::var("JUICEBACK_ORIGIN")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.urls.juiceback_origin.clone())
+            .unwrap_or_else(|| format!("http://{host}:{port}"))
+            .trim_end_matches('/')
+            .to_string();
 
         let cors_origins = std::env::var("CORS_ORIGINS")
-            .unwrap_or_else(|_| "http://localhost:6400".to_string())
+            .unwrap_or_else(|_| file.cors.origins.join(","))
             .split(',')
-            .map(|s| s.trim().to_string())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
+            .map(str::to_string)
             .collect();
 
         let report_webhook_url = std::env::var("REPORT_WEBHOOK_URL")
             .ok()
             .filter(|s| !s.trim().is_empty());
-
         let smtp_host = std::env::var("SMTP_HOST")
             .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.report.smtp_host.clone());
         let smtp_port = std::env::var("SMTP_PORT")
             .ok()
             .filter(|s| !s.trim().is_empty())
-            .map(|s| s.parse::<u16>().unwrap_or(465));
+            .map(|s| s.parse::<u16>().unwrap_or(465))
+            .or(file.report.smtp_port);
         let smtp_username = std::env::var("SMTP_USERNAME")
             .ok()
-            .filter(|s| !s.trim().is_empty());
-        let smtp_password = std::env::var("SMTP_PASSWORD")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.report.smtp_username.clone());
         let report_email_recipient = std::env::var("REPORT_EMAIL_RECIPIENT")
             .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.report.email_recipient.clone());
         let report_email_sender = std::env::var("REPORT_EMAIL_SENDER")
             .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.report.email_sender.clone());
 
-        let quic_cert_path = Some(
-            std::env::var("QUIC_CERT_PATH")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("./quic-cert.der")),
-        );
+        let quic_cert_path = std::env::var("QUIC_CERT_PATH")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from);
 
         let trusted_proxy_cidrs = juiceutils::proxy::parse_trusted_proxy_cidrs(
             &std::env::var("TRUSTED_PROXY_CIDRS").unwrap_or_default(),
         )?;
+
         let report_retention_days = std::env::var("REPORT_RETENTION_DAYS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(90);
+            .unwrap_or(file.report.retention_days);
         let feedback_retention_days = std::env::var("FEEDBACK_RETENTION_DAYS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(90);
-
-        let cf_api_token = std::env::var("CF_API_TOKEN")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+            .unwrap_or(file.report.feedback_retention_days);
         let cf_zone_id = std::env::var("CF_ZONE_ID")
             .ok()
-            .filter(|s| !s.trim().is_empty());
-
-        let ticket_jwt_secret =
-            std::env::var("TICKET_JWT_SECRET").unwrap_or_else(|_| jwt_secret.clone());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.cloudflare.zone_id.clone());
 
         let secure_cookies = std::env::var("SECURE_COOKIES")
-            .ok()
-            .map(|value| value == "true" || value == "1")
-            .unwrap_or(true);
-
+            .map_or(file.features.secure_cookies, |v| {
+                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
+            });
         let direct_upload_enabled = std::env::var("DIRECT_UPLOAD_ENABLED")
-            .ok()
-            .map(|value| value == "true" || value == "1")
-            .unwrap_or(false);
+            .map_or(file.features.direct_upload_enabled, |v| {
+                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
+            });
 
-        let cobalt_enabled = std::env::var("COBALT_ENABLED")
-            .ok()
-            .map(|value| value == "true" || value == "1")
-            .unwrap_or(false);
-
+        let cobalt_enabled = std::env::var("COBALT_ENABLED").map_or(file.cobalt.enabled, |v| {
+            v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
+        });
         let cobalt_api_url = std::env::var("COBALT_API_URL")
-            .unwrap_or_else(|_| "http://localhost:7272".to_string())
+            .unwrap_or_else(|_| file.cobalt.api_url.clone())
             .trim_end_matches('/')
             .to_string();
-
-        let cobalt_api_key = std::env::var("COBALT_API_KEY").unwrap_or_default();
-
-        let dte_enabled = std::env::var("DTE")
-            .ok()
-            .map(|value| value == "true" || value == "1")
-            .unwrap_or(false);
-
-        let dte_assumed_bps = std::env::var("DTE_ASSUMED_BPS")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(crate::constants::DTE_ASSUMED_BPS);
-        let dte_safety_mult = std::env::var("DTE_SAFETY_MULT")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(crate::constants::DTE_SAFETY_MULT);
-        let dte_base_overhead_secs = std::env::var("DTE_BASE_OVERHEAD_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(crate::constants::DTE_BASE_OVERHEAD_SECS);
-        let dte_min_ttl_secs = std::env::var("DTE_MIN_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(crate::constants::DTE_MIN_TTL_SECS);
-        let dte_max_ttl_secs = std::env::var("DTE_MAX_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(crate::constants::DTE_MAX_TTL_SECS);
-        let dte_mint_limit = std::env::var("DTE_MINT_LIMIT")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(crate::constants::DTE_MINT_LIMIT);
-        let dte_mint_window_secs = std::env::var("DTE_MINT_WINDOW_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(crate::constants::DTE_MINT_WINDOW_SECS);
-        let dte_mint_burst = std::env::var("DTE_MINT_BURST")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(crate::constants::DTE_MINT_BURST);
-
-        let region_public_juicehosts: HashMap<String, String> =
-            std::env::var("REGION_PUBLIC_JUICEHOSTS")
-                .unwrap_or_default()
-                .split(',')
-                .filter_map(|pair| {
-                    let pair = pair.trim();
-                    if pair.is_empty() {
-                        return None;
-                    }
-                    let (region, url) = pair.split_once(':')?;
-                    let region = region.trim().to_ascii_lowercase();
-                    let url = url.trim().trim_end_matches('/').to_string();
-                    if region.is_empty() || url.is_empty() {
-                        None
-                    } else {
-                        Some((region, url))
-                    }
-                })
-                .collect();
-
         let cobalt_session_api_url = std::env::var("COBALT_SESSION_API_URL")
             .ok()
             .map(|v| v.trim().trim_end_matches('/').to_string())
-            .filter(|v| !v.is_empty());
-        let cobalt_session_api_key = std::env::var("COBALT_SESSION_API_KEY")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+            .filter(|v| !v.is_empty())
+            .or_else(|| file.cobalt.session_api_url.clone().map(clean_url));
         let fetch_empty_retry_delay_secs = std::env::var("FETCH_EMPTY_RETRY_DELAY_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(crate::constants::FETCH_EMPTY_RETRY_DELAY_SECS);
+            .unwrap_or(file.cobalt.fetch_empty_retry_delay_secs);
+
+        let dte_enabled = std::env::var("DTE").map_or(file.dte.enabled, |v| {
+            v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
+        });
+        let dte_assumed_bps = std::env::var("DTE_ASSUMED_BPS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(file.dte.assumed_bps);
+        let dte_safety_mult = std::env::var("DTE_SAFETY_MULT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(file.dte.safety_mult);
+        let dte_base_overhead_secs = std::env::var("DTE_BASE_OVERHEAD_SECS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(file.dte.base_overhead_secs);
+        let dte_min_ttl_secs = std::env::var("DTE_MIN_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(file.dte.min_ttl_secs);
+        let dte_max_ttl_secs = std::env::var("DTE_MAX_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(file.dte.max_ttl_secs);
+        let dte_mint_limit = std::env::var("DTE_MINT_LIMIT")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(file.dte.mint_limit);
+        let dte_mint_window_secs = std::env::var("DTE_MINT_WINDOW_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(file.dte.mint_window_secs);
+        let dte_mint_burst = std::env::var("DTE_MINT_BURST")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(file.dte.mint_burst);
+
+        let region_public_juicehosts = file.regions.public_juicehosts.clone().unwrap_or_default();
 
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
             return Err(
@@ -408,7 +665,7 @@ impl Config {
             );
         }
 
-        // Refuse to start with placeholder secrets
+        // Refuse to start with placeholder secrets.
         let placeholder_values = ["change_this_to_a_random_value", "change_this_in_production"];
         if placeholder_values.contains(&jwt_secret.as_str()) || jwt_secret.is_empty() {
             return Err(
@@ -477,4 +734,8 @@ impl Config {
             region_public_juicehosts,
         })
     }
+}
+
+fn clean_url(s: String) -> String {
+    s.trim_end_matches('/').to_string()
 }

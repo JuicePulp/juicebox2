@@ -1,6 +1,6 @@
 use std::{env, str::FromStr};
 
-use crate::config::ConfigError;
+use crate::config::{ConfigError, PublicFile};
 
 /// Public HTTP listener settings.
 #[derive(Debug)]
@@ -23,9 +23,9 @@ impl PublicSettings {
         self.port
     }
 
-    pub fn from_env() -> Result<Self, ConfigError> {
-        let host = env::var("PUBLIC_HOST").unwrap_or_else(|_| Self::DEFAULT_IP.to_owned());
-        let port = env::var("PUBLIC_PORT").map_or(Ok(Self::DEFAULT_PORT), |p| {
+    pub fn load(file: &PublicFile) -> Result<Self, ConfigError> {
+        let host = env::var("PUBLIC_HOST").unwrap_or_else(|_| file.host.clone());
+        let port = env::var("PUBLIC_PORT").map_or(Ok(file.port), |p| {
             u16::from_str(&p).map_err(|_| ConfigError::invalid_public_port())
         })?;
 

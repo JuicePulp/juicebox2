@@ -4,9 +4,9 @@ use crate::db::{BanRecord, FeedbackRecord, HosterRecord, ReportRecord};
 use crate::routes::admin::{
     AdminBansResponse, AdminFeedbackEntry, AdminFeedbackResponse, AdminFileEntry,
     AdminFilesResponse, AdminHostersResponse, AdminReportEntry, AdminReportsResponse,
-    AnnouncementPayload, AnnouncementResponse, BanExportEntry, BanExportResponse,
-    BanHosterPayload, BanImportEntry, BanImportPayload, BanImportResponse, BanIpPayload,
-    CheckResponse, LoginForm, LoginResponse, UnbanHosterPayload,
+    AnnouncementPayload, AnnouncementResponse, BanExportEntry, BanExportResponse, BanHosterPayload,
+    BanImportEntry, BanImportPayload, BanImportResponse, BanIpPayload, CheckResponse, LoginForm,
+    LoginResponse, UnbanHosterPayload,
 };
 use crate::routes::manage::{
     ClientFilesRequest, ClientFilesResponse, FileInfoResponse, OwnedFilesRequest,
@@ -16,8 +16,8 @@ use crate::routes::pairing::{
     DeviceInfo as PairingDeviceInfo, GenerateCodeRequest, GenerateCodeResponse, VerifyCodeRequest,
     VerifyCodeResponse,
 };
-use crate::routes::presence::DeviceListResponse;
 use crate::routes::presence::DeviceInfo as PresenceDeviceInfo;
+use crate::routes::presence::DeviceListResponse;
 use crate::routes::register::{RegisterRequest, RegisterResponse};
 use crate::routes::upload::{
     ReserveResponse, ReserveUploadRequest, UltrafastCompleteRequest, UltrafastReserveRequest,

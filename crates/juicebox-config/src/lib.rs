@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// Sentry settings shared by all Juicebox services.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SentrySettings {
     /// Sentry DSN. Falls back to `SENTRY_DSN` when unset.
     #[serde(default)]
@@ -13,6 +13,15 @@ pub struct SentrySettings {
     /// Environment reported to Sentry.
     #[serde(default = "default_sentry_env")]
     pub environment: String,
+}
+
+impl Default for SentrySettings {
+    fn default() -> Self {
+        Self {
+            dsn: None,
+            environment: default_sentry_env(),
+        }
+    }
 }
 
 fn default_sentry_env() -> String {
@@ -47,7 +56,10 @@ where
     match toml::from_str::<T>(&text) {
         Ok(cfg) => cfg,
         Err(err) => {
-            tracing::warn!("config file {} invalid ({err}), using defaults", path.display());
+            tracing::warn!(
+                "config file {} invalid ({err}), using defaults",
+                path.display()
+            );
             T::default()
         }
     }
@@ -55,14 +67,16 @@ where
 
 /// Read a required secret from the environment.
 pub fn required_secret(name: &str) -> anyhow::Result<String> {
-    std::env::var(name).map_err(|_| anyhow::anyhow!("{name} is not set")).and_then(|v| {
-        let trimmed = v.trim().to_owned();
-        if trimmed.is_empty() {
-            Err(anyhow::anyhow!("{name} is empty"))
-        } else {
-            Ok(trimmed)
-        }
-    })
+    std::env::var(name)
+        .map_err(|_| anyhow::anyhow!("{name} is not set"))
+        .and_then(|v| {
+            let trimmed = v.trim().to_owned();
+            if trimmed.is_empty() {
+                Err(anyhow::anyhow!("{name} is empty"))
+            } else {
+                Ok(trimmed)
+            }
+        })
 }
 
 /// Read an optional secret from the environment.
@@ -86,4 +100,3 @@ mod tests {
         assert_eq!(cfg.dsn, None);
     }
 }
-

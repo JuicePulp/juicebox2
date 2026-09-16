@@ -1,4 +1,4 @@
-use crate::config::{bounded_env, ConfigError};
+use crate::config::{ConfigError, ThreadsFile, bounded_env};
 
 /// Tokio worker thread settings.
 #[derive(Debug)]
@@ -11,9 +11,9 @@ impl ThreadSettings {
         self.worker_threads
     }
 
-    pub fn from_env() -> Result<Self, ConfigError> {
+    pub fn load(file: &ThreadsFile) -> Result<Self, ConfigError> {
         Ok(Self {
-            worker_threads: bounded_env("WORKER_THREADS", 3usize, 1, 256)?,
+            worker_threads: bounded_env("WORKER_THREADS", file.worker_threads, 1, 256)?,
         })
     }
 }

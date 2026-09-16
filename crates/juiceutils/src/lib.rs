@@ -9,8 +9,8 @@ pub mod server;
 
 #[cfg(feature = "quic")]
 pub use server::{
-    generate_self_signed_cert, get_or_generate_cert, load_cert_for_pinning, start_quic_server,
-    start_quic_server_with_limits, QuicServerLimits,
+    QuicServerLimits, generate_self_signed_cert, get_or_generate_cert, load_cert_for_pinning,
+    start_quic_server, start_quic_server_with_limits,
 };
 
 /// Compare secret contents without early exit.
@@ -73,7 +73,7 @@ pub async fn add_security_headers(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> impl axum::response::IntoResponse {
-    use axum::http::{header, HeaderValue};
+    use axum::http::{HeaderValue, header};
 
     let is_file_route = req.uri().path().starts_with("/f/");
 

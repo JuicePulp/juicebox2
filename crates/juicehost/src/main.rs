@@ -20,13 +20,10 @@ use tokio::sync::Notify;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
-    let _ = dotenvy::dotenv();
-
     // Initialize Sentry before configuration so it captures startup failures.
-    let _sentry_guard = std::env::var("SENTRY_DSN_JUICEHOST")
-        .or_else(|_| std::env::var("SENTRY_DSN"))
-        .ok()
-        .filter(|dsn| !dsn.is_empty())
+    // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN.
+    let _sentry_guard = juicebox_config::optional_secret("SENTRY_DSN_JUICEHOST")
+        .or_else(|| juicebox_config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
             sentry::init((
                 dsn.as_str(),
@@ -55,7 +52,7 @@ fn main() {
         .with(sentry_tracing::layer())
         .init();
 
-    let config = Config::from_env().expect("Failed to load configuration");
+    let config = Config::try_load().expect("Failed to load configuration");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(config.worker_threads)

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::{bounded_env, public::PublicSettings, ConfigError};
+use crate::config::{ConfigError, QuicFile, bounded_env, public::PublicSettings};
 
 /// QUIC/HTTP/3 listener and limit settings.
 #[derive(Debug)]
@@ -48,8 +48,12 @@ impl QuicSettings {
         self.request_total_seconds
     }
 
-    pub fn from_env(public: &PublicSettings) -> Result<Self, ConfigError> {
-        let host = std::env::var("QUIC_HOST").unwrap_or_else(|_| public.host().to_owned());
+    pub fn load(file: &QuicFile, public: &PublicSettings) -> Result<Self, ConfigError> {
+        let host = std::env::var("QUIC_HOST").unwrap_or_else(|_| {
+            file.host
+                .clone()
+                .unwrap_or_else(|| public.host().to_owned())
+        });
         let port = std::env::var("QUIC_PORT")
             .ok()
             .map(|p| {
@@ -57,6 +61,7 @@ impl QuicSettings {
                     .map_err(|_| ConfigError::invalid_quic_port())
             })
             .transpose()?
+            .or(file.port)
             .unwrap_or(
                 public
                     .port()
@@ -66,12 +71,18 @@ impl QuicSettings {
         let cert_path = std::env::var("QUIC_CERT_PATH")
             .ok()
             .filter(|s| !s.trim().is_empty())
-            .map_or_else(|| PathBuf::from("./quic-cert.der"), PathBuf::from);
-        let max_connections = bounded_env("QUIC_MAX_CONNECTIONS", 256usize, 1, 65_536)?;
-        let max_requests = bounded_env("QUIC_MAX_REQUESTS", 256usize, 1, 65_536)?;
-        let handshake_seconds = bounded_env("QUIC_HANDSHAKE_SECONDS", 10u64, 1, 120)?;
-        let idle_seconds = bounded_env("QUIC_IDLE_SECONDS", 30u64, 1, 600)?;
-        let request_total_seconds = bounded_env("QUIC_REQUEST_TOTAL_SECONDS", 600u64, 1, 86_400)?;
+            .map_or_else(|| file.cert_path.clone(), PathBuf::from);
+        let max_connections = bounded_env("QUIC_MAX_CONNECTIONS", file.max_connections, 1, 65_536)?;
+        let max_requests = bounded_env("QUIC_MAX_REQUESTS", file.max_requests, 1, 65_536)?;
+        let handshake_seconds =
+            bounded_env("QUIC_HANDSHAKE_SECONDS", file.handshake_seconds, 1, 120)?;
+        let idle_seconds = bounded_env("QUIC_IDLE_SECONDS", file.idle_seconds, 1, 600)?;
+        let request_total_seconds = bounded_env(
+            "QUIC_REQUEST_TOTAL_SECONDS",
+            file.request_total_seconds,
+            1,
+            86_400,
+        )?;
         Ok(Self {
             host,
             port,

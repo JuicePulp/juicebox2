@@ -1,10 +1,10 @@
 //! HTML endpoints that work without javascript like upload confirmation and file listing and reporting so the site still works when js is disabled, very inclusive
 // might get rid of it in the future
 use axum::{
-    extract::{Extension, State},
-    http::{header, HeaderMap, HeaderValue},
-    response::{IntoResponse, Redirect, Response},
     Form,
+    extract::{Extension, State},
+    http::{HeaderMap, HeaderValue, header},
+    response::{IntoResponse, Redirect, Response},
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};

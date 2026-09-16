@@ -5,7 +5,7 @@ pub fn verify_ticket_jwt(
     token: &str,
     secret: &str,
 ) -> Result<serde_json::Value, jsonwebtoken::errors::Error> {
-    use jsonwebtoken::{decode, DecodingKey};
+    use jsonwebtoken::{DecodingKey, decode};
 
     let validation = ticket_validation();
     let token_data = decode::<serde_json::Value>(

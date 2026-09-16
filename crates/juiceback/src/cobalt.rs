@@ -278,7 +278,8 @@ pub fn parse_youtube_video_id(url: &str) -> Option<String> {
             return Some(seg.to_string());
         }
     }
-    None}
+    None
+}
 
 /// Best-effort YouTube link detection for session-instance fallback.
 pub fn is_youtube_link(url: &str) -> bool {
@@ -292,9 +293,7 @@ pub fn is_youtube_link(url: &str) -> bool {
     }
     let host = host.split(':').next().unwrap_or(host); // strip port
     let host = host.to_ascii_lowercase();
-    host == "youtube.com"
-        || host == "youtu.be"
-        || host.ends_with(".youtube.com")
+    host == "youtube.com" || host == "youtu.be" || host.ends_with(".youtube.com")
 }
 
 pub fn tunnel_client() -> reqwest::Result<reqwest::Client> {
@@ -380,7 +379,14 @@ mod tests {
     fn request_body_audio_mode() {
         let body = build_request_body(
             "https://youtu.be/x",
-            &FetchOptions::sanitized(true, Some("bogus"), Some("webm"), Some("opus"), true, Some("av1")),
+            &FetchOptions::sanitized(
+                true,
+                Some("bogus"),
+                Some("webm"),
+                Some("opus"),
+                true,
+                Some("av1"),
+            ),
         );
         assert_eq!(body["downloadMode"], "audio");
         assert_eq!(body["videoQuality"], "1080"); // bogus quality sanitized
@@ -500,13 +506,18 @@ mod tests {
                 "status": "error",
                 "error": {"code": code}
             }));
-            assert!(!r.is_client_refused(), "{code} must not count as client-refused");
+            assert!(
+                !r.is_client_refused(),
+                "{code} must not count as client-refused"
+            );
         }
 
-        assert!(!CobaltResponse::LocalProcessing {
-            service: "youtube".into()
-        }
-        .is_client_refused());
+        assert!(
+            !CobaltResponse::LocalProcessing {
+                service: "youtube".into()
+            }
+            .is_client_refused()
+        );
     }
 
     #[test]

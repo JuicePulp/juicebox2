@@ -56,6 +56,7 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         ban_list_file: None,
         ban_sync_url: None,
         ban_sync_interval: 30,
+        sentry: juicebox_config::SentrySettings::default(),
     }
 }
 

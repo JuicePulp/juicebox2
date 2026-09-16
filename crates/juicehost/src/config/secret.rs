@@ -16,11 +16,11 @@ impl SecretSettings {
         &self.ip_pepper
     }
 
-    pub fn from_env(security: &SecuritySettings) -> Self {
-        let ticket_jwt_secret = std::env::var("TICKET_JWT_SECRET").unwrap_or_else(|_| {
-            std::env::var("JWT_SECRET").unwrap_or_else(|_| security.api_key().to_owned())
-        });
-        let ip_pepper = std::env::var("IP_PEPPER").unwrap_or_default();
+    pub fn load(security: &SecuritySettings) -> Self {
+        let ticket_jwt_secret = juicebox_config::optional_secret("TICKET_JWT_SECRET")
+            .or_else(|| juicebox_config::optional_secret("JWT_SECRET"))
+            .unwrap_or_else(|| security.api_key().to_owned());
+        let ip_pepper = juicebox_config::optional_secret("IP_PEPPER").unwrap_or_default();
         Self {
             ticket_jwt_secret,
             ip_pepper,

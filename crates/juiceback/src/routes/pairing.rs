@@ -1,13 +1,13 @@
 //! juicebox-plus pairing, where the website generates codes that devices exchange for JWTs.
 
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 
 use crate::routes::UserId;
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use rand::Rng;
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};

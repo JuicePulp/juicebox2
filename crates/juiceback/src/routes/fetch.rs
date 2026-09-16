@@ -3,9 +3,9 @@
 //! juicehost and hands the user a normal /f/ file like any other upload.
 
 use axum::{
+    Json,
     extract::{ConnectInfo, Path, State},
     http::HeaderMap,
-    Json,
 };
 use std::path::PathBuf;
 
@@ -276,7 +276,10 @@ pub async fn fetch_services_handler(
     let url = format!("{}/", state.config.cobalt_api_url.trim_end_matches('/'));
     let mut request = state.http.get(&url);
     if !state.config.cobalt_api_key.is_empty() {
-        request = request.header("Authorization", format!("Api-Key {}", state.config.cobalt_api_key));
+        request = request.header(
+            "Authorization",
+            format!("Api-Key {}", state.config.cobalt_api_key),
+        );
     }
     let response = request
         .send()
@@ -295,7 +298,12 @@ pub async fn fetch_services_handler(
 
     let mut services: Vec<String> = body["cobalt"]["services"]
         .as_array()
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(service_domain).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(service_domain)
+                .collect()
+        })
         .unwrap_or_default();
     services.sort();
     services.dedup();
@@ -492,8 +500,7 @@ async fn run_fetch_job_inner(
         default_ttl_hours: f64,
         encrypted_ip: Option<String>,
     ) -> FetchResult {
-        let response =
-            cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
+        let response = cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
 
         // A session-enabled instance may still refuse at client level; that
         // refusal is final for this attempt and surfaces as a friendly error.
@@ -558,8 +565,7 @@ async fn run_fetch_job_inner(
     // until something sticks or the budget runs out. Each cycle surfaces a
     // user-visible stage ("retry-N") so the UI isn't a dead spinner.
     let is_rescue = |r: &FetchResult| {
-        matches!(r, Err(e) if youtube_needs_rescue(e))
-            && cobalt::is_youtube_link(source_url)
+        matches!(r, Err(e) if youtube_needs_rescue(e)) && cobalt::is_youtube_link(source_url)
     };
 
     // Secondary server rescues FIRST, with no waiting.
@@ -573,7 +579,11 @@ async fn run_fetch_job_inner(
                     let job_id = job_id.to_string();
                     move |db| {
                         db::update_fetch_job_progress(
-                            db, &job_id, "session-fallback", "processing", 0,
+                            db,
+                            &job_id,
+                            "session-fallback",
+                            "processing",
+                            0,
                         )
                     }
                 })
@@ -614,15 +624,15 @@ async fn run_fetch_job_inner(
         // rescue loop entirely (used by tests).
         if state.config.fetch_empty_retry_delay_secs == 0
             || pass >= crate::constants::FETCH_RESCUE_MAX_PASSES
-            || budget_left < std::time::Duration::from_secs(
-                state.config.fetch_empty_retry_delay_secs,
-            )
+            || budget_left
+                < std::time::Duration::from_secs(state.config.fetch_empty_retry_delay_secs)
         {
             return last;
         }
         tracing::info!(
             "youtube rescue pass {} failed; retrying in {}s",
-            pass, state.config.fetch_empty_retry_delay_secs
+            pass,
+            state.config.fetch_empty_retry_delay_secs
         );
         let _ = state
             .db_call("update_fetch_job_progress", {
@@ -632,9 +642,9 @@ async fn run_fetch_job_inner(
             })
             .await;
         tokio::time::sleep(std::time::Duration::from_secs(
-                state.config.fetch_empty_retry_delay_secs,
-            ))
-            .await;
+            state.config.fetch_empty_retry_delay_secs,
+        ))
+        .await;
 
         // ---- full ladder for this pass ----
         // Tier 2: session-enabled instance when present; otherwise re-hit
@@ -668,7 +678,11 @@ async fn run_fetch_job_inner(
                     let job_id = job_id.to_string();
                     move |db| {
                         db::update_fetch_job_progress(
-                            db, &job_id, "session-fallback", "processing", 0,
+                            db,
+                            &job_id,
+                            "session-fallback",
+                            "processing",
+                            0,
                         )
                     }
                 })
@@ -724,8 +738,7 @@ fn is_rescue_err(err: &str) -> bool {
 /// Internal marker check for the empty-stream failure class, which may be
 /// retried against the session-enabled cobalt instance.
 fn is_empty_stream_error(err: &str) -> bool {
-    err.contains("returned no data")
-        || err.contains("blocked extraction")
+    err.contains("returned no data") || err.contains("blocked extraction")
 }
 
 /// YouTube failures worth escalating for: client-level refusals
@@ -733,9 +746,7 @@ fn is_empty_stream_error(err: &str) -> bool {
 /// rescue path (session instance or yt-dlp tier) even when the primary
 /// instance cannot serve the link.
 fn youtube_needs_rescue(err: &str) -> bool {
-    err.contains("unavailable")
-        || err.contains("login")
-        || is_empty_stream_error(err)
+    err.contains("unavailable") || err.contains("login") || is_empty_stream_error(err)
 }
 
 /// Tier-3 fallback gate: yt-dlp + bgutil PO provider, routed through the
@@ -897,7 +908,13 @@ async fn run_ytdlp_tier(
             &out_dir,
         );
 
-        tracing::info!("tier-3 pass {} via {} ({}): running {}", idx + 1, proxy, stage_tag, ytdlp_bin());
+        tracing::info!(
+            "tier-3 pass {} via {} ({}): running {}",
+            idx + 1,
+            proxy,
+            stage_tag,
+            ytdlp_bin()
+        );
         let output = match tokio::time::timeout(
             std::time::Duration::from_secs(crate::constants::FETCH_JOB_TIMEOUT_SECS),
             tokio::process::Command::new(ytdlp_bin())
@@ -919,7 +936,16 @@ async fn run_ytdlp_tier(
 
         if !output.status.success() {
             let tail = String::from_utf8_lossy(&output.stderr);
-            let tail = tail.lines().rev().take(3).collect::<Vec<&str>>().iter().rev().copied().collect::<Vec<_>>().join(" | ");
+            let tail = tail
+                .lines()
+                .rev()
+                .take(3)
+                .collect::<Vec<&str>>()
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" | ");
             last_err = Some(format!("yt-dlp fallback failed via {}: {}", proxy, tail));
             continue;
         }
@@ -943,7 +969,12 @@ async fn run_ytdlp_tier(
         }
 
         let tail = String::from_utf8_lossy(&output.stderr);
-        let tail = tail.lines().rev().take(2).collect::<Vec<&str>>().join(" | ");
+        let tail = tail
+            .lines()
+            .rev()
+            .take(2)
+            .collect::<Vec<&str>>()
+            .join(" | ");
         last_err = Some(if tail.is_empty() {
             format!(
                 "yt-dlp extracted no downloadable streams via {} (SABR enforcement)",
@@ -956,16 +987,17 @@ async fn run_ytdlp_tier(
 
     let path = match produced {
         Some(p) => p,
-        None => return Err(last_err.unwrap_or_else(|| {
-            "yt-dlp extracted no downloadable streams (SABR enforcement)".into()
-        })),
+        None => {
+            return Err(last_err.unwrap_or_else(|| {
+                "yt-dlp extracted no downloadable streams (SABR enforcement)".into()
+            }));
+        }
     };
 
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "video.mp4".into());
-
 
     let result = download_and_store(
         state,
@@ -1166,9 +1198,10 @@ async fn transfer_to_juicehost(
                 }
             }
             (
-                Box::pin(resp.bytes_stream().map(|c| {
-                    c.map_err(|e| format!("media download failed mid-stream: {}", e))
-                })),
+                Box::pin(
+                    resp.bytes_stream()
+                        .map(|c| c.map_err(|e| format!("media download failed mid-stream: {}", e))),
+                ),
                 len,
             )
         }
@@ -1192,10 +1225,7 @@ async fn transfer_to_juicehost(
                     match file.read_buf(&mut buf).await {
                         Ok(0) => None,
                         Ok(_) => Some((Ok(buf.freeze()), file)),
-                        Err(e) => Some((
-                            Err(format!("failed reading yt-dlp output: {}", e)),
-                            file,
-                        )),
+                        Err(e) => Some((Err(format!("failed reading yt-dlp output: {}", e)), file)),
                     }
                 })),
                 None,
@@ -1238,12 +1268,15 @@ async fn transfer_to_juicehost(
             last_progress = std::time::Instant::now();
             let job_id_owned = job_id.to_string();
             let _ = state
-                .db_call(
-                    "update_fetch_job_progress",
-                    move |db| {
-                        db::update_fetch_job_progress(db, &job_id_owned, "transfer", "downloading", total as i64)
-                    },
-                )
+                .db_call("update_fetch_job_progress", move |db| {
+                    db::update_fetch_job_progress(
+                        db,
+                        &job_id_owned,
+                        "transfer",
+                        "downloading",
+                        total as i64,
+                    )
+                })
                 .await;
         }
         if tx.send(Ok(chunk)).await.is_err() {
@@ -1255,12 +1288,15 @@ async fn transfer_to_juicehost(
     {
         let job_id_owned = job_id.to_string();
         let _ = state
-            .db_call(
-                "update_fetch_job_progress_final",
-                move |db| {
-                    db::update_fetch_job_progress(db, &job_id_owned, "transfer", "downloading", total as i64)
-                },
-            )
+            .db_call("update_fetch_job_progress_final", move |db| {
+                db::update_fetch_job_progress(
+                    db,
+                    &job_id_owned,
+                    "transfer",
+                    "downloading",
+                    total as i64,
+                )
+            })
             .await;
     }
 

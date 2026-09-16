@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-/// The port environment variable that failed to parse.
+/// The port setting that failed to parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigPort {
     Public,

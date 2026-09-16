@@ -5,14 +5,14 @@ use std::sync::Arc;
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Redirect, Response},
 };
 use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::error::StorageError;
-use crate::error::{not_found_html, teapot_html, JuicehostError};
+use crate::error::{JuicehostError, not_found_html, teapot_html};
 use crate::state::AppState;
 use crate::storage;
 
@@ -221,8 +221,7 @@ async fn serve_file_inner(
     let with_cache_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, &cache_control);
         if let Some(tag) = &cache_tag {
-            builder = builder
-                .header(header::HeaderName::from_static("cache-tag"), tag);
+            builder = builder.header(header::HeaderName::from_static("cache-tag"), tag);
         }
         builder
     };
@@ -575,7 +574,7 @@ fn validate_or_block(
     danger_level: juiceutils::file_validation::ProtectionLevel,
     context: &str,
 ) -> Result<(), JuicehostError> {
-    use juiceutils::file_validation::{friendly_block_reason, FileValidation};
+    use juiceutils::file_validation::{FileValidation, friendly_block_reason};
     match juiceutils::file_validation::validate_file(filename, bytes, danger_level) {
         FileValidation::Allowed => Ok(()),
         FileValidation::BlockedExtension { ext, tier } => {
@@ -944,7 +943,7 @@ pub async fn store_file_ticket(
         file_capability: Option<String>,
     }
 
-    use jsonwebtoken::{decode, DecodingKey};
+    use jsonwebtoken::{DecodingKey, decode};
 
     let ticket = decode::<TicketClaims>(
         token,

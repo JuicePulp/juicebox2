@@ -1,10 +1,10 @@
 use axum::{
+    Json,
     extract::{
-        ws::{Message, WebSocket},
         State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
     },
     response::sse::{Event, Sse},
-    Json,
 };
 use futures::StreamExt;
 use serde::Serialize;

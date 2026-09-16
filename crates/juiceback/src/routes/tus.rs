@@ -1,11 +1,12 @@
 //! TUS resumable upload protocol endpoints.
 
 use axum::{
+    Json,
     body::Bytes,
     extract::{ConnectInfo, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing, Json,
+    routing,
 };
 use base64::Engine;
 use dashmap::mapref::entry::Entry;
@@ -450,15 +451,15 @@ async fn finish_tus_upload(
         {
             db::CompleteReservationResult::Completed(record) => record,
             db::CompleteReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reserve_id".into()))
+                return Err(AppError::BadRequest("invalid reserve_id".into()));
             }
             db::CompleteReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()))
+                return Err(AppError::BadRequest("reservation is not uploading".into()));
             }
             db::CompleteReservationResult::InvalidToken => {
                 return Err(AppError::Forbidden(
                     "invalid reservation delete token".into(),
-                ))
+                ));
             }
         };
         tracing::info!(
@@ -586,9 +587,11 @@ fn release_parallel_slot(
         .map(|v| v.value() == id)
         .unwrap_or(false);
     if ours && session.part_ids.remove(&pi).is_some() {
-        let _ = session.declared_size.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |size| {
-            Some(size.saturating_sub(total_length))
-        });
+        let _ = session
+            .declared_size
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |size| {
+                Some(size.saturating_sub(total_length))
+            });
     }
 }
 
@@ -707,15 +710,15 @@ async fn finalize_concat(
         {
             db::CompleteReservationResult::Completed(record) => record,
             db::CompleteReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reserve_id".into()))
+                return Err(AppError::BadRequest("invalid reserve_id".into()));
             }
             db::CompleteReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()))
+                return Err(AppError::BadRequest("reservation is not uploading".into()));
             }
             db::CompleteReservationResult::InvalidToken => {
                 return Err(AppError::Forbidden(
                     "invalid reservation delete token".into(),
-                ))
+                ));
             }
         };
         tracing::info!(
@@ -894,23 +897,22 @@ async fn patch_upload_handler_impl(
     // Chunks may arrive gzip-compressed (X-File-Encoding: gzip, one
     // self-contained gzip member per PATCH). Decode up front so first-chunk
     // magic validation sniffs real content and offsets stay logical.
-    let body_bytes =
-        if headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip")
-            && !body.is_empty()
-        {
-            use std::io::Read as _;
-            let mut out = Vec::with_capacity(body.len() * 4);
-            flate2::read::GzDecoder::new(&body[..])
-                .read_to_end(&mut out)
-                .map_err(|_| AppError::GzipDecodeFailed)?;
-            const MAX_DECOMPRESSED_CHUNK: usize = 256 * 1024 * 1024;
-            if out.len() > MAX_DECOMPRESSED_CHUNK {
-                return Err(AppError::PayloadTooLarge);
-            }
-            Bytes::from(out)
-        } else {
-            body
-        };
+    let body_bytes = if headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip")
+        && !body.is_empty()
+    {
+        use std::io::Read as _;
+        let mut out = Vec::with_capacity(body.len() * 4);
+        flate2::read::GzDecoder::new(&body[..])
+            .read_to_end(&mut out)
+            .map_err(|_| AppError::GzipDecodeFailed)?;
+        const MAX_DECOMPRESSED_CHUNK: usize = 256 * 1024 * 1024;
+        if out.len() > MAX_DECOMPRESSED_CHUNK {
+            return Err(AppError::PayloadTooLarge);
+        }
+        Bytes::from(out)
+    } else {
+        body
+    };
     let chunk_len = body_bytes.len() as u64;
 
     let reserve_override = headers
@@ -1083,7 +1085,7 @@ async fn patch_upload_handler_impl(
     if is_complete {
         if let Some(meta) = completed_meta {
             // Check if this is a parallel part.
-            if let (Some(ref sid), Some(pi)) = (&session_id, part_index) {
+            if let (Some(sid), Some(pi)) = (&session_id, part_index) {
                 state.tus.remove(&id);
                 let response = complete_parallel_part(&state, meta, sid, pi).await?;
                 let status = if response.get("url").is_some() {
@@ -1234,18 +1236,22 @@ mod tests {
 
     #[test]
     fn parallel_metadata_requires_complete_bounded_tuple() {
-        assert!(validate_parallel_metadata(None, None, None)
-            .unwrap()
-            .is_none());
+        assert!(
+            validate_parallel_metadata(None, None, None)
+                .unwrap()
+                .is_none()
+        );
         assert!(validate_parallel_metadata(Some("session"), Some(0), Some(4)).is_ok());
         assert!(validate_parallel_metadata(Some("session"), None, Some(4)).is_err());
         assert!(validate_parallel_metadata(Some("session"), Some(4), Some(4)).is_err());
-        assert!(validate_parallel_metadata(
-            Some("session"),
-            Some(0),
-            Some(crate::constants::MAX_TUS_PARALLEL_PARTS + 1),
-        )
-        .is_err());
+        assert!(
+            validate_parallel_metadata(
+                Some("session"),
+                Some(0),
+                Some(crate::constants::MAX_TUS_PARALLEL_PARTS + 1),
+            )
+            .is_err()
+        );
         assert!(parse_parallel_number(Some("not-a-number")).is_err());
     }
 

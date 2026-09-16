@@ -1,6 +1,6 @@
 //! internal endpoint for when juicehost already has a file so we don't push the same data twice, big brain move
 
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -144,15 +144,15 @@ pub async fn register_handler(
                 (record.delete_token, record.expires_at)
             }
             db::CompleteReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reservation ID".into()))
+                return Err(AppError::BadRequest("invalid reservation ID".into()));
             }
             db::CompleteReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()))
+                return Err(AppError::BadRequest("reservation is not uploading".into()));
             }
             db::CompleteReservationResult::InvalidToken => {
                 return Err(AppError::Forbidden(
                     "invalid reservation delete token".into(),
-                ))
+                ));
             }
         }
     } else {

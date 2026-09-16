@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -1650,10 +1650,12 @@ mod tests {
             Ok(Bytes::from_static(b"partial")),
             Err(StorageError::Io("request failed".into())),
         ]);
-        assert!(backend
-            .put_stream("broken", "file.txt", Box::pin(stream))
-            .await
-            .is_err());
+        assert!(
+            backend
+                .put_stream("broken", "file.txt", Box::pin(stream))
+                .await
+                .is_err()
+        );
         assert!(backend.stat("broken").await.is_err());
         let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
         assert!(entries.is_empty());

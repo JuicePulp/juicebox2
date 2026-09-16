@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::upload_mode::UploadMode;
 

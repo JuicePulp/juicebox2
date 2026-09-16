@@ -17,7 +17,11 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
     let (Some(token), Some(zone_id)) = (&config.cf_api_token, &config.cf_zone_id) else {
         return;
     };
-    if (body.get("files").and_then(|v| v.as_array()).map(|a| a.is_empty()).unwrap_or(false))
+    if (body
+        .get("files")
+        .and_then(|v| v.as_array())
+        .map(|a| a.is_empty())
+        .unwrap_or(false))
         || (body
             .get("purge_by_tags")
             .and_then(|v| v.as_array())

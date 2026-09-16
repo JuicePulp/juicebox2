@@ -1,9 +1,9 @@
 //! Error types mapped to HTTP status codes and JSON response bodies.
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde_json::json;
 
@@ -64,26 +64,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match self {
             // -- 404 / 403 / 410 / 409 --
-            AppError::NotFound => (
-                StatusCode::NOT_FOUND,
-                "FILE_NOT_FOUND",
-                "File not found",
-            ),
-            AppError::Gone => (
-                StatusCode::GONE,
-                "FILE_EXPIRED",
-                "File has expired",
-            ),
-            AppError::Forbidden(ref msg) => (
-                StatusCode::FORBIDDEN,
-                "FORBIDDEN",
-                msg.as_str(),
-            ),
-            AppError::Conflict(ref msg) => (
-                StatusCode::CONFLICT,
-                "CONFLICT",
-                msg.as_str(),
-            ),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "FILE_NOT_FOUND", "File not found"),
+            AppError::Gone => (StatusCode::GONE, "FILE_EXPIRED", "File has expired"),
+            AppError::Forbidden(ref msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.as_str()),
+            AppError::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.as_str()),
 
             // -- Upload validation --
             AppError::GzipDecodeFailed => (
@@ -143,11 +127,7 @@ impl IntoResponse for AppError {
                 } else {
                     clean
                 };
-                (
-                    StatusCode::BAD_GATEWAY,
-                    "STORAGE_UNREACHABLE",
-                    clean,
-                )
+                (StatusCode::BAD_GATEWAY, "STORAGE_UNREACHABLE", clean)
             }
             AppError::JuicehostRejected(ref e) => {
                 let clean = extract_error_message(e);
@@ -156,11 +136,7 @@ impl IntoResponse for AppError {
                 } else {
                     clean
                 };
-                (
-                    StatusCode::BAD_GATEWAY,
-                    "STORAGE_REJECTED",
-                    clean,
-                )
+                (StatusCode::BAD_GATEWAY, "STORAGE_REJECTED", clean)
             }
             AppError::InsufficientStorage(ref e) => {
                 let clean = extract_error_message(e);
@@ -197,10 +173,14 @@ impl IntoResponse for AppError {
                 "An internal processing task failed unexpectedly",
             ),
             AppError::BadRequest(ref msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.as_str()),
-            AppError::Unauthorized(ref msg) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.as_str()),
-            AppError::InvalidMultipart(_) => {
-                (StatusCode::BAD_REQUEST, "INVALID_MULTIPART", "Invalid multipart data")
+            AppError::Unauthorized(ref msg) => {
+                (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.as_str())
             }
+            AppError::InvalidMultipart(_) => (
+                StatusCode::BAD_REQUEST,
+                "INVALID_MULTIPART",
+                "Invalid multipart data",
+            ),
             AppError::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",

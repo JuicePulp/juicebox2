@@ -836,34 +836,50 @@ mod tests {
 
     #[tokio::test]
     async fn custom_target_rejects_credentials_and_extra_url_components() {
-        assert!(custom_juicehost_target("https://user:pass@1.1.1.1")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("https://1.1.1.1/api")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("https://1.1.1.1/?next=x")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("https://1.1.1.1/#fragment")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("https://localhost./")
-            .await
-            .is_err());
+        assert!(
+            custom_juicehost_target("https://user:pass@1.1.1.1")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("https://1.1.1.1/api")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("https://1.1.1.1/?next=x")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("https://1.1.1.1/#fragment")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("https://localhost./")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn custom_target_rejects_local_and_metadata_names() {
-        assert!(custom_juicehost_target("http://localhost:6402")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("http://service.internal")
-            .await
-            .is_err());
-        assert!(custom_juicehost_target("http://metadata.google.internal")
-            .await
-            .is_err());
+        assert!(
+            custom_juicehost_target("http://localhost:6402")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("http://service.internal")
+                .await
+                .is_err()
+        );
+        assert!(
+            custom_juicehost_target("http://metadata.google.internal")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

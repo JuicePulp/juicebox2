@@ -1,4 +1,4 @@
-use crate::config::{env_bool, ConfigError};
+use crate::config::{ConfigError, S3File, env_bool};
 
 /// S3-compatible backend settings.
 #[derive(Debug)]
@@ -38,23 +38,22 @@ impl S3Settings {
 }
 
 impl S3Settings {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    pub fn load(file: &S3File) -> Result<Self, ConfigError> {
         let bucket = std::env::var("S3_BUCKET")
             .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.bucket.clone());
         let region = std::env::var("S3_REGION")
             .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.region.clone());
         let endpoint = std::env::var("S3_ENDPOINT")
             .ok()
-            .filter(|s| !s.trim().is_empty());
-        let allow_http = env_bool("S3_ALLOW_HTTP", false)?;
-        let access_key = std::env::var("S3_ACCESS_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let secret_key = std::env::var("S3_SECRET_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.endpoint.clone());
+        let allow_http = env_bool("S3_ALLOW_HTTP", file.allow_http)?;
+        let access_key = juicebox_config::optional_secret("S3_ACCESS_KEY");
+        let secret_key = juicebox_config::optional_secret("S3_SECRET_KEY");
         Ok(Self {
             bucket,
             region,

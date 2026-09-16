@@ -1,4 +1,4 @@
-use crate::config::{bounded_env, ConfigError};
+use crate::config::{ConfigError, LimitsFile, bounded_env};
 
 /// Concurrency and timeout limit settings.
 #[derive(Debug)]
@@ -52,27 +52,51 @@ impl LimitsSettings {
     }
 
     // I KNOW THERE'S A BETTER WAY TO DO THIS DON'T BLAME ME FOR THIS.
-    pub fn from_env() -> Result<Self, ConfigError> {
+    pub fn load(file: &LimitsFile) -> Result<Self, ConfigError> {
         let min_free_space_bytes = std::env::var("MIN_FREE_SPACE_GB")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(5)
+            .unwrap_or(file.min_free_space_gb)
             * 1024
             * 1024
             * 1024;
         let max_file_size_bytes =
-            bounded_env("MAX_FILE_SIZE_MB", 500u64, 1, 1024 * 1024)? * 1024 * 1024;
+            bounded_env("MAX_FILE_SIZE_MB", file.max_file_size_mb, 1, 1024 * 1024)? * 1024 * 1024;
         let max_range_response_bytes =
-            bounded_env("MAX_RANGE_RESPONSE_MB", 16u64, 1, 1024)? * 1024 * 1024;
-        let max_concurrent_uploads = bounded_env("MAX_CONCURRENT_UPLOADS", 16usize, 1, 4096)?;
-        let max_concurrent_downloads = bounded_env("MAX_CONCURRENT_DOWNLOADS", 64usize, 1, 4096)?;
-        let max_concat_parts = bounded_env("MAX_CONCAT_PARTS", 128usize, 1, 4096)?;
-        let tcp_body_inactivity_seconds =
-            bounded_env("TCP_BODY_INACTIVITY_SECONDS", 30u64, 1, 3600)?;
-        let tcp_request_total_seconds =
-            bounded_env("TCP_REQUEST_TOTAL_SECONDS", 600u64, 1, 86_400)?;
-        let tcp_max_concurrent_requests =
-            bounded_env("TCP_MAX_CONCURRENT_REQUESTS", 512usize, 1, 65_536)?;
+            bounded_env("MAX_RANGE_RESPONSE_MB", file.max_range_response_mb, 1, 1024)?
+                * 1024
+                * 1024;
+        let max_concurrent_uploads = bounded_env(
+            "MAX_CONCURRENT_UPLOADS",
+            file.max_concurrent_uploads,
+            1,
+            4096,
+        )?;
+        let max_concurrent_downloads = bounded_env(
+            "MAX_CONCURRENT_DOWNLOADS",
+            file.max_concurrent_downloads,
+            1,
+            4096,
+        )?;
+        let max_concat_parts = bounded_env("MAX_CONCAT_PARTS", file.max_concat_parts, 1, 4096)?;
+        let tcp_body_inactivity_seconds = bounded_env(
+            "TCP_BODY_INACTIVITY_SECONDS",
+            file.tcp_body_inactivity_seconds,
+            1,
+            3600,
+        )?;
+        let tcp_request_total_seconds = bounded_env(
+            "TCP_REQUEST_TOTAL_SECONDS",
+            file.tcp_request_total_seconds,
+            1,
+            86_400,
+        )?;
+        let tcp_max_concurrent_requests = bounded_env(
+            "TCP_MAX_CONCURRENT_REQUESTS",
+            file.tcp_max_concurrent_requests,
+            1,
+            65_536,
+        )?;
         Ok(Self {
             min_free_space_bytes,
             max_file_size_bytes,

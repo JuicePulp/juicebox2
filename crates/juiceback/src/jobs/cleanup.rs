@@ -7,8 +7,8 @@ use crate::db;
 use crate::error::AppError;
 use crate::state::AppState;
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use tokio::sync::Semaphore;
 
 const MINT_LIMITER_PRUNE_INTERVAL_SECS: u64 = 120;

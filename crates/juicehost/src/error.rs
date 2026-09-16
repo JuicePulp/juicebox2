@@ -1,9 +1,9 @@
 //! Errors and stuff sent to juiceback
 
 use axum::{
+    Json,
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 use thiserror::Error;

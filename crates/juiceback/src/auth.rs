@@ -1,15 +1,15 @@
 //! This is where my Argon2 password hashing died parappa.
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use axum::{
     async_trait,
     extract::{FromRef, FromRequestParts},
     http::request::Parts,
 };
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

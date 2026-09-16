@@ -6,13 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
+    Router,
     body::Body,
     extract::{ConnectInfo, DefaultBodyLimit, State},
     http::{HeaderMap, Request},
     middleware,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Router,
 };
 use sentry::integrations::tower::NewSentryLayer;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
