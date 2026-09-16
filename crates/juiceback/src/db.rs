@@ -1,5 +1,4 @@
-//! SQLite schema, migrations, and CRUD operations for application data.
-
+// SQL WILL BE REPLACED
 use rusqlite::{Connection, OptionalExtension, Result, params};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -219,13 +218,6 @@ fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     })
 }
 
-/// A file owned by a client (server-side mirror of the browser's upload list).
-///
-/// juiceback's `files` table is anonymous (no owner), so the browser holds the
-/// only copy of "what did I upload". This registry persists that list per client
-/// (keyed by the `jb_uid` cookie user id), so a no-JS SSR render can show the
-/// full list without the ~4KB cookie cap. Field names mirror the compact cookie
-/// payload (`n`/`m`/`s`/`u`/`e`) plus the owning `id`/`token` pair.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClientFileRecord {
     pub id: String,

@@ -3,6 +3,9 @@ resolver = "3"
 members = [
     "crates/*",
 ]
+default-members = [
+    "crates/juicebox",
+]
 
 [workspace.package]
 version = "0.1.0"
