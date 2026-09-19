@@ -8,8 +8,10 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Redirect, Response},
 };
+use std::net::SocketAddr;
 use bytes::Bytes;
 use futures::StreamExt;
+use serde_json::json;
 
 use crate::error::StorageError;
 use crate::error::{JuicehostError, not_found_html, teapot_html};
@@ -773,6 +775,7 @@ pub async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
     );
+    sentry::metrics::counter("juicehost.health", 1).capture();
     resp
 }
 
@@ -797,6 +800,26 @@ async fn check_backend_health(state: &AppState, backend_url: &str) -> bool {
                 .is_some_and(|s| s == "ok")
         })
         .unwrap_or(false)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/ip",
+    responses(
+        (status = 200, description = "Client IP address and version", body = serde_json::Value),
+    ),
+    tag = "General",
+)]
+pub async fn ip_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
+) -> Json<serde_json::Value> {
+    let ip = juiceutils::proxy::client_ip(&headers, peer.ip(), &state.trusted_proxy_cidrs);
+    Json(json!({
+        "ip": ip.to_string(),
+        "version": if ip.is_ipv6() { "ipv6" } else { "ipv4" },
+    }))
 }
 
 #[utoipa::path(

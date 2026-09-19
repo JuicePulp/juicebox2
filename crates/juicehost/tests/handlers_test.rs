@@ -27,6 +27,7 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         backend_url: None,
         frontend_url,
         api_key: "test-api-key".into(),
+        allow_no_auth: false,
         allowed_origins: vec![],
         danger_level: juiceutils::file_validation::ProtectionLevel::High,
         trusted_proxy_cidrs: vec![],
@@ -63,7 +64,11 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
 async fn test_state(dir: &std::path::Path) -> Arc<AppState> {
     let backend = Arc::new(LocalBackend::new(dir.to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
-    Arc::new(AppState::new(&test_config("", None), backend))
+    let mut cfg = test_config("", None);
+    // Handler-level fixtures exercise business logic; keep the legacy
+    // open-mode behavior here explicitly (auth has its own test below).
+    cfg.allow_no_auth = true;
+    Arc::new(AppState::new(&cfg, backend))
 }
 
 async fn frontend_state(dir: &std::path::Path) -> Arc<AppState> {
@@ -789,6 +794,9 @@ async fn internal_endpoints_open_when_no_api_key_configured() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = test_config("", None);
     config.api_key = String::new();
+    // Open mode is now opt-in: an unset key alone refuses all internal
+    // traffic (see empty_api_key_fails_closed_without_explicit_opt_out).
+    config.allow_no_auth = true;
     let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
     let app = build_router(Arc::new(AppState::new(&config, backend)));
@@ -1188,4 +1196,49 @@ async fn banned_ip_blocked_from_file_serving() {
         .await
         .unwrap();
     assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn empty_api_key_fails_closed_without_explicit_opt_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
+    backend.init_cache().await.unwrap();
+
+    // No key, no explicit opt-out: internal endpoints must reject.
+    let mut cfg = test_config("", None);
+    cfg.api_key = String::new();
+    cfg.allow_no_auth = false;
+    let state = Arc::new(AppState::new(&cfg, backend.clone()));
+    let app = build_router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/someid/rename")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"new_id":"other"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // Explicit JUICEHOST_ALLOW_NO_AUTH opt-out keeps legacy open uploads
+    // working (mutations like rename still demand per-file capabilities).
+    let mut cfg = test_config("", None);
+    cfg.api_key = String::new();
+    cfg.allow_no_auth = true;
+    let state = Arc::new(AppState::new(&cfg, backend));
+    let app = build_router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/stream/optout1/notes.txt")
+                .body(Body::from(b"open data".as_slice()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 }

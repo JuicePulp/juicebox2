@@ -15,6 +15,9 @@ pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
     /// Shared secret for authenticating internal API calls from juiceback.
     pub api_key: String,
+    /// When true, an empty `api_key` is an explicit opt-out and internal
+    /// endpoints stay open. When false (default), empty key = reject all.
+    pub allow_no_auth: bool,
     /// Allowed values for the `X-Juiceback-Origin` header. Empty means allow all.
     pub allowed_origins: Vec<String>,
     /// Minimum free disk space (bytes) before rejecting writes.
@@ -64,6 +67,7 @@ impl AppState {
         Self {
             storage,
             api_key: config.api_key.clone(),
+            allow_no_auth: config.allow_no_auth,
             allowed_origins: config.allowed_origins.clone(),
             min_free_space_bytes: config.min_free_space_bytes,
             max_file_size_bytes: config.max_file_size_bytes,

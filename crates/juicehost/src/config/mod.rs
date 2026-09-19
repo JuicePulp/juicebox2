@@ -58,6 +58,10 @@ pub struct Config {
     pub frontend_url: Option<String>, // juicefront URL that GET / redirects to
     /// Security Settings
     pub api_key: String, // Optional!
+    /// Explicit opt-out for running without an API key. When `api_key` is
+    /// empty and this is false (the default), the server refuses to start
+    /// and internal endpoints reject everything - no silent open instances.
+    pub allow_no_auth: bool,
     pub allowed_origins: Vec<String>, // Optional!
     pub danger_level: ProtectionLevel, // <- (none, low, medium, high)
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>, // Super important if under a rev proxy.
@@ -268,6 +272,9 @@ pub struct SecurityFile {
     pub allowed_origins: Option<Vec<String>>,
     #[serde(default)]
     pub trusted_proxy_cidrs: Option<String>,
+    /// Explicit opt-out for running without an API key (env JUICEHOST_ALLOW_NO_AUTH wins when set).
+    #[serde(default)]
+    pub allow_no_auth: bool,
 }
 
 impl Default for SecurityFile {
@@ -276,6 +283,7 @@ impl Default for SecurityFile {
             danger_level: default_danger_level(),
             allowed_origins: None,
             trusted_proxy_cidrs: None,
+            allow_no_auth: false,
         }
     }
 }
@@ -522,6 +530,7 @@ impl Config {
             backend_url: directories.backend_url().cloned(),
             frontend_url: directories.frontend_url().cloned(),
             api_key: security.api_key().to_owned(),
+            allow_no_auth: security.allow_no_auth(),
             allowed_origins: security.allowed_origins().to_owned(),
             danger_level: security.danger_level(),
             trusted_proxy_cidrs: security.trusted_proxy_cidrs().to_owned(),

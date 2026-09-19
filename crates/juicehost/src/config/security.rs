@@ -9,6 +9,7 @@ use crate::config::{ConfigError, DirectorySettings, SecurityFile};
 #[derive(Debug)]
 pub struct SecuritySettings {
     api_key: String,
+    allow_no_auth: bool,
     allowed_origins: Vec<String>,
     danger_level: ProtectionLevel,
     trusted_proxy_cidrs: Vec<proxy::IpCidr>,
@@ -17,6 +18,10 @@ pub struct SecuritySettings {
 impl SecuritySettings {
     pub fn api_key(&self) -> &str {
         &self.api_key
+    }
+
+    pub fn allow_no_auth(&self) -> bool {
+        self.allow_no_auth
     }
 
     pub fn allowed_origins(&self) -> &[String] {
@@ -33,6 +38,13 @@ impl SecuritySettings {
 
     pub fn load(file: &SecurityFile, directories: &DirectorySettings) -> Result<Self, ConfigError> {
         let api_key = juicebox_config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
+        // Explicit opt-out for running without an API key. Env wins when set,
+        // otherwise fall back to the TOML value (default false).
+        let allow_no_auth = std::env::var("JUICEHOST_ALLOW_NO_AUTH")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(|v| matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(file.allow_no_auth);
 
         let allowed_origins = std::env::var("ALLOWED_ORIGINS")
             .ok()
@@ -67,6 +79,7 @@ impl SecuritySettings {
         .map_err(ConfigError::InvalidTrustedProxyCidrs)?;
         Ok(Self {
             api_key,
+            allow_no_auth,
             allowed_origins,
             danger_level,
             trusted_proxy_cidrs,

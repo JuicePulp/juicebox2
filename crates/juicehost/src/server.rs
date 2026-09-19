@@ -63,14 +63,27 @@ async fn ban_check_middleware(
 }
 
 /// Authenticate juiceback requests with the API key and optional origin whitelist.
-/// When no API key is configured, internal authentication is disabled.
+/// Fail-closed when no API key is configured unless JUICEHOST_ALLOW_NO_AUTH is set.
 async fn require_api_key(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: middleware::Next,
 ) -> impl IntoResponse {
     if state.api_key.is_empty() {
-        return next.run(req).await;
+        // Fail closed: an unset key used to silently disable auth on every
+        // internal endpoint. Two ways through remain: an explicit
+        // JUICEHOST_ALLOW_NO_AUTH=true opt-out (dev/loopback), or a per-file
+        // capability header - for unkeyed instances capabilities ARE the
+        // auth, and handlers verify them against the stored sidecar.
+        let has_capability =
+            req.headers().contains_key("x-juicehost-file-capability");
+        if state.allow_no_auth || has_capability {
+            return next.run(req).await;
+        }
+        tracing::warn!(
+            "auth: rejected request - JUICEHOST_API_KEY is not configured"
+        );
+        return JuicehostError::Forbidden.into_response();
     }
 
     if req.headers().contains_key("x-juicehost-file-capability") {
@@ -198,6 +211,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let public = Router::new()
         .route("/api/health", get(handlers::health))
+        .route("/api/ip", get(handlers::ip_handler))
         .route("/api/storage", get(handlers::storage_handler))
         .route("/api/config", get(handlers::config_handler))
         .route("/api/openapi.json", get(openapi_json_handler))
