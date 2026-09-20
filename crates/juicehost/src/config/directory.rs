@@ -24,20 +24,15 @@ impl DirectorySettings {
     }
 
     pub fn load(file: &DirectoryFile) -> Self {
-        let files_dir = std::env::var("FILES_DIR")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map_or_else(|| file.files_dir.clone(), PathBuf::from);
-        let backend_url = std::env::var("BACKEND_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.backend_url.clone())
+        let files_dir = file.files_dir.clone();
+        let backend_url = file
+            .backend_url
+            .clone()
             .filter(|s| !s.trim().is_empty() && s.trim() != "none")
             .map(|s| s.trim_end_matches('/').to_string());
-        let frontend_url = std::env::var("FRONTEND_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.frontend_url.clone())
+        let frontend_url = file
+            .frontend_url
+            .clone()
             .filter(|s| !s.trim().is_empty() && s.trim() != "none")
             .map(|s| s.trim_end_matches('/').to_string());
         Self {

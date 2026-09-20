@@ -174,7 +174,7 @@ use crate::{
         (name = "Files", description = "File management endpoints"),
         (name = "Pairing", description = "Device pairing endpoints...generate codes, verify codes, list and unpair paired devices."),
         (name = "Devices", description = "Device presence and communication...WebSocket connection, SSE events, ping, and status checks."),
-        (name = "Cobalt", description = "JuiceBox x Cobalt.Tools URL fetching endpoints. Disabled unless COBALT_ENABLED=true."),
+        (name = "Cobalt", description = "JuiceBox x Cobalt.Tools URL fetching endpoints. Disabled unless enabled in [cobalt]."),
         (name = "General", description = "General endpoints"),
         (name = "Internal", description = "Internal endpoints for juiceback-juicehost communication. Protected by shared API key."),
         (name = "Admin", description = "Admin panel endpoints. All admin endpoints require a valid JWT token in a cookie named `token`, obtained via POST /api/admin/login."),

@@ -61,6 +61,8 @@ fn main() {
 
     // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
     // Uses SENTRY_DSN_JUICEBACK if set, otherwise falls back to SENTRY_DSN.
+    // The environment comes from the TOML [sentry] section.
+    let config = Config::try_load().expect("Failed to load configuration");
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEBACK")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -73,15 +75,11 @@ fn main() {
                 dsn.as_str(),
                 sentry::ClientOptions::default()
                     .maybe_release(sentry::release_name!())
-                    .environment(
-                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
-                    )
+                    .environment(config.sentry_environment.clone())
                     .traces_sample_rate(traces_sample_rate)
                     .send_default_pii(false),
             ))
         });
-
-    let config = Config::try_load().expect("Failed to load configuration");
 
     tracing_subscriber::registry()
         .with(
@@ -99,7 +97,7 @@ fn main() {
     if config.cobalt_enabled {
         tracing::info!("cobalt fetching enabled ({})", config.cobalt_api_url);
     } else {
-        tracing::info!("cobalt fetching disabled (set COBALT_ENABLED=true to enable)");
+        tracing::info!("cobalt fetching disabled (enable it in [cobalt])");
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

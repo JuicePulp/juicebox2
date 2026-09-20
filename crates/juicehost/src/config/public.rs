@@ -1,5 +1,3 @@
-use std::{env, str::FromStr};
-
 use crate::config::{ConfigError, PublicFile};
 
 /// Public HTTP listener settings.
@@ -24,10 +22,8 @@ impl PublicSettings {
     }
 
     pub fn load(file: &PublicFile) -> Result<Self, ConfigError> {
-        let host = env::var("PUBLIC_HOST").unwrap_or_else(|_| file.host.clone());
-        let port = env::var("PUBLIC_PORT").map_or(Ok(file.port), |p| {
-            u16::from_str(&p).map_err(|_| ConfigError::invalid_public_port())
-        })?;
+        let host = file.host.clone();
+        let port = file.port;
 
         Ok(Self { host, port })
     }

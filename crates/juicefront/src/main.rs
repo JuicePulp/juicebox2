@@ -1,8 +1,7 @@
 //! juicefront runs the Astro frontend dev = astro dev, prod = build + node.
 //! bun > npm. syncs version from cargo workspace.
 //!
-//! Configuration: TOML file first, environment variables override.
-//! Secrets (Sentry DSN) stay env-only.
+//! Configuration: TOML file. Secrets (Sentry DSN) stay env-only.
 
 use std::{
     path::{Path, PathBuf},
@@ -189,8 +188,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("juicefront (Astro) starting");
 
-    // Initialize Sentry before configuration so it captures startup failures.
-    // DSN stays env-only: SENTRY_DSN_JUICEFRONT, then SENTRY_DSN.
+    let config = load_file_config();
+
+    // Initialize Sentry before the Node child spawns so crashes are captured.
+    // DSN stays env-only: SENTRY_DSN_JUICEFRONT, then SENTRY_DSN. The
+    // environment comes from the TOML [sentry] section.
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEFRONT")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -203,37 +205,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 dsn.as_str(),
                 sentry::ClientOptions::default()
                     .maybe_release(sentry::release_name!())
-                    .environment(
-                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
-                    )
+                    .environment(config.sentry.environment.clone())
                     .traces_sample_rate(traces_sample_rate)
                     .send_default_pii(false),
             ))
         });
 
-    let config = load_file_config();
-
     // Serve a prebuilt (staged) UI build directly. Used by JuiceFetch / systemd
     // deployments where the source tree isn't present: skip install & build.
-    let staged = std::env::var("JUICEFRONT_UI_DIR")
-        .ok()
-        .filter(|dir| Path::new(dir).join("server.mjs").is_file())
-        .or_else(|| {
-            config
-                .ui
-                .dir
-                .as_ref()
-                .filter(|dir| !dir.trim().is_empty())
-                .filter(|dir| Path::new(dir.trim()).join("server.mjs").is_file())
-                .cloned()
-        });
+    let staged = config
+        .ui
+        .dir
+        .as_ref()
+        .filter(|dir| !dir.trim().is_empty())
+        .filter(|dir| Path::new(dir.trim()).join("server.mjs").is_file())
+        .cloned();
 
-    let ui_port = std::env::var("UI_PORT").unwrap_or_else(|_| config.ui.port.to_string());
-    let ui_host = std::env::var("UI_HOST").unwrap_or_else(|_| config.ui.host.clone());
+    let ui_port = config.ui.port;
+    let ui_host = config.ui.host.clone();
 
     if let Some(staged) = staged {
         tracing::info!("serving staged UI from {}", staged);
-        let mut server = spawn_node_server(&staged, &ui_port, &ui_host)?;
+        let mut server = spawn_node_server(&staged, &ui_port.to_string(), &ui_host)?;
         let status = server.wait().await?;
         if !status.success() {
             tracing::error!("juicefront exited with error: {:?}", status.code());
@@ -340,7 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         tracing::info!("Starting production server on {}:{}...", ui_host, ui_port);
-        let mut server = spawn_node_server(&ui_dir, &ui_port, &ui_host)?;
+        let mut server = spawn_node_server(&ui_dir, &ui_port.to_string(), &ui_host)?;
 
         let status = server.wait().await?;
         if !status.success() {

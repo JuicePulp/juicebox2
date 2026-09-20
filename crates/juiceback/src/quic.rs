@@ -30,7 +30,7 @@ impl ServerCertVerifier for PinnedCertVerifier {
     ) -> Result<ServerCertVerified, RustlsError> {
         if self.pinned_cert_der.is_empty() {
             return Err(RustlsError::General(
-                "no QUIC certificate pinned - set QUIC_CERT_PATH to enable QUIC".into(),
+                "no QUIC certificate pinned - set server.quic_cert_path to enable QUIC".into(),
             ));
         }
         if end_entity.as_ref() == self.pinned_cert_der.as_slice() {
@@ -109,7 +109,7 @@ fn create_quic_endpoint(
         None => {
             let default_path = std::path::PathBuf::from("./quic-cert.der");
             tracing::info!(
-                "QUIC_CERT_PATH not set, auto-generating cert at {}",
+                "server.quic_cert_path not set, auto-generating cert at {}",
                 default_path.display()
             );
             let (cert_der, _) = juiceutils::get_or_generate_cert(&default_path);

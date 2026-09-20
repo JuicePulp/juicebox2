@@ -24,8 +24,10 @@ fn main() {
     // like `juicebox` supervision does. Explicit env always wins.
     juiceutils::config::load_dotenv();
 
-    // Initialize Sentry before configuration so it captures startup failures.
-    // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN.
+    // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
+    // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN. The
+    // environment comes from the TOML [sentry] section.
+    let config = Config::try_load().expect("Failed to load configuration");
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -38,9 +40,7 @@ fn main() {
                 dsn.as_str(),
                 sentry::ClientOptions::default()
                     .maybe_release(sentry::release_name!())
-                    .environment(
-                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
-                    )
+                    .environment(config.sentry.environment.clone())
                     .traces_sample_rate(traces_sample_rate)
                     .send_default_pii(false),
             ))
@@ -53,8 +53,6 @@ fn main() {
         .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
         .with(sentry_tracing::layer())
         .init();
-
-    let config = Config::try_load().expect("Failed to load configuration");
 
     // Refuse to boot an unauthenticated instance by accident. Internal
     // endpoints can store, overwrite, and delete files - open-by-default
