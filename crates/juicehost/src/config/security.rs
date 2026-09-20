@@ -38,49 +38,20 @@ impl SecuritySettings {
 
     pub fn load(file: &SecurityFile, directories: &DirectorySettings) -> Result<Self, ConfigError> {
         let api_key = juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
-        // Explicit opt-out for running without an API key. Env wins when set,
-        // otherwise fall back to the TOML value (default false).
-        let allow_no_auth = std::env::var("JUICEHOST_ALLOW_NO_AUTH")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map_or(file.allow_no_auth, |v| {
-                matches!(
-                    v.trim().to_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            });
+        // Explicit opt-out for running without an API key (default false).
+        let allow_no_auth = file.allow_no_auth;
 
-        let allowed_origins = std::env::var("ALLOWED_ORIGINS")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map_or_else(
-                || {
-                    file.allowed_origins.clone().unwrap_or_else(|| {
-                        directories
-                            .backend_url()
-                            .map(|b| vec![b.clone()])
-                            .unwrap_or_default()
-                    })
-                },
-                |s| {
-                    s.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                },
-            );
+        let allowed_origins = file.allowed_origins.clone().unwrap_or_else(|| {
+            directories
+                .backend_url()
+                .map(|b| vec![b.clone()])
+                .unwrap_or_default()
+        });
 
-        let danger_level = ProtectionLevel::parse(
-            &std::env::var("DANGER_LEVEL").unwrap_or_else(|_| file.danger_level.clone()),
-        );
-        let trusted_proxy_cidrs = parse_trusted_proxy_cidrs(
-            &std::env::var("TRUSTED_PROXY_CIDRS")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| file.trusted_proxy_cidrs.clone())
-                .unwrap_or_default(),
-        )
-        .map_err(ConfigError::InvalidTrustedProxyCidrs)?;
+        let danger_level = ProtectionLevel::parse(&file.danger_level);
+        let trusted_proxy_cidrs =
+            parse_trusted_proxy_cidrs(&file.trusted_proxy_cidrs.clone().unwrap_or_default())
+                .map_err(ConfigError::InvalidTrustedProxyCidrs)?;
         Ok(Self {
             api_key,
             allow_no_auth,

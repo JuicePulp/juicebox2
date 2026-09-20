@@ -1,4 +1,4 @@
-//! Configuration loaded from a TOML file with environment overrides.
+//! Configuration loaded from a TOML file.
 //! Secrets always come from the environment, never from TOML.
 
 use std::path::{Path, PathBuf};
@@ -11,7 +11,6 @@ mod directory;
 mod error;
 mod feature;
 mod limits;
-mod port;
 mod public;
 mod quic;
 mod s3;
@@ -24,7 +23,6 @@ use directory::DirectorySettings;
 pub use error::ConfigError;
 use feature::FeatureSettings;
 use limits::LimitsSettings;
-use port::ConfigPort;
 use public::PublicSettings;
 use quic::QuicSettings;
 use s3::S3Settings;
@@ -480,12 +478,13 @@ fn load_one_file(path: &Path) -> FileConfig {
 }
 
 impl Config {
-    /// Load configuration from a TOML file with environment overrides.
+    /// Load configuration from a TOML file.
     pub fn try_load() -> Result<Self, ConfigError> {
         Self::try_load_from(&load_file_config())
     }
 
-    /// Load configuration from the environment only (tests / compat).
+    /// Load configuration from defaults (tests). Secrets still come from
+    /// the environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::try_load_from(&FileConfig::default())
     }
@@ -559,41 +558,6 @@ impl Config {
     }
 }
 
-pub(crate) fn bounded_env<T>(
-    name: &'static str,
-    default: T,
-    min: T,
-    max: T,
-) -> Result<T, ConfigError>
-where
-    T: std::str::FromStr + PartialOrd + Copy + std::fmt::Display,
-{
-    let value = match std::env::var(name) {
-        Ok(raw) => raw
-            .parse::<T>()
-            .map_err(|_| ConfigError::InvalidNumber { name })?,
-        Err(_) => default,
-    };
-    if value < min || value > max {
-        return Err(ConfigError::OutOfRange {
-            name,
-            min: min.to_string(),
-            max: max.to_string(),
-        });
-    }
-    Ok(value)
-}
-
-pub(crate) fn env_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
-    std::env::var(name).map_or(Ok(default), |value| {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" => Ok(true),
-            "0" | "false" => Ok(false),
-            _ => Err(ConfigError::InvalidBoolean { name }),
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -603,43 +567,16 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn clear_juicehost_env() {
+        // Only secrets and the config path still come from the environment;
+        // everything else is TOML-driven.
         for name in [
             "JUICEHOST_API_KEY",
-            "ALLOWED_ORIGINS",
-            "ALLOWED_TTL_HOURS",
-            "BACKEND_URL",
-            "BAN_LIST_FILE",
-            "BAN_SYNC_INTERVAL",
-            "BAN_SYNC_INTERVAL_SECS",
-            "BAN_SYNC_URL",
-            "DANGER_LEVEL",
-            "DEFAULT_TTL_HOURS",
-            "FILES_DIR",
-            "FRONTEND_URL",
             "JUICEHOST_CONFIG",
-            "MAX_CONCAT_PARTS",
-            "MAX_FILE_SIZE_MB",
-            "MAX_RANGE_RESPONSE_MB",
-            "MIN_FREE_SPACE_GB",
-            "PUBLIC_HOST",
-            "PUBLIC_PORT",
-            "QUIC_CERT_PATH",
-            "QUIC_HANDSHAKE_SECONDS",
-            "QUIC_HOST",
-            "QUIC_IDLE_SECONDS",
-            "QUIC_MAX_CONNECTIONS",
-            "QUIC_MAX_REQUESTS",
-            "QUIC_PORT",
-            "QUIC_REQUEST_TOTAL_SECONDS",
             "S3_ACCESS_KEY",
-            "S3_BUCKET",
-            "S3_ENDPOINT",
-            "S3_REGION",
             "S3_SECRET_KEY",
             "JWT_SECRET",
             "TICKET_JWT_SECRET",
-            "TRUSTED_PROXY_CIDRS",
-            "WORKER_THREADS",
+            "IP_PEPPER",
         ] {
             unsafe {
                 std::env::remove_var(name);
@@ -654,11 +591,6 @@ mod tests {
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
-        assert!(
-            std::env::var("QUIC_MAX_CONNECTIONS").is_err(),
-            "QUIC_MAX_CONNECTIONS still set: {:?}",
-            std::env::var("QUIC_MAX_CONNECTIONS").ok()
-        );
         let result = Config::from_env();
         assert!(result.is_ok(), "from_env failed: {:?}", result.err());
         assert!(result.unwrap().api_key.is_empty());
@@ -703,55 +635,10 @@ mod tests {
     }
 
     #[test]
-    fn bounded_env_rejects_invalid_and_out_of_range_values() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        const NAME: &str = "JUICEHOST_TEST_BOUNDED_ENV";
-        let previous = std::env::var_os(NAME);
-
-        unsafe {
-            std::env::set_var(NAME, "not-a-number");
-        }
-        assert!(bounded_env(NAME, 5usize, 1, 10).is_err());
-        unsafe {
-            std::env::set_var(NAME, "0");
-        }
-        assert!(bounded_env(NAME, 5usize, 1, 10).is_err());
-        unsafe {
-            std::env::set_var(NAME, "11");
-        }
-        assert!(bounded_env(NAME, 5usize, 1, 10).is_err());
-        unsafe {
-            std::env::set_var(NAME, "10");
-        }
-        assert_eq!(bounded_env(NAME, 5usize, 1, 10).unwrap(), 10);
-
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var(NAME, value);
-            },
-            None => unsafe {
-                std::env::remove_var(NAME);
-            },
-        }
-    }
-
-    #[test]
     fn toml_values_flow_into_config() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
-        }
-        for name in [
-            "PUBLIC_HOST",
-            "PUBLIC_PORT",
-            "QUICK_LINK",
-            "CUSTOM_ID",
-            "DEFAULT_TTL_HOURS",
-            "ALLOWED_TTL_HOURS",
-        ] {
-            unsafe {
-                std::env::remove_var(name);
-            }
         }
         let file: FileConfig = toml::from_str(
             "[public]\nhost = \"10.0.0.9\"\nport = 6410\n[features]\nquick_link = false\ncustom_id = false\ndefault_ttl_hours = 6.0\nallowed_ttl_hours = [6.0, 24.0]\n",

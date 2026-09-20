@@ -26,21 +26,9 @@ impl BanSettings {
     }
 
     pub fn load(file: &BanFile) -> Self {
-        let list_file = std::env::var("BAN_LIST_FILE")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(PathBuf::from)
-            .or_else(|| file.list_file.clone());
-        let sync_url = std::env::var("BAN_SYNC_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.trim_end_matches('/').to_string())
-            .or_else(|| file.sync_url.clone());
-        let sync_interval = std::env::var("BAN_SYNC_INTERVAL_SECS")
-            .or_else(|_| std::env::var("BAN_SYNC_INTERVAL"))
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(file.sync_interval_secs);
+        let list_file = file.list_file.clone();
+        let sync_url = file.sync_url.clone();
+        let sync_interval = file.sync_interval_secs;
         Self {
             list_file,
             sync_url,

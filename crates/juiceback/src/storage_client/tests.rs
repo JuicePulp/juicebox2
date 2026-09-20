@@ -69,6 +69,7 @@ fn test_state() -> Arc<AppState> {
         cf_zone_id: None,
         ticket_jwt_secret: "secret".into(),
         secure_cookies: false,
+        sentry_environment: "test".into(),
         direct_upload_enabled: false,
         cobalt_enabled: false,
         cobalt_api_url: "http://localhost:7272".into(),

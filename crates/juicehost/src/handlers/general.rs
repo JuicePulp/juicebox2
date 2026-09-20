@@ -145,6 +145,8 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
         "quick_link": state.quick_link,
         "custom_id": state.custom_id,
         "ultrafast": !state.ticket_jwt_secret.is_empty(),
+        "backend_url": state.backend_url,
+        "frontend_url": state.frontend_url,
     }))
 }
 

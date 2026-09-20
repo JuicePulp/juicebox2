@@ -1,4 +1,4 @@
-//! Configuration loaded from a TOML file with environment overrides.
+//! Configuration loaded from a TOML file.
 //! Secrets always come from the environment, never from TOML.
 
 use std::{
@@ -64,6 +64,8 @@ pub struct Config {
     pub ticket_jwt_secret: String,
     /// Whether authentication and ownership cookies require HTTPS.
     pub secure_cookies: bool,
+    /// Sentry environment label from the TOML `[sentry]` section.
+    pub sentry_environment: String,
     /// Whether browser uploads may bypass the Node/Juiceback byte relay.
     pub direct_upload_enabled: bool,
     /// Whether the `JuiceBox` x Cobalt.Tools URL-fetch feature is enabled
@@ -145,6 +147,7 @@ impl std::fmt::Debug for Config {
             )
             .field("ticket_jwt_secret", &"[REDACTED]")
             .field("secure_cookies", &self.secure_cookies)
+            .field("sentry_environment", &self.sentry_environment)
             .field("direct_upload_enabled", &self.direct_upload_enabled)
             .field("cobalt_enabled", &self.cobalt_enabled)
             .field("cobalt_api_url", &self.cobalt_api_url)
@@ -214,6 +217,14 @@ pub struct ServerFile {
     pub log_level: String,
     #[serde(default = "default_cleanup_interval_minutes")]
     pub cleanup_interval_minutes: u64,
+    /// PEM/DER certificate path for QUIC pinning. Unset = auto-generate
+    /// at `./quic-cert.der`. TOML-only; no env override.
+    #[serde(default)]
+    pub quic_cert_path: Option<PathBuf>,
+    /// CIDRs allowed to supply forwarding headers. Unset = none (direct
+    /// peer IP is used). TOML-only; no env override.
+    #[serde(default)]
+    pub trusted_proxy_cidrs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -323,6 +334,11 @@ pub struct FeaturesFile {
     pub secure_cookies: bool,
     #[serde(default)]
     pub direct_upload_enabled: bool,
+    /// Test/dev escape hatch for the fetch SSRF policy (accept loopback
+    /// and private targets). Default false; never enable in production.
+    /// TOML-only; no env override.
+    #[serde(default)]
+    pub allow_private_fetch: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -456,6 +472,8 @@ impl Default for ServerFile {
             max_concurrent_uploads: default_max_concurrent_uploads(),
             log_level: default_log_level(),
             cleanup_interval_minutes: default_cleanup_interval_minutes(),
+            quic_cert_path: None,
+            trusted_proxy_cidrs: Vec::new(),
         }
     }
 }
@@ -503,6 +521,7 @@ impl Default for FeaturesFile {
         Self {
             secure_cookies: default_secure_cookies(),
             direct_upload_enabled: false,
+            allow_private_fetch: false,
         }
     }
 }
@@ -559,47 +578,24 @@ fn load_one_file(path: &Path) -> FileConfig {
 }
 
 impl Config {
-    /// Load configuration from a TOML file with environment overrides.
+    /// Load configuration from a TOML file. Only secrets and paths without a
+    /// TOML key come from the environment; everything else is file-driven.
     pub fn try_load() -> Result<Self, String> {
         Self::try_load_from(&load_file_config())
     }
 
     fn try_load_from(file: &FileConfig) -> Result<Self, String> {
-        let host = std::env::var("HOST").unwrap_or_else(|_| file.server.host.clone());
-        let port = std::env::var("PORT")
-            .unwrap_or_else(|_| file.server.port.to_string())
-            .parse::<u16>()
-            .map_err(|e| format!("Invalid PORT: {e}"))?;
-        let quic_port = std::env::var("QUIC_PORT")
-            .ok()
-            .and_then(|p| p.parse::<u16>().ok())
-            .or(file.server.quic_port)
-            .unwrap_or(port + 1);
+        let host = file.server.host.clone();
+        let port = file.server.port;
+        let quic_port = file.server.quic_port.unwrap_or(port + 1);
 
-        let database_path =
-            std::env::var("DATABASE_PATH").unwrap_or_else(|_| file.server.database_path.clone());
-        let rate_limit_per_minute = std::env::var("RATE_LIMIT_PER_MINUTE")
-            .unwrap_or_else(|_| file.server.rate_limit_per_minute.to_string())
-            .parse::<u32>()
-            .map_err(|e| format!("Invalid RATE_LIMIT_PER_MINUTE: {e}"))?;
-        let db_pool_size = std::env::var("DB_POOL_SIZE")
-            .unwrap_or_else(|_| file.server.db_pool_size.to_string())
-            .parse::<u32>()
-            .map_err(|e| format!("Invalid DB_POOL_SIZE: {e}"))?;
-        let max_concurrent_uploads = std::env::var("MAX_CONCURRENT_UPLOADS")
-            .unwrap_or_else(|_| file.server.max_concurrent_uploads.to_string())
-            .parse::<u32>()
-            .map_err(|e| format!("Invalid MAX_CONCURRENT_UPLOADS: {e}"))?;
-        let public_base_url = std::env::var("PUBLIC_BASE_URL")
-            .unwrap_or_else(|_| file.urls.public_base_url.clone())
-            .trim_end_matches('/')
-            .to_string();
-        let log_level =
-            std::env::var("LOG_LEVEL").unwrap_or_else(|_| file.server.log_level.clone());
-        let cleanup_interval_minutes = std::env::var("CLEANUP_INTERVAL_MINUTES")
-            .unwrap_or_else(|_| file.server.cleanup_interval_minutes.to_string())
-            .parse::<u64>()
-            .map_err(|e| format!("Invalid CLEANUP_INTERVAL_MINUTES: {e}"))?;
+        let database_path = file.server.database_path.clone();
+        let rate_limit_per_minute = file.server.rate_limit_per_minute;
+        let db_pool_size = file.server.db_pool_size;
+        let max_concurrent_uploads = file.server.max_concurrent_uploads;
+        let public_base_url = file.urls.public_base_url.trim_end_matches('/').to_string();
+        let log_level = file.server.log_level.clone();
+        let cleanup_interval_minutes = file.server.cleanup_interval_minutes;
 
         // Secrets are env-only, never from TOML.
         let juicehost_api_key =
@@ -624,158 +620,81 @@ impl Config {
             return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
         }
 
-        let juicehost_url = std::env::var("JUICEHOST_URL")
-            .unwrap_or_else(|_| file.urls.juicehost_url.clone())
-            .trim_end_matches('/')
-            .to_string();
-        let public_juicehost_url = std::env::var("PUBLIC_JUICEHOST_URL")
-            .ok()
+        let juicehost_url = file.urls.juicehost_url.trim_end_matches('/').to_string();
+        let public_juicehost_url = file
+            .urls
+            .public_juicehost_url
+            .clone()
             .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.urls.public_juicehost_url.clone())
             .unwrap_or_else(|| public_base_url.clone())
             .trim_end_matches('/')
             .to_string();
-        let juiceback_origin = std::env::var("JUICEBACK_ORIGIN")
-            .ok()
+        let juiceback_origin = file
+            .urls
+            .juiceback_origin
+            .clone()
             .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.urls.juiceback_origin.clone())
             .unwrap_or_else(|| format!("http://{host}:{port}"))
             .trim_end_matches('/')
             .to_string();
 
-        let cors_origins = std::env::var("CORS_ORIGINS")
-            .unwrap_or_else(|_| file.cors.origins.join(","))
-            .split(',')
-            .map(str::trim)
+        let cors_origins: Vec<String> = file
+            .cors
+            .origins
+            .iter()
+            .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .map(str::to_string)
             .collect();
 
-        let report_webhook_url = std::env::var("REPORT_WEBHOOK_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let smtp_host = std::env::var("SMTP_HOST")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.report.smtp_host.clone());
-        let smtp_port = std::env::var("SMTP_PORT")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.parse::<u16>().unwrap_or(465))
-            .or(file.report.smtp_port);
-        let smtp_username = std::env::var("SMTP_USERNAME")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.report.smtp_username.clone());
-        let report_email_recipient = std::env::var("REPORT_EMAIL_RECIPIENT")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.report.email_recipient.clone());
-        let report_email_sender = std::env::var("REPORT_EMAIL_SENDER")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.report.email_sender.clone());
+        let report_webhook_url = file.report.webhook_url.clone();
+        let smtp_host = file.report.smtp_host.clone();
+        let smtp_port = file.report.smtp_port;
+        let smtp_username = file.report.smtp_username.clone();
+        let report_email_recipient = file.report.email_recipient.clone();
+        let report_email_sender = file.report.email_sender.clone();
 
-        let quic_cert_path = std::env::var("QUIC_CERT_PATH")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(PathBuf::from);
+        let quic_cert_path = file.server.quic_cert_path.clone();
 
         let trusted_proxy_cidrs = juiceutils::proxy::parse_trusted_proxy_cidrs(
-            &std::env::var("TRUSTED_PROXY_CIDRS").unwrap_or_default(),
-        )?;
+            &file.server.trusted_proxy_cidrs.join(","),
+        )
+        .map_err(|e| format!("invalid server.trusted_proxy_cidrs: {e}"))?;
 
-        let report_retention_days = std::env::var("REPORT_RETENTION_DAYS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(file.report.retention_days);
-        let feedback_retention_days = std::env::var("FEEDBACK_RETENTION_DAYS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(file.report.feedback_retention_days);
-        let cf_zone_id = std::env::var("CF_ZONE_ID")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.cloudflare.zone_id.clone());
+        let report_retention_days = file.report.retention_days;
+        let feedback_retention_days = file.report.feedback_retention_days;
+        let cf_zone_id = file.cloudflare.zone_id.clone();
 
-        let secure_cookies = std::env::var("SECURE_COOKIES")
-            .map_or(file.features.secure_cookies, |v| {
-                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
-            });
-        let direct_upload_enabled = std::env::var("DIRECT_UPLOAD_ENABLED")
-            .map_or(file.features.direct_upload_enabled, |v| {
-                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
-            });
+        let secure_cookies = file.features.secure_cookies;
+        let direct_upload_enabled = file.features.direct_upload_enabled;
         // Test/dev only: never set in production. Lets the fetch/tunnel
-        // SSRF policy accept loopback and private addresses.
-        let allow_private_fetch =
-            std::env::var("JUICEBACK_ALLOW_PRIVATE_FETCH").map_or(false, |v| {
-                matches!(
-                    v.trim().to_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            });
+        // SSRF policy accept loopback and private addresses. TOML-only.
+        let allow_private_fetch = file.features.allow_private_fetch;
 
-        let cobalt_enabled = std::env::var("COBALT_ENABLED").map_or(file.cobalt.enabled, |v| {
-            v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
-        });
-        let cobalt_api_url = std::env::var("COBALT_API_URL")
-            .unwrap_or_else(|_| file.cobalt.api_url.clone())
-            .trim_end_matches('/')
-            .to_string();
-        let cobalt_session_api_url = std::env::var("COBALT_SESSION_API_URL")
-            .ok()
-            .map(|v| v.trim().trim_end_matches('/').to_string())
-            .filter(|v| !v.is_empty())
-            .or_else(|| file.cobalt.session_api_url.clone().map(clean_url));
-        let fetch_empty_retry_delay_secs = std::env::var("FETCH_EMPTY_RETRY_DELAY_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(file.cobalt.fetch_empty_retry_delay_secs);
+        let cobalt_enabled = file.cobalt.enabled;
+        let cobalt_api_url = file.cobalt.api_url.trim_end_matches('/').to_string();
+        let cobalt_session_api_url = file
+            .cobalt
+            .session_api_url
+            .clone()
+            .map(clean_url)
+            .filter(|v| !v.is_empty());
+        let fetch_empty_retry_delay_secs = file.cobalt.fetch_empty_retry_delay_secs;
 
-        let dte_enabled = std::env::var("DTE_ENABLED")
-            .or_else(|_| std::env::var("DTE"))
-            .map_or(file.dte.enabled, |v| {
-                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
-            });
-        let dte_assumed_bps = std::env::var("DTE_ASSUMED_BPS")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(file.dte.assumed_bps);
-        let dte_safety_mult = std::env::var("DTE_SAFETY_MULT")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(file.dte.safety_mult);
-        let dte_base_overhead_secs = std::env::var("DTE_BASE_OVERHEAD_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(file.dte.base_overhead_secs);
-        let dte_min_ttl_secs = std::env::var("DTE_MIN_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(file.dte.min_ttl_secs);
-        let dte_max_ttl_secs = std::env::var("DTE_MAX_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(file.dte.max_ttl_secs);
-        let dte_mint_limit = std::env::var("DTE_MINT_LIMIT")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(file.dte.mint_limit);
-        let dte_mint_window_secs = std::env::var("DTE_MINT_WINDOW_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(file.dte.mint_window_secs);
-        let dte_mint_burst = std::env::var("DTE_MINT_BURST")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(file.dte.mint_burst);
+        let dte_enabled = file.dte.enabled;
+        let dte_assumed_bps = file.dte.assumed_bps;
+        let dte_safety_mult = file.dte.safety_mult;
+        let dte_base_overhead_secs = file.dte.base_overhead_secs;
+        let dte_min_ttl_secs = file.dte.min_ttl_secs;
+        let dte_max_ttl_secs = file.dte.max_ttl_secs;
+        let dte_mint_limit = file.dte.mint_limit;
+        let dte_mint_window_secs = file.dte.mint_window_secs;
+        let dte_mint_burst = file.dte.mint_burst;
 
         let region_public_juicehosts = file.regions.public_juicehosts.clone().unwrap_or_default();
 
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
             return Err(
-                "COBALT_SESSION_API_URL and COBALT_SESSION_API_KEY must be set together \
+                "cobalt session_api_url and COBALT_SESSION_API_KEY must be set together \
                  (or both left unset)."
                     .to_string(),
             );
@@ -791,8 +710,8 @@ impl Config {
 
         if cobalt_enabled && cobalt_api_key.is_empty() {
             return Err(
-                "COBALT_ENABLED is true but COBALT_API_KEY is not set. Cobalt instances with \
-                 auth enabled require an API key; set COBALT_API_KEY or disable COBALT_ENABLED."
+                "cobalt is enabled but COBALT_API_KEY is not set. Cobalt instances with \
+                 auth enabled require an API key; set COBALT_API_KEY or disable cobalt in [cobalt]."
                     .to_string(),
             );
         }
@@ -831,6 +750,7 @@ impl Config {
             cf_zone_id,
             ticket_jwt_secret,
             secure_cookies,
+            sentry_environment: file.sentry.environment.clone(),
             direct_upload_enabled,
             cobalt_enabled,
             cobalt_api_url,

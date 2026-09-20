@@ -1,39 +1,37 @@
-# Example config — copy to juiceback.toml and adjust to your setup.
-# Juiceback full default config.
-# Every value below is the code default. Secrets stay env-only (see .env) — never put them here.
-# Each key can be overridden by its env var (shown in comments); explicit env always wins.
-# Lookup order: $JUICEBACK_CONFIG, ./juiceback.toml, ./config.toml, /etc/juicebox/juiceback.toml, /etc/juicebox/config.toml.
-
 [server]
-host = "127.0.0.1" # env: HOST
-port = 6401 # env: PORT
-# QUIC/HTTP3 UDP port. Unset = port + 1 (6402). Env: QUIC_PORT
+host = "127.0.0.1"
+port = 6401
+database_path = "./delta.db"
+rate_limit_per_minute = 10
+db_pool_size = 8
+max_concurrent_uploads = 16
+log_level = "info"
+cleanup_interval_minutes = 30
+
+# QUIC/HTTP3 UDP port. Defaults to `port + 1` (6402) when unset.
 # quic_port = 6402
-database_path = "./delta.db" # env: DATABASE_PATH
-rate_limit_per_minute = 10 # env: RATE_LIMIT_PER_MINUTE
-db_pool_size = 8 # env: DB_POOL_SIZE
-max_concurrent_uploads = 16 # env: MAX_CONCURRENT_UPLOADS
-log_level = "info" # env: LOG_LEVEL (also RUST_LOG)
-cleanup_interval_minutes = 30 # env: CLEANUP_INTERVAL_MINUTES
 
 [urls]
-public_base_url = "http://localhost:6402" # env: PUBLIC_BASE_URL
-juicehost_url = "http://127.0.0.1:6402" # env: JUICEHOST_URL
-# Public juicehost URL handed to browsers. Unset = public_base_url. Env: PUBLIC_JUICEHOST_URL
+public_base_url = "http://localhost:6402"
+juicehost_url = "http://127.0.0.1:6402"
+
+# Public juicehost URL handed to browsers. Defaults to public_base_url.
 # public_juicehost_url = "http://localhost:6402"
-# Origin string for this juiceback. Unset = "http://{host}:{port}". Env: JUICEBACK_ORIGIN
+
+# Origin string for this juiceback. Defaults to "http://{host}:{port}".
 # juiceback_origin = "http://127.0.0.1:6401"
 
 [cors]
-origins = ["http://localhost:6400"] # env: CORS_ORIGINS (comma-separated)
+origins = ["http://localhost:6400"]
 
 [report]
-retention_days = 90 # env: REPORT_RETENTION_DAYS
-feedback_retention_days = 90 # env: FEEDBACK_RETENTION_DAYS
-# Report webhook. Note: TOML value is parsed but ignored — env-only. Env: REPORT_WEBHOOK_URL
+retention_days = 90
+feedback_retention_days = 90
+
+# Report webhook URL.
 # webhook_url = "https://example.com/hook"
-# SMTP relay for report mails. Env: SMTP_HOST / SMTP_PORT / SMTP_USERNAME / REPORT_EMAIL_RECIPIENT / REPORT_EMAIL_SENDER
-# (SMTP password is env-only: SMTP_PASSWORD)
+
+# SMTP relay for report mails. check env for pass
 # smtp_host = "mail.example.com"
 smtp_port = 465
 # smtp_username = "juicebox"
@@ -41,45 +39,39 @@ smtp_port = 465
 # email_sender = "juicebox@example.com"
 
 [cloudflare]
-# Cloudflare zone for DNS/purge integration. Token is env-only: CF_API_TOKEN. Env: CF_ZONE_ID
-# zone_id = "abc123"
+# Cloudflare zone for cache purges. (check env for api)
+# zone_id = "12345600006767"
 
 [cobalt]
-enabled = false # env: COBALT_ENABLED (true/1)
-api_url = "http://localhost:7272" # env: COBALT_API_URL
-# Session API URL (requires COBALT_SESSION_API_KEY when set). Env: COBALT_SESSION_API_URL
+enabled = false
+api_url = "http://localhost:7272"
+fetch_empty_retry_delay_secs = 10
+
+# Session API URL (check env for api)
 # session_api_url = "http://localhost:7272"
-fetch_empty_retry_delay_secs = 10 # env: FETCH_EMPTY_RETRY_DELAY_SECS
-# Cobalt API key, required when enabled. Env-only: COBALT_API_KEY
-# Cobalt session key, required iff session_api_url is set. Env-only: COBALT_SESSION_API_KEY
 
 [dte]
-enabled = false # env: DTE (not DTE_ENABLED)
-assumed_bps = 2097152.0 # env: DTE_ASSUMED_BPS
-safety_mult = 2.0 # env: DTE_SAFETY_MULT
-base_overhead_secs = 120 # env: DTE_BASE_OVERHEAD_SECS
-min_ttl_secs = 600 # env: DTE_MIN_TTL_SECS
-max_ttl_secs = 21600 # env: DTE_MAX_TTL_SECS
-mint_limit = 60 # env: DTE_MINT_LIMIT
-mint_window_secs = 600 # env: DTE_MINT_WINDOW_SECS
-mint_burst = 15 # env: DTE_MINT_BURST
+enabled = false
+assumed_bps = 2097152.0
+safety_mult = 2.0
+base_overhead_secs = 120
+min_ttl_secs = 600
+max_ttl_secs = 21600
+mint_limit = 60
+mint_window_secs = 600
+mint_burst = 15
 
 [features]
-# WARNING: plain-HTTP local dev needs false (Secure cookies are never sent back over http).
-secure_cookies = true # env: SECURE_COOKIES (true/1)
-direct_upload_enabled = false # env: DIRECT_UPLOAD_ENABLED (true/1)
+# WARNING!!!! plain-HTTP local dev needs secure_cookies = false,
+# Secure cookies are never sent back over http.
+secure_cookies = true
+direct_upload_enabled = false
 
 [regions]
-# Per-region public juicehost map. TOML-only, no env override.
+# Per-region public juicehost map. TOML-only.
 # [regions.public_juicehosts]
 # eu = "http://localhost:6402"
 
 [sentry]
-# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEBACK). Env: SENTRY_ENVIRONMENT
+# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEBACK).
 environment = "production"
-
-# ---- env-only secrets (no TOML key exists, listed for completeness) ----
-# JWT_SECRET (required) / IP_ENCRYPTION_KEY (required, 32-byte hex)
-# TICKET_JWT_SECRET (defaults to JWT_SECRET) / IP_PEPPER (defaults to "")
-# JUICEHOST_API_KEY (defaults to "") / QUIC_CERT_PATH / TRUSTED_PROXY_CIDRS
-# JUICEBACK_ALLOW_PRIVATE_FETCH (1/true/yes/on)

@@ -1,4 +1,4 @@
-use crate::config::{ConfigError, S3File, env_bool};
+use crate::config::{ConfigError, S3File};
 
 /// S3-compatible backend settings.
 #[derive(Debug)]
@@ -39,19 +39,10 @@ impl S3Settings {
 
 impl S3Settings {
     pub fn load(file: &S3File) -> Result<Self, ConfigError> {
-        let bucket = std::env::var("S3_BUCKET")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.bucket.clone());
-        let region = std::env::var("S3_REGION")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.region.clone());
-        let endpoint = std::env::var("S3_ENDPOINT")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| file.endpoint.clone());
-        let allow_http = env_bool("S3_ALLOW_HTTP", file.allow_http)?;
+        let bucket = file.bucket.clone();
+        let region = file.region.clone();
+        let endpoint = file.endpoint.clone();
+        let allow_http = file.allow_http;
         let access_key = juiceutils::config::optional_secret("S3_ACCESS_KEY");
         let secret_key = juiceutils::config::optional_secret("S3_SECRET_KEY");
         Ok(Self {
