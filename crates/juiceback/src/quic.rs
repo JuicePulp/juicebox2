@@ -1,18 +1,18 @@
 //! the QUIC/HTTP/3 client for juiceback
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::http::{Request, Uri};
-
 use bytes::{Buf, Bytes};
 use futures::future;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::{DigitallySignedStruct, Error as RustlsError, SignatureScheme};
+use quinn_proto::VarInt;
+use rustls::{
+    DigitallySignedStruct, Error as RustlsError, SignatureScheme,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 use crate::state::AppState;
-use quinn_proto::VarInt;
 
 #[derive(Debug)]
 struct PinnedCertVerifier {
@@ -55,7 +55,7 @@ impl ServerCertVerifier for PinnedCertVerifier {
             &rustls::crypto::ring::default_provider().signature_verification_algorithms,
         );
         verifier.map_err(|e| {
-            RustlsError::General(format!("TLS 1.2 signature verification failed: {}", e))
+            RustlsError::General(format!("TLS 1.2 signature verification failed: {e}"))
         })
     }
 
@@ -72,7 +72,7 @@ impl ServerCertVerifier for PinnedCertVerifier {
             &rustls::crypto::ring::default_provider().signature_verification_algorithms,
         );
         verifier.map_err(|e| {
-            RustlsError::General(format!("TLS 1.3 signature verification failed: {}", e))
+            RustlsError::General(format!("TLS 1.3 signature verification failed: {e}"))
         })
     }
 
@@ -127,7 +127,7 @@ fn create_quic_endpoint(
     tls_config.enable_early_data = true;
 
     let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
-        .map_err(|e| format!("QUIC client config: {}", e))?;
+        .map_err(|e| format!("QUIC client config: {e}"))?;
 
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(64u32.into());
@@ -143,14 +143,13 @@ fn create_quic_endpoint(
         std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
         0,
     ))
-    .map_err(|e| format!("QUIC endpoint: {}", e))?;
+    .map_err(|e| format!("QUIC endpoint: {e}"))?;
 
     endpoint.set_default_client_config(client_config);
 
     Ok(endpoint)
 }
 
-/// Get or create the persistent QUIC client endpoint.
 async fn get_endpoint(state: &Arc<AppState>) -> Result<h3_quinn::quinn::Endpoint, String> {
     state
         .quic_endpoint
@@ -162,11 +161,11 @@ async fn get_endpoint(state: &Arc<AppState>) -> Result<h3_quinn::quinn::Endpoint
         .cloned()
 }
 
-/// Turn a juicehost URL into a QUIC socket addr. port+1 baby.
+/// Turn a juicehost URL into a QUIC socket addr.
 async fn resolve_quic_addr(juicehost_url: &str) -> Result<(std::net::SocketAddr, String), String> {
     let uri: Uri = juicehost_url
         .parse()
-        .map_err(|e| format!("invalid juicehost URL: {}", e))?;
+        .map_err(|e| format!("invalid juicehost URL: {e}"))?;
     let hostname = uri
         .host()
         .ok_or("no hostname in juicehost URL")?
@@ -179,17 +178,17 @@ async fn resolve_quic_addr(juicehost_url: &str) -> Result<(std::net::SocketAddr,
     } else {
         let mut addrs = tokio::net::lookup_host((hostname.as_str(), quic_port))
             .await
-            .map_err(|e| format!("DNS resolution failed for {}: {}", hostname, e))?;
+            .map_err(|e| format!("DNS resolution failed for {hostname}: {e}"))?;
         addrs
             .find(|a| a.is_ipv4() || a.is_ipv6())
-            .ok_or_else(|| format!("no IP address found for {}", hostname))?
+            .ok_or_else(|| format!("no IP address found for {hostname}"))?
     };
 
     Ok((addr, hostname))
 }
 
-/// Set up a QUIC connection to juicehost and return the h3 send_request handle.
-/// Reuses the persistent endpoint from AppState.
+/// Set up a QUIC connection to juicehost and return the h3 `send_request`
+/// handle. Reuses the persistent endpoint from `AppState`.
 #[tracing::instrument(skip_all)]
 async fn quic_connect(
     state: &Arc<AppState>,
@@ -202,32 +201,32 @@ async fn quic_connect(
     let (addr, hostname) = resolve_quic_addr(juicehost_url).await?;
     let endpoint = get_endpoint(state).await?;
 
-    tracing::debug!("QUIC connecting: addr={} hostname={}", addr, hostname);
+    tracing::debug!("QUIC connecting: addr={addr} hostname={hostname}");
 
     let conn = endpoint
         .connect(addr, &hostname)
-        .map_err(|e| format!("QUIC connect error: {}", e))?
+        .map_err(|e| format!("QUIC connect error: {e}"))?
         .await
-        .map_err(|e| format!("QUIC handshake failed: {}", e))?;
+        .map_err(|e| format!("QUIC handshake failed: {e}"))?;
 
-    tracing::debug!("QUIC handshake complete: addr={}", addr);
+    tracing::debug!("QUIC handshake complete: addr={addr}");
 
     let quinn_conn = h3_quinn::Connection::new(conn);
     let (mut driver, send_request) = h3::client::new(quinn_conn)
         .await
-        .map_err(|e| format!("h3 client setup failed: {}", e))?;
+        .map_err(|e| format!("h3 client setup failed: {e}"))?;
 
     tokio::spawn(async move {
         let err = future::poll_fn(|cx| driver.poll_close(cx)).await;
         if !err.is_h3_no_error() {
-            tracing::warn!("h3 client connection error: {}", err);
+            tracing::warn!("h3 client connection error: {err}");
         }
     });
 
     Ok(send_request)
 }
 
-/// Build an h3 request to push a file over QUIC. good enough.
+/// Build an h3 request to push a file over QUIC.
 fn quic_stream_request(
     juicehost_url: &str,
     id: &str,
@@ -246,16 +245,16 @@ fn quic_stream_request(
     );
     let mut req_builder = Request::post(&req_uri);
     req_builder = req_builder.header("x-mime-type", mime_type);
-    let headers = crate::juicehost::juicehost_headers(state);
+    let headers = crate::storage_client::juicehost_headers(state);
     for (name, value) in &headers {
         req_builder = req_builder.header(name.as_str(), value.as_bytes());
     }
     req_builder
         .body(())
-        .map_err(|e| format!("failed to build request: {}", e))
+        .map_err(|e| format!("failed to build request: {e}"))
 }
 
-/// After sending all data and calling finish(), wait for the server response.
+/// After sending all data and calling `finish()`, wait for the server response.
 async fn quic_recv_response(
     stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<(u16, Vec<u8>), String> {
@@ -263,18 +262,18 @@ async fn quic_recv_response(
         stream
             .finish()
             .await
-            .map_err(|e| format!("finish failed: {}", e))?;
+            .map_err(|e| format!("finish failed: {e}"))?;
 
         let resp = stream
             .recv_response()
             .await
-            .map_err(|e| format!("recv_response failed: {}", e))?;
+            .map_err(|e| format!("recv_response failed: {e}"))?;
 
         let mut body_bytes = Vec::new();
         while let Some(chunk) = stream
             .recv_data()
             .await
-            .map_err(|e| format!("recv_data failed: {}", e))?
+            .map_err(|e| format!("recv_data failed: {e}"))?
         {
             body_bytes.extend_from_slice(chunk.chunk());
         }
@@ -289,13 +288,13 @@ async fn quic_recv_response(
 
 fn quic_result(id: &str, url: &str, status: u16, body_bytes: Vec<u8>) -> Result<(), String> {
     if (200..300).contains(&status) {
-        tracing::info!("juicehost QUIC push: id={} ok", id);
+        tracing::info!("juicehost QUIC push: id={id} ok");
         Ok(())
     } else {
         let body_text = String::from_utf8_lossy(&body_bytes).to_string();
         Err(format!(
             "{} (url={}, status={}, body_len={})",
-            crate::juicehost::format_error_response(status, body_text.clone()),
+            crate::storage_client::format_error_response(status, body_text.clone()),
             url,
             status,
             body_bytes.len(),
@@ -304,14 +303,15 @@ fn quic_result(id: &str, url: &str, status: u16, body_bytes: Vec<u8>) -> Result<
 }
 
 /// Push to juicehost over QUIC while streaming chunks from a receiver.
-/// Also buffers each chunk so the caller can fall back to HTTP on failure.
+/// Each chunk is also retained in the bounded fallback buffer so the caller
+/// can replay over HTTP on failure without pinning the whole file in RAM.
 pub async fn push_file_streaming_quic_streamed(
     state: &Arc<AppState>,
     id: &str,
     filename: &str,
     mime_type: &str,
     rx: &mut tokio::sync::mpsc::Receiver<Result<Bytes, String>>,
-    chunks: &mut Vec<Bytes>,
+    fallback: &mut crate::storage_client::push::QuicFallbackBuffer,
 ) -> Result<(), String> {
     let juicehost_url = &state.config.juicehost_url;
     let mut send_request = quic_connect(state, juicehost_url).await?;
@@ -322,21 +322,21 @@ pub async fn push_file_streaming_quic_streamed(
         id,
         percent_encoding::utf8_percent_encode(filename, percent_encoding::NON_ALPHANUMERIC)
     );
-    tracing::debug!("QUIC push: id={} url={}", id, url);
+    tracing::debug!("QUIC push: id={id} url={url}");
     let mut stream = send_request
         .send_request(req)
         .await
-        .map_err(|e| format!("send_request failed: {}", e))?;
+        .map_err(|e| format!("send_request failed: {e}"))?;
 
     let mut has_data = false;
     while let Some(chunk) = rx.recv().await {
         has_data = true;
-        let data = chunk.map_err(|e| format!("chunk error: {}", e))?;
-        chunks.push(data.clone());
+        let data = chunk.map_err(|e| format!("chunk error: {e}"))?;
+        fallback.push(&data)?;
         stream
             .send_data(data)
             .await
-            .map_err(|e| format!("send_data failed: {}", e))?;
+            .map_err(|e| format!("send_data failed: {e}"))?;
     }
     if !has_data {
         return Err("no data received for QUIC push".into());

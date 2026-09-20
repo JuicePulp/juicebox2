@@ -72,6 +72,19 @@
   --orange-500-15: rgba(249, 115, 22, 0.15);
   --orange-500-20: rgba(249, 115, 22, 0.2);
   --orange-500-50: rgba(249, 115, 22, 0.5);
+
+  --red-600: #dc2626;
+  --red-500: #ef4444;
+  --red-400: #f87171;
+
+  --green-600: #16a34a;
+  --green-500: #22c55e;
+
+  --blue-900: #1e3a8a;
+  --blue-700: #1d4ed8;
+  --blue-500: #3b82f6;
+
+  --clr-text: #d5c7bc;
 }
 
 *,
@@ -470,7 +483,6 @@ html.js .upload-form .text-editor {
   color: var(--juice-200);
 }
 
-/* Small code-style chips that wrap horizontally. */
 .services-info__cards {
   display: flex;
   flex-wrap: wrap;
@@ -513,7 +525,6 @@ html.js .upload-form .text-editor {
   user-select: none;
 }
 
-/* Tabs form one merged strip: only the outer ends are rounded. */
 .upload-tab:first-child {
   border-top-left-radius: 0.5rem;
 }
@@ -689,8 +700,6 @@ html.js .upload-form .text-editor {
   opacity: 1;
   pointer-events: auto;
 }
-
-/* == JuiceBox x Cobalt.Tools mode == */
 
 .cobalt-branding {
   position: relative;
@@ -1755,7 +1764,6 @@ html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
   margin: 0;
 }
 
-/* Pair modal */
 .pair-device-status {
   display: flex;
   flex-direction: column;
@@ -1884,7 +1892,6 @@ html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
 .pair-status--success { color: var(--green-500, #22c55e); }
 .pair-status--error { color: var(--red-500, #ef4444); }
 
-/* Host button glow */
 .host-btn--glow {
   animation: host-glow 2s ease-in-out infinite;
 }

@@ -1,9 +1,9 @@
 //! juiceback, the entire backend of juicebox
 // "Well, well, well. Welcome to MY LAIR!" - Wheatley from Portal 2
 
+use std::{sync::Arc, time::Duration};
+
 use mimalloc::MiMalloc;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::net::TcpListener;
 #[cfg(feature = "quic")]
 use tokio::sync::Notify;
@@ -12,8 +12,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::Subsc
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-use juiceback::config::Config;
-use juiceback::state::AppState;
+use juiceback::{config::Config, state::AppState};
 
 #[derive(Debug)]
 struct SqlitePragmas;
@@ -23,52 +22,62 @@ impl r2d2::CustomizeConnection<rusqlite::Connection, rusqlite::Error> for Sqlite
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
-             PRAGMA busy_timeout=5000;",
+             PRAGMA busy_timeout=5000;
+             -- 64 MiB page cache (default ~2 MiB spills the files table early).
+             PRAGMA cache_size=-64000;
+             -- Admin ORDER BY / COUNT sorts in memory instead of temp files.
+             PRAGMA temp_store=MEMORY;
+             -- 128 MiB read-only mmap window for metadata scans.
+             PRAGMA mmap_size=134217728;
+             -- Cap WAL growth; checkpoints still run automatically.
+             PRAGMA journal_size_limit=67108864;",
         )
     }
 }
 
 async fn shutdown_signal() {
-    juiceutils::shutdown_signal("juiceback").await
+    juiceutils::shutdown_signal("juiceback").await;
 }
 
 fn main() {
+    // Load ./.env first so standalone runs pick up cwd secrets exactly
+    // like `juicebox` supervision does. Explicit env always wins.
+    juiceutils::config::load_dotenv();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "hash-password" {
-        let password = if args.get(2).map(|s| s.as_str()) == Some("--stdin") {
+        let password = if args.get(2).map(std::string::String::as_str) == Some("--stdin") {
             let mut input = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)
                 .expect("Failed to read password from stdin");
             input.trim().to_string()
         } else {
-            args.get(2).expect("usage: juiceback hash-password <password> OR echo 'password' | juiceback hash-password --stdin").to_string()
+            args.get(2).expect("usage: juiceback hash-password <password> OR echo 'password' | juiceback hash-password --stdin").clone()
         };
         let hash = juiceback::auth::hash_password(&password).expect("hashing failed");
-        println!("{}", hash);
+        println!("{hash}");
         return;
     }
 
     // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
     // Uses SENTRY_DSN_JUICEBACK if set, otherwise falls back to SENTRY_DSN.
-    let _sentry_guard = juicebox_config::optional_secret("SENTRY_DSN_JUICEBACK")
-        .or_else(|| juicebox_config::optional_secret("SENTRY_DSN"))
+    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEBACK")
+        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
+            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|rate| rate.clamp(0.0, 1.0))
+                .unwrap_or(0.05);
             sentry::init((
                 dsn.as_str(),
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    environment: Some(
-                        std::env::var("SENTRY_ENVIRONMENT")
-                            .unwrap_or_else(|_| "production".into())
-                            .into(),
-                    ),
-                    traces_sample_rate: std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                        .ok()
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(0.05),
-                    send_default_pii: false,
-                    ..Default::default()
-                },
+                sentry::ClientOptions::default()
+                    .maybe_release(sentry::release_name!())
+                    .environment(
+                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
+                    )
+                    .traces_sample_rate(traces_sample_rate)
+                    .send_default_pii(false),
             ))
         });
 
@@ -118,7 +127,6 @@ fn main() {
         }
         tracing::info!("Database initialized");
 
-        // Build the reqwest client and juicehost headers once at startup.
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(juiceback::constants::HTTP_CONNECT_TIMEOUT_SECS))
             .pool_idle_timeout(Duration::from_secs(juiceback::constants::HTTP_IDLE_TIMEOUT_SECS))
@@ -142,11 +150,11 @@ fn main() {
         }
 
         // Fetch juicehost config with startup retries (degraded mode if all fail).
-        let mut jh_config: Option<juiceback::juicehost::JuicehostConfig> = None;
+        let mut jh_config: Option<juiceback::storage_client::JuicehostConfig> = None;
         {
             let mut last_err = String::new();
             for attempt in 0..juiceback::constants::STARTUP_CONFIG_RETRIES {
-                match juiceback::juicehost::fetch_juicehost_config(
+                match juiceback::storage_client::fetch_juicehost_config(
                     &http,
                     &config.juicehost_url,
                     &juicehost_headers,
@@ -194,7 +202,7 @@ fn main() {
                         juiceback::constants::DEGRADED_RETRY_INTERVAL_SECS,
                     ))
                     .await;
-                    match juiceback::juicehost::fetch_juicehost_config(
+                    match juiceback::storage_client::fetch_juicehost_config(
                         &refresh_http,
                         &refresh_url,
                         &refresh_headers,
@@ -203,7 +211,12 @@ fn main() {
                     {
                         Ok(cfg) => {
                             tracing::debug!("juicehost config refreshed");
-                            *refresh_state.jh_config.write().unwrap() = Some(Arc::new(cfg));
+                            match refresh_state.jh_config.write() {
+                                Ok(mut slot) => *slot = Some(Arc::new(cfg)),
+                                Err(_) => tracing::warn!(
+                                    "juicehost config lock poisoned, keeping last known value"
+                                ),
+                            }
                         }
                         Err(e) => {
                             tracing::debug!(
@@ -250,11 +263,11 @@ fn main() {
             let quic_cert = state.config.quic_cert_path.clone();
 
             tokio::select! {
-                _ = async {
+                () = async {
                     juiceutils::start_quic_server(quic_router, quic_listen, quic_shutdown, "juiceback", quic_cert).await;
                 } => {}
-                _ = async {
-                    tracing::info!("Listening on http://{}", addr);
+                () = async {
+                    tracing::info!("Listening on http://{addr}");
                     axum::serve(
                         listener,
                         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -263,7 +276,7 @@ fn main() {
                     .await
                     .expect("Server failed");
                 } => {}
-                _ = shutdown_signal() => {
+                () = shutdown_signal() => {
                     tracing::info!("juiceback shutting down...");
                     shutdown.notify_one();
                 }
@@ -272,7 +285,7 @@ fn main() {
 
         #[cfg(not(feature = "quic"))]
         {
-            tracing::info!("Listening on http://{}", addr);
+            tracing::info!("Listening on http://{addr}");
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

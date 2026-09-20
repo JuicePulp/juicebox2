@@ -51,15 +51,12 @@ impl LimitsSettings {
         self.tcp_max_concurrent_requests
     }
 
-    // I KNOW THERE'S A BETTER WAY TO DO THIS DON'T BLAME ME FOR THIS.
     pub fn load(file: &LimitsFile) -> Result<Self, ConfigError> {
-        let min_free_space_bytes = std::env::var("MIN_FREE_SPACE_GB")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(file.min_free_space_gb)
-            * 1024
-            * 1024
-            * 1024;
+        let min_free_space_bytes =
+            bounded_env("MIN_FREE_SPACE_GB", file.min_free_space_gb, 0, 1024 * 1024)?
+                * 1024
+                * 1024
+                * 1024;
         let max_file_size_bytes =
             bounded_env("MAX_FILE_SIZE_MB", file.max_file_size_mb, 1, 1024 * 1024)? * 1024 * 1024;
         let max_range_response_bytes =

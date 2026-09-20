@@ -1,6 +1,6 @@
 /**
- * Transforms server-rendered retention radio buttons into an animated slider UI.
- * Self-contained -- takes a card element and enhances the [data-rttoolbar] within it.
+ * Replaces server-rendered retention radios with a slider.
+ * Takes a card element and upgrades the [data-rttoolbar] inside it.
  */
 import { t, type Locale } from "../i18n";
 import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config";
@@ -25,7 +25,6 @@ function storeTtl(hours: string) {
     try {
         localStorage.setItem(TTL_STORAGE_KEY, hours);
     } catch {
-        /* storage unavailable; ignore */
     }
 }
 

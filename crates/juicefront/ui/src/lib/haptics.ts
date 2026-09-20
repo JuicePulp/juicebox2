@@ -1,5 +1,5 @@
 // Subtle haptic feedback tuned for modern LRA motors (Pixel-class devices):
-// every pattern is a short, crisp tick stack - never a long coarse buzz.
+// all patterns use short 8-40ms ticks.
 // Web Vibration API only fires on Android; iOS ignores it silently.
 
 const KEY = "jb_haptics_v1";
@@ -25,12 +25,6 @@ export function hapticsEnabled(): boolean {
   } catch {
     return true;
   }
-}
-
-export function setHapticsEnabled(v: boolean): void {
-  try {
-    localStorage.setItem(KEY, v ? "1" : "0");
-  } catch {}
 }
 
 export function haptic(name: HapticName): void {

@@ -22,12 +22,10 @@ const translations: Record<Locale, TranslationKeys> = Object.fromEntries(
   localeModules.map((m) => [m.meta.code, m.dict])
 ) as Record<Locale, TranslationKeys>;
 
-/** Regex pattern matching any non-default locale prefix, e.g. /^\/(fr|ru|es)(\/|$)/ */
 export const LOCALE_PREFIX_RE = new RegExp(
   `^\\/(${LOCALES.filter((l) => l.code !== DEFAULT_LOCALE).map((l) => l.code).join("|")})(\\/|$)`
 );
 
-/** All valid locale codes as a Set for quick lookup */
 const VALID_CODES = new Set(LOCALES.map((l) => l.code));
 
 export function getTranslations(locale: Locale): TranslationKeys {

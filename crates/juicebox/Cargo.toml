@@ -1,20 +1,19 @@
 [package]
-name              = "juicebox"
+name = "juicebox"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description       = "Orchestrator that runs all the Juicebox services,, couldn't be simpler."
-publish           = false
-
-[[bin]]
-name = "juicebox"
-path = "src/main.rs"
+description = "Orchestrator that runs all the Juicebox services, couldn't be simpler."
+publish = false
 
 [dependencies]
+juiceutils = { path = "../juiceutils" }
+libc.workspace = true
+# Process supervision only: spawn/kill children, watch for Ctrl-C/SIGTERM.
 tokio = { workspace = true, features = ["process", "signal", "macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-libc = "0.2"
 
 [lints]
 workspace = true

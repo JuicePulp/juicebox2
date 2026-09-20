@@ -1,8 +1,8 @@
 //! Trusted-proxy configuration and client address resolution.
 
+use std::{net::IpAddr, str::FromStr};
+
 use axum::http::HeaderMap;
-use std::net::IpAddr;
-use std::str::FromStr;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IpCidr {
@@ -11,7 +11,7 @@ pub struct IpCidr {
 }
 
 impl IpCidr {
-    /// Return whether the network contains an IP address.
+    #[must_use]
     pub fn contains(&self, ip: IpAddr) -> bool {
         match (self.network, ip) {
             (IpAddr::V4(network), IpAddr::V4(ip)) => {
@@ -58,7 +58,6 @@ impl FromStr for IpCidr {
     }
 }
 
-/// Parse a comma-separated list of trusted proxy networks.
 pub fn parse_trusted_proxy_cidrs(value: &str) -> Result<Vec<IpCidr>, String> {
     value
         .split(',')
@@ -68,7 +67,7 @@ pub fn parse_trusted_proxy_cidrs(value: &str) -> Result<Vec<IpCidr>, String> {
         .collect()
 }
 
-/// Return whether an address belongs to a trusted proxy network.
+#[must_use]
 pub fn is_trusted(ip: IpAddr, trusted: &[IpCidr]) -> bool {
     trusted.iter().any(|cidr| cidr.contains(ip))
 }
@@ -76,6 +75,7 @@ pub fn is_trusted(ip: IpAddr, trusted: &[IpCidr]) -> bool {
 /// Resolve a client address only when the immediate peer is trusted. The
 /// forwarding chain is walked from right to left, stopping at the first
 /// untrusted hop, which is the closest address controlled by the client.
+#[must_use]
 pub fn client_ip(headers: &HeaderMap, peer: IpAddr, trusted: &[IpCidr]) -> IpAddr {
     if !is_trusted(peer, trusted) {
         return peer;

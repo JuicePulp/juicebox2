@@ -1,8 +1,10 @@
 //! Configuration loaded from a TOML file with environment overrides.
 //! Secrets always come from the environment, never from TOML.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,21 +17,25 @@ pub struct Config {
     pub database_path: String,
     pub rate_limit_per_minute: u32,
     pub db_pool_size: u32,
+    /// Concurrent multipart uploads process-wide. Raised from the legacy
+    /// value once streaming removed the per-upload full-file buffering that
+    /// the old cap protected against.
+    pub max_concurrent_uploads: u32,
     pub public_base_url: String,
     pub log_level: String,
     pub cleanup_interval_minutes: u64,
     pub juicehost_api_key: String,
     pub juicehost_url: String,
     /// Public URL that remote devices can use to reach juicehost. Falls back to
-    /// PUBLIC_BASE_URL when PUBLIC_JUICEHOST_URL is unset.
+    /// `PUBLIC_BASE_URL` when `PUBLIC_JUICEHOST_URL` is unset.
     pub public_juicehost_url: String,
     pub juiceback_origin: String,
     pub jwt_secret: String,
-    /// AES-256-GCM key for encrypting IP addresses before storage (hex-encoded).
+    /// AES-256-GCM key for encrypting IP addresses before storage
+    /// (hex-encoded).
     pub ip_encryption_key: String,
     /// Secret pepper for HMAC ban-lookup digests.
     pub ip_pepper: String,
-    /// List of allowed CORS origins.
     pub cors_origins: Vec<String>,
     /// Webhook URL for report notifications (Discord, Slack, etc.).
     pub report_webhook_url: Option<String>,
@@ -37,9 +43,7 @@ pub struct Config {
     pub smtp_host: Option<String>,
     /// SMTP port (default 465 for TLS).
     pub smtp_port: Option<u16>,
-    /// SMTP username.
     pub smtp_username: Option<String>,
-    /// SMTP password.
     pub smtp_password: Option<String>,
     /// Email address to send report notifications to.
     pub report_email_recipient: Option<String>,
@@ -55,25 +59,27 @@ pub struct Config {
     pub cf_api_token: Option<String>,
     /// Cloudflare zone ID for cache purging (optional).
     pub cf_zone_id: Option<String>,
-    /// JWT signing secret for upload tickets shared with juicehost. Falls back to jwt_secret if unset.
+    /// JWT signing secret for upload tickets shared with juicehost. Falls back
+    /// to `jwt_secret` if unset.
     pub ticket_jwt_secret: String,
     /// Whether authentication and ownership cookies require HTTPS.
     pub secure_cookies: bool,
     /// Whether browser uploads may bypass the Node/Juiceback byte relay.
     pub direct_upload_enabled: bool,
-    /// Whether the JuiceBox x Cobalt.Tools URL-fetch feature is enabled (default off).
+    /// Whether the `JuiceBox` x Cobalt.Tools URL-fetch feature is enabled
+    /// (default off).
     pub cobalt_enabled: bool,
     /// Base URL of the self-hosted cobalt API instance.
     pub cobalt_api_url: String,
-    /// Cobalt Api-Key auth token. Required when cobalt_enabled is true.
+    /// Cobalt Api-Key auth token. Required when `cobalt_enabled` is true.
     pub cobalt_api_key: String,
-    /// Optional second cobalt instance with YouTube session auth (cookies +
+    /// Optional second cobalt instance with `YouTube` session auth (cookies +
     /// poToken provider). Used as a fallback when the primary instance
-    /// refuses a YouTube link at client level (private/age/region-locked).
+    /// refuses a `YouTube` link at client level (private/age/region-locked).
     pub cobalt_session_api_url: Option<String>,
     /// Api-Key auth token for the session instance.
     pub cobalt_session_api_key: Option<String>,
-    /// Seconds between rescue-ladder passes for enforcement-gated YouTube
+    /// Seconds between rescue-ladder passes for enforcement-gated `YouTube`
     /// links (flapping windows often open within seconds-minutes).
     pub fetch_empty_retry_delay_secs: u64,
     pub dte_enabled: bool,
@@ -86,6 +92,10 @@ pub struct Config {
     pub dte_mint_window_secs: u64,
     pub dte_mint_burst: u32,
     pub region_public_juicehosts: HashMap<String, String>,
+    /// Test/dev escape hatch for the outbound-URL SSRF policy: when true,
+    /// loopback and private addresses are accepted as fetch/tunnel/storage
+    /// targets. Default false; never enable in production.
+    pub allow_private_fetch: bool,
 }
 
 impl std::fmt::Debug for Config {
@@ -97,6 +107,7 @@ impl std::fmt::Debug for Config {
             .field("database_path", &self.database_path)
             .field("rate_limit_per_minute", &self.rate_limit_per_minute)
             .field("db_pool_size", &self.db_pool_size)
+            .field("max_concurrent_uploads", &self.max_concurrent_uploads)
             .field("public_base_url", &self.public_base_url)
             .field("log_level", &self.log_level)
             .field("cleanup_interval_minutes", &self.cleanup_interval_minutes)
@@ -153,12 +164,13 @@ impl std::fmt::Debug for Config {
             .field("dte_mint_window_secs", &self.dte_mint_window_secs)
             .field("dte_mint_burst", &self.dte_mint_burst)
             .field("region_public_juicehosts", &self.region_public_juicehosts)
+            .field("allow_private_fetch", &self.allow_private_fetch)
             .finish()
     }
 }
 
 /// TOML file layout for juiceback. Every section is optional.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FileConfig {
     #[serde(default)]
     pub server: ServerFile,
@@ -179,10 +191,10 @@ pub struct FileConfig {
     #[serde(default)]
     pub regions: RegionsFile,
     #[serde(default)]
-    pub sentry: juicebox_config::SentrySettings,
+    pub sentry: juiceutils::config::SentrySettings,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ServerFile {
     #[serde(default = "default_host")]
     pub host: String,
@@ -196,13 +208,15 @@ pub struct ServerFile {
     pub rate_limit_per_minute: u32,
     #[serde(default = "default_db_pool_size")]
     pub db_pool_size: u32,
+    #[serde(default = "default_max_concurrent_uploads")]
+    pub max_concurrent_uploads: u32,
     #[serde(default = "default_log_level")]
     pub log_level: String,
     #[serde(default = "default_cleanup_interval_minutes")]
     pub cleanup_interval_minutes: u64,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct UrlsFile {
     #[serde(default = "default_public_base_url")]
     pub public_base_url: String,
@@ -269,7 +283,7 @@ pub struct CloudflareFile {
     pub zone_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CobaltFile {
     #[serde(default)]
     pub enabled: bool,
@@ -281,7 +295,7 @@ pub struct CobaltFile {
     pub fetch_empty_retry_delay_secs: u64,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DteFile {
     #[serde(default)]
     pub enabled: bool,
@@ -303,7 +317,7 @@ pub struct DteFile {
     pub mint_burst: u32,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FeaturesFile {
     #[serde(default = "default_secure_cookies")]
     pub secure_cookies: bool,
@@ -311,7 +325,7 @@ pub struct FeaturesFile {
     pub direct_upload_enabled: bool,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RegionsFile {
     #[serde(default)]
     pub public_juicehosts: Option<HashMap<String, String>>,
@@ -335,6 +349,10 @@ const fn default_rate_limit_per_minute() -> u32 {
 
 const fn default_db_pool_size() -> u32 {
     8
+}
+
+const fn default_max_concurrent_uploads() -> u32 {
+    16
 }
 
 fn default_log_level() -> String {
@@ -409,6 +427,94 @@ const fn default_secure_cookies() -> bool {
     true
 }
 
+impl Default for FileConfig {
+    fn default() -> Self {
+        Self {
+            server: ServerFile::default(),
+            urls: UrlsFile::default(),
+            cors: CorsFile::default(),
+            report: ReportFile::default(),
+            cloudflare: CloudflareFile::default(),
+            cobalt: CobaltFile::default(),
+            dte: DteFile::default(),
+            features: FeaturesFile::default(),
+            regions: RegionsFile::default(),
+            sentry: juiceutils::config::SentrySettings::default(),
+        }
+    }
+}
+
+impl Default for ServerFile {
+    fn default() -> Self {
+        Self {
+            host: default_host(),
+            port: default_port(),
+            quic_port: None,
+            database_path: default_database_path(),
+            rate_limit_per_minute: default_rate_limit_per_minute(),
+            db_pool_size: default_db_pool_size(),
+            max_concurrent_uploads: default_max_concurrent_uploads(),
+            log_level: default_log_level(),
+            cleanup_interval_minutes: default_cleanup_interval_minutes(),
+        }
+    }
+}
+
+impl Default for UrlsFile {
+    fn default() -> Self {
+        Self {
+            public_base_url: default_public_base_url(),
+            juicehost_url: default_juicehost_url(),
+            public_juicehost_url: None,
+            juiceback_origin: None,
+        }
+    }
+}
+
+impl Default for CobaltFile {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_url: default_cobalt_api_url(),
+            session_api_url: None,
+            fetch_empty_retry_delay_secs: default_fetch_empty_retry_delay(),
+        }
+    }
+}
+
+impl Default for DteFile {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            assumed_bps: default_dte_assumed_bps(),
+            safety_mult: default_dte_safety_mult(),
+            base_overhead_secs: default_dte_base_overhead(),
+            min_ttl_secs: default_dte_min_ttl(),
+            max_ttl_secs: default_dte_max_ttl(),
+            mint_limit: default_dte_mint_limit(),
+            mint_window_secs: default_dte_mint_window(),
+            mint_burst: default_dte_mint_burst(),
+        }
+    }
+}
+
+impl Default for FeaturesFile {
+    fn default() -> Self {
+        Self {
+            secure_cookies: default_secure_cookies(),
+            direct_upload_enabled: false,
+        }
+    }
+}
+
+impl Default for RegionsFile {
+    fn default() -> Self {
+        Self {
+            public_juicehosts: None,
+        }
+    }
+}
+
 /// Candidate config file locations, first hit wins.
 fn candidate_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -458,12 +564,6 @@ impl Config {
         Self::try_load_from(&load_file_config())
     }
 
-    /// Load configuration from the environment only (tests / compat).
-    #[allow(dead_code)]
-    pub fn from_env() -> Result<Self, String> {
-        Self::try_load_from(&FileConfig::default())
-    }
-
     fn try_load_from(file: &FileConfig) -> Result<Self, String> {
         let host = std::env::var("HOST").unwrap_or_else(|_| file.server.host.clone());
         let port = std::env::var("PORT")
@@ -486,6 +586,10 @@ impl Config {
             .unwrap_or_else(|_| file.server.db_pool_size.to_string())
             .parse::<u32>()
             .map_err(|e| format!("Invalid DB_POOL_SIZE: {e}"))?;
+        let max_concurrent_uploads = std::env::var("MAX_CONCURRENT_UPLOADS")
+            .unwrap_or_else(|_| file.server.max_concurrent_uploads.to_string())
+            .parse::<u32>()
+            .map_err(|e| format!("Invalid MAX_CONCURRENT_UPLOADS: {e}"))?;
         let public_base_url = std::env::var("PUBLIC_BASE_URL")
             .unwrap_or_else(|_| file.urls.public_base_url.clone())
             .trim_end_matches('/')
@@ -499,18 +603,19 @@ impl Config {
 
         // Secrets are env-only, never from TOML.
         let juicehost_api_key =
-            juicebox_config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
+            juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
         let jwt_secret =
-            juicebox_config::required_secret("JWT_SECRET").map_err(|e| e.to_string())?;
+            juiceutils::config::required_secret("JWT_SECRET").map_err(|e| e.to_string())?;
         let ip_encryption_key =
-            juicebox_config::required_secret("IP_ENCRYPTION_KEY").map_err(|e| e.to_string())?;
-        let ip_pepper = juicebox_config::optional_secret("IP_PEPPER").unwrap_or_default();
-        let ticket_jwt_secret = juicebox_config::optional_secret("TICKET_JWT_SECRET")
+            juiceutils::config::required_secret("IP_ENCRYPTION_KEY").map_err(|e| e.to_string())?;
+        let ip_pepper = juiceutils::config::optional_secret("IP_PEPPER").unwrap_or_default();
+        let ticket_jwt_secret = juiceutils::config::optional_secret("TICKET_JWT_SECRET")
             .unwrap_or_else(|| jwt_secret.clone());
-        let smtp_password = juicebox_config::optional_secret("SMTP_PASSWORD");
-        let cobalt_api_key = juicebox_config::optional_secret("COBALT_API_KEY").unwrap_or_default();
-        let cobalt_session_api_key = juicebox_config::optional_secret("COBALT_SESSION_API_KEY");
-        let cf_api_token = juicebox_config::optional_secret("CF_API_TOKEN");
+        let smtp_password = juiceutils::config::optional_secret("SMTP_PASSWORD");
+        let cobalt_api_key =
+            juiceutils::config::optional_secret("COBALT_API_KEY").unwrap_or_default();
+        let cobalt_session_api_key = juiceutils::config::optional_secret("COBALT_SESSION_API_KEY");
+        let cf_api_token = juiceutils::config::optional_secret("CF_API_TOKEN");
 
         // IP encryption key must decode to exactly 32 bytes.
         let encryption_key_bytes = hex::decode(&ip_encryption_key)
@@ -601,6 +706,15 @@ impl Config {
             .map_or(file.features.direct_upload_enabled, |v| {
                 v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
             });
+        // Test/dev only: never set in production. Lets the fetch/tunnel
+        // SSRF policy accept loopback and private addresses.
+        let allow_private_fetch =
+            std::env::var("JUICEBACK_ALLOW_PRIVATE_FETCH").map_or(false, |v| {
+                matches!(
+                    v.trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            });
 
         let cobalt_enabled = std::env::var("COBALT_ENABLED").map_or(file.cobalt.enabled, |v| {
             v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
@@ -619,9 +733,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(file.cobalt.fetch_empty_retry_delay_secs);
 
-        let dte_enabled = std::env::var("DTE").map_or(file.dte.enabled, |v| {
-            v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
-        });
+        let dte_enabled = std::env::var("DTE_ENABLED")
+            .or_else(|_| std::env::var("DTE"))
+            .map_or(file.dte.enabled, |v| {
+                v.trim().eq_ignore_ascii_case("true") || v.trim() == "1"
+            });
         let dte_assumed_bps = std::env::var("DTE_ASSUMED_BPS")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
@@ -666,8 +782,7 @@ impl Config {
         }
 
         // Refuse to start with placeholder secrets.
-        let placeholder_values = ["change_this_to_a_random_value", "change_this_in_production"];
-        if placeholder_values.contains(&jwt_secret.as_str()) || jwt_secret.is_empty() {
+        if juiceutils::config::is_placeholder_secret(&jwt_secret) {
             return Err(
                 "JWT_SECRET is set to a placeholder value. Generate a real secret before starting."
                     .to_string(),
@@ -689,6 +804,7 @@ impl Config {
             database_path,
             rate_limit_per_minute,
             db_pool_size,
+            max_concurrent_uploads,
             public_base_url,
             log_level,
             cleanup_interval_minutes,
@@ -732,6 +848,7 @@ impl Config {
             dte_mint_window_secs,
             dte_mint_burst,
             region_public_juicehosts,
+            allow_private_fetch,
         })
     }
 }

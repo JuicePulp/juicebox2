@@ -1,14 +1,17 @@
-//! internal endpoint for when juicehost already has a file so we don't push the same data twice, big brain move
+//! Register pre-existing juicehost files without re-pushing bytes.
+
+use std::sync::Arc;
 
 use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use utoipa::ToSchema;
 
-use crate::db::{self, FileRecord};
-use crate::error::AppError;
-use crate::routes::upload::sanitize_filename;
-use crate::state::AppState;
+use crate::{
+    db::{self, FileRecord},
+    error::AppError,
+    routes::upload::sanitize_filename,
+    state::AppState,
+};
 
 #[derive(Deserialize, ToSchema)]
 pub struct RegisterRequest {
@@ -23,7 +26,6 @@ pub struct RegisterRequest {
     pub delete_token: Option<String>,
 }
 
-/// Response returned by the register endpoint.
 #[derive(Serialize, ToSchema)]
 pub struct RegisterResponse {
     pub delete_token: String,
@@ -36,8 +38,11 @@ pub struct RegisterResponse {
     request_body(content = RegisterRequest, description = "File metadata for juicehost to register"),
     responses(
         (status = 200, description = "File registered, returns delete token and expiry", body = RegisterResponse),
-        (status = 403, description = "Invalid or missing x-juicehost-api-key header"),
-        (status = 403, description = "Missing or invalid reservation delete token when completing an existing reserved ID"),
+        (status = 401, description = "Invalid or missing x-juicehost-api-key header"),
+        (status = 401, description = "Missing reservation delete token when completing an existing reserved ID"),
+        (status = 403, description = "Invalid reservation delete token when completing an existing reserved ID"),
+        (status = 404, description = "Unknown reservation ID"),
+        (status = 409, description = "File ID already exists or reservation is not uploading"),
         (status = 400, description = "Invalid file ID format"),
     ),
     tag = "General",
@@ -49,14 +54,14 @@ pub async fn register_handler(
 ) -> Result<Json<RegisterResponse>, AppError> {
     {
         if state.config.juicehost_api_key.is_empty() {
-            return Err(AppError::Forbidden("API key not configured".into()));
+            return Err(AppError::Unauthorized("API key not configured".into()));
         }
         let provided = headers
             .get("x-juicehost-api-key")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-            return Err(AppError::Forbidden("invalid API key".into()));
+            return Err(AppError::Unauthorized("invalid API key".into()));
         }
     }
 
@@ -66,16 +71,13 @@ pub async fn register_handler(
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(AppError::InvalidMultipart("Invalid file ID format".into()));
+        return Err(AppError::BadRequest("invalid file ID format".into()));
     }
 
     let filename = sanitize_filename(&payload.filename);
 
     let (default_ttl, allowed_ttl) = {
-        let guard = state.jh_config.read().unwrap();
-        let jh = guard.as_ref().ok_or_else(|| {
-            AppError::ServiceUnavailable("juicehost config unavailable (degraded mode)".into())
-        })?;
+        let jh = state.juicehost_config()?;
         (jh.default_ttl_hours, jh.allowed_ttl_hours.clone())
     };
 
@@ -115,12 +117,12 @@ pub async fn register_handler(
         .await?;
     let (delete_token, response_expires_at) = if let Some(existing) = existing {
         if existing.status != "uploading" {
-            return Err(AppError::BadRequest("file ID already exists".into()));
+            return Err(AppError::Conflict("file ID already exists".into()));
         }
         let reservation_token = payload
             .delete_token
             .clone()
-            .ok_or_else(|| AppError::Forbidden("reservation delete token required".into()))?;
+            .ok_or_else(|| AppError::Unauthorized("reservation delete token required".into()))?;
         let update_id = existing.id.clone();
         let filename = record.filename.clone();
         let mime_type = record.mime_type.clone();
@@ -128,7 +130,7 @@ pub async fn register_handler(
         let uploader_ip = record.uploader_ip.clone();
         match state
             .db_call("complete_registered_reservation", move |db| {
-                db::complete_reservation(
+                db::finish_reservation(
                     db,
                     &filename,
                     &mime_type,
@@ -140,16 +142,16 @@ pub async fn register_handler(
             })
             .await?
         {
-            db::CompleteReservationResult::Completed(record) => {
+            db::FinishReservationResult::Completed(record) => {
                 (record.delete_token, record.expires_at)
             }
-            db::CompleteReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reservation ID".into()));
+            db::FinishReservationResult::NotFound => {
+                return Err(AppError::NotFound);
             }
-            db::CompleteReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()));
+            db::FinishReservationResult::NotUploading => {
+                return Err(AppError::Conflict("reservation is not uploading".into()));
             }
-            db::CompleteReservationResult::InvalidToken => {
+            db::FinishReservationResult::InvalidToken => {
                 return Err(AppError::Forbidden(
                     "invalid reservation delete token".into(),
                 ));

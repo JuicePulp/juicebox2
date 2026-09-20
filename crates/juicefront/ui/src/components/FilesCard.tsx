@@ -6,26 +6,20 @@ import {
   makeCopyBar,
   pctRemaining,
   announce,
+  isDefaultHost,
 } from "../lib/format";
 import { iconSvgHtml } from "../lib/icons";
+import { escapeHtml as esc } from "../lib/escape";
 import { t, type Locale } from "../i18n";
 import { getMoreMenuItems } from "../lib/more-menu";
+import { apiOwnedFiles, publicFile, publicFileRenew } from "../lib/api";
+import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
+import { lp } from "../lib/locale-prefix";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "../lib/file-events";
 import type { ServerFile } from "../lib/types";
 import FileCard, { remainingLabel } from "./FileCard";
 
-/** Escape HTML entities to prevent XSS when interpolating user data into innerHTML. */
-function esc(s: string | null | undefined): string {
-  if (s == null) return "";
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-// WeakMap-backed shift-delete state (avoids `document as any` expandos)
+// Plain-object shift-delete state (no DOM expandos)
 const shiftState = { held: false, listenersAttached: false };
 function isShiftHeld(): boolean { return shiftState.held; }
 function attachShiftListeners(onChange: () => void) {
@@ -131,26 +125,6 @@ function saveLocalFiles(files: any[]) {
   } catch {}
 }
 
-function isDefaultHost(host: string, defaultHost?: string): boolean {
-  if (!host) return true;
-  const stripped = host.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  if (
-    stripped === "localhost:6402" ||
-    stripped === "127.0.0.1:6402" ||
-    stripped === "localhost:6400" ||
-    stripped === "127.0.0.1:6400"
-  ) {
-    return true;
-  }
-  if (defaultHost) {
-    const defStripped = defaultHost
-      .replace(/^https?:\/\//, "")
-      .replace(/\/$/, "");
-    return stripped === defStripped;
-  }
-  return false;
-}
-
 /** Reads this instance's default host from the SSR server-config element. */
 function readDefaultHost(): string {
   try {
@@ -169,9 +143,7 @@ export default function FilesCard(props: Props) {
   const cardId = props.id ?? "files-card";
   const headerId = `${cardId}-header`;
   const actionsGridId = `${cardId}-actions`;
-  const localePrefix = locale === "en" ? "" : `/${locale}`;
-  const lp = (path: string) => `${localePrefix}${path}`;
-  const moreItems = getMoreMenuItems(locale, lp);
+  const moreItems = getMoreMenuItems(locale, (path) => lp(locale, path));
 
   let cardRef!: HTMLDivElement;
   let gridRef!: HTMLDivElement;
@@ -246,7 +218,7 @@ export default function FilesCard(props: Props) {
             textSpan.textContent;
         btn.classList.add("spinning");
         if (f.delete_token) {
-          const res = await fetch(`/file/${f.id}`, {
+          const res = await fetch(publicFile(f.id), {
             method: "DELETE",
             headers: { "X-Delete-Token": f.delete_token },
           });
@@ -289,20 +261,12 @@ export default function FilesCard(props: Props) {
     el.setAttribute("data-delete-token", f.delete_token ?? "");
     el.setAttribute("data-storage-host", f.storage_host ?? "");
     const hostTag = f.storage_host && !isDefaultHost(f.storage_host, readDefaultHost())
-      ? `<span class="storage-host-tag">${t(locale, "files.stored_on", { host: f.storage_host.replace(/^https?:\/\//, "") })}</span>`
+      ? `<span class="storage-host-tag">${t(locale, "files.stored_on", { host: esc(f.storage_host.replace(/^https?:\/\//, "")) })}</span>`
       : "";
     const url = f.url || "";
     const ttl = remainingLabel(f.expires_at, locale);
     const pct = f.expires_at
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            ((f.expires_at * 1000 - Date.now()) /
-              ((f.expires_at - (f.uploaded_at || f.expires_at - 86400)) * 1000)) *
-              100,
-          ),
-        )
+      ? pctRemaining(f.expires_at, f.uploaded_at || f.expires_at - 86400)
       : 0;
     el.innerHTML = `
       <div class="file-card-header">
@@ -514,7 +478,7 @@ export default function FilesCard(props: Props) {
 
       const customId = input.value.trim();
       try {
-        const res = await fetch(`/file/${f.id}/renew`, {
+        const res = await fetch(publicFileRenew(f.id), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -564,7 +528,7 @@ export default function FilesCard(props: Props) {
     if (pairs.length === 0) return;
 
     try {
-      const res = await fetch("/api/owned-files", {
+      const res = await fetch(apiOwnedFiles(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pairs }),
@@ -663,6 +627,7 @@ export default function FilesCard(props: Props) {
   function startLiveUpdates() {
     if (liveUpdateTimer != null) clearInterval(liveUpdateTimer);
     liveUpdateTimer = setInterval(() => {
+      if (document.hidden) return;
       if (!gridRef || gridRef.hidden) return;
       gridRef.querySelectorAll(".file-card").forEach((el) => {
         const expires = Number(
@@ -738,7 +703,7 @@ export default function FilesCard(props: Props) {
     >
       <header id={headerId} class="upload-header upload-header--centered">
         <h1 class="upload-header__title">
-          <img src="/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" loading="eager" fetchpriority="high" />
+          <img src="/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high" />
           {props.title ?? t(locale, "files.title")}
         </h1>
         {(props.subtitle ?? t(locale, "files.subtitle")) && (
@@ -915,14 +880,11 @@ export default function FilesCard(props: Props) {
           )}
           <a
             class="footr__commit footr__link"
-            href={
-              props.footerRepoUrl ??
-              "https://github.com/create-juicey-app/juicebox2"
-            }
+            href={props.footerRepoUrl ?? getRepoUrl()}
             target="_blank"
             rel="noopener noreferrer"
           >
-            {props.footerCommit ?? "main@a3f8c2d"}
+            {props.footerCommit ?? getFormattedCommitLabel()}
           </a>
         </div>
         {props.footerLinks && props.footerLinks.length > 0 && (

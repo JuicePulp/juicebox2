@@ -20,13 +20,11 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
     if (body
         .get("files")
         .and_then(|v| v.as_array())
-        .map(|a| a.is_empty())
-        .unwrap_or(false))
+        .is_some_and(Vec::is_empty))
         || (body
             .get("purge_by_tags")
             .and_then(|v| v.as_array())
-            .map(|a| a.is_empty())
-            .unwrap_or(false))
+            .is_some_and(Vec::is_empty))
     {
         return;
     }
@@ -35,15 +33,12 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
     let zone_id = zone_id.clone();
 
     tokio::spawn(async move {
-        let url = format!(
-            "https://api.cloudflare.com/client/v4/zones/{}/purge_cache",
-            zone_id
-        );
+        let url = format!("https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache");
 
         let client = reqwest::Client::new();
         match client
             .delete(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -52,7 +47,7 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
-                    tracing::info!("cloudflare: cache purge {} OK (status={})", kind, status);
+                    tracing::info!("cloudflare: cache purge {kind} OK (status={status})");
                 } else {
                     let text = resp.text().await.unwrap_or_default();
                     tracing::warn!(
@@ -64,7 +59,7 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
                 }
             }
             Err(e) => {
-                tracing::warn!("cloudflare: cache purge {} request failed: {}", kind, e);
+                tracing::warn!("cloudflare: cache purge {kind} request failed: {e}");
             }
         }
     });

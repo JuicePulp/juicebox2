@@ -10,7 +10,6 @@ export interface DeleteButtonOpts {
     immediate?: boolean;
 }
 
-// WeakMap to store confirm timers without polluting DOM with expandos
 const confirmTimers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
 
 /**

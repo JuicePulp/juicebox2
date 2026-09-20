@@ -1,4 +1,6 @@
 ---
+import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
+
 interface FooterLink {
     label: string;
     href: string;
@@ -15,10 +17,10 @@ interface Props {
 }
 
 const {
-    commit = "commit pls change dynamically",
+    commit = getFormattedCommitLabel(),
     message = "",
     showDivider = true,
-    repoUrl = "https://github.com/create-juicey-app/juicebox2",
+    repoUrl = getRepoUrl(),
     links = [],
 } = Astro.props as Props;
 
@@ -44,7 +46,7 @@ const footerClass = ["footr", showDivider ? "footr--divd" : null]
     {
         hasLinks && (
             <nav class="footr__links" aria-label="Additional footer links">
-                {links.map((link, index) => {
+                {links.map((link) => {
                     const target = link.external ? "_blank" : undefined;
                     const rel = link.external
                         ? "noopener noreferrer"

@@ -1,46 +1,48 @@
 //! juicehost: the file storage side of juicebox.
 //! files get pushed here by juiceback, stored on disk (or S3), served with
-//! ETags, and cleaned up when they expire. also has an optional QUIC/HTTP/3 port
-//! over QUIC/HTTP/3.
+//! `ETags`, and cleaned up when they expire. also has an optional QUIC/HTTP/3
+//! port over QUIC/HTTP/3.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use juicehost::config::Config;
-use juicehost::server::{build_router, print_startup_banner, start_server};
-use juicehost::state::AppState;
-use juicehost::storage::{LocalBackend, S3Backend, StorageBackend};
+use juicehost::{
+    config::Config,
+    server::{build_router, print_startup_banner, start_server},
+    state::AppState,
+    storage::{LocalBackend, S3Backend, StorageBackend},
+};
 #[cfg(feature = "quic")]
 use tokio::sync::Notify;
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
+    // Load ./.env first so standalone runs pick up cwd secrets exactly
+    // like `juicebox` supervision does. Explicit env always wins.
+    juiceutils::config::load_dotenv();
+
     // Initialize Sentry before configuration so it captures startup failures.
     // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN.
-    let _sentry_guard = juicebox_config::optional_secret("SENTRY_DSN_JUICEHOST")
-        .or_else(|| juicebox_config::optional_secret("SENTRY_DSN"))
+    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
+        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
+            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|rate| rate.clamp(0.0, 1.0))
+                .unwrap_or(0.05);
             sentry::init((
                 dsn.as_str(),
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    environment: Some(
-                        std::env::var("SENTRY_ENVIRONMENT")
-                            .unwrap_or_else(|_| "production".into())
-                            .into(),
-                    ),
-                    traces_sample_rate: std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                        .ok()
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(0.05),
-                    send_default_pii: false,
-                    ..Default::default()
-                },
+                sentry::ClientOptions::default()
+                    .maybe_release(sentry::release_name!())
+                    .environment(
+                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
+                    )
+                    .traces_sample_rate(traces_sample_rate)
+                    .send_default_pii(false),
             ))
         });
 
@@ -72,15 +74,17 @@ fn main() {
         .expect("tokio runtime creation failed");
 
     runtime.block_on(async {
-        // Create the appropriate storage backend
         let storage: Arc<dyn StorageBackend> = if config.is_s3_mode() {
-            let bucket = config.s3_bucket.as_deref().unwrap();
+            let bucket = config
+                .s3_bucket
+                .as_deref()
+                .expect("is_s3_mode guarantees s3_bucket is set");
             let region = config.s3_region.as_deref().unwrap_or("us-east-1");
             let endpoint = config.s3_endpoint.as_deref();
             let access_key = config.s3_access_key.as_deref().unwrap_or("");
             let secret_key = config.s3_secret_key.as_deref().unwrap_or("");
 
-            tracing::info!("S3 storage mode: bucket={}, region={}", bucket, region);
+            tracing::info!("S3 storage mode: bucket={bucket}, region={region}");
 
             let backend = S3Backend::new(
                 bucket,
@@ -141,7 +145,7 @@ fn main() {
             let quic_cert = config.quic_cert_path.clone();
 
             tokio::select! {
-                _ = async {
+                () = async {
                     let quic_limits = juiceutils::QuicServerLimits {
                         max_connections: config.quic_max_connections,
                         max_requests: config.quic_max_requests,
@@ -167,7 +171,6 @@ fn main() {
         }
     });
 
-    // Flush any remaining Sentry events before exit
     if let Some(client) = sentry::Hub::current().client() {
         client.close(Some(Duration::from_secs(2)));
     }

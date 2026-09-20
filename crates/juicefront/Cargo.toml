@@ -2,24 +2,19 @@
 name = "juicefront"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Astro frontend runner for Juicebox"
 publish = false
 
-[[bin]]
-name = "juicefront"
-path = "src/main.rs"
-
 [dependencies]
-tokio = { version = "1", features = ["process", "macros", "rt-multi-thread"] }
+juiceutils = { path = "../juiceutils" }
+sentry = { workspace = true, features = ["tower", "tower-axum-matched-path"] }
+serde.workspace = true
+# Spawns the Node/Astro child process; no networking or timers of its own.
+tokio = { workspace = true, features = ["process", "macros", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde.workspace = true
-toml.workspace = true
-anyhow.workspace = true
-juicebox-config = { path = "../juicebox-config" }
-sentry = { version = "0.48", features = ["tower", "tower-axum-matched-path"] }
-sentry-tracing = "0.48"
 
 [lints]
 workspace = true

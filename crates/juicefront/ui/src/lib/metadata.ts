@@ -34,12 +34,6 @@ export const REPO_METADATA: RepoMetadata = {
 
 export const getRepoUrl = (): string => REPO_METADATA.url;
 
-export const getRepoPathUrl = (
-  path: string,
-  ref: string = REPO_METADATA.defaultBranch,
-): string =>
-  `${REPO_METADATA.url}/blob/${encodeURIComponent(ref)}/${path.replace(/^\/+/, "")}`;
-
 export const getFormattedCommitLabel = (includeBranch = true): string =>
   includeBranch
     ? REPO_METADATA.latestCommitRef

@@ -1,102 +1,46 @@
-use axum::body::Body;
-use axum::extract::ConnectInfo;
-use axum::http::{HeaderMap, Request};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
-use aes_gcm::aead::Aead;
-use aes_gcm::aead::KeyInit;
-use aes_gcm::{Aes256Gcm, Nonce};
-
-use crate::error::AppError;
-use crate::state::AppState;
-
+use axum::{
+    body::Body,
+    extract::ConnectInfo,
+    http::{HeaderMap, Request},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+/// Compute HMAC-SHA256(pepper, ip) for deterministic ban lookups.
+pub use juiceutils::ban::hash_ip_for_ban;
+/// Truncate a hex string to 12 characters for display in logs/notifications.
+pub use juiceutils::ban::truncate_hash;
 /// Constant-time string comparison to prevent timing attacks on secrets
 /// like delete tokens. Pads the shorter input to avoid leaking length.
 pub(crate) use juiceutils::constant_time_eq;
-
-// == IP encryption / hashing ==
-
-/// Compute HMAC-SHA256(pepper, ip) for deterministic ban lookups.
-pub use juiceutils::ban::hash_ip_for_ban;
-
-/// Truncate a hex string to 12 characters for display in logs/notifications.
-pub use juiceutils::ban::truncate_hash;
-
-/// Encrypt an IP address with AES-256-GCM using a random 12-byte nonce.
-/// Returns `"nonce_hex:ciphertext_hex"` where ciphertext includes the 16-byte auth tag.
-pub fn encrypt_ip(ip: &str, key_hex: &str) -> Option<String> {
-    let key_bytes = hex::decode(key_hex).ok()?;
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes).ok()?;
-    let mut nonce_bytes = [0u8; 12];
-    // Fill nonce with cryptographically secure random bytes.
-    // Uses /dev/urandom on Linux (the production platform).
-    {
-        use std::io::Read;
-        let mut f = std::fs::File::open("/dev/urandom").ok()?;
-        f.read_exact(&mut nonce_bytes).ok()?;
-    }
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, ip.as_bytes()).ok()?;
-    Some(format!(
-        "{}:{}",
-        hex::encode(nonce_bytes),
-        hex::encode(ciphertext)
-    ))
-}
-
 /// Decrypt an IP address that was encrypted with [`encrypt_ip`].
-pub fn decrypt_ip(encrypted: &str, key_hex: &str) -> Option<String> {
-    let (nonce_hex, ct_hex) = encrypted.split_once(':')?;
-    let key_bytes = hex::decode(key_hex).ok()?;
-    let nonce_bytes = hex::decode(nonce_hex).ok()?;
-    let ct_bytes = hex::decode(ct_hex).ok()?;
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes).ok()?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let plaintext = cipher.decrypt(nonce, ct_bytes.as_ref()).ok()?;
-    String::from_utf8(plaintext).ok()
-}
+pub use juiceutils::ip_crypt::decrypt_ip;
+/// Encrypt an IP address with AES-256-GCM. See [`juiceutils::ip_crypt`].
+pub use juiceutils::ip_crypt::encrypt_ip;
+
+use crate::{error::AppError, state::AppState};
 
 /// Validate a file ID: must be non-empty, within length bounds,
 /// and contain only alphanumeric, `-`, or `_`.
+#[must_use]
 pub fn is_valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() >= crate::constants::MIN_CUSTOM_ID_LEN
-        && id.len() <= crate::constants::MAX_CUSTOM_ID_LEN
-        && id
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    juiceutils::ids::is_valid_custom_id(
+        id,
+        crate::constants::MIN_CUSTOM_ID_LEN,
+        crate::constants::MAX_CUSTOM_ID_LEN,
+    )
 }
 
 /// Normalize a custom ID: trim whitespace and convert to lowercase.
-pub fn normalize_custom_id(id: &str) -> String {
-    id.trim().to_lowercase()
-}
-
-/// Build the public URL for a file, including an extension for client compatibility.
-pub fn public_url(
-    base_url: &str,
-    storage_host: &Option<String>,
-    id: &str,
-    filename: &str,
-) -> String {
-    let host = match storage_host {
-        Some(host) if !host.is_empty() => host.as_str(),
-        _ => base_url,
-    };
-    let host = if host.contains("://") {
-        host.to_string()
-    } else {
-        format!("https://{}", host)
-    };
-    match filename.rsplit('.').next() {
-        Some(ext) if !ext.is_empty() && ext != filename => format!("{}/f/{}.{}", host, id, ext),
-        _ => format!("{}/f/{}", host, id),
-    }
-}
+pub use juiceutils::ids::normalize_custom_id;
+/// Build the public URL for a file, including an extension for client
+/// compatibility.
+pub use juiceutils::urls::public_url;
 
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {
     let throughput = if total.as_secs_f64() > 0.0 {
@@ -117,6 +61,7 @@ pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration
 #[derive(Clone, Copy, Debug)]
 pub struct ClientIp(pub IpAddr);
 
+#[must_use]
 pub fn client_ip(headers: &HeaderMap, peer_ip: IpAddr, state: &AppState) -> IpAddr {
     juiceutils::proxy::client_ip(headers, peer_ip, &state.config.trusted_proxy_cidrs)
 }
@@ -143,6 +88,7 @@ pub struct TrustedClientIpKeyExtractor {
 }
 
 impl TrustedClientIpKeyExtractor {
+    #[must_use]
     pub fn new(cidrs: Vec<juiceutils::proxy::IpCidr>) -> Self {
         Self {
             trusted_proxy_cidrs: Arc::new(cidrs),
@@ -174,7 +120,6 @@ impl tower_governor::key_extractor::KeyExtractor for TrustedClientIpKeyExtractor
 }
 
 /// Axum middleware that checks if the client IP is banned.
-// Proxy-aware client address extraction.
 pub async fn ban_check_middleware(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     req: Request<Body>,
@@ -187,16 +132,12 @@ pub async fn ban_check_middleware(
         return next.run(req).await;
     }
 
+    // Prefer the ClientIp resolved by client_ip_middleware;;
     let raw_ip = req
         .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|value| client_ip(req.headers(), value.0.ip(), &state))
-        .or_else(|| {
-            req.extensions()
-                .get::<ClientIp>()
-                .map(|value| value.0)
-                .filter(|ip| !ip.is_unspecified())
-        })
+        .get::<ClientIp>()
+        .map(|value| value.0)
+        .filter(|ip| !ip.is_unspecified())
         .unwrap_or_else(|| {
             let peer = req
                 .extensions()
@@ -206,8 +147,7 @@ pub async fn ban_check_middleware(
             client_ip(req.headers(), peer, &state)
         })
         .to_string();
-    let hashed = hash_ip_for_ban(&raw_ip, &state.config.ip_pepper);
-    if state.is_banned(&hashed) {
+    if state.is_banned(&hash_ip_for_ban(&raw_ip, &state.config.ip_pepper)) {
         return AppError::Forbidden("you are banned".into()).into_response();
     }
 
@@ -239,7 +179,7 @@ mod tests {
     fn public_url_empty_storage_host() {
         let url = public_url(
             "http://localhost:6402",
-            &Some("".into()),
+            &Some(String::new()),
             "abc123",
             "cute.gif",
         );

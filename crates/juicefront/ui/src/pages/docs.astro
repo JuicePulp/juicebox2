@@ -1,11 +1,14 @@
 ---
+export const prerender = true;
 import BaseLayout from "../layouts/BaseLayout.astro";
 import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
+import { t, resolveLocale } from "../i18n";
 import { iconSvgHtml } from "../lib/icons";
 import fs from "node:fs";
 
 const footerCommit = getFormattedCommitLabel();
 const canonicalUrl = getRepoUrl();
+const locale = resolveLocale(Astro.currentLocale);
 
 const rustdocPath = new URL("../../public/rustdoc", import.meta.url).pathname;
 const rustdocExists = fs.existsSync(rustdocPath);
@@ -22,8 +25,8 @@ const apidocs = [
 ---
 
 <BaseLayout
-    title="Documentation - Juicebox"
-    description="Auto-generated code and API documentation for Juicebox."
+    title={`${t(locale, "docs.title")} - Juicebox`}
+    description={t(locale, "docs.description")}
     canonical={canonicalUrl}
     bodyClass="content-page"
 >

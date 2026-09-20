@@ -1,9 +1,6 @@
 /** Client-side file type validation with tiered danger levels.
  *  Mirrors the server's validation so users see rejections immediately. */
 
-import { t, type Locale } from "../i18n";
-import type { TranslationKeys } from "../i18n/en";
-
 export type ProtectionLevel = "none" | "low" | "medium" | "high";
 
 const LEVEL_ORDER: Record<ProtectionLevel, number> = {
@@ -72,7 +69,6 @@ export function validateFileClient(
 
   const ext = filename.split(".").pop()?.toLowerCase() || "";
   if (!ext || ext === filename.toLowerCase()) {
-    // no extension found
     return { allowed: true };
   }
 
@@ -99,19 +95,4 @@ export function validateFileClient(
   }
 
   return { allowed: true };
-}
-
-/** Badge color for a danger tier. */
-export function tierColor(tier: DangerTier): string {
-  switch (tier) {
-    case "low": return "var(--yellow-500, #eab308)";
-    case "medium": return "var(--orange-500, #f97316)";
-    case "high": return "var(--red-500, #ef4444)";
-  }
-}
-
-/** Human-readable label for a danger tier. */
-export function tierLabel(tier: DangerTier, locale: Locale): string {
-  const key = `validate.tier_${tier}` as keyof TranslationKeys;
-  return t(locale, key);
 }

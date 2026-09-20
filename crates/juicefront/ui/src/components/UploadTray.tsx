@@ -9,6 +9,7 @@ import {
 import { t, type Locale } from "../i18n";
 import { iconSvgHtml } from "../lib/icons";
 import { UPLOAD_URL } from "../lib/upload-config";
+import { publicFile } from "../lib/api";
 import {
   getUploads,
   subscribe,
@@ -27,7 +28,6 @@ import {
 } from "../lib/file-events";
 import FileCard from "./FileCard";
 
-// better entrance anim
 function useEntrance(
   ref: () => HTMLElement | undefined,
   active: () => boolean,
@@ -51,7 +51,9 @@ interface TrayCard {
 
 const TRAY_OPEN_KEY = "juicebox_tray_open";
 const TRAY_ITEMS_KEY = "juicebox_tray_items";
-const MAX_PERSISTED_ITEMS = 100;
+// Persist only recent terminal items, stripped of debug payloads, so
+// sessionStorage churn stays small on every progress tick.
+const MAX_PERSISTED_ITEMS = 30;
 
 const TERMINAL_STATES = new Set(["done", "error", "cancelled"]);
 
@@ -94,7 +96,8 @@ function savePersistedItems(items: UploadItem[]) {
     const terminal = items
       .filter((i) => TERMINAL_STATES.has(i.state))
       .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, MAX_PERSISTED_ITEMS);
+      .slice(0, MAX_PERSISTED_ITEMS)
+      .map(({ dbg, ...rest }) => rest);
     const json = JSON.stringify(terminal);
     if (json === lastPersisted) return;
     lastPersisted = json;
@@ -385,7 +388,7 @@ export default function UploadTray(props: { locale?: Locale }) {
     const fileId = item.serverId || extractServerId(item.url || "");
     if (!fileId || !item.deleteToken) return;
     try {
-      const res = await fetch(`${UPLOAD_URL}/file/${fileId}`, {
+      const res = await fetch(`${UPLOAD_URL}${publicFile(fileId)}`, {
         method: "DELETE",
         headers: { "X-Delete-Token": item.deleteToken },
       });

@@ -1,10 +1,8 @@
 //! Shared state used by request handlers.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use crate::config::Config;
-use crate::storage::StorageBackend;
+use crate::{config::Config, storage::StorageBackend};
 
 /// Shared state injected into every axum handler.
 ///
@@ -18,7 +16,8 @@ pub struct AppState {
     /// When true, an empty `api_key` is an explicit opt-out and internal
     /// endpoints stay open. When false (default), empty key = reject all.
     pub allow_no_auth: bool,
-    /// Allowed values for the `X-Juiceback-Origin` header. Empty means allow all.
+    /// Allowed values for the `X-Juiceback-Origin` header. Empty means allow
+    /// all.
     pub allowed_origins: Vec<String>,
     /// Minimum free disk space (bytes) before rejecting writes.
     pub min_free_space_bytes: u64,
@@ -26,7 +25,8 @@ pub struct AppState {
     pub max_file_size_bytes: u64,
     /// juiceback URL (used to check upload status on storage miss).
     pub backend_url: Option<String>,
-    /// juicefront URL that the index page redirects to (empty disables the redirect).
+    /// juicefront URL that the index page redirects to (empty disables the
+    /// redirect).
     pub frontend_url: Option<String>,
     /// File type danger level: none, low, medium, high.
     pub danger_level: juiceutils::file_validation::ProtectionLevel,
@@ -62,7 +62,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Create a new `AppState` from a loaded `Config` and the storage backend.
     pub fn new(config: &Config, storage: Arc<dyn StorageBackend>) -> Self {
         Self {
             storage,

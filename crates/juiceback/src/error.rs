@@ -10,18 +10,15 @@ use serde_json::json;
 /// Application errors exposed through the HTTP API.
 #[derive(Debug)]
 pub enum AppError {
-    // -- 404 / 410 --
     NotFound,
     Gone,
     Forbidden(String),
     /// Resource already exists (e.g. custom file ID taken)
     Conflict(String),
 
-    // -- Upload validation (400) --
     /// Upload body claims gzip but decompression failed
     GzipDecodeFailed,
 
-    // -- TUS protocol errors (400 / 409 / 404) --
     /// Upload-Length header missing or unparseable
     TusMissingLength,
     /// Upload-Offset header missing or unparseable
@@ -31,7 +28,6 @@ pub enum AppError {
     /// TUS upload session not found
     TusSessionNotFound,
 
-    // -- Size / rate (413 / 429) --
     PayloadTooLarge,
     RateLimited,
     /// Account temporarily locked due to too many failed login attempts
@@ -39,23 +35,21 @@ pub enum AppError {
     /// File type is blocked (dangerous executable, script, etc.)
     BlockedFileType(String),
 
-    // -- Storage backend --
     /// Cannot reach juicehost at all (connection refused / dns)
     JuicehostUnreachable(String),
     /// juicehost returned a non-2xx status
     JuicehostRejected(String),
     /// juicehost returned 507, disk is full
     InsufficientStorage(String),
-    // -- Generic server errors (500) --
     FilesystemError(std::io::Error),
     DatabaseError(rusqlite::Error),
     /// Could not acquire a connection from the database pool
     DbPoolError(String),
-    /// A background task (spawn_blocking) panicked
+    /// A background task (`spawn_blocking`) panicked
     TaskPanicked(String),
     BadRequest(String),
     Unauthorized(String),
-    InvalidMultipart(#[allow(dead_code)] String),
+    InvalidMultipart,
     Internal(String),
     ServiceUnavailable(String),
 }
@@ -63,64 +57,59 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match self {
-            // -- 404 / 403 / 410 / 409 --
-            AppError::NotFound => (StatusCode::NOT_FOUND, "FILE_NOT_FOUND", "File not found"),
-            AppError::Gone => (StatusCode::GONE, "FILE_EXPIRED", "File has expired"),
-            AppError::Forbidden(ref msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.as_str()),
-            AppError::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.as_str()),
+            Self::NotFound => (StatusCode::NOT_FOUND, "FILE_NOT_FOUND", "File not found"),
+            Self::Gone => (StatusCode::GONE, "FILE_EXPIRED", "File has expired"),
+            Self::Forbidden(ref msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.as_str()),
+            Self::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.as_str()),
 
-            // -- Upload validation --
-            AppError::GzipDecodeFailed => (
+            Self::GzipDecodeFailed => (
                 StatusCode::BAD_REQUEST,
                 "GZIP_DECODE_FAILED",
                 "Gzip decompression failed, the data may be corrupt or not actually gzip-compressed",
             ),
 
-            // -- TUS protocol --
-            AppError::TusMissingLength => (
+            Self::TusMissingLength => (
                 StatusCode::BAD_REQUEST,
                 "TUS_MISSING_LENGTH",
                 "Missing or invalid Upload-Length header",
             ),
-            AppError::TusMissingOffset => (
+            Self::TusMissingOffset => (
                 StatusCode::BAD_REQUEST,
                 "TUS_MISSING_OFFSET",
                 "Missing or invalid Upload-Offset header",
             ),
-            AppError::TusOffsetMismatch => (
+            Self::TusOffsetMismatch => (
                 StatusCode::CONFLICT,
                 "TUS_OFFSET_MISMATCH",
                 "Upload offset does not match server state",
             ),
-            AppError::TusSessionNotFound => (
+            Self::TusSessionNotFound => (
                 StatusCode::NOT_FOUND,
                 "TUS_SESSION_NOT_FOUND",
                 "TUS upload session not found... it may have expired or been cancelled",
             ),
-            // -- Size / rate --
-            AppError::PayloadTooLarge => (
+            Self::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "FILE_TOO_LARGE",
                 "File exceeds the maximum allowed size",
             ),
-            AppError::RateLimited => (
+            Self::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMITED",
                 "Too many uploads!!! please wait before trying again",
             ),
-            AppError::TooManyRequests(ref msg) => (
+            Self::TooManyRequests(ref msg) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "ACCOUNT_LOCKED",
                 msg.as_str(),
             ),
-            AppError::BlockedFileType(ref reason) => (
+            Self::BlockedFileType(ref reason) => (
                 StatusCode::BAD_REQUEST,
                 "BLOCKED_FILE_TYPE",
                 reason.as_str(),
             ),
 
-            // -- Storage backend --
-            AppError::JuicehostUnreachable(ref e) => {
+            Self::JuicehostUnreachable(ref e) => {
                 let clean = extract_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "File storage backend is unreachable"
@@ -129,7 +118,7 @@ impl IntoResponse for AppError {
                 };
                 (StatusCode::BAD_GATEWAY, "STORAGE_UNREACHABLE", clean)
             }
-            AppError::JuicehostRejected(ref e) => {
+            Self::JuicehostRejected(ref e) => {
                 let clean = extract_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "File storage backend rejected the upload"
@@ -138,7 +127,7 @@ impl IntoResponse for AppError {
                 };
                 (StatusCode::BAD_GATEWAY, "STORAGE_REJECTED", clean)
             }
-            AppError::InsufficientStorage(ref e) => {
+            Self::InsufficientStorage(ref e) => {
                 let clean = extract_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "This instance is out of storage! Try again later."
@@ -151,58 +140,58 @@ impl IntoResponse for AppError {
                     clean,
                 )
             }
-            // -- Generic server errors --
-            AppError::FilesystemError(_) => (
+            Self::FilesystemError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "DISK_ERROR",
                 "A server disk error occurred",
             ),
-            AppError::DatabaseError(_) => (
+            Self::DatabaseError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "DATABASE_ERROR",
                 "A database error occurred",
             ),
-            AppError::DbPoolError(_) => (
+            Self::DbPoolError(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "DB_POOL_ERROR",
                 "The server is temporarily unable to process uploads - please try again",
             ),
-            AppError::TaskPanicked(_) => (
+            Self::TaskPanicked(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "TASK_PANICKED",
                 "An internal processing task failed unexpectedly",
             ),
-            AppError::BadRequest(ref msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.as_str()),
-            AppError::Unauthorized(ref msg) => {
-                (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.as_str())
-            }
-            AppError::InvalidMultipart(_) => (
+            Self::BadRequest(ref msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.as_str()),
+            Self::Unauthorized(ref msg) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.as_str()),
+            Self::InvalidMultipart => (
                 StatusCode::BAD_REQUEST,
                 "INVALID_MULTIPART",
                 "Invalid multipart data",
             ),
-            AppError::Internal(_) => (
+            Self::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 "An internal error occurred",
             ),
-            AppError::ServiceUnavailable(ref msg) => (
+            Self::ServiceUnavailable(ref msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "SERVICE_UNAVAILABLE",
                 msg.as_str(),
             ),
         };
 
-        let body = Json(json!({
-            "error": error_code,
-            "message": message,
-        }));
-
-        (status, body).into_response()
+        (
+            status,
+            Json(json!({
+                "error": error_code,
+                "message": message,
+            })),
+        )
+            .into_response()
     }
 }
 
-/// Extract a clean message from errors formatted as `[CODE] message (status=N)`.
+/// Extract a clean message from errors formatted as `[CODE] message
+/// (status=N)`.
 fn extract_error_message(e: &str) -> &str {
     e.strip_prefix('[')
         .and_then(|s| s.find("] "))
@@ -214,13 +203,13 @@ fn extract_error_message(e: &str) -> &str {
 
 impl From<std::io::Error> for AppError {
     fn from(err: std::io::Error) -> Self {
-        AppError::FilesystemError(err)
+        Self::FilesystemError(err)
     }
 }
 
 impl From<rusqlite::Error> for AppError {
     fn from(err: rusqlite::Error) -> Self {
-        AppError::DatabaseError(err)
+        Self::DatabaseError(err)
     }
 }
 
@@ -229,18 +218,19 @@ impl AppError {
     /// not when converting it to an HTTP response.
     pub fn log_error(&self) {
         match self {
-            AppError::JuicehostUnreachable(e) => tracing::error!("juicehost unreachable: {}", e),
-            AppError::JuicehostRejected(e) => tracing::error!("juicehost rejected upload: {}", e),
-            AppError::InsufficientStorage(e) => tracing::warn!("juicehost out of storage: {}", e),
-            AppError::FilesystemError(e) => tracing::error!("filesystem error: {}", e),
-            AppError::DatabaseError(e) => tracing::error!("database error: {}", e),
-            AppError::DbPoolError(e) => tracing::error!("database pool error: {}", e),
-            AppError::TaskPanicked(e) => tracing::error!("background task panicked: {}", e),
-            AppError::Internal(e) => tracing::error!("internal error: {}", e),
+            Self::JuicehostUnreachable(e) => tracing::error!("juicehost unreachable: {e}"),
+            Self::JuicehostRejected(e) => tracing::error!("juicehost rejected upload: {e}"),
+            Self::InsufficientStorage(e) => tracing::warn!("juicehost out of storage: {e}"),
+            Self::FilesystemError(e) => tracing::error!("filesystem error: {e}"),
+            Self::DatabaseError(e) => tracing::error!("database error: {e}"),
+            Self::DbPoolError(e) => tracing::error!("database pool error: {e}"),
+            Self::TaskPanicked(e) => tracing::error!("background task panicked: {e}"),
+            Self::Internal(e) => tracing::error!("internal error: {e}"),
             _ => {}
         }
     }
 
+    #[must_use]
     pub fn from_juicehost_error(e: String) -> Self {
         let err = if e.contains("error trying to connect")
             || e.contains("dns error")
@@ -249,11 +239,11 @@ impl AppError {
             || e.contains("QUIC handshake failed")
             || e.contains("QUIC connect error")
         {
-            AppError::JuicehostUnreachable(e)
+            Self::JuicehostUnreachable(e)
         } else if e.contains("[INSUFFICIENT_STORAGE]") || e.contains("(status=507)") {
-            AppError::InsufficientStorage(e)
+            Self::InsufficientStorage(e)
         } else {
-            AppError::JuicehostRejected(e)
+            Self::JuicehostRejected(e)
         };
         err.log_error();
         err
@@ -262,10 +252,13 @@ impl AppError {
 
 #[cfg(test)]
 mod tests {
+    use axum::{
+        body::Body,
+        http::{Response, StatusCode},
+        response::IntoResponse,
+    };
+
     use super::*;
-    use axum::body::Body;
-    use axum::http::{Response, StatusCode};
-    use axum::response::IntoResponse;
 
     fn status_for(error: AppError) -> StatusCode {
         let resp: Response<Body> = error.into_response();
@@ -423,7 +416,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_multipart_body_is_generic() {
-        let body = body_for(AppError::InvalidMultipart("parse failed".into())).await;
+        let body = body_for(AppError::InvalidMultipart).await;
         assert_eq!(body["error"], "INVALID_MULTIPART");
         assert_eq!(body["message"], "Invalid multipart data");
     }

@@ -1,4 +1,4 @@
-//! Errors and stuff sent to juiceback
+//! Errors sent to juiceback
 
 use axum::{
     Json,
@@ -15,7 +15,7 @@ const TEAPOT_HTML_TEMPLATE: &str = include_str!("templates/teapot_uploading.html
 /// Standard error response body returned by all juicehost endpoints on failure.
 #[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
-    /// Machine-readable error code (e.g. "FILE_NOT_FOUND", "FORBIDDEN").
+    /// Machine-readable error code (e.g. "`FILE_NOT_FOUND`", "FORBIDDEN").
     pub error: String,
     /// Human-readable description of what went wrong.
     pub message: String,
@@ -42,6 +42,9 @@ pub enum StorageError {
     /// The supplied per-file capability did not authorize the operation.
     #[error("invalid file capability")]
     Forbidden,
+    /// The request body failed mid-stream (client disconnect or truncation).
+    #[error("request body failed: {0}")]
+    BodyRead(String),
     /// An I/O or backend-specific error occurred.
     #[error("{0}")]
     Io(String),
@@ -50,13 +53,14 @@ pub enum StorageError {
 impl From<StorageError> for JuicehostError {
     fn from(e: StorageError) -> Self {
         match e {
-            StorageError::NotFound => JuicehostError::NotFound,
-            StorageError::Conflict => JuicehostError::Conflict,
-            StorageError::PayloadTooLarge => JuicehostError::PayloadTooLarge,
-            StorageError::SizeMismatch => JuicehostError::SizeMismatch,
-            StorageError::InsufficientStorage => JuicehostError::InsufficientStorage,
-            StorageError::Forbidden => JuicehostError::Forbidden,
-            StorageError::Io(_) => JuicehostError::InternalServerError,
+            StorageError::NotFound => Self::NotFound,
+            StorageError::Conflict => Self::Conflict,
+            StorageError::PayloadTooLarge => Self::PayloadTooLarge,
+            StorageError::SizeMismatch => Self::SizeMismatch,
+            StorageError::InsufficientStorage => Self::InsufficientStorage,
+            StorageError::Forbidden => Self::Forbidden,
+            StorageError::BodyRead(_) => Self::BadRequest,
+            StorageError::Io(_) => Self::Internal,
         }
     }
 }
@@ -70,7 +74,6 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
 }
 
 /// Return 418 while a file is still uploading so social previews can retry.
-// hehehe teapot
 pub fn teapot_html(
     filename: &str,
     public_url: &str,
@@ -79,9 +82,9 @@ pub fn teapot_html(
     let filename = escape_html(filename);
     let public_url = escape_html(public_url);
     let public_base_url = escape_html(public_base_url);
-    let og_title = format!("{} is still uploading...", filename);
+    let og_title = format!("{filename} is still uploading...");
     let og_description = "This file is being uploaded and will be available soon.";
-    let og_image = format!("{}/placeholder-og.png", public_base_url);
+    let og_image = format!("{public_base_url}/placeholder-og.png");
     let retry_after = "30";
 
     let html = TEAPOT_HTML_TEMPLATE
@@ -107,7 +110,6 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Errors that could maybe occur during request handling.
 #[derive(Debug, Error)]
 pub enum JuicehostError {
     /// The requested file does not exist.
@@ -127,11 +129,16 @@ pub enum JuicehostError {
     InsufficientStorage,
     /// An unexpected internal error occurred.
     #[error("internal server error")]
-    InternalServerError,
+    Internal,
     /// The request lacked valid authentication credentials.
+    #[error("authentication required")]
+    Unauthorized,
+    /// The request was authenticated but is not allowed to perform this
+    /// operation (banned IP, wrong-resource ticket, disallowed origin).
     #[error("forbidden")]
     Forbidden,
-    /// The uploaded file type was blocked by validation (dangerous extension or magic bytes).
+    /// The uploaded file type was blocked by validation (dangerous extension or
+    /// magic bytes).
     #[error("{0}")]
     BlockedFileType(String),
     /// A declared or signed request size did not match the body.
@@ -145,36 +152,30 @@ pub enum JuicehostError {
 impl IntoResponse for JuicehostError {
     fn into_response(self) -> Response {
         let (status, error_code) = match &self {
-            JuicehostError::NotFound => (StatusCode::NOT_FOUND, "FILE_NOT_FOUND"),
-            JuicehostError::BadRequest => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
-            JuicehostError::Conflict => (StatusCode::CONFLICT, "CONFLICT"),
-            JuicehostError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "FILE_TOO_LARGE"),
-            JuicehostError::InsufficientStorage => {
-                (StatusCode::INSUFFICIENT_STORAGE, "INSUFFICIENT_STORAGE")
-            }
-            JuicehostError::InternalServerError => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR")
-            }
-            JuicehostError::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN"),
-            JuicehostError::BlockedFileType(_) => (StatusCode::BAD_REQUEST, "BLOCKED_FILE_TYPE"),
-            JuicehostError::SizeMismatch => (StatusCode::BAD_REQUEST, "SIZE_MISMATCH"),
-            JuicehostError::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "BUSY"),
+            Self::NotFound => (StatusCode::NOT_FOUND, "FILE_NOT_FOUND"),
+            Self::BadRequest => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
+            Self::Conflict => (StatusCode::CONFLICT, "CONFLICT"),
+            Self::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "FILE_TOO_LARGE"),
+            Self::InsufficientStorage => (StatusCode::INSUFFICIENT_STORAGE, "INSUFFICIENT_STORAGE"),
+            Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
+            Self::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN"),
+            Self::BlockedFileType(_) => (StatusCode::BAD_REQUEST, "BLOCKED_FILE_TYPE"),
+            Self::SizeMismatch => (StatusCode::BAD_REQUEST, "SIZE_MISMATCH"),
+            Self::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
         };
         let message: String = match &self {
-            JuicehostError::NotFound => "File not found".into(),
-            JuicehostError::BadRequest => "Bad request".into(),
-            JuicehostError::Conflict => "Target file already exists".into(),
-            JuicehostError::PayloadTooLarge => "File too large".into(),
-            JuicehostError::InsufficientStorage => {
-                "This instance is out of storage! Try again later.".into()
-            }
-            JuicehostError::InternalServerError => "Internal server error".into(),
-            JuicehostError::Forbidden => "Forbidden".into(),
-            JuicehostError::BlockedFileType(msg) => msg.clone(),
-            JuicehostError::SizeMismatch => {
-                "Request body size does not match the signed file size".into()
-            }
-            JuicehostError::ServiceUnavailable => "Server concurrency limit reached".into(),
+            Self::NotFound => "File not found".into(),
+            Self::BadRequest => "Bad request".into(),
+            Self::Conflict => "Target file already exists".into(),
+            Self::PayloadTooLarge => "File too large".into(),
+            Self::InsufficientStorage => "This instance is out of storage! Try again later.".into(),
+            Self::Internal => "Internal server error".into(),
+            Self::Unauthorized => "Authentication required".into(),
+            Self::Forbidden => "Forbidden".into(),
+            Self::BlockedFileType(msg) => msg.clone(),
+            Self::SizeMismatch => "Request body size does not match the signed file size".into(),
+            Self::ServiceUnavailable => "Server concurrency limit reached".into(),
         };
         (
             status,
@@ -189,9 +190,9 @@ impl IntoResponse for JuicehostError {
 
 #[cfg(test)]
 mod tests {
+    use axum::{body::Body, response::IntoResponse};
+
     use super::*;
-    use axum::body::Body;
-    use axum::response::IntoResponse;
 
     fn status_for(error: JuicehostError) -> StatusCode {
         let resp: axum::http::Response<Body> = error.into_response();
@@ -243,7 +244,7 @@ mod tests {
     #[test]
     fn internal_server_error_returns_500() {
         assert_eq!(
-            status_for(JuicehostError::InternalServerError),
+            status_for(JuicehostError::Internal),
             StatusCode::INTERNAL_SERVER_ERROR
         );
     }
@@ -251,6 +252,21 @@ mod tests {
     #[test]
     fn forbidden_returns_403() {
         assert_eq!(status_for(JuicehostError::Forbidden), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn unauthorized_returns_401() {
+        assert_eq!(
+            status_for(JuicehostError::Unauthorized),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn unauthorized_body() {
+        let body = body_for(JuicehostError::Unauthorized).await;
+        assert_eq!(body["error"], "UNAUTHORIZED");
+        assert_eq!(body["message"], "Authentication required");
     }
 
     #[tokio::test]
@@ -333,23 +349,22 @@ mod tests {
         );
     }
 
-    #[test]
-    fn storage_error_to_juicehost_error() {
+    #[tokio::test]
+    async fn storage_error_to_juicehost_error() {
         let mapping = [
             (StorageError::NotFound, "FILE_NOT_FOUND"),
             (StorageError::Conflict, "CONFLICT"),
             (StorageError::PayloadTooLarge, "FILE_TOO_LARGE"),
             (StorageError::InsufficientStorage, "INSUFFICIENT_STORAGE"),
+            (StorageError::BodyRead("x".into()), "BAD_REQUEST"),
             (StorageError::Io("x".into()), "INTERNAL_ERROR"),
         ];
         for (se, expected_code) in mapping {
             let je: JuicehostError = se.into();
             let resp: axum::http::Response<Body> = je.into_response();
-            let body_bytes = tokio::runtime::Runtime::new().unwrap().block_on(async {
-                axum::body::to_bytes(resp.into_body(), usize::MAX)
-                    .await
-                    .unwrap()
-            });
+            let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
             let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
             assert_eq!(body["error"], expected_code);
         }

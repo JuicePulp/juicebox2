@@ -1,33 +1,24 @@
 ---
 import UploadCardSolid from "./UploadCard.tsx";
 import { iconSvgHtml } from "../lib/icons";
-import { formatMaxSize, formatSize } from "../lib/format";
+import { formatMaxSize, formatSize, iconForMime } from "../lib/format";
 import { t, resolveLocale } from "../i18n";
 import { getMoreMenuItems } from "../lib/more-menu";
 import { readCookieHost, resolveEffectiveConfig, fetchCobaltServices } from "../lib/server-host";
 import { ttlLabel } from "../lib/retention";
+import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
+import { lp } from "../lib/locale-prefix";
 const locale = resolveLocale(Astro.currentLocale);
-const localePrefix = locale === "en" ? "" : `/${locale}`;
-const lp = (path: string) => `${localePrefix}${path}`;
 
 interface Props {
   uploadedFile?: string | null;
 }
 
-const { uploadedFile = null } = Astro.props;
+const { uploadedFile = null } = Astro.props as Props;
 
 let parsed: { id: string; filename: string; mime_type: string; size_bytes: number; url: string; delete_token: string } | null = null;
 if (uploadedFile) {
   try { parsed = JSON.parse(uploadedFile); } catch {}
-}
-
-function mimeIcon(mime: string): string {
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio-waveform";
-  if (/archive|zip|gzip|rar|7z|tar/.test(mime)) return "archive";
-  if (/json|xml|javascript|html|css/.test(mime)) return "code";
-  return "file-text";
 }
 
 let maxFileSizeBytes = 524288000;
@@ -50,7 +41,7 @@ const RETENTION_DEFAULT_INDEX = Math.max(0, RETENTION_OPTIONS.findIndex(o => o.h
 
 const maxUploadSize = formatMaxSize(maxFileSizeBytes);
 
-const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
+const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
 ---
 
 <div class="upload-card" id="upload-card" data-upload-card="" style="view-transition-name: main-card;" aria-labelledby="upload-card-header">
@@ -109,7 +100,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
 
     <div class="upload-mode-wrapper" data-mode-wrapper="">
       <div class="upload-mode-file" data-mode-file="">
-        <label class="drop-zone" data-drop-zone="" for="dropzone-input" data-dropzone-offline="">
+        <label class="drop-zone" data-drop-zone="" for="dropzone-input">
           <div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
           <div class="drop-icon-wrapper">
             <span set:html={iconSvgHtml("upload", 64)} class="drop-icon" />
@@ -120,7 +111,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
             <p class="drop-text-secondary">{t(locale, "upload.drop_secondary")}</p>
             <div class="drop-text-meta" data-drop-max-template={t(locale, "upload.drop_max")} set:html={t(locale, "upload.drop_max", { size: `<span data-drop-max-size>${maxUploadSize}</span>` })}></div>
           </div>
-          <div class="drop-zone-offline" data-dropzone-offline-overlay="">
+          <div class="drop-zone-offline">
             <span set:html={iconSvgHtml("x", 48)} class="drop-offline-icon" />
             <p class="drop-offline-primary">{t(locale, "upload.drop_offline")}</p>
             <p class="drop-offline-secondary">{t(locale, "upload.drop_offline_desc")}</p>
@@ -136,7 +127,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
       <div class="upload-mode-text" data-mode-text="">
         <div class="text-editor" data-text-editor="">
           <div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
-          <textarea class="text-editor-textarea" data-text-textarea="" name="paste_text" placeholder={t(locale, "upload.text_placeholder")}></textarea>
+          <textarea class="text-editor-textarea" data-text-textarea="" name="paste_text" placeholder={t(locale, "upload.text_placeholder")} aria-label={t(locale, "upload.text_placeholder")}></textarea>
           <div class="text-editor-actions">
             <button type="button" class="text-editor-cancel js-only" data-text-cancel="">{t(locale, "upload.text_cancel")}</button>
             <button type="button" class="text-editor-upload js-only" data-text-upload="">{t(locale, "upload.text_upload")}</button>
@@ -173,7 +164,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
                 </div>
               </div>
             </details>
-            <textarea class="text-editor-textarea" data-cobalt-textarea="" name="cobalt_url" placeholder={t(locale, "upload.cobalt_placeholder")} spellcheck="false"></textarea>
+            <textarea class="text-editor-textarea" data-cobalt-textarea="" name="cobalt_url" placeholder={t(locale, "upload.cobalt_placeholder")} aria-label={t(locale, "upload.cobalt_placeholder")} spellcheck="false"></textarea>
             <div class="cobalt-bottom">
               <div class="cobalt-settings js-only" data-cobalt-settings="">
                 <label class="cobalt-option select-option--toggle" title={t(locale, "upload.cobalt_audio_only")}>
@@ -251,7 +242,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
         <style>[data-component="upload-card"] { display: none !important; }</style>
         <div class="file-item complete" role="listitem" data-file-id={parsed.id} data-delete-token={parsed.delete_token} data-url={parsed.url} data-server-rendered="">
           <div class="file-item-header">
-            <div class="file-card-icon" set:html={iconSvgHtml(mimeIcon(parsed.mime_type), 24)} />
+            <div class="file-card-icon" set:html={iconSvgHtml(iconForMime(parsed.mime_type), 24)} />
             <div class="file-info-left">
               <span class="file-name">{parsed.filename}</span>
               <span class="file-size">{formatSize(parsed.size_bytes)}</span>
@@ -277,13 +268,13 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
     <div class="scroll-element scroll-cover-bottom" aria-hidden="true"></div>
   </section>
 
-  <span id="actions-area" tabindex="-1" aria-hidden="true" style="position:absolute"></span>
+  <span id="actions-area" tabindex="-1" style="position:absolute"></span>
     <nav id="upload-card-actions" class="act" aria-label={t(locale, "actions.upload_actions")} data-act="">
-    <a class="action-btn" href={lp("/files")} aria-label={t(locale, "nav.files")} title={t(locale, "nav.files")} data-action-id="files">
+    <a class="action-btn" href={lp(locale, "/files")} aria-label={t(locale, "nav.files")} title={t(locale, "nav.files")} data-action-id="files">
       <span class="action-btn__icon" set:html={iconSvgHtml("files", 24)} />
       <span>{t(locale, "nav.files")}</span>
     </a>
-    <a class="action-btn" href={lp("/report")} aria-label={t(locale, "nav.report")} title={t(locale, "nav.report")} data-action-id="report">
+    <a class="action-btn" href={lp(locale, "/report")} aria-label={t(locale, "nav.report")} title={t(locale, "nav.report")} data-action-id="report">
       <span class="action-btn__icon" set:html={iconSvgHtml("report", 24)} />
       <span>{t(locale, "nav.report")}</span>
     </a>
@@ -315,7 +306,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, lp);
   <footer class="footr footr--divd" data-footr="">
     <div class="footr__primary">
       <p class="footr__message"></p>
-      <a class="footr__commit footr__link" href="https://github.com/create-juicey-app/juicebox2" target="_blank" rel="noopener noreferrer">main</a>
+      <a class="footr__commit footr__link" href={getRepoUrl()} target="_blank" rel="noopener noreferrer">{getFormattedCommitLabel(false)}</a>
     </div>
   </footer>
 </div>

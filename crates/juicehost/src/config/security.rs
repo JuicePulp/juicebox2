@@ -20,7 +20,7 @@ impl SecuritySettings {
         &self.api_key
     }
 
-    pub fn allow_no_auth(&self) -> bool {
+    pub const fn allow_no_auth(&self) -> bool {
         self.allow_no_auth
     }
 
@@ -37,14 +37,18 @@ impl SecuritySettings {
     }
 
     pub fn load(file: &SecurityFile, directories: &DirectorySettings) -> Result<Self, ConfigError> {
-        let api_key = juicebox_config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
+        let api_key = juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
         // Explicit opt-out for running without an API key. Env wins when set,
         // otherwise fall back to the TOML value (default false).
         let allow_no_auth = std::env::var("JUICEHOST_ALLOW_NO_AUTH")
             .ok()
             .filter(|s| !s.trim().is_empty())
-            .map(|v| matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(file.allow_no_auth);
+            .map_or(file.allow_no_auth, |v| {
+                matches!(
+                    v.trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            });
 
         let allowed_origins = std::env::var("ALLOWED_ORIGINS")
             .ok()

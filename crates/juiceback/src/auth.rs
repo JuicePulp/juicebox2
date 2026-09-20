@@ -1,29 +1,27 @@
-//! This is where my Argon2 password hashing died parappa.
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 use axum::{
-    async_trait,
     extract::{FromRef, FromRequestParts},
     http::request::Parts,
 };
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use rand::RngCore;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Issuer strings to prevent cross-JWT confusion attacks.
 pub const ISS_ADMIN: &str = "juiceback-admin";
 pub const ISS_DEVICE: &str = "juiceback-device";
-pub const ISS_TICKET: &str = "juiceback-ticket";
 
 /// JWT claims payload for an admin session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminClaims {
-    /// Admin username
     pub sub: String,
     pub iss: String,
     /// Token expiry as a UNIX timestamp
@@ -34,17 +32,15 @@ pub struct AdminClaims {
 
 /// Hash plaintext password using Argon2id with a random salt
 pub fn hash_password(password: &str) -> Result<String, String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| format!("hashing failed: {}", e))?;
-    Ok(hash.to_string())
+    Argon2::default()
+        .hash_password(password.as_bytes())
+        .map(|hash| hash.to_string())
+        .map_err(|e| format!("hashing failed: {e}"))
 }
 
 /// Verify a plaintext password against an Argon2id hash
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
-    let parsed = PasswordHash::new(hash).map_err(|e| format!("invalid hash format: {}", e))?;
+    let parsed = PasswordHash::new(hash).map_err(|e| format!("invalid hash format: {e}"))?;
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
         .is_ok())
@@ -54,14 +50,14 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
 pub fn create_jwt(username: &str, secret: &str) -> Result<String, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| format!("time error: {}", e))?
+        .map_err(|e| format!("time error: {e}"))?
         .as_secs() as usize;
 
     let claims = AdminClaims {
         sub: username.to_string(),
         iss: ISS_ADMIN.to_string(),
         iat: now,
-        exp: now + 86400,
+        exp: now + crate::constants::SECONDS_PER_DAY as usize,
     };
 
     encode(
@@ -69,7 +65,7 @@ pub fn create_jwt(username: &str, secret: &str) -> Result<String, String> {
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| format!("jwt encoding failed: {}", e))
+    .map_err(|e| format!("jwt encoding failed: {e}"))
 }
 
 /// Verify a JWT and return its claims
@@ -81,11 +77,11 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<AdminClaims, String> {
         &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
-    .map_err(|e| format!("jwt verification failed: {}", e))?;
+    .map_err(|e| format!("jwt verification failed: {e}"))?;
     Ok(token_data.claims)
 }
 
-/// Verify a device JWT and return its claims (sub = device_id, user_id).
+/// Verify a device JWT and return its claims (sub = `device_id`, `user_id`).
 pub fn verify_device_jwt(token: &str, secret: &str) -> Result<DeviceClaims, String> {
     let mut validation = Validation::default();
     validation.set_issuer(&[ISS_DEVICE]);
@@ -94,11 +90,12 @@ pub fn verify_device_jwt(token: &str, secret: &str) -> Result<DeviceClaims, Stri
         &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
-    .map_err(|e| format!("device JWT verification failed: {}", e))?;
+    .map_err(|e| format!("device JWT verification failed: {e}"))?;
     Ok(token_data.claims)
 }
 
-/// Device JWT claims (issued during pairing, used for WS auth + upload tickets).
+/// Device JWT claims (issued during pairing, used for WS auth + upload
+/// tickets).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceClaims {
     /// Device UUID
@@ -122,7 +119,6 @@ pub struct DeviceClaims {
 #[derive(Debug, Clone)]
 pub struct DeviceAuth(pub DeviceClaims);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for DeviceAuth
 where
     Arc<crate::state::AppState>: FromRef<S>,
@@ -157,7 +153,7 @@ pub const SESSION_COOKIE_NAME: &str = "jb_session";
 pub const LEGACY_USER_COOKIE_NAME: &str = "jb_uid";
 
 /// Cookie max-age: 90 days.
-pub const SESSION_MAX_AGE: i64 = 90 * 24 * 60 * 60;
+pub const SESSION_MAX_AGE_SECS: i64 = 90 * 24 * 60 * 60;
 
 /// JWT claims for a user identity cookie.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,15 +165,15 @@ pub struct UserClaims {
 }
 
 /// Create a signed Set-Cookie header value for a user identity.
-///
-/// The cookie is HTTP-only, SameSite=Strict, and scoped to all paths.
+#[must_use]
 pub fn create_session_cookie(token: &str, secure: bool) -> String {
     let secure_attribute = if secure { "; Secure" } else { "" };
     format!(
-        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE}{secure_attribute}"
-    )
+        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE_SECS}{secure_attribute}"
+    ) // is there a cookie crate?
 }
 
+#[must_use]
 pub fn clear_legacy_user_cookie(secure: bool) -> String {
     let secure_attribute = if secure { "; Secure" } else { "" };
     format!(
@@ -195,28 +191,34 @@ pub fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<Strin
         .map(str::to_owned)
 }
 
+#[must_use]
 pub fn new_session_token() -> String {
     let mut token = [0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut token);
+    rand::rng().fill_bytes(&mut token);
     hex::encode(token)
 }
 
+#[must_use]
 pub fn session_token_hash(token: &str) -> String {
     blake3::hash(token.as_bytes()).to_hex().to_string()
 }
 
-/// One-release migration support for the old signed identity cookie.
+#[must_use]
 pub fn verify_legacy_user_cookie(headers: &axum::http::HeaderMap, secret: &str) -> Option<String> {
     let jwt = cookie_value(headers, LEGACY_USER_COOKIE_NAME)?;
 
-    let token_data = decode::<UserClaims>(
+    let token_data = decode::<serde_json::Value>(
         &jwt,
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
     )
     .ok()?;
+    if token_data.claims.get("iss").is_some() {
+        return None;
+    }
+    let claims: UserClaims = serde_json::from_value(token_data.claims).ok()?;
 
-    Some(token_data.claims.sub)
+    Some(claims.sub)
 }
 
 #[cfg(test)]
@@ -262,6 +264,44 @@ mod tests {
         assert_eq!(claims.sub, "admin");
         assert_eq!(claims.iss, ISS_ADMIN);
         assert!(claims.exp > claims.iat);
+    }
+
+    fn legacy_cookie_headers(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            "cookie",
+            format!("{LEGACY_USER_COOKIE_NAME}={token}")
+                .parse()
+                .unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn legacy_cookie_without_issuer_verifies() {
+        let claims = UserClaims {
+            sub: "user-1".into(),
+            iat: 1,
+            exp: 9_999_999_999,
+        };
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"secret123"),
+        )
+        .unwrap();
+        let headers = legacy_cookie_headers(&token);
+        assert_eq!(
+            verify_legacy_user_cookie(&headers, "secret123"),
+            Some("user-1".into())
+        );
+    }
+
+    #[test]
+    fn admin_jwt_rejected_as_legacy_cookie() {
+        let token = create_jwt("admin", "secret123").unwrap();
+        let headers = legacy_cookie_headers(&token);
+        assert_eq!(verify_legacy_user_cookie(&headers, "secret123"), None);
     }
 
     #[test]

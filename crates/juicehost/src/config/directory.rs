@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::DirsFile;
+use crate::config::DirectoryFile;
 
 /// Local directory and peer URL settings.
 #[derive(Debug)]
@@ -23,7 +23,7 @@ impl DirectorySettings {
         self.frontend_url.as_ref()
     }
 
-    pub fn load(file: &DirsFile) -> Self {
+    pub fn load(file: &DirectoryFile) -> Self {
         let files_dir = std::env::var("FILES_DIR")
             .ok()
             .filter(|s| !s.trim().is_empty())

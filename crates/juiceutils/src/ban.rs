@@ -1,28 +1,26 @@
 //! Shared IP-ban helpers for juiceback and juicehost.
 
-use std::collections::HashSet;
-use std::net::IpAddr;
-use std::path::Path;
-use std::sync::RwLock;
+use std::{collections::HashSet, net::IpAddr, path::Path, sync::RwLock};
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
 /// Compute HMAC-SHA256(pepper, canonical IP address) for ban lookups.
+#[must_use]
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
     let ip = ip
         .parse::<IpAddr>()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| ip.to_string());
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(pepper.as_bytes())
+        .map_or_else(|_| ip.to_string(), |ip| ip.to_string());
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(pepper.as_bytes())
         .expect("HMAC accepts any key length");
     mac.update(ip.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
 
 /// Truncate a hex string to 12 characters for display in logs/notifications.
+#[must_use]
 pub fn truncate_hash(hex_str: &str) -> &str {
     if hex_str.len() <= 12 {
         hex_str
@@ -49,7 +47,8 @@ impl Default for BanList {
 }
 
 impl BanList {
-    /// Create an empty ban list with an optional pepper for hashing incoming IPs.
+    /// Create an empty ban list with an optional pepper for hashing incoming
+    /// IPs.
     pub fn new(pepper: impl Into<String>) -> Self {
         Self {
             inner: RwLock::new(BanListInner {
@@ -63,7 +62,7 @@ impl BanList {
     pub fn len(&self) -> usize {
         self.inner
             .read()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .hashes
             .len()
     }
@@ -73,19 +72,24 @@ impl BanList {
         self.len() == 0
     }
 
-    /// Whether banning is enabled: requires a pepper so incoming IPs can be hashed.
+    /// Whether banning is enabled: requires a pepper so incoming IPs can be
+    /// hashed.
     pub fn enabled(&self) -> bool {
         !self
             .inner
             .read()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pepper
             .is_empty()
     }
 
-    /// Check an IP against the ban list. Always false while banning is disabled.
+    /// Check an IP against the ban list. Always false while banning is
+    /// disabled.
     pub fn is_banned(&self, ip: &str) -> bool {
-        let inner = self.inner.read().unwrap_or_else(|error| error.into_inner());
+        let inner = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if inner.pepper.is_empty() {
             return false;
         }
@@ -93,20 +97,18 @@ impl BanList {
         inner.hashes.contains(&hashed)
     }
 
-    /// The current pepper, used to hash incoming IPs.
     pub fn pepper(&self) -> String {
         self.inner
             .read()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pepper
             .clone()
     }
 
-    /// Set the pepper used to hash incoming IPs.
     pub fn set_pepper(&self, pepper: &str) {
         self.inner
             .write()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pepper = pepper.to_string();
     }
 
@@ -116,7 +118,7 @@ impl BanList {
         let mut inner = self
             .inner
             .write()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.pepper = pepper.to_string();
         inner.hashes = hashes;
     }
@@ -125,7 +127,7 @@ impl BanList {
     pub fn merge_hashes(&self, hashes: impl IntoIterator<Item = String>) {
         self.inner
             .write()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .hashes
             .extend(hashes);
     }
@@ -167,17 +169,12 @@ impl BanList {
                     "ban list file {}: cannot hash raw IP {ip} without IP_PEPPER",
                     path.display()
                 );
+            } else if let Ok(ip) = ip.parse::<IpAddr>() {
+                hashes.push(hash_ip_for_ban(&ip.to_string(), &pepper));
+                added += 1;
             } else {
-                match ip.parse::<IpAddr>() {
-                    Ok(ip) => {
-                        hashes.push(hash_ip_for_ban(&ip.to_string(), &pepper));
-                        added += 1;
-                    }
-                    Err(_) => {
-                        skipped += 1;
-                        tracing::warn!("ban list file {}: invalid IP {ip}", path.display());
-                    }
-                }
+                skipped += 1;
+                tracing::warn!("ban list file {}: invalid IP {ip}", path.display());
             }
         }
 
@@ -261,7 +258,7 @@ mod tests {
         let ip = "10.0.0.1";
         let hash = hash_ip_for_ban(ip, "pepper");
         assert!(!list.is_banned(ip));
-        list.merge_hashes([hash.clone()]);
+        list.merge_hashes([hash]);
         assert!(list.is_banned(ip));
         assert!(!list.is_banned("10.0.0.2"));
         assert_eq!(list.len(), 1);

@@ -1,0 +1,82 @@
+# Example config — copy to juicehost.toml and adjust to your setup.
+# Juicehost full default config.
+# Every value below is the code default. Secrets stay env-only (see .env) — never put them here.
+# Each key can be overridden by its env var (shown in comments); explicit env always wins.
+# Lookup order: $JUICEHOST_CONFIG, ./.juicehost.toml, ./juicehost.toml, /etc/juicebox/juicehost.toml.
+
+[public]
+host = "127.0.0.1" # env: PUBLIC_HOST
+port = 6402 # env: PUBLIC_PORT
+
+[quic]
+# QUIC bind host/port. Unset = public host/port. Env: QUIC_HOST / QUIC_PORT
+# host = "127.0.0.1"
+# port = 6403
+cert_path = "./quic-cert.der" # env: QUIC_CERT_PATH
+max_connections = 256 # env: QUIC_MAX_CONNECTIONS
+max_requests = 256 # env: QUIC_MAX_REQUESTS
+handshake_seconds = 10 # env: QUIC_HANDSHAKE_SECONDS
+idle_seconds = 30 # env: QUIC_IDLE_SECONDS
+request_total_seconds = 600 # env: QUIC_REQUEST_TOTAL_SECONDS
+
+[threads]
+worker_threads = 3 # env: WORKER_THREADS
+
+[dirs]
+files_dir = "./files" # env: FILES_DIR
+# Advertised URLs. Unset = none. Env: BACKEND_URL / FRONTEND_URL
+# backend_url = "http://127.0.0.1:6401"
+# frontend_url = "http://localhost:6400"
+
+[security]
+danger_level = "high" # env: DANGER_LEVEL (none/low/medium/high)
+# Extra CORS origins. Unset = [] (or [backend_url] when set). Env: ALLOWED_ORIGINS (comma-separated)
+# allowed_origins = ["http://localhost:6400"]
+# Trusted proxy CIDRs for client-IP extraction. Unset = none. Env: TRUSTED_PROXY_CIDRS
+# trusted_proxy_cidrs = "127.0.0.1/32"
+# DANGER: allows unauthenticated internal endpoints. Dev/loopback only. Env: JUICEHOST_ALLOW_NO_AUTH
+# Accepted values: 1/true/yes/on (anything else counts as false).
+allow_no_auth = false
+# Internal API key. Env-only, no TOML key: JUICEHOST_API_KEY
+
+[s3]
+# S3-compatible backend. All unset = local disk storage.
+# Env: S3_BUCKET / S3_REGION / S3_ENDPOINT
+# bucket = "juicebox-files"
+# region = "us-east-1"
+# endpoint = "https://s3.example.com"
+allow_http = false # env: S3_ALLOW_HTTP (1/true)
+# S3 credentials. Env-only, no TOML keys: S3_ACCESS_KEY / S3_SECRET_KEY
+
+[limits]
+min_free_space_gb = 5 # env: MIN_FREE_SPACE_GB (TOML unit is GB)
+max_file_size_mb = 500 # env: MAX_FILE_SIZE_MB (TOML unit is MB)
+max_range_response_mb = 16 # env: MAX_RANGE_RESPONSE_MB (TOML unit is MB)
+max_concurrent_uploads = 16 # env: MAX_CONCURRENT_UPLOADS
+max_concurrent_downloads = 64 # env: MAX_CONCURRENT_DOWNLOADS
+max_concat_parts = 128 # env: MAX_CONCAT_PARTS
+tcp_body_inactivity_seconds = 30 # env: TCP_BODY_INACTIVITY_SECONDS
+tcp_request_total_seconds = 600 # env: TCP_REQUEST_TOTAL_SECONDS
+tcp_max_concurrent_requests = 512 # env: TCP_MAX_CONCURRENT_REQUESTS
+
+[features]
+quick_link = true # env: QUICK_LINK
+custom_id = true # env: CUSTOM_ID
+file_cache_enabled = false # env: FILE_CACHE_ENABLED
+file_cache_max_age_secs = 3600 # env: FILE_CACHE_MAX_AGE_SECS
+default_ttl_hours = 24.0 # env: DEFAULT_TTL_HOURS
+allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0] # env: ALLOWED_TTL_HOURS (comma-separated)
+
+[ban]
+# Ban list source. Unset = none. Env: BAN_LIST_FILE / BAN_SYNC_URL
+# list_file = "./bans.txt"
+# sync_url = "https://example.com/bans.txt"
+sync_interval_secs = 30 # env: BAN_SYNC_INTERVAL_SECS (BAN_SYNC_INTERVAL also accepted)
+
+[sentry]
+# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEHOST). Env: SENTRY_ENVIRONMENT
+environment = "production"
+
+# ---- env-only secrets (no TOML key exists, listed for completeness) ----
+# TICKET_JWT_SECRET (falls back to JWT_SECRET, then JUICEHOST_API_KEY; required in effect)
+# IP_PEPPER (defaults to "") / JUICEHOST_API_KEY (defaults to "")

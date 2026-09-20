@@ -1,6 +1,7 @@
 ---
 import Icon from "./Icon.astro";
 import { getMoreMenuItems } from "../lib/more-menu";
+import { lp } from "../lib/locale-prefix";
 import { resolveLocale, t } from "../i18n";
 
 interface ActionItem {
@@ -21,8 +22,6 @@ interface Props {
 const { id, heading = "Upload actions", actions } = Astro.props as Props;
 
 const locale = resolveLocale(Astro.currentLocale);
-const localePrefix = locale === "en" ? "" : `/${locale}`;
-const lp = (path: string) => `${localePrefix}${path}`;
 
 const defaultActions: ActionItem[] = [
     { id: "files", label: "Files", icon: "files" },
@@ -33,15 +32,15 @@ const defaultActions: ActionItem[] = [
 const list = actions && actions.length > 0 ? actions : defaultActions;
 
 const ROUTES: Record<string, string> = {
-    back: lp("/"),
-    files: lp("/files"),
-    report: lp("/report"),
+    back: lp(locale, "/"),
+    files: lp(locale, "/files"),
+    report: lp(locale, "/report"),
 };
 
-const MORE_ITEMS = getMoreMenuItems(locale, lp);
+const MORE_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
 ---
 
-<span id="actions-area" tabindex="-1" aria-hidden="true" style="position:absolute"></span>
+<span id="actions-area" tabindex="-1" style="position:absolute"></span>
 <nav id={id} class="act" aria-label={heading} data-act>
     {
         list.map((action) =>

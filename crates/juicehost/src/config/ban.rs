@@ -36,7 +36,8 @@ impl BanSettings {
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim_end_matches('/').to_string())
             .or_else(|| file.sync_url.clone());
-        let sync_interval = std::env::var("BAN_SYNC_INTERVAL")
+        let sync_interval = std::env::var("BAN_SYNC_INTERVAL_SECS")
+            .or_else(|_| std::env::var("BAN_SYNC_INTERVAL"))
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(file.sync_interval_secs);

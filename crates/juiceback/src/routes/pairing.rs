@@ -1,26 +1,23 @@
-//! juicebox-plus pairing, where the website generates codes that devices exchange for JWTs.
+//! juicebox-plus pairing, where the website generates codes that devices
+//! exchange for JWTs.
+
+use std::sync::Arc;
 
 use axum::{
     Json,
     extract::{Path, State},
+    http::StatusCode,
 };
-
-use crate::routes::UserId;
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
-use rand::Rng;
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use utoipa::ToSchema;
 
-use crate::error::AppError;
-use crate::state::AppState;
-use crate::utils::ClientIp;
+use crate::{error::AppError, routes::UserId, state::AppState, utils::ClientIp};
 
 #[derive(Deserialize, ToSchema)]
 pub struct GenerateCodeRequest {
-    /// Optional name for the device being paired
     pub device_name: Option<String>,
 }
 
@@ -28,7 +25,6 @@ pub struct GenerateCodeRequest {
 pub struct GenerateCodeResponse {
     /// One-time pairing code in XXXX-XXXX format (expires in 300 seconds)
     pub code: String,
-    /// Seconds until the code expires
     pub expires_in: u64,
 }
 
@@ -36,7 +32,6 @@ pub struct GenerateCodeResponse {
 pub struct VerifyCodeRequest {
     /// The 9-character pairing code obtained from the website
     pub code: String,
-    /// A human-readable name for this device
     pub device_name: String,
 }
 
@@ -49,18 +44,15 @@ pub struct VerifyCodeResponse {
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct DeviceInfo {
+pub struct PairingDevice {
     /// UUID of the paired device
     pub device_id: String,
-    /// Human-readable device name
     pub device_name: String,
     /// Unix timestamp when the device was paired
     pub paired_at: i64,
     /// Unix timestamp of the last heartbeat from the device
     pub last_seen_at: i64,
 }
-
-// Handlers
 
 #[utoipa::path(
     post,
@@ -72,7 +64,7 @@ pub struct DeviceInfo {
     tag = "Pairing",
 )]
 /// POST /api/pair/generate returns a blake3-hashed code once and then it's gone
-pub async fn generate_code(
+pub async fn generate_code_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
     axum::extract::Extension(client_ip): axum::extract::Extension<ClientIp>,
@@ -137,7 +129,7 @@ pub async fn generate_code(
     tag = "Pairing",
 )]
 /// POST /api/pair/verify exchanges a pairing code for a device JWT
-pub async fn verify_code(
+pub async fn verify_code_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyCodeRequest>,
 ) -> Result<Json<VerifyCodeResponse>, AppError> {
@@ -179,22 +171,22 @@ pub async fn verify_code(
     get,
     path = "/api/device",
     responses(
-        (status = 200, description = "List of paired devices", body = Vec<DeviceInfo>),
+        (status = 200, description = "List of paired devices", body = Vec<PairingDevice>),
     ),
     tag = "Pairing",
 )]
 /// `GET /api/device` - list paired devices for the authenticated user.
-pub async fn list_devices(
+pub async fn list_devices_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
-) -> Result<Json<Vec<DeviceInfo>>, AppError> {
+) -> Result<Json<Vec<PairingDevice>>, AppError> {
     let devices = state
-        .db_call("list_devices", move |db| {
+        .db_call("list_devices_handler", move |db| {
             let mut stmt = db.prepare(
                 "SELECT id, device_name, paired_at, last_seen_at FROM devices WHERE user_id = ?1",
             )?;
             let rows = stmt.query_map(rusqlite::params![user_id], |row| {
-                Ok(DeviceInfo {
+                Ok(PairingDevice {
                     device_id: row.get(0)?,
                     device_name: row.get(1)?,
                     paired_at: row.get(2)?,
@@ -221,15 +213,15 @@ pub async fn list_devices(
     tag = "Pairing",
 )]
 /// DELETE /api/device/:id removes it from the db and broadcasts a disconnect
-pub async fn unpair_device(
+pub async fn unpair_device_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
     Path(device_id): Path<String>,
-) -> Result<(), AppError> {
+) -> Result<StatusCode, AppError> {
     let did_del = device_id.clone();
     let uid_del = user_id.clone();
     let deleted = state
-        .db_call("unpair_device", move |db| {
+        .db_call("unpair_device_handler", move |db| {
             let mut stmt = db.prepare("DELETE FROM devices WHERE id = ?1 AND user_id = ?2")?;
             let rows = stmt.execute(rusqlite::params![did_del, uid_del])?;
             Ok(rows > 0)
@@ -264,7 +256,7 @@ pub async fn unpair_device(
             });
         }
 
-        Ok(())
+        Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::NotFound)
     }
@@ -321,20 +313,20 @@ fn claim_pairing_code(
 
 /// Generate a 9-character pairing code without visually ambiguous characters.
 fn generate_pairing_code() -> String {
-    let mut rng = rand::thread_rng();
     let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".chars().collect();
     (0..9)
         .map(|i| {
             if i == 4 {
                 '-'
             } else {
-                chars[rng.gen_range(0..chars.len())]
+                chars[rand::random_range(0..chars.len())]
             }
         })
         .collect()
 }
 
 /// Validate that a code matches the `XXXX-XXXX` alphanumeric format (9 chars).
+#[must_use]
 pub fn is_valid_pairing_code(code: &str) -> bool {
     let bytes = code.as_bytes();
     bytes.len() == 9
@@ -353,13 +345,13 @@ pub fn is_valid_pairing_code(code: &str) -> bool {
 fn create_device_jwt(device_id: &str, user_id: &str, secret: &str) -> Result<String, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .map_err(|e| format!("time error: {e}"))?
         .as_secs() as usize;
 
     let claims = DeviceClaims {
         sub: device_id.to_string(),
         user_id: user_id.to_string(),
-        iss: crate::auth::ISS_DEVICE.to_string(),
+        iss: "juiceback-device".to_string(),
         iat: now,
         exp: now + 30 * 24 * 3600,
     };
@@ -388,7 +380,6 @@ mod tests {
     #[test]
     fn code_format_valid() {
         let code = generate_pairing_code();
-        // 4 chars + dash + 4 chars = 9 total (XXXX-XXXX)
         assert_eq!(code.len(), 9);
         assert_eq!(code.as_bytes()[4], b'-');
         assert!(is_valid_pairing_code(&code));

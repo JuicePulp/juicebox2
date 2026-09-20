@@ -1,5 +1,6 @@
-use dashmap::DashMap;
 use std::time::{Duration, Instant};
+
+use dashmap::DashMap;
 
 struct Bucket {
     window_start: Instant,
@@ -14,6 +15,7 @@ pub struct MintLimiter {
 }
 
 impl MintLimiter {
+    #[must_use]
     pub fn new(limit: u32, window_secs: u64, burst: u32) -> Self {
         Self {
             buckets: DashMap::new(),
@@ -23,6 +25,7 @@ impl MintLimiter {
         }
     }
 
+    #[must_use]
     pub fn allow(&self, ip: &str) -> bool {
         let now = Instant::now();
         let mut entry = self
@@ -57,6 +60,7 @@ impl MintLimiter {
             .retain(|_, b| now.duration_since(b.window_start) < self.window);
     }
 
+    #[must_use]
     pub fn len_probe(&self) -> usize {
         self.buckets.len()
     }
@@ -96,8 +100,8 @@ mod tests {
     #[test]
     fn prune_removes_stale_buckets() {
         let limiter = MintLimiter::new(3, 600, 1);
-        limiter.allow("a");
-        limiter.allow("b");
+        let _ = limiter.allow("a");
+        let _ = limiter.allow("b");
         assert_eq!(limiter.len_probe(), 2);
 
         for mut b in limiter.buckets.iter_mut() {

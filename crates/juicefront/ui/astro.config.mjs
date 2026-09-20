@@ -2,6 +2,12 @@
 import { defineConfig } from "astro/config";
 import solid from "@astrojs/solid-js";
 import node from "@astrojs/node";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+// Single source of truth for the Sentry release; keep package.json in sync.
+const pkg = require("./package.json");
+const release = `${pkg.name}@${pkg.version}`;
 
 import sentry from "@sentry/astro";
 import spotlightjs from "@spotlightjs/astro";
@@ -16,7 +22,7 @@ if (sentryDsn) {
   integrations.push(
     sentry({
       dsn: sentryDsn,
-      release: "juicebox-epsilon@0.3",
+      release,
       environment: process.env.SENTRY_ENVIRONMENT || "production",
       tracesSampleRate: 0.1,
       enabled: { client: false, server: true },

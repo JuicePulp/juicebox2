@@ -7,6 +7,7 @@ import {
   type UploadOptions,
 } from "./upload-engine";
 import { UPLOAD_URL, TUS_THRESHOLD } from "./upload-config";
+import { deleteTus } from "./tus";
 
 type Listener = (items: UploadItem[]) => void;
 
@@ -121,9 +122,7 @@ function startLocal(item: UploadItem, input: EnqueueInput) {
     update: localUpsert,
     onTusCreate: () => {},
     onTusDelete: (tusId) => {
-      fetch(`${UPLOAD_URL}/api/tus/${tusId}`, { method: "DELETE" }).catch(
-        () => {},
-      );
+      deleteTus(UPLOAD_URL, tusId);
     },
   });
   localHandles.set(item.id, handle);

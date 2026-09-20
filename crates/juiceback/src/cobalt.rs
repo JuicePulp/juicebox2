@@ -1,11 +1,6 @@
-//! Client for a self-hosted cobalt API instance (JuiceBox x Cobalt.Tools).
-//!
-//! cobalt does all media extraction/remuxing; this module just talks to its
-//! JSON API and maps responses into something juiceback can act on.
-//! Docs: https://github.com/imputnet/cobalt/blob/main/docs/api.md
+use std::time::Duration;
 
 use serde::Deserialize;
-use std::time::Duration;
 
 /// User-selectable options for a fetch job.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,9 +13,9 @@ pub struct FetchOptions {
     pub youtube_video_container: String,
     /// Audio format for audio-only fetches: best/mp3/ogg/wav/opus.
     pub audio_format: String,
-    /// Ask cobalt to hunt for the highest available audio quality (YouTube).
+    /// Ask cobalt to hunt for the highest available audio quality (`YouTube`).
     pub youtube_better_audio: bool,
-    /// YouTube video codec: h264/av1/vp9.
+    /// `YouTube` video codec: h264/av1/vp9.
     pub youtube_video_codec: String,
 }
 
@@ -39,7 +34,7 @@ impl Default for FetchOptions {
 
 impl FetchOptions {
     /// Sanitize untrusted option strings into values cobalt accepts.
-    #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn sanitized(
         audio_only: bool,
         video_quality: Option<&str>,
@@ -78,6 +73,7 @@ impl FetchOptions {
 }
 
 /// Build the cobalt `POST /` request body. Pure function so it is testable.
+#[must_use]
 pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
     serde_json::json!({
         "url": url,
@@ -116,7 +112,8 @@ pub enum CobaltResponse {
         url: String,
         filename: Option<String>,
     },
-    /// Multiple media items were found; user should pick one (not yet supported).
+    /// Multiple media items were found; user should pick one (not yet
+    /// supported).
     Picker { items: Vec<CobaltPickerItem> },
     /// cobalt wants us to merge streams locally (needs ffmpeg); not supported.
     LocalProcessing { service: String },
@@ -126,12 +123,13 @@ pub enum CobaltResponse {
 
 impl CobaltResponse {
     /// True when cobalt refused the link at client level (private,
-    /// age-restricted or region-locked) — the class of refusals a
-    /// session-enabled instance may still be able to serve.
+    /// age-restricted or region-locked). A session-enabled instance
+    /// can sometimes still serve these.
+    #[must_use]
     pub fn is_client_refused(&self) -> bool {
         matches!(
             self,
-            CobaltResponse::Error { code }
+            Self::Error { code }
                 if code == "error.api.content.video.unavailable"
         )
     }
@@ -146,28 +144,28 @@ impl CobaltResponse {
             value
                 .get(key)
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
         };
         match status.as_str() {
             "tunnel" => match get_str("url") {
-                Some(tunnel_url) => CobaltResponse::Tunnel {
+                Some(tunnel_url) => Self::Tunnel {
                     tunnel_url,
                     filename: get_str("filename"),
                 },
-                None => CobaltResponse::Error {
+                None => Self::Error {
                     code: "error.api.malformed_response".into(),
                 },
             },
             "redirect" => match get_str("url") {
-                Some(url) => CobaltResponse::Redirect {
+                Some(url) => Self::Redirect {
                     url,
                     filename: get_str("filename"),
                 },
-                None => CobaltResponse::Error {
+                None => Self::Error {
                     code: "error.api.malformed_response".into(),
                 },
             },
-            "picker" => CobaltResponse::Picker {
+            "picker" => Self::Picker {
                 items: value
                     .get("picker")
                     .and_then(|p| p.as_array())
@@ -186,17 +184,17 @@ impl CobaltResponse {
                                         thumb: item
                                             .get("thumb")
                                             .and_then(|t| t.as_str())
-                                            .map(|s| s.to_string()),
+                                            .map(ToString::to_string),
                                     })
                             })
                             .collect()
                     })
                     .unwrap_or_default(),
             },
-            "local-processing" => CobaltResponse::LocalProcessing {
+            "local-processing" => Self::LocalProcessing {
                 service: get_str("service").unwrap_or_else(|| "unknown".into()),
             },
-            "error" => CobaltResponse::Error {
+            "error" => Self::Error {
                 code: value
                     .get("error")
                     .and_then(|e| e.get("code"))
@@ -204,13 +202,13 @@ impl CobaltResponse {
                     .unwrap_or("error.api.unknown")
                     .to_string(),
             },
-            "" => CobaltResponse::Error {
+            "" => Self::Error {
                 code: "error.api.empty_response".into(),
             },
             other => {
                 tracing::warn!("cobalt returned unknown status {:?}", other);
-                CobaltResponse::Error {
-                    code: format!("error.api.unknown_status:{}", other),
+                Self::Error {
+                    code: format!("error.api.unknown_status:{other}"),
                 }
             }
         }
@@ -226,21 +224,20 @@ pub async fn process(
     source_url: &str,
     opts: &FetchOptions,
 ) -> Result<CobaltResponse, String> {
-    let endpoint = format!("{}/", api_url.trim_end_matches('/'));
     let mut request = client
-        .post(&endpoint)
+        .post(format!("{}/", api_url.trim_end_matches('/')))
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
         .timeout(Duration::from_secs(30))
         .json(&build_request_body(source_url, opts));
     if !api_key.is_empty() {
-        request = request.header("Authorization", format!("Api-Key {}", api_key));
+        request = request.header("Authorization", format!("Api-Key {api_key}"));
     }
 
     let resp = request
         .send()
         .await
-        .map_err(|e| format!("fetch service unreachable: {}", e))?;
+        .map_err(|e| format!("fetch service unreachable: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -249,20 +246,18 @@ pub async fn process(
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
             return Ok(CobaltResponse::from_json(v));
         }
-        return Err(format!("fetch service returned status {}", status));
+        return Err(format!("fetch service returned status {status}"));
     }
 
     let value: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("fetch service returned invalid json: {}", e))?;
+        .map_err(|e| format!("fetch service returned invalid json: {e}"))?;
     Ok(CobaltResponse::from_json(value))
 }
 
-/// Build a dedicated download client for cobalt tunnel/redirect URLs.
-/// Unlike juiceback's shared client this follows redirects (source-service
-/// redirect URLs commonly bounce), but never more than a sane limit.
 /// Extract the youtube video id from common link shapes (watch?v=, youtu.be/).
+#[must_use]
 pub fn parse_youtube_video_id(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
     if let Some((_, q)) = rest.split_once("v=") {
@@ -281,7 +276,8 @@ pub fn parse_youtube_video_id(url: &str) -> Option<String> {
     None
 }
 
-/// Best-effort YouTube link detection for session-instance fallback.
+/// Best-effort `YouTube` link detection for session-instance fallback.
+#[must_use]
 pub fn is_youtube_link(url: &str) -> bool {
     let rest = match url.split_once("://") {
         Some((_, r)) => r,
@@ -296,14 +292,8 @@ pub fn is_youtube_link(url: &str) -> bool {
     host == "youtube.com" || host == "youtu.be" || host.ends_with(".youtube.com")
 }
 
-pub fn tunnel_client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-}
-
-/// Map a cobalt error code to a user-friendly message.
+/// Map a cobalt error code to a short error string.
+#[must_use]
 pub fn friendly_error(code: &str) -> String {
     match code {
         "error.api.auth.jwt.missing"
@@ -350,7 +340,7 @@ pub fn friendly_error(code: &str) -> String {
             let clean = other.split(':').next().unwrap_or(other);
             match clean.strip_prefix("error.api.") {
                 Some(rest) => format!("fetch failed ({})", rest.replace('.', " ")),
-                None => format!("fetch failed ({})", clean),
+                None => format!("fetch failed ({clean})"),
             }
         }
     }
@@ -428,7 +418,7 @@ mod tests {
                 assert_eq!(tunnel_url, "http://localhost:7272/tunnel?id=x");
                 assert_eq!(filename.as_deref(), Some("video.mp4"));
             }
-            other => panic!("unexpected: {:?}", other),
+            other => panic!("unexpected: {other:?}"),
         }
     }
 
@@ -440,7 +430,7 @@ mod tests {
         });
         match CobaltResponse::from_json(v) {
             CobaltResponse::Error { code } => assert_eq!(code, "error.api.link.invalid"),
-            other => panic!("unexpected: {:?}", other),
+            other => panic!("unexpected: {other:?}"),
         }
     }
 
@@ -459,7 +449,7 @@ mod tests {
                 assert_eq!(items[0].r#type, "photo");
                 assert_eq!(items[1].thumb, None);
             }
-            other => panic!("unexpected: {:?}", other),
+            other => panic!("unexpected: {other:?}"),
         }
     }
 
@@ -474,7 +464,7 @@ mod tests {
         });
         match CobaltResponse::from_json(v) {
             CobaltResponse::LocalProcessing { service } => assert_eq!(service, "youtube"),
-            other => panic!("unexpected: {:?}", other),
+            other => panic!("unexpected: {other:?}"),
         }
     }
 
@@ -483,7 +473,6 @@ mod tests {
         assert!(friendly_error("error.api.auth.key.invalid").contains("credentials"));
         assert!(friendly_error("error.api.link.unsupported").contains("isn't supported"));
         assert!(friendly_error("error.api.content.too_long").contains("too long"));
-        // unknown codes degrade gracefully
         let msg = friendly_error("error.api.something.new");
         assert!(msg.starts_with("fetch failed"));
         assert!(!msg.contains("error.api"));

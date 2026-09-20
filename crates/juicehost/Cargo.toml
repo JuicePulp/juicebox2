@@ -2,6 +2,7 @@
 name = "juicehost"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "File storage and delivery service for Juicebox"
 publish = false
@@ -12,39 +13,40 @@ mimalloc = ["dep:mimalloc"]
 quic = ["juiceutils/quic"]
 
 [dependencies]
-axum = { version = "0.7", features = ["multipart", "ws"] }
-tokio = { version = "1", features = ["full"] }
-tower = { version = "0.4", features = ["limit", "util"] }
-tower-http = { version = "0.5", features = ["fs", "trace", "compression-gzip", "compression-br", "compression-zstd", "limit", "cors", "timeout"] }
-tracing.workspace = true
-tracing-subscriber.workspace = true
-mimalloc = { version = "0.1", optional = true }
-thiserror.workspace = true
-reqwest = { version = "0.12", features = ["multipart", "stream", "json"] }
+async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
+dashmap.workspace = true
+fs2.workspace = true
+futures.workspace = true
+hex.workspace = true
+infer.workspace = true
+jsonwebtoken.workspace = true
+juiceutils = { path = "../juiceutils" }
+libc.workspace = true
+mimalloc = { workspace = true, optional = true }
+mime_guess.workspace = true
+object_store.workspace = true
+reqwest.workspace = true
+sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
+sentry-tracing = { workspace = true, features = ["logs"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+# Full runtime: HTTP/QUIC servers, blocking disk I/O bridge, timers.
+tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-anyhow.workspace = true
-sha2 = "0.10"
-mime_guess = "2"
-infer = "0.22"
-dashmap = "6.0"
-fs2 = "0.4"
-futures = "0.3"
-bytes = "1"
-jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
-libc = "0.2"
-object_store = { version = "0.14", default-features = false, features = ["aws"] }
-async-trait = "0.1"
-utoipa = { version = "5", features = ["axum_extras"] }
-sentry = { version = "0.48", features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
-sentry-tracing = { version = "0.48", features = ["logs"] }
-juiceutils = { path = "../juiceutils" }
-juicebox-config = { path = "../juicebox-config" }
+tower = { workspace = true, features = ["limit", "util"] }
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+utoipa.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
-tower = { version = "0.4", features = ["util"] }
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
 
 [lints]
 workspace = true

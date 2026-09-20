@@ -69,7 +69,7 @@ const {
 const currentLocale = resolveLocale(lang || Astro.currentLocale);
 const defaultTitle = "Juicebox - Temporary File Uploads";
 const defaultDescription =
-  "Juicebox is a temporary file upload experience with rich feedback, retention controls, and delightful visuals.";
+  "Juicebox is temporary file hosting with upload progress and expiry settings.";
 const defaultOgImage = "/og-image.png";
 
 const resolvedTitle = title?.trim() || defaultTitle;
@@ -115,17 +115,16 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
     <meta charset="utf-8" />
     <meta name="viewport" content={viewport} />
     <meta name="theme-color" content="#1a1613" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="dark" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http: https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: http: https:; font-src 'self'; connect-src 'self' http: https: ws: wss:; frame-src http: https:" />
     {backendOffline && <meta http-equiv="refresh" content="15" />}
     <title>{resolvedTitle}</title>
     <meta name="description" content={resolvedDescription} />
     <meta name="x-commit-ref" content={resolvedCommitLabel} />
-    <link rel="preconnect" href="/" crossorigin />
-    <link rel="dns-prefetch" href="/" />
     <link rel="icon" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="preload" as="font" href="/general-latin.woff2" type="font/woff2" crossorigin />
+    <link rel="preload" as="image" href="/logo_big.webp?v=2" type="image/webp" />
 
     {LOCALES.map((l) => {
       const href = l.code === "en" ? currentPath : `/${l.code}${currentPath === "/" ? "" : currentPath}`;
@@ -183,6 +182,8 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
 
       const API_URL = import.meta.env.PUBLIC_API_URL || "";
       async function checkHealth() {
+        // Skip background polls when the tab is hidden; the
+        if (document.hidden) return;
         try {
           const res = await fetch(`${API_URL}/api/health`);
           if (!res.ok) throw new Error("not ok");

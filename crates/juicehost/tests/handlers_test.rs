@@ -1,14 +1,17 @@
-// This was getting too big so i gave it a file.
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use bytes::Bytes;
 use std::sync::Arc;
-use tower::ServiceExt;
 
-use juicehost::config::Config;
-use juicehost::server::build_router;
-use juicehost::state::AppState;
-use juicehost::storage::{LocalBackend, StorageBackend};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use bytes::Bytes;
+use juicehost::{
+    config::Config,
+    server::build_router,
+    state::AppState,
+    storage::{LocalBackend, StorageBackend},
+};
+use tower::ServiceExt;
 
 fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
     Config {
@@ -53,11 +56,11 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         default_ttl_hours: 24.0,
         allowed_ttl_hours: vec![1.0, 24.0, 168.0],
         ticket_jwt_secret: ticket_secret.into(),
-        ip_pepper: "".into(),
+        ip_pepper: String::new(),
         ban_list_file: None,
         ban_sync_url: None,
         ban_sync_interval: 30,
-        sentry: juicebox_config::SentrySettings::default(),
+        sentry: juiceutils::config::SentrySettings::default(),
     }
 }
 
@@ -80,7 +83,7 @@ async fn frontend_state(dir: &std::path::Path) -> Arc<AppState> {
     ))
 }
 
-fn api_key_header() -> (&'static str, &'static str) {
+const fn api_key_header() -> (&'static str, &'static str) {
     ("x-juicehost-api-key", "test-api-key")
 }
 
@@ -241,7 +244,7 @@ async fn serve_etag_304() {
     let dir = tempfile::tempdir().unwrap();
     let backend = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend
-        .put("etag1", "test.txt", Bytes::from("data"))
+        .put("etag1", "test.txt", Bytes::from("data"), None)
         .await
         .unwrap();
 
@@ -282,7 +285,7 @@ async fn ranges_clamp_and_return_416() {
     let dir = tempfile::tempdir().unwrap();
     let backend = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend
-        .put("range", "file.txt", Bytes::from_static(b"0123456789"))
+        .put("range", "file.txt", Bytes::from_static(b"0123456789"), None)
         .await
         .unwrap();
 
@@ -555,7 +558,7 @@ async fn api_key_required() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -594,7 +597,7 @@ async fn invalid_api_key() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -854,20 +857,32 @@ async fn unpaired_host_requires_file_capability_for_delete() {
         .unwrap();
     assert_eq!(upload.status(), StatusCode::OK);
 
-    for capability in [None, Some("wrong-secret")] {
-        let mut request = Request::builder()
-            .method("DELETE")
-            .uri("/internal/file/cap-delete");
-        if let Some(capability) = capability {
-            request = request.header("x-juicehost-file-capability", capability);
-        }
-        let response = app
-            .clone()
-            .oneshot(request.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/internal/file/cap-delete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/internal/file/cap-delete")
+                .header("x-juicehost-file-capability", "wrong-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     let response = app
         .oneshot(
@@ -1034,7 +1049,7 @@ async fn ticket_upload_uses_only_signed_filename() {
     ));
     state
         .storage
-        .put("_", "seed.txt", Bytes::from("x"))
+        .put("_", "seed.txt", Bytes::from("x"), None)
         .await
         .unwrap();
     let app = build_router(state);
@@ -1090,7 +1105,7 @@ async fn ticket_upload_uses_signed_filename_extension() {
     ));
     state
         .storage
-        .put("_", "seed.txt", Bytes::from("x"))
+        .put("_", "seed.txt", Bytes::from("x"), None)
         .await
         .unwrap();
     let app = build_router(state);
@@ -1204,7 +1219,6 @@ async fn empty_api_key_fails_closed_without_explicit_opt_out() {
     let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
 
-    // No key, no explicit opt-out: internal endpoints must reject.
     let mut cfg = test_config("", None);
     cfg.api_key = String::new();
     cfg.allow_no_auth = false;
@@ -1221,7 +1235,7 @@ async fn empty_api_key_fails_closed_without_explicit_opt_out() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
     // Explicit JUICEHOST_ALLOW_NO_AUTH opt-out keeps legacy open uploads
     // working (mutations like rename still demand per-file capabilities).

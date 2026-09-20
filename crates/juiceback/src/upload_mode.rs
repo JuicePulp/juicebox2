@@ -1,5 +1,4 @@
-/// Upload transport mode.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UploadMode {
     /// Standard HTTP upload via axum.
     Standard,
@@ -10,8 +9,8 @@ pub enum UploadMode {
 impl From<&str> for UploadMode {
     fn from(s: &str) -> Self {
         match s {
-            "quic" => UploadMode::Quic,
-            _ => UploadMode::Standard,
+            "quic" => Self::Quic,
+            _ => Self::Standard,
         }
     }
 }

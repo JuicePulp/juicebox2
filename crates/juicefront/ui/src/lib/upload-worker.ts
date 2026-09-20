@@ -1,11 +1,11 @@
 import {
   startUpload,
-  generateId,
   type UploadHandle,
   type UploadItem,
   type UploadOptions,
 } from "./upload-engine";
 import { UPLOAD_URL, TUS_THRESHOLD } from "./upload-config";
+import { deleteTus } from "./tus";
 
 interface Entry {
   item: UploadItem;
@@ -99,9 +99,7 @@ function handleEnqueue(
       entry.tusIds.push(tusId);
     },
     onTusDelete: (tusId) => {
-      fetch(`${UPLOAD_URL}/api/tus/${tusId}`, { method: "DELETE" }).catch(
-        () => {},
-      );
+      deleteTus(UPLOAD_URL, tusId);
     },
   });
 }
@@ -111,9 +109,7 @@ function handleCancel(id: string) {
   if (!entry) return;
   entry.handle?.abort();
   for (const tusId of entry.tusIds) {
-    fetch(`${UPLOAD_URL}/api/tus/${tusId}`, { method: "DELETE" }).catch(
-      () => {},
-    );
+    deleteTus(UPLOAD_URL, tusId);
   }
   if (
     entry.item.state === "queued" ||

@@ -7,7 +7,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
     <p><a href="/admin">Back to Admin Panel</a></p>
 
     <div class="admin-toolbar">
-        <input type="text" id="search-input" placeholder="Search filename, ID, type, IP..." />
+        <input type="text" id="search-input" placeholder="Search filename, ID, type, IP..." aria-label="Search filename, ID, type, IP..." />
         <select id="sort-select">
             <option value="uploaded_at">Uploaded</option>
             <option value="expires_at">Expires</option>
@@ -94,7 +94,6 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
                 "<td nowrap>" + formatTime(f.uploaded_at) + "</td>" +
                 "<td nowrap>" + formatTime(f.expires_at) + "</td>" +
                 "<td nowrap>" + statusLabel(f.expires_at) + "</td>" +
-                "<td>" + esc(f.uploader_ip || "???") + "</td>" +
                 "<td>" +
                     (f.uploader_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.uploader_ip_hash) + '">' + esc(f.uploader_ip_hash) + "</a>"
@@ -134,7 +133,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
             '<thead><tr>' +
             '<th>ID</th><th>Filename</th><th>Size</th><th>Type</th>' +
             '<th>Uploaded</th><th>Expires</th><th>TTL</th>' +
-            '<th>Uploader IP</th><th>IP Hash</th><th>Actions</th>' +
+            '<th>IP Hash</th><th>Actions</th>' +
             "</tr></thead><tbody>" +
             renderRows(toShow) +
             "</tbody></table></div>";

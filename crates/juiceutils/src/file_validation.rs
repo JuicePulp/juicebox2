@@ -13,6 +13,7 @@ pub enum ProtectionLevel {
 
 impl ProtectionLevel {
     /// Parse from a string like "none", "low", "medium", "high".
+    #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "none" => Self::None,
@@ -23,13 +24,16 @@ impl ProtectionLevel {
         }
     }
 
-    /// Whether the given danger tier should be blocked at this protection level.
+    /// Whether the given danger tier should be blocked at this protection
+    /// level.
+    #[must_use]
     pub fn blocks(self, tier: DangerTier) -> bool {
         self >= tier.level()
     }
 
     /// Return the string representation for API responses.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Low => "low",
@@ -49,11 +53,12 @@ pub enum DangerTier {
 
 impl DangerTier {
     /// The minimum protection level needed to block this tier.
-    pub fn level(self) -> ProtectionLevel {
+    #[must_use]
+    pub const fn level(self) -> ProtectionLevel {
         match self {
-            DangerTier::Low => ProtectionLevel::Low,
-            DangerTier::Medium => ProtectionLevel::Medium,
-            DangerTier::High => ProtectionLevel::High,
+            Self::Low => ProtectionLevel::Low,
+            Self::Medium => ProtectionLevel::Medium,
+            Self::High => ProtectionLevel::High,
         }
     }
 }
@@ -120,11 +125,11 @@ const HIGH_TIER_EXTENSIONS: &[&str] = &[
 
 /// Magic byte signatures mapped to danger tiers.
 const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
-    // PE executable (Windows) -- Low tier
+    // PE executable (Windows), Low tier
     (&[0x4D, 0x5A], "PE executable", DangerTier::Low),
-    // ELF executable (Linux) -- Low tier
+    // ELF executable (Linux), Low tier
     (&[0x7F, 0x45, 0x4C, 0x46], "ELF executable", DangerTier::Low),
-    // Mach-O executable (macOS) -- Low tier
+    // Mach-O executable (macOS), Low tier
     (
         &[0xFE, 0xED, 0xFA, 0xCE],
         "Mach-O executable",
@@ -145,45 +150,45 @@ const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
         "Mach-O 64-bit executable",
         DangerTier::Low,
     ),
-    // Java class file -- Low tier
+    // Java class file, Low tier
     (
         &[0xCA, 0xFE, 0xBA, 0xBE],
         "Java class file",
         DangerTier::Low,
     ),
-    // Batch file (@echo off) -- Medium tier
+    // Batch file (@echo off), Medium tier
     (
         &[0x40, 0x65, 0x63, 0x68, 0x6F],
         "batch script",
         DangerTier::Medium,
     ),
-    // Shebang line (#!/...) -- Medium tier
+    // Shebang line (#!/...), Medium tier
     (&[0x23, 0x21], "shell script", DangerTier::Medium),
-    // JavaScript (common patterns) -- High tier
+    // JavaScript (common patterns), High tier
     (
         &[0x66, 0x75, 0x6E, 0x63, 0x74, 0x69, 0x6F, 0x6E],
         "JavaScript",
         DangerTier::High,
     ),
-    // HTML DOCTYPE -- High tier
+    // HTML DOCTYPE, High tier
     (
         &[0x3C, 0x21, 0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45],
         "HTML document",
         DangerTier::High,
     ),
-    // HTML <html -- High tier
+    // HTML <html, High tier
     (
         &[0x3C, 0x68, 0x74, 0x6D, 0x6C],
         "HTML document",
         DangerTier::High,
     ),
-    // SVG -- High tier
+    // SVG, High tier
     (
         &[0x3C, 0x3F, 0x78, 0x6D, 0x6C],
         "XML/SVG document",
         DangerTier::High,
     ),
-    // PHP -- High tier
+    // PHP, High tier
     (
         &[0x3C, 0x3F, 0x70, 0x68, 0x70],
         "PHP script",
@@ -191,13 +196,14 @@ const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
     ),
 ];
 
-/// Result of file type validation.
 #[derive(Debug)]
 pub enum FileValidation {
-    /// File is safe to accept.
     Allowed,
     /// File was rejected because of a dangerous extension.
-    BlockedExtension { ext: String, tier: DangerTier },
+    BlockedExtension {
+        ext: String,
+        tier: DangerTier,
+    },
     /// File was rejected because its magic bytes indicate a dangerous type.
     BlockedMagic {
         description: String,
@@ -207,15 +213,8 @@ pub enum FileValidation {
     Empty,
 }
 
-pub fn tier_name(tier: DangerTier) -> &'static str {
-    match tier {
-        DangerTier::Low => "low",
-        DangerTier::Medium => "medium",
-        DangerTier::High => "high",
-    }
-}
-
 /// User-friendly message for why a file type was blocked.
+#[must_use]
 pub fn friendly_block_reason(tier: DangerTier) -> String {
     match tier {
         DangerTier::Low => "Executable files, installers, and disk images are not allowed".into(),
@@ -225,6 +224,7 @@ pub fn friendly_block_reason(tier: DangerTier) -> String {
 }
 
 /// Validate a filename against the configured extension policy.
+#[must_use]
 pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidation {
     if level == ProtectionLevel::None {
         return FileValidation::Allowed;
@@ -233,7 +233,7 @@ pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidati
     if let Some(ext) = Path::new(filename)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
+        .map(str::to_lowercase)
     {
         if level.blocks(DangerTier::Low) && LOW_TIER_EXTENSIONS.contains(&ext.as_str()) {
             return FileValidation::BlockedExtension {
@@ -259,6 +259,7 @@ pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidati
 }
 
 /// Validate a filename and the available leading file bytes.
+#[must_use]
 pub fn validate_file(filename: &str, data: &[u8], level: ProtectionLevel) -> FileValidation {
     let filename_result = validate_filename(filename, level);
     if !matches!(filename_result, FileValidation::Allowed) {
@@ -273,7 +274,6 @@ pub fn validate_file(filename: &str, data: &[u8], level: ProtectionLevel) -> Fil
         return FileValidation::Empty;
     }
 
-    // Check leading signatures against danger tiers.
     for (magic, desc, tier) in DANGEROUS_MAGIC {
         if level.blocks(*tier) && data.len() >= magic.len() && &data[..magic.len()] == *magic {
             return FileValidation::BlockedMagic {

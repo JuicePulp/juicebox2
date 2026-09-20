@@ -5,10 +5,13 @@ import {
   iconForMime,
   announce,
   pctRemaining,
+  isDefaultHost,
 } from "../lib/format";
 import { iconSvgHtml } from "../lib/icons";
+import { publicFileRenew } from "../lib/api";
 import { vanityMsg } from "../lib/errors";
 import type { UploadState } from "../lib/upload-engine";
+import { extractServerId } from "../lib/upload-engine";
 
 const ACTIVE_STATES: ReadonlySet<UploadState> = new Set([
   "queued",
@@ -100,33 +103,13 @@ export default function FileCard(props: FileCardProps) {
     return !isDefaultHost(props.storageHost, props.defaultHost);
   };
 
-  function isDefaultHost(host: string, defaultHost?: string): boolean {
-    const stripped = host.replace(/^https?:\/\//, "").replace(/\/$/, "");
-    if (
-      stripped === "localhost:6402" ||
-      stripped === "127.0.0.1:6402" ||
-      stripped === "localhost:6400" ||
-      stripped === "127.0.0.1:6400"
-    ) {
-      return true;
-    }
-    if (defaultHost) {
-      const defStripped = defaultHost
-        .replace(/^https?:\/\//, "")
-        .replace(/\/$/, "");
-      return stripped === defStripped;
-    }
-    return false;
-  }
-
   const ttlPct = () =>
     props.expiresAt && props.uploadedAt
       ? pctRemaining(props.expiresAt, props.uploadedAt)
       : 0;
 
   const currentId = () => {
-    const m = props.url?.match(/\/f\/([A-Za-z0-9_-]+)/);
-    return m ? m[1] : "";
+    return extractServerId(props.url ?? "");
   };
 
   const copy = async (e: Event, url: string) => {
@@ -168,7 +151,7 @@ export default function FileCard(props: FileCardProps) {
     setRenaming(true);
     setRenameError("");
     try {
-      const res = await fetch(`/file/${props.serverId}/renew`, {
+      const res = await fetch(publicFileRenew(props.serverId ?? ""), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

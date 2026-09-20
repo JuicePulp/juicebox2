@@ -1,9 +1,8 @@
-//! OpenAPI specification for the juicehost API.
+//! `OpenAPI` specification for the juicehost API.
 
 use utoipa::OpenApi;
 
-use crate::error::ErrorResponse;
-use crate::storage::StorageMetrics;
+use crate::{error::ErrorResponse, storage::StorageMetrics};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -17,17 +16,17 @@ use crate::storage::StorageMetrics;
         (url = "/", description = "Relative to the server root"),
     ),
     paths(
-        crate::handlers::index_handler,
-        crate::handlers::health,
-        crate::handlers::storage_handler,
-        crate::handlers::config_handler,
-        crate::handlers::store_file,
-        crate::handlers::store_file_streaming,
-        crate::handlers::store_file_ticket,
-        crate::handlers::delete_file,
-        crate::handlers::rename_file,
-        crate::handlers::concat_files,
-        crate::handlers::stat_file,
+        crate::handlers::general::index_handler,
+        crate::handlers::general::health,
+        crate::handlers::general::storage_handler,
+        crate::handlers::general::config_handler,
+        crate::handlers::store::store_file,
+        crate::handlers::store::store_file_streaming,
+        crate::handlers::store::store_file_ticket,
+        crate::handlers::delete::delete_file,
+        crate::handlers::rename::rename_file,
+        crate::handlers::concat::concat_files,
+        crate::handlers::general::stat_file,
     ),
     components(schemas(
         StorageMetrics,

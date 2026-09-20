@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import UploadCard from "../components/UploadCard.astro";
+import HostSelector from "../components/HostSelector.astro";
 import AnnouncementBanner from "../components/AnnouncementBanner.astro";
 import { getRepoUrl } from "../lib/metadata";
 import { checkBackendHealth } from "../lib/health";
@@ -54,4 +55,5 @@ if (uploadedParam) {
             <UploadCard uploadedFile={uploadedFileJson} />
         </div>
     </main>
+    <HostSelector />
 </BaseLayout>

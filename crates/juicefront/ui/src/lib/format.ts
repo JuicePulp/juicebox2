@@ -58,21 +58,8 @@ export function iconForMime(mime: string): string {
   return "file-text";
 }
 
-/** Render an inline SVG icon. */
 export function iconHTML(name: string, size = 18): string {
   return iconSvgHtml(name, size);
-}
-
-/** Human-readable label for time remaining until expiry. */
-export function remainingLabel(expiresAtSec: number): string {
-  const left = expiresAtSec * 1000 - Date.now();
-  if (left <= 0) return "Expired";
-  const mins = Math.floor(left / 60000);
-  const hours = Math.floor(left / 3600000);
-  const days = Math.floor(left / 86400000);
-  if (mins < 60) return `${mins}m left`;
-  if (hours < 24) return `${hours}h left`;
-  return `${days}d left`;
 }
 
 /** Percentage of TTL remaining (0-100). */
@@ -83,15 +70,43 @@ export function pctRemaining(expiresAt: number, uploadedAt: number): number {
   return Math.max(0, Math.min(100, (left / total) * 100));
 }
 
+const DEFAULT_HOSTS = new Set([
+  "localhost:6402",
+  "127.0.0.1:6402",
+  "localhost:6400",
+  "127.0.0.1:6400",
+]);
+
+function stripHost(host: string): string {
+  return host.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+/** Whether a storage host is one of this instance's default hosts. */
+export function isDefaultHost(host: string, defaultHost?: string): boolean {
+  if (!host) return true;
+  const stripped = stripHost(host);
+  if (DEFAULT_HOSTS.has(stripped)) return true;
+  if (defaultHost) return stripped === stripHost(defaultHost);
+  return false;
+}
+
+/** Localized strings for the copy-to-clipboard button. */
+export interface CopyBarStrings {
+  title: string;
+  aria: string;
+  copied: string;
+  announceMsg: string;
+}
+
 /** Create a copy-to-clipboard button for a URL. */
-export function makeCopyBar(url: string): HTMLButtonElement {
+export function makeCopyBar(url: string, strings?: CopyBarStrings): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "copy-bar";
-  btn.title = "Click to copy link";
-  btn.setAttribute("aria-label", "Copy link to clipboard");
+  btn.title = strings?.title ?? "Click to copy link";
+  btn.setAttribute("aria-label", strings?.aria ?? "Copy link to clipboard");
   btn.innerHTML =
-    '<div class="copy-bar__text-wrapper"><span class="copy-bar__copied-text">Copied!</span><span class="copy-bar__url"></span></div>' +
+    `<div class="copy-bar__text-wrapper"><span class="copy-bar__copied-text">${strings?.copied ?? "Copied!"}</span><span class="copy-bar__url"></span></div>` +
     iconSvgHtml("copy", 24, "copy-bar__copy-icon");
   const urlEl = btn.querySelector(".copy-bar__url");
   if (urlEl) urlEl.textContent = url;
@@ -100,7 +115,7 @@ export function makeCopyBar(url: string): HTMLButtonElement {
       const currentUrl = urlEl?.textContent?.trim() || url;
       await navigator.clipboard.writeText(currentUrl);
       btn.classList.add("copy-bar--copied");
-      announce("Link copied to clipboard");
+      announce(strings?.announceMsg ?? "Link copied to clipboard");
       setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
     } catch {}
   });

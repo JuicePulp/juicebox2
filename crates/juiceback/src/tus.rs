@@ -19,7 +19,8 @@ pub struct TusUpload {
     pub ttl_hours: f64,
     pub created_at: i64,
     pub delete_token: String,
-    /// HMAC-SHA256 hash of the uploader's IP so we can count sessions per-IP in memory
+    /// HMAC-SHA256 hash of the uploader's IP so we can count sessions per-IP in
+    /// memory
     pub hashed_ip: String,
     /// AES-256-GCM encrypted IP, for storage in the database.
     pub encrypted_ip: String,
@@ -28,13 +29,15 @@ pub struct TusUpload {
     pub session_id: Option<String>,
     /// Part index within the session (0-based).
     pub part_index: Option<usize>,
-    /// Quick Link reservation ID: if set, update this existing record on completion.
+    /// Quick Link reservation ID: if set, update this existing record on
+    /// completion.
     pub reserve_id: Option<String>,
     /// Capability for the reservation, supplied as `delete_token` metadata.
     pub reservation_token: Option<String>,
     /// Shared per-file capability used for all parts and the final concat.
     pub capability: String,
-    /// Serializes offset validation, streaming, and offset advancement for PATCH requests.
+    /// Locks offset check, stream, and write per upload so PATCH
+    /// requests cannot race.
     pub patch_lock: Arc<Mutex<()>>,
     pub user_id: String,
     /// Transport used for the storage push (from upload metadata).
@@ -46,6 +49,7 @@ pub struct TusUpload {
 
 pub type TusMap = Arc<DashMap<String, TusUpload>>;
 
+#[must_use]
 pub fn new_tus_state() -> TusMap {
     Arc::new(DashMap::new())
 }
@@ -53,6 +57,7 @@ pub fn new_tus_state() -> TusMap {
 /// Per-upload mpsc sender for streaming chunks to the push task.
 pub type TusSenderMap = Arc<DashMap<String, mpsc::Sender<Result<Bytes, String>>>>;
 
+#[must_use]
 pub fn new_tus_sender_map() -> TusSenderMap {
     Arc::new(DashMap::new())
 }
@@ -94,6 +99,7 @@ impl std::fmt::Debug for PartSession {
 
 pub type PartSessionMap = Arc<DashMap<String, Arc<PartSession>>>;
 
+#[must_use]
 pub fn new_part_session_map() -> PartSessionMap {
     Arc::new(DashMap::new())
 }

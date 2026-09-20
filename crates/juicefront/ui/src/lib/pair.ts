@@ -1,4 +1,9 @@
-const UPLOAD_URL = import.meta.env.PUBLIC_API_URL || "";
+/**
+ * juicebox-plus device pairing: code generation, status polling, unpairing.
+ * Drives the pair modal; all endpoints live under /api/pair and /api/device.
+ */
+import { UPLOAD_URL } from "./upload-config";
+import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -27,7 +32,7 @@ async function handleGenerate() {
   statusEl.hidden = true;
 
   try {
-    const res = await fetch(`${UPLOAD_URL}/api/pair/generate`, {
+    const res = await fetch(`${UPLOAD_URL}${apiPairGenerate}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -87,7 +92,7 @@ function startPairingPoll() {
     }
 
     try {
-      const res = await fetch(`${UPLOAD_URL}/api/device`, {
+      const res = await fetch(`${UPLOAD_URL}${apiPairDevices}`, {
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
@@ -125,7 +130,7 @@ async function handleUnpair() {
   if (!confirm("Unpair this device?")) return;
 
   try {
-    const res = await fetch(`${UPLOAD_URL}/api/device/${deviceId}`, {
+    const res = await fetch(`${UPLOAD_URL}${apiPairDevice(deviceId)}`, {
       method: "DELETE",
     });
     if (res.ok) {

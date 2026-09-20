@@ -2,12 +2,10 @@
 name = "juiceutils"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description = "Shared security, validation, proxy, and HTTP/3 utilities for juicebox"
+description = "Shared config, security, validation, proxy, and HTTP/3 utilities for Juicebox"
 publish = false
-
-[lib]
-name = "juiceutils"
 
 [features]
 default = ["quic"]
@@ -23,27 +21,33 @@ quic = [
 ]
 
 [dependencies]
-axum = { version = "0.7", features = ["multipart", "ws"] }
-tokio.workspace = true
-tower = { version = "0.4", features = ["util"] }
-tracing.workspace = true
-bytes = "1"
+aes-gcm.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+bytes.workspace = true
+h3 = { workspace = true, optional = true }
+h3-quinn = { workspace = true, optional = true }
+hex.workspace = true
+hmac.workspace = true
+http-body-util = { workspace = true, optional = true }
+quinn = { workspace = true, optional = true }
+quinn-proto = { workspace = true, optional = true }
+rand.workspace = true
+rcgen = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+rustls-pki-types = { workspace = true, optional = true }
+serde.workspace = true
 serde_json.workspace = true
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
-subtle = "2"
-quinn = { version = "0.11", features = ["runtime-tokio"], optional = true }
-quinn-proto = { version = "0.11", optional = true }
-h3 = { version = ">=0.0.7", optional = true }
-h3-quinn = { version = ">=0.0.8", optional = true }
-rustls = { version = "0.23", optional = true }
-rustls-pki-types = { version = "1", optional = true }
-rcgen = { version = "0.13", optional = true }
-http-body-util = { version = "0.1", features = ["channel"], optional = true }
+sha2.workspace = true
+subtle.workspace = true
+# Library subset: timers, signals and sync primitives for server helpers.
+tokio = { workspace = true, features = ["macros", "rt", "signal", "sync", "time"] }
+toml.workspace = true
+tower = { workspace = true, features = ["util"] }
+tracing.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { escapeHtml } from "./escape";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,14 +39,7 @@ export function readPublicFile(name: string): string {
   return "";
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 
 function inline(text: string): string {
   return escapeHtml(text)

@@ -2,7 +2,11 @@
 import { getIconSvg } from "../lib/icons";
 import { t, type Locale } from "../i18n";
 
-const { locale = "en" } = Astro.props as { locale?: Locale };
+interface Props {
+    locale?: Locale;
+}
+
+const { locale = "en" } = Astro.props as Props;
 
 const skyscraperKey = import.meta.env.PUBLIC_ADSTERRA_SKYSCRAPER_160X600;
 const railKey = import.meta.env.PUBLIC_ADSTERRA_SKYSCRAPER_160X300;
@@ -47,7 +51,7 @@ const belowZones = [
 ].filter((zone) => zone.key);
 ---
 
-<aside class="box-rail box-rail--left">
+<aside class="box-rail box-rail--left" aria-label="Advertisements">
   {railLeftZones.map((z) => (
     <div id={z.holder} class={`box-slot ${z.cls}`} data-box-w={z.w} data-box-h={z.h} data-box-loading={adEligibleSSR ? "" : undefined} style={`--box-w:${z.w}px;--box-h:${z.h}px`}>
       <div class="box-shimmer" aria-hidden="true"></div>
@@ -59,7 +63,7 @@ const belowZones = [
     </div>
   ))}
 </aside>
-<aside class="box-rail box-rail--right">
+<aside class="box-rail box-rail--right" aria-label="Advertisements">
   {railRightZones.map((z) => (
     <div id={z.holder} class={`box-slot ${z.cls}`} data-box-w={z.w} data-box-h={z.h} data-box-loading={adEligibleSSR ? "" : undefined} style={`--box-w:${z.w}px;--box-h:${z.h}px`}>
       <div class="box-shimmer" aria-hidden="true"></div>
@@ -92,7 +96,6 @@ const belowZones = [
   // before the next zone overwrites the global.
   const ZONES = adZones;
 
-  // grace like the roblox game
   const BLOCKED_GRACE_MS = 4000;
   const WATCH_MAX_MS = BLOCKED_GRACE_MS + 30000;
 
@@ -136,7 +139,7 @@ const belowZones = [
     if (done) {
       invoke.onload = done;
       invoke.onerror = () => {
-        // incase vpn or other
+        // invoke.js failed (adblock, VPN, or offline): fail the whole cascade.
         cascadeFailed = true;
         markAllBlocked();
         done();

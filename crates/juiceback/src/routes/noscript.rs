@@ -1,5 +1,6 @@
-//! HTML endpoints that work without javascript like upload confirmation and file listing and reporting so the site still works when js is disabled, very inclusive
-// might get rid of it in the future
+//! No-JS HTML endpoints: upload confirm, file list, report/feedback.
+use std::sync::Arc;
+
 use axum::{
     Form,
     extract::{Extension, State},
@@ -8,20 +9,15 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use utoipa::ToSchema;
 
-use crate::db;
-use crate::error::AppError;
-use crate::notify;
-use crate::state::AppState;
-use crate::utils::ClientIp;
+use crate::{db, error::AppError, notify, state::AppState, utils::ClientIp};
 
 const COOKIE_NAME: &str = "jb_files";
 const COOKIE_MAX_AGE: &str = "2592000";
 
 #[derive(Deserialize, ToSchema)]
-pub struct ReportForm {
+pub struct ReportRequest {
     #[serde(default)]
     pub file_url: String,
     #[serde(default)]
@@ -32,11 +28,12 @@ pub struct ReportForm {
     pub email: String,
 }
 
-/// POST /api/report accepts a form submission, stores it, notifies admins, and redirects back
+/// POST /api/report accepts a form submission, stores it, notifies admins, and
+/// redirects back
 #[utoipa::path(
     post,
     path = "/api/report",
-    request_body(content_type = "application/x-www-form-urlencoded", content = inline(ReportForm), description = "Report form fields"),
+    request_body(content_type = "application/x-www-form-urlencoded", content = inline(ReportRequest), description = "Report form fields"),
     responses(
         (status = 303, description = "Redirects to /report?submitted=1"),
     ),
@@ -45,7 +42,7 @@ pub struct ReportForm {
 pub async fn report_submit_handler(
     State(state): State<Arc<AppState>>,
     Extension(client_ip): Extension<ClientIp>,
-    Form(form): Form<ReportForm>,
+    Form(form): Form<ReportRequest>,
 ) -> Result<Redirect, AppError> {
     let file_url = form.file_url.trim();
     if file_url.is_empty()
@@ -54,9 +51,7 @@ pub async fn report_submit_handler(
         || form.reason.trim().len() > crate::constants::MAX_REPORT_REASON_LEN
         || form.details.len() > crate::constants::MAX_REPORT_DETAILS_LEN
     {
-        return Err(AppError::InvalidMultipart(
-            "file_url and reason are required".into(),
-        ));
+        return Err(AppError::InvalidMultipart);
     }
 
     let reporter_ip = Some(client_ip.0.to_string());
@@ -128,18 +123,19 @@ pub async fn report_submit_handler(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct FeedbackForm {
+pub struct FeedbackRequest {
     #[serde(default)]
     pub message: String,
     #[serde(default)]
     pub email: String,
 }
 
-/// POST /api/feedback - accept a feedback form submission and redirect to confirmation.
+/// POST /api/feedback - accept a feedback form submission and redirect to
+/// confirmation.
 #[utoipa::path(
     post,
     path = "/api/feedback",
-    request_body(content_type = "application/x-www-form-urlencoded", content = inline(FeedbackForm), description = "Feedback form fields"),
+    request_body(content_type = "application/x-www-form-urlencoded", content = inline(FeedbackRequest), description = "Feedback form fields"),
     responses(
         (status = 303, description = "Redirect to feedback page with submitted flag"),
     ),
@@ -148,11 +144,11 @@ pub struct FeedbackForm {
 pub async fn feedback_submit_handler(
     State(state): State<Arc<AppState>>,
     Extension(client_ip): Extension<ClientIp>,
-    Form(form): Form<FeedbackForm>,
+    Form(form): Form<FeedbackRequest>,
 ) -> Result<Redirect, AppError> {
     let message = form.message.trim();
     if message.is_empty() || message.len() > crate::constants::MAX_FEEDBACK_MESSAGE_LEN {
-        return Err(AppError::InvalidMultipart("message is required".into()));
+        return Err(AppError::InvalidMultipart);
     }
 
     let reporter_ip = Some(client_ip.0.to_string());
@@ -200,7 +196,7 @@ pub async fn feedback_submit_handler(
 }
 
 #[derive(Deserialize)]
-pub struct DeleteForm {
+pub struct DeleteRequest {
     #[serde(default)]
     pub token: String,
 }
@@ -215,17 +211,17 @@ fn parse_file_cookie(header: &HeaderValue) -> Vec<FileCookieEntry> {
     let cookie_str = header.to_str().unwrap_or("");
     for part in cookie_str.split(';') {
         let part = part.trim();
-        if let Some(val) = part.strip_prefix("jb_files=") {
-            if let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val) {
-                if let Ok(arr) = serde_json::from_slice::<Vec<FileCookieEntry>>(&bytes) {
-                    return arr;
-                }
-            }
+        if let Some(val) = part.strip_prefix("jb_files=")
+            && let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val)
+            && let Ok(arr) = serde_json::from_slice::<Vec<FileCookieEntry>>(&bytes)
+        {
+            return arr;
         }
     }
     Vec::new()
 }
 
+#[must_use]
 pub(crate) fn build_file_cookie_value(existing: &HeaderMap, new_entry: &FileCookieEntry) -> String {
     let mut entries = existing
         .get(header::COOKIE)
@@ -239,6 +235,7 @@ pub(crate) fn build_file_cookie_value(existing: &HeaderMap, new_entry: &FileCook
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
 }
 
+#[must_use]
 pub fn file_cookie_header(existing: &HeaderMap, new_entry: &FileCookieEntry) -> HeaderValue {
     let val = build_file_cookie_value(existing, new_entry);
     cookie_header_value(&val, existing)
@@ -247,17 +244,18 @@ pub fn file_cookie_header(existing: &HeaderMap, new_entry: &FileCookieEntry) -> 
 /// Build the Set-Cookie header for a `jb_files` value, mirroring the request's
 /// security context (Secure only over HTTPS / non-localhost).
 fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
-    // Only set Secure when the request is over HTTPS (or from localhost over plain HTTP)
+    // Only set Secure when the request is over HTTPS (or from localhost over plain
+    // HTTP)
     let is_localhost = existing
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        .map(|h| h.starts_with("localhost") || h.starts_with("127.0.0.1") || h.starts_with("[::1]"))
-        .unwrap_or(false);
+        .is_some_and(|h| {
+            h.starts_with("localhost") || h.starts_with("127.0.0.1") || h.starts_with("[::1]")
+        });
     let is_https = existing
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
-        .map(|p| p == "https")
-        .unwrap_or(false);
+        .is_some_and(|p| p == "https");
     let secure = !(is_localhost && !is_https);
 
     HeaderValue::from_str(&format!(
@@ -270,11 +268,13 @@ fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
     .unwrap_or_else(|_| HeaderValue::from_static("jb_files=; Path=/; Max-Age=0"))
 }
 
-/// Rewrite the `jb_files` cookie so a renamed file's old ID becomes its new one.
+/// Rewrite the `jb_files` cookie so a renamed file's old ID becomes its new
+/// one.
 ///
 /// A rename keeps the delete token, so the entry just swaps its id in place
 /// (deduping against any entry already under the new id). Returns the new
 /// Set-Cookie header value to attach to the redirect response.
+#[must_use]
 pub fn rename_file_cookie_header(
     existing: &HeaderMap,
     old_id: &str,
@@ -297,8 +297,13 @@ pub fn rename_file_cookie_header(
     cookie_header_value(&val, existing)
 }
 
-/// Redirect to the index page with file metadata encoded as base64url so it shows up in the file list for no-JS uploads
-#[allow(clippy::too_many_arguments)]
+/// Redirect to the index page with file metadata encoded as base64url so it
+/// shows up in the file list for no-JS uploads
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
+)]
+#[must_use]
 pub fn upload_redirect(
     _headers: &HeaderMap,
     public_url: &str,
@@ -319,14 +324,14 @@ pub fn upload_redirect(
         "uploaded_at": uploaded_at,
         "expires_at": expires_at,
     });
-    let encoded =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
-
-    let location = format!("/index.html?uploaded={}", encoded);
+    let location = format!(
+        "/index.html?uploaded={}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
+    );
     Redirect::to(&location).into_response()
 }
 
-/// Returns true when the request prefers an HTML response which means it's a no-JS form submission
+#[must_use]
 pub fn wants_html(headers: &axum::http::HeaderMap) -> bool {
     headers
         .get(header::ACCEPT)
@@ -396,7 +401,7 @@ mod tests {
         let val1 = build_file_cookie_value(&headers, &entry1);
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_str(&format!("jb_files={}", val1)).unwrap(),
+            HeaderValue::from_str(&format!("jb_files={val1}")).unwrap(),
         );
 
         let entry2 = FileCookieEntry {
@@ -424,7 +429,8 @@ mod tests {
         assert!(s.starts_with("jb_files="));
         assert!(s.contains("Path=/"));
         assert!(s.contains("SameSite=Strict"));
-        // No Secure flag when no host header and no x-forwarded-proto (plain HTTP dev)
+        // No Secure flag when no host header and no x-forwarded-proto (plain
+        // HTTP dev)
     }
 
     #[test]

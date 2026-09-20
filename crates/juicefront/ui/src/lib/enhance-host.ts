@@ -1,5 +1,6 @@
 /** Reads the currently selected custom host from the DOM. */
 import { formatMaxSize } from "./format";
+import { clearHostGlow, shouldGlowHost } from "./device-ws";
 
 export function readSelectedHost(): string {
   const input = document.querySelector(
@@ -34,31 +35,21 @@ export function readUltraFastSupported(): boolean {
   return localStorage.getItem("juicebox_ultrafast_supported") === "true";
 }
 
-/** Check if the host settings button should glow (device connected). */
-function shouldGlowHost(): boolean {
-  const glow = localStorage.getItem("juicebox_host_glow_cleared");
-  return glow !== "true";
-}
-
-/** Clear the host button glow when user opens settings. */
-function clearHostGlow(): void {
-  localStorage.setItem("juicebox_host_glow_cleared", "true");
-  document.querySelector("[data-host-btn]")?.classList.remove("host-btn--glow");
-}
-
 /** Initialize the host button glow state. */
 export function initHostGlow(): void {
   const btn = document.querySelector("[data-host-btn]");
   if (!btn) return;
 
   const observer = new MutationObserver(() => {
-    if (location.hash === "#host-modal") {
+    if (
+      location.hash === "#host-modal" ||
+      location.hash === "#host-selector-modal"
+    ) {
       clearHostGlow();
     }
   });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["hash"] });
 
-  // Also clear on direct click
   btn.addEventListener("click", clearHostGlow);
 
   if (shouldGlowHost()) {
@@ -77,13 +68,6 @@ export function initHostGlow(): void {
     }
   }) as EventListener);
 }
-
-const DANGER_COLORS: Record<string, string> = {
-  none: "var(--green-500, #22c55e)",
-  low: "var(--yellow-500, #eab308)",
-  medium: "var(--orange-500, #f97316)",
-  high: "var(--red-500, #ef4444)",
-};
 
 const BLOCKED_TYPES_I18N: Record<string, Record<string, string>> = {
   en: {
@@ -130,7 +114,12 @@ function updateDropMaxSize(bytes: number) {
   ) as HTMLElement | null;
   if (!el) return;
   const tpl = el.getAttribute("data-drop-max-template") || "Max upload size: {size}";
-  el.innerHTML = tpl.replace("{size}", `<span data-drop-max-size>${formatMaxSize(bytes)}</span>`);
+  const size = document.createElement("span");
+  size.setAttribute("data-drop-max-size", "");
+  size.textContent = formatMaxSize(bytes);
+  const [before, after] = tpl.split("{size}");
+  el.textContent = "";
+  el.append(before ?? "", size, after ?? "");
 }
 
 type HostCheck =
@@ -203,14 +192,14 @@ async function fetchHostConfig(host: string): Promise<HostCheck> {
       return { ok: false, reason: "notjuicebox" };
     }
     return { ok: true, cfg: record };
-  } catch (e) {
+  } catch (err) {
     if (
-      e instanceof DOMException &&
-      (e.name === "AbortError" || e.name === "TimeoutError")
+      err instanceof DOMException &&
+      (err.name === "AbortError" || err.name === "TimeoutError")
     ) {
       return { ok: false, reason: "timeout" };
     }
-    if (e instanceof TypeError) {
+    if (err instanceof TypeError) {
       const reachable = await fetch(`${parsed.base}/api/config`, {
         method: "GET",
         mode: "no-cors",
@@ -225,11 +214,8 @@ async function fetchHostConfig(host: string): Promise<HostCheck> {
 }
 
 /**
- * Enhances the custom host selector UI: persists host input to localStorage,
- * wires up the health-check button (pure validation) and the Apply button
- * (validates, saves, and applies the host config to the UI), and
- * enables/disables the QUIC toggle and Quick Link toggle based on backend
- * feature support.
+ * Sets up the custom host selector: saves host input, binds the Check
+ * and Apply buttons, and toggles QUIC and Quick Link from backend support.
  */
 export function enhanceHostSelector(locale?: string) {
   const input = document.querySelector(
@@ -348,8 +334,8 @@ export function enhanceHostSelector(locale?: string) {
   updateDangerLevelDisplay(readDangerLevel(), locale);
 
   // Prefer SSR-provided config from data attributes (embedded by Modals.astro).
-  // This avoids a client-side /api/config fetch that fails in production
-  // because juicefront doesn't proxy /api/ to juiceback.
+  // This avoids a client-side /api/config round trip so the toggles render
+  // correctly on first paint, even offline.
   const serverCfg = document.getElementById("server-config");
   if (serverCfg) {
     const ql = serverCfg.getAttribute("data-quick-link");
@@ -492,7 +478,6 @@ export function enhanceHostSelector(locale?: string) {
     return null;
   };
 
-  // Check button: pure validation, no side effects.
   checkBtn.addEventListener("click", async () => {
     checkBtn.disabled = true;
     try {
@@ -502,7 +487,6 @@ export function enhanceHostSelector(locale?: string) {
     }
   });
 
-  // Apply button: validate, save, and apply config to the UI.
   applyBtn.addEventListener("click", async () => {
     applyBtn.disabled = true;
     try {

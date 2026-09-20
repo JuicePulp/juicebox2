@@ -2,8 +2,7 @@
 /**
  * Modals for Share, Shortcuts, Language, and Host.
  * Works without JS via CSS :target pseudo-class.
- * JS adds: escape-to-close, focus trapping, language persistence,
- * clipboard copy, native share, and auto-redirect to saved locale.
+ * JS adds Esc close, focus trap, copy/share, and locale redirect.
  */
 import { iconSvgHtml } from "../lib/icons";
 import { LOCALES, LOCALE_PREFIX_RE, resolveLocale, t } from "../i18n";
@@ -16,6 +15,7 @@ const encodedText = encodeURIComponent(t(currentLocale, "share.check_out", { url
 
 const pathname = Astro.url.pathname;
 const basePath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
+const selectorHref = (currentLocale === "en" ? "" : "/" + currentLocale) + "/#host-selector-modal";
 
 let dangerLevel = "high";
 let serverQuickLink = true;
@@ -372,6 +372,7 @@ const shortcuts = [
       </div>
     </div>
     <div class="mdlfooter">
+      <a href={selectorHref} class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
       <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
@@ -601,11 +602,27 @@ const shortcuts = [
       );
       if (first) first.focus();
       var handler = function(e) { trapFocus(e, modal); };
+      // Store the handler on the modal so it can be removed deterministically
+      // when the modal closes, even if no CSS transition runs.
+      modal._focusTrapHandler = handler;
       document.addEventListener("keydown", handler);
-      modal.addEventListener("transitionend", function() { document.removeEventListener("keydown", handler); }, { once: true });
-    } else if (lastFocus) {
-      lastFocus.focus();
-      lastFocus = null;
+      modal.addEventListener("transitionend", function() {
+        if (modal._focusTrapHandler) {
+          document.removeEventListener("keydown", modal._focusTrapHandler);
+          modal._focusTrapHandler = null;
+        }
+      }, { once: true });
+    } else {
+      document.querySelectorAll(".mdloverlay[id$='-modal']").forEach(function(m) {
+        if (m._focusTrapHandler) {
+          document.removeEventListener("keydown", m._focusTrapHandler);
+          m._focusTrapHandler = null;
+        }
+      });
+      if (lastFocus) {
+        lastFocus.focus();
+        lastFocus = null;
+      }
     }
   }
 
@@ -641,7 +658,6 @@ const shortcuts = [
         }
         var input = document.getElementById("dropzone-input");
         if (input) {
-          // In app mode, simulate a dropzone click to delegate to device file picker
           if (window.__juiceboxAppMode) {
             var dropzone = document.querySelector("[data-drop-zone]");
             if (dropzone) {

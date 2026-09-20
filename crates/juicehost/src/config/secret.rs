@@ -1,4 +1,4 @@
-use crate::config::security::SecuritySettings;
+use crate::config::{ConfigError, security::SecuritySettings};
 
 /// Signing secrets and ban pepper settings.
 #[derive(Debug)]
@@ -16,14 +16,21 @@ impl SecretSettings {
         &self.ip_pepper
     }
 
-    pub fn load(security: &SecuritySettings) -> Self {
-        let ticket_jwt_secret = juicebox_config::optional_secret("TICKET_JWT_SECRET")
-            .or_else(|| juicebox_config::optional_secret("JWT_SECRET"))
-            .unwrap_or_else(|| security.api_key().to_owned());
-        let ip_pepper = juicebox_config::optional_secret("IP_PEPPER").unwrap_or_default();
-        Self {
+    pub fn load(security: &SecuritySettings) -> Result<Self, ConfigError> {
+        let ticket_jwt_secret = juiceutils::config::optional_secret("TICKET_JWT_SECRET")
+            .or_else(|| juiceutils::config::optional_secret("JWT_SECRET"))
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                let key = security.api_key().trim().to_owned();
+                (!key.is_empty()).then_some(key)
+            })
+            .ok_or(ConfigError::MissingSecret {
+                name: "TICKET_JWT_SECRET",
+            })?;
+        let ip_pepper = juiceutils::config::optional_secret("IP_PEPPER").unwrap_or_default();
+        Ok(Self {
             ticket_jwt_secret,
             ip_pepper,
-        }
+        })
     }
 }

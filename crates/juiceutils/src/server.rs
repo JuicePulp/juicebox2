@@ -1,26 +1,26 @@
 //! QUIC/HTTP/3 server setup shared between juiceback and juicehost.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use axum::body::Body;
-use axum::http::{Request, Response};
+use axum::{
+    body::Body,
+    http::{Request, Response},
+};
 use bytes::{Buf, Bytes};
 use h3_quinn::Connection as H3Connection;
 use http_body_util::{BodyExt, channel::Channel};
 use quinn::Endpoint;
-use quinn_proto::VarInt;
-use quinn_proto::crypto::rustls::QuicServerConfig;
+use quinn_proto::{VarInt, crypto::rustls::QuicServerConfig};
 use rcgen::generate_simple_self_signed;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::sync::{Notify, Semaphore};
 use tower::Service;
 
-/// Generate an ephemeral self-signed TLS certificate for QUIC.
+#[must_use]
 pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
     let certified_key = generate_simple_self_signed(vec!["juicebox.local".into()]).unwrap();
     let cert_der = certified_key.cert.der().clone();
-    let key_der = PrivateKeyDer::try_from(certified_key.key_pair.serialize_der()).unwrap();
+    let key_der = PrivateKeyDer::try_from(certified_key.signing_key.serialize_der()).unwrap();
     (cert_der, key_der)
 }
 
@@ -28,18 +28,18 @@ pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'s
 pub fn get_or_generate_cert(
     cert_path: &std::path::Path,
 ) -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
-    if let Ok(der_bytes) = std::fs::read(cert_path) {
-        if let Ok(key_bytes) = std::fs::read(cert_path.with_extension("key")) {
-            let cert_der = CertificateDer::from(der_bytes);
-            let key_der =
-                PrivateKeyDer::try_from(key_bytes).expect("failed to parse saved QUIC private key");
-            tracing::info!("loaded QUIC cert from {}", cert_path.display());
-            return (cert_der, key_der);
-        }
+    if let Ok(der_bytes) = std::fs::read(cert_path)
+        && let Ok(key_bytes) = std::fs::read(cert_path.with_extension("key"))
+    {
+        let cert_der = CertificateDer::from(der_bytes);
+        let key_der =
+            PrivateKeyDer::try_from(key_bytes).expect("failed to parse saved QUIC private key");
+        tracing::info!("loaded QUIC cert from {}", cert_path.display());
+        return (cert_der, key_der);
     }
     let certified_key = generate_simple_self_signed(vec!["juicebox.local".into()]).unwrap();
     let cert_der = certified_key.cert.der().clone();
-    let key_der_bytes = certified_key.key_pair.serialize_der();
+    let key_der_bytes = certified_key.signing_key.serialize_der();
     let key_der =
         PrivateKeyDer::try_from(key_der_bytes.clone()).expect("failed to create PrivateKeyDer");
     if let Some(parent) = cert_path.parent() {
@@ -71,7 +71,6 @@ fn write_private_key(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
     std::io::Write::write_all(&mut options.open(path)?, bytes)
 }
 
-/// Load only the certificate from disk for client-side pinning.
 pub fn load_cert_for_pinning(
     cert_path: &std::path::Path,
 ) -> Result<CertificateDer<'static>, String> {
@@ -80,8 +79,6 @@ pub fn load_cert_for_pinning(
     Ok(CertificateDer::from(der_bytes))
 }
 
-/// Start a QUIC/HTTP/3 server and proxy requests through Axum.
-/// `cert_path` persists the self-signed certificate for client pinning.
 #[derive(Debug, Clone)]
 pub struct QuicServerLimits {
     pub max_connections: usize,
@@ -118,7 +115,7 @@ pub async fn start_quic_server(
         cert_path,
         QuicServerLimits::default(),
     )
-    .await
+    .await;
 }
 
 pub async fn start_quic_server_with_limits(
@@ -135,8 +132,8 @@ pub async fn start_quic_server_with_limits(
     };
 
     let tls_config = {
-        static INSTALL_CRYPTO_PROVIDER: std::sync::Once = std::sync::Once::new();
-        INSTALL_CRYPTO_PROVIDER.call_once(|| {
+        static INSTALL_CRYPTO_PROVIDER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        INSTALL_CRYPTO_PROVIDER.get_or_init(|| {
             rustls::crypto::aws_lc_rs::default_provider()
                 .install_default()
                 .expect("failed to install default crypto provider");
@@ -180,17 +177,17 @@ pub async fn start_quic_server_with_limits(
     )
     .expect("Failed to create QUIC endpoint");
 
-    tracing::info!("{} QUIC listening on udp://{}", service_name, addr);
+    tracing::info!("{service_name} QUIC listening on udp://{addr}");
 
     let quic_shutdown = shutdown.clone();
     tokio::select! {
         biased;
-        _ = quic_shutdown.notified() => {
-            tracing::info!("{} QUIC shutting down...", service_name);
+        () = quic_shutdown.notified() => {
+            tracing::info!("{service_name} QUIC shutting down...");
             endpoint.close(VarInt::from_u32(0), b"server shutdown");
             let _ = tokio::time::timeout(Duration::from_secs(5), endpoint.wait_idle()).await;
         }
-        _ = run_quic_server(&endpoint, router, limits) => {
+        () = run_quic_server(&endpoint, router, limits) => {
             endpoint.wait_idle().await;
         }
     }
@@ -210,12 +207,11 @@ async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: Quic
             }
             continue;
         }
-        let permit = match Arc::clone(&connection_limit).try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => {
-                incoming.refuse();
-                continue;
-            }
+        let permit = if let Ok(permit) = Arc::clone(&connection_limit).try_acquire_owned() {
+            permit
+        } else {
+            incoming.refuse();
+            continue;
         };
 
         let router = router.clone();
@@ -226,7 +222,7 @@ async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: Quic
             let conn = match tokio::time::timeout(limits.handshake_timeout, incoming).await {
                 Ok(Ok(c)) => c,
                 Ok(Err(e)) => {
-                    tracing::warn!("QUIC connection handshake failed: {}", e);
+                    tracing::warn!("QUIC connection handshake failed: {e}");
                     return;
                 }
                 Err(_) => {
@@ -244,7 +240,7 @@ async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: Quic
             )
             .await
             {
-                tracing::debug!("QUIC connection closed: {}", e);
+                tracing::debug!("QUIC connection closed: {e}");
             }
             drop(permit);
         });
@@ -267,7 +263,7 @@ async fn handle_h3_conn(
             Ok(Some(r)) => r,
             Ok(None) => break,
             Err(e) => {
-                tracing::debug!("h3 accept error: {}", e);
+                tracing::debug!("h3 accept error: {e}");
                 break;
             }
         };
@@ -284,7 +280,7 @@ async fn handle_h3_conn(
                 match tokio::time::timeout_at(deadline, resolver.resolve_request()).await {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
-                        tracing::debug!("h3 resolve_request error: {}", e);
+                        tracing::debug!("h3 resolve_request error: {e}");
                         return;
                     }
                     Err(_) => return,
@@ -379,7 +375,7 @@ async fn proxy_axum(
     }
 
     let mut builder = Response::builder().status(status);
-    for (k, v) in resp_headers.iter() {
+    for (k, v) in &resp_headers {
         builder = builder.header(k, v);
     }
     send_stream.send_response(builder.body(()).unwrap()).await?;
@@ -404,4 +400,40 @@ fn header_bytes(req: &Request<()>) -> usize {
             .iter()
             .map(|(name, value)| name.as_str().len() + value.as_bytes().len())
             .sum::<usize>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_cert_has_non_empty_der() {
+        let (cert, key) = generate_self_signed_cert();
+        assert!(!cert.as_ref().is_empty());
+        let key_bytes: &[u8] = match &key {
+            rustls_pki_types::PrivateKeyDer::Pkcs8(k) => k.secret_pkcs8_der(),
+            rustls_pki_types::PrivateKeyDer::Sec1(k) => k.secret_sec1_der(),
+            _ => panic!("unexpected key type"),
+        };
+        assert!(!key_bytes.is_empty());
+    }
+
+    #[test]
+    fn cert_roundtrip_saves_and_reloads_same_cert() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert_path = dir.path().join("quic.der");
+        let (cert_a, _) = get_or_generate_cert(&cert_path);
+        assert!(cert_path.exists());
+        let (cert_b, _) = get_or_generate_cert(&cert_path);
+        assert_eq!(cert_a.as_ref(), cert_b.as_ref());
+        let loaded = load_cert_for_pinning(&cert_path).unwrap();
+        assert_eq!(loaded.as_ref(), cert_a.as_ref());
+    }
+
+    #[test]
+    fn load_missing_cert_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist.der");
+        assert!(load_cert_for_pinning(&missing).is_err());
+    }
 }

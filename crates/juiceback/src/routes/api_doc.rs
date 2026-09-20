@@ -1,27 +1,30 @@
 use utoipa::OpenApi;
 
-use crate::db::{BanRecord, FeedbackRecord, HosterRecord, ReportRecord};
-use crate::routes::admin::{
-    AdminBansResponse, AdminFeedbackEntry, AdminFeedbackResponse, AdminFileEntry,
-    AdminFilesResponse, AdminHostersResponse, AdminReportEntry, AdminReportsResponse,
-    AnnouncementPayload, AnnouncementResponse, BanExportEntry, BanExportResponse, BanHosterPayload,
-    BanImportEntry, BanImportPayload, BanImportResponse, BanIpPayload, CheckResponse, LoginForm,
-    LoginResponse, UnbanHosterPayload,
-};
-use crate::routes::manage::{
-    ClientFilesRequest, ClientFilesResponse, FileInfoResponse, OwnedFilesRequest,
-    OwnedFilesResponse, RenewRequest, RenewResponse,
-};
-use crate::routes::pairing::{
-    DeviceInfo as PairingDeviceInfo, GenerateCodeRequest, GenerateCodeResponse, VerifyCodeRequest,
-    VerifyCodeResponse,
-};
-use crate::routes::presence::DeviceInfo as PresenceDeviceInfo;
-use crate::routes::presence::DeviceListResponse;
-use crate::routes::register::{RegisterRequest, RegisterResponse};
-use crate::routes::upload::{
-    ReserveResponse, ReserveUploadRequest, UltrafastCompleteRequest, UltrafastReserveRequest,
-    UltrafastReserveResponse, UploadResponse,
+use crate::{
+    db::{BanRecord, FeedbackRecord, HosterRecord, ReportRecord},
+    routes::{
+        admin::{
+            AdminBansResponse, AdminFeedbackEntry, AdminFeedbackResponse, AdminFileEntry,
+            AdminFilesResponse, AdminHostersResponse, AdminReportEntry, AdminReportsResponse,
+            AnnouncementRequest, AnnouncementResponse, BanExportEntry, BanExportResponse,
+            BanImportEntry, BanImportRequest, BanImportResponse, BanIpRequest, CheckResponse,
+            HosterBanRequest, LoginRequest, LoginResponse,
+        },
+        manage::{
+            ClientFilesRequest, ClientFilesResponse, FileInfoResponse, OwnedFilesRequest,
+            OwnedFilesResponse, RenewRequest, RenewResponse,
+        },
+        pairing::{
+            GenerateCodeRequest, GenerateCodeResponse, PairingDevice, VerifyCodeRequest,
+            VerifyCodeResponse,
+        },
+        presence::{DeviceListResponse, PresenceDevice},
+        register::{RegisterRequest, RegisterResponse},
+        upload::{
+            ReserveResponse, ReserveUploadRequest, UltrafastCompleteRequest,
+            UltrafastReserveRequest, UltrafastReserveResponse, UploadResponse,
+        },
+    },
 };
 
 #[derive(OpenApi)]
@@ -39,34 +42,34 @@ use crate::routes::upload::{
     ),
     paths(
         // Uploads
-        crate::routes::upload::upload_handler,
-        crate::routes::upload::reserve_upload_handler,
-        crate::routes::upload::ultrafast_reserve_handler,
-        crate::routes::upload::ultrafast_complete_handler,
-        crate::routes::upload::device_upload_handler,
-        crate::routes::tus::create_upload_handler,
-        crate::routes::tus::get_upload_handler,
-        crate::routes::tus::patch_upload_handler,
-        crate::routes::tus::delete_upload_handler,
-        crate::routes::tus::options_handler,
+        crate::routes::upload::multipart::upload_handler,
+        crate::routes::upload::multipart::reserve_upload_handler,
+        crate::routes::upload::ultrafast::ultrafast_reserve_handler,
+        crate::routes::upload::ultrafast::ultrafast_complete_handler,
+        crate::routes::upload::ultrafast::device_upload_handler,
+        crate::routes::tus::create::create_upload_handler,
+        crate::routes::tus::query::get_upload_handler,
+        crate::routes::tus::patch::patch_upload_handler,
+        crate::routes::tus::query::delete_upload_handler,
+        crate::routes::tus::query::options_handler,
         // File management
         crate::routes::manage::file_info_handler,
         crate::routes::manage::delete_file_handler,
         crate::routes::manage::delete_file_form_handler,
         crate::routes::manage::renew_file_id_handler,
         crate::routes::manage::owned_files_handler,
-        crate::routes::manage::get_client_files_handler,
+        crate::routes::manage::list_client_files_handler,
         crate::routes::manage::put_client_files_handler,
         // Pairing
-        crate::routes::pairing::generate_code,
-        crate::routes::pairing::verify_code,
-        crate::routes::pairing::list_devices,
-        crate::routes::pairing::unpair_device,
+        crate::routes::pairing::generate_code_handler,
+        crate::routes::pairing::verify_code_handler,
+        crate::routes::pairing::list_devices_handler,
+        crate::routes::pairing::unpair_device_handler,
         // Devices & presence
-        crate::routes::presence::device_status,
-        crate::routes::presence::presence_sse,
-        crate::routes::presence::ping_device,
-        crate::routes::presence::list_connected_devices,
+        crate::routes::presence::device_status_handler,
+        crate::routes::presence::presence_sse_handler,
+        crate::routes::presence::ping_device_handler,
+        crate::routes::presence::list_connected_devices_handler,
         // General
         crate::routes::health_handler,
         crate::routes::config_handler,
@@ -77,32 +80,32 @@ use crate::routes::upload::{
         crate::routes::noscript::feedback_submit_handler,
         crate::routes::register::register_handler,
         // Internal
-        crate::routes::upload::file_status_handler,
+        crate::routes::upload::internal::file_status_handler,
         crate::routes::ban_snapshot_handler,
         // Cobalt URL fetching
-        crate::routes::fetch::fetch_start_handler,
-        crate::routes::fetch::fetch_status_handler,
-        crate::routes::fetch::fetch_services_handler,
+        crate::routes::fetch::handlers::fetch_start_handler,
+        crate::routes::fetch::handlers::fetch_status_handler,
+        crate::routes::fetch::handlers::fetch_services_handler,
         // Admin
-        crate::routes::admin::login_handler,
-        crate::routes::admin::logout_handler,
-        crate::routes::admin::check_handler,
-        crate::routes::admin::files_handler,
-        crate::routes::admin::delete_file_handler,
-        crate::routes::admin::reports_handler,
-        crate::routes::admin::delete_report_handler,
-        crate::routes::admin::list_feedback_handler,
-        crate::routes::admin::delete_feedback_handler,
-        crate::routes::admin::list_bans_handler,
-        crate::routes::admin::ban_ip_handler,
-        crate::routes::admin::unban_ip_handler,
-        crate::routes::admin::export_bans_handler,
-        crate::routes::admin::import_bans_handler,
-        crate::routes::admin::get_announcement_handler,
-        crate::routes::admin::put_announcement_handler,
-        crate::routes::admin::list_hosters_handler,
-        crate::routes::admin::ban_hoster_handler,
-        crate::routes::admin::unban_hoster_handler,
+        crate::routes::admin::auth::login_handler,
+        crate::routes::admin::auth::logout_handler,
+        crate::routes::admin::auth::check_handler,
+        crate::routes::admin::files::list_files_handler,
+        crate::routes::admin::files::delete_file_handler,
+        crate::routes::admin::reports::list_reports_handler,
+        crate::routes::admin::reports::delete_report_handler,
+        crate::routes::admin::feedback::list_feedback_handler,
+        crate::routes::admin::feedback::delete_feedback_handler,
+        crate::routes::admin::bans::list_bans_handler,
+        crate::routes::admin::bans::ban_ip_handler,
+        crate::routes::admin::bans::unban_ip_handler,
+        crate::routes::admin::bans::export_bans_handler,
+        crate::routes::admin::bans::import_bans_handler,
+        crate::routes::admin::announcement::get_announcement_handler,
+        crate::routes::admin::announcement::put_announcement_handler,
+        crate::routes::admin::hosters::list_hosters_handler,
+        crate::routes::admin::hosters::ban_hoster_handler,
+        crate::routes::admin::hosters::unban_hoster_handler,
     ),
     components(schemas(
         // Upload types
@@ -125,10 +128,10 @@ use crate::routes::upload::{
         GenerateCodeResponse,
         VerifyCodeRequest,
         VerifyCodeResponse,
-        PairingDeviceInfo,
+        PairingDevice,
         // Presence types
         DeviceListResponse,
-        PresenceDeviceInfo,
+        PresenceDevice,
         // Admin types
         AdminFilesResponse,
         AdminFileEntry,
@@ -141,20 +144,19 @@ use crate::routes::upload::{
         AdminHostersResponse,
         HosterRecord,
         AnnouncementResponse,
-        AnnouncementPayload,
+        AnnouncementRequest,
         // Admin auth types
-        LoginForm,
+        LoginRequest,
         LoginResponse,
         CheckResponse,
         // Admin ban management types
-        BanIpPayload,
+        BanIpRequest,
         BanExportEntry,
         BanExportResponse,
         BanImportEntry,
-        BanImportPayload,
+        BanImportRequest,
         BanImportResponse,
-        BanHosterPayload,
-        UnbanHosterPayload,
+        HosterBanRequest,
         // Reporting types
         ReportRecord,
         FeedbackRecord,

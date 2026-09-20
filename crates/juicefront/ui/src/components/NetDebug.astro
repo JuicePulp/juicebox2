@@ -71,6 +71,7 @@
     TUS_TARGET_CHUNK_SECS,
     LAST_SPEED_KEY,
   } from "../lib/upload-config";
+  import { apiHealth } from "../lib/api";
 
   const MB = 1024 * 1024;
   const fmtRate = (bps: number) =>
@@ -123,7 +124,7 @@
   async function probe(): Promise<void> {
     const t0 = performance.now();
     try {
-      const r = await fetch("/api/health", { cache: "no-store" });
+      const r = await fetch(apiHealth, { cache: "no-store" });
       if (r.ok) probeRtt = Math.round(performance.now() - t0);
     } catch {}
   }
@@ -143,7 +144,7 @@
     return [label, ...lines.map((l) => "  " + l)].join("\n");
   }
 
-  // ---- datapoint recorder ------------------------------------------------
+  // Datapoint recorder.
   // Fixed 1s cadence, independent of panel visibility, so cold-start bursts
   // are captured even when the overlay is closed. Ring buffer ~2h.
   interface RecFile {
@@ -392,7 +393,6 @@
     const pad = 2;
     const max = Math.max(...hist, 512 * 1024);
 
-    // quarter gridlines + y labels
     ctx.font = "9px ui-monospace, monospace";
     ctx.fillStyle = "rgba(255,255,255,.55)";
     ctx.strokeStyle = "rgba(255,255,255,.14)";
@@ -421,7 +421,6 @@
     const x0 = pad;
     const yOf = (v: number) => pad + (h - pad * 2) * (1 - v / max);
 
-    // area fill
     ctx.beginPath();
     ctx.moveTo(x0, h - pad);
     hist.forEach((v, i) => ctx.lineTo(x0 + i * stepX, yOf(v)));
@@ -429,8 +428,6 @@
     ctx.closePath();
     ctx.fillStyle = "rgba(255,255,255,.09)";
     ctx.fill();
-
-    // line
     ctx.beginPath();
     hist.forEach((v, i) => {
       const x = x0 + i * stepX;
@@ -441,7 +438,6 @@
     ctx.lineWidth = 1.6;
     ctx.stroke();
 
-    // head dot
     const hx = x0 + (hist.length - 1) * stepX;
     const hy = yOf(hist[hist.length - 1]);
     ctx.beginPath();
@@ -545,10 +541,10 @@
   let lastSpike = 0;
   let lastMag: number | null = null;
 
-  // Double-shake arming: one deliberate shake arms the toggle (short haptic
-  // blip), a second within DOUBLE_SHAKE_MS confirms it. A post-gesture
-  // suppression window keeps one long continuous shake from counting as
-  // two gestures, and raised gates cut accidental arming (pocket, jog).
+  // Two shakes toggle: the first arms it, a second within
+  // DOUBLE_SHAKE_MS confirms. A short cooldown after a gesture keeps
+  // one long shake from counting twice, and raised gates cut
+  // accidental arming (pocket, jog).
   const DOUBLE_SHAKE_MS = 1400;
   const GESTURE_COOLDOWN_MS = 600;
   let armed = false;
@@ -618,7 +614,7 @@
         } catch {}
         toggle();
       } else {
-        // First shake (or stale arm): arm and blip so it feels acknowledged.
+        // First shake or stale arm: set armed and vibrate 15ms.
         armed = true;
         armedAt = now;
         dbg.state = "armed";

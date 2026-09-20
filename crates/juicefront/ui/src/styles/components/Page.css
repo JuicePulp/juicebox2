@@ -1,23 +1,23 @@
 @media (max-width: 768px) {
     html,
     body {
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100% !important;
+        margin: 0;
+        padding: 0;
+        width: 100%;
     }
 
     .upload-page,
     .files-page,
     .report-page {
-        padding: 0 !important;
-        margin: 0 !important;
+        padding: 0;
+        margin: 0;
     }
 
     .content {
-        padding: 0 !important;
-        margin: 0 !important;
-        max-width: 100% !important;
-        width: 100% !important;
+        padding: 0;
+        margin: 0;
+        max-width: 100%;
+        width: 100%;
     }
 
     main,
@@ -25,18 +25,18 @@
     .upload-page main,
     .files-page main,
     .report-page main {
-        width: 100% !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        max-width: 100% !important;
+        width: 100%;
+        padding: 0;
+        margin: 0;
+        max-width: 100%;
     }
 
     .upload-card,
     .files-card,
     .report-card {
-        margin: 0 !important;
-        max-width: 100% !important;
-        width: 100% !important;
+        margin: 0;
+        max-width: 100%;
+        width: 100%;
     }
 }
 

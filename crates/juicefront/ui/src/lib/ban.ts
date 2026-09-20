@@ -19,7 +19,7 @@ export interface BanStatus {
   banned_at?: number;
 }
 
-/** SSR ban check -- queries juiceback with the user's real IP. */
+/** SSR ban check: queries juiceback with the user's real IP. */
 export async function checkUserBan(request: Request): Promise<BanStatus> {
   const BACKEND_URL =
     process.env.JUICEBACK_URL || "";

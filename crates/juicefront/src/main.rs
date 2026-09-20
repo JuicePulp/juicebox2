@@ -4,12 +4,14 @@
 //! Configuration: TOML file first, environment variables override.
 //! Secrets (Sentry DSN) stay env-only.
 
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use tokio::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
-use juicebox_config::SentrySettings;
+use juiceutils::config::SentrySettings;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 
 /// TOML file layout for juicefront. Every section is optional.
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -40,11 +42,8 @@ const fn default_ui_port() -> u16 {
 /// Candidate config file locations, first hit wins.
 fn candidate_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Ok(dir) = std::env::var("JUICEFRONT_CONFIG") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            paths.push(PathBuf::from(trimmed));
-        }
+    if let Some(dir) = juiceutils::config::optional_secret("JUICEFRONT_CONFIG") {
+        paths.push(PathBuf::from(dir));
     }
     for name in ["juicefront.toml", "config.toml"] {
         paths.push(PathBuf::from(name));
@@ -56,31 +55,14 @@ fn candidate_paths() -> Vec<PathBuf> {
 fn load_file_config() -> FileConfig {
     for path in candidate_paths() {
         if path.exists() {
-            return load_one_file(&path);
+            return juiceutils::config::load_toml_or_default(&path);
         }
     }
     tracing::warn!("no juicefront config file found, using defaults");
     FileConfig::default()
 }
 
-fn load_one_file(path: &PathBuf) -> FileConfig {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        tracing::warn!("config file {} unreadable, using defaults", path.display());
-        return FileConfig::default();
-    };
-    match toml::from_str::<FileConfig>(&text) {
-        Ok(cfg) => cfg,
-        Err(err) => {
-            tracing::warn!(
-                "config file {} invalid ({err}), using defaults",
-                path.display()
-            );
-            FileConfig::default()
-        }
-    }
-}
-
-/// Set PR_SET_PDEATHSIG so we die with our parent.
+/// Set `PR_SET_PDEATHSIG` so we die with our parent.
 unsafe fn watch_parent() {
     unsafe extern "C" {
         fn prctl(option: i32, ...) -> i32;
@@ -144,11 +126,11 @@ fn patch_json_version(path: &std::path::Path, new_version: &str) -> bool {
     }
     let old = &after[val_start..val_end];
     if old == new_version {
-        return false; // already up to date
+        return false;
     }
     let before = &text[..full_start + val_start];
     let after_ver = &text[full_start + val_end..];
-    let new_text = format!("{}{}{}", before, new_version, after_ver);
+    let new_text = format!("{before}{new_version}{after_ver}");
     std::fs::write(path, new_text).is_ok()
 }
 
@@ -172,7 +154,7 @@ fn spawn_node_server(
     ui_port: &str,
     ui_host: &str,
 ) -> Result<tokio::process::Child, Box<dyn std::error::Error>> {
-    let server_entry = format!("{}/server.mjs", ui_dir);
+    let server_entry = format!("{ui_dir}/server.mjs");
     let mut server_builder = Command::new("node");
     server_builder
         .arg(&server_entry)
@@ -189,36 +171,43 @@ fn spawn_node_server(
     };
     Ok(server_builder
         .spawn()
-        .map_err(|e| format!("Failed to spawn Node.js server: {}", e))?)
+        .map_err(|e| format!("Failed to spawn Node.js server: {e}"))?)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+    // Load ./.env first so standalone runs pick up cwd secrets exactly
+    // like `juicebox` supervision does. Explicit env always wins.
+    juiceutils::config::load_dotenv();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .init();
 
     tracing::info!("juicefront (Astro) starting");
 
     // Initialize Sentry before configuration so it captures startup failures.
     // DSN stays env-only: SENTRY_DSN_JUICEFRONT, then SENTRY_DSN.
-    let _sentry_guard = juicebox_config::optional_secret("SENTRY_DSN_JUICEFRONT")
-        .or_else(|| juicebox_config::optional_secret("SENTRY_DSN"))
+    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEFRONT")
+        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
+            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|rate| rate.clamp(0.0, 1.0))
+                .unwrap_or(0.05);
             sentry::init((
                 dsn.as_str(),
-                sentry::ClientOptions {
-                    release: sentry::release_name!(),
-                    environment: Some(
-                        std::env::var("SENTRY_ENVIRONMENT")
-                            .unwrap_or_else(|_| "production".into())
-                            .into(),
-                    ),
-                    traces_sample_rate: std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                        .ok()
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(0.05),
-                    send_default_pii: false,
-                    ..Default::default()
-                },
+                sentry::ClientOptions::default()
+                    .maybe_release(sentry::release_name!())
+                    .environment(
+                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
+                    )
+                    .traces_sample_rate(traces_sample_rate)
+                    .send_default_pii(false),
             ))
         });
 
@@ -259,7 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if Path::new(dir).join("server.mjs").exists() {
             dir.to_string()
         } else {
-            return Err(format!("ui dir '{}' has no server.mjs", dir).into());
+            return Err(format!("ui dir '{dir}' has no server.mjs").into());
         }
     } else {
         infer_ui_dir()?
@@ -294,10 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .stderr(Stdio::inherit());
     let mut install_status = install
         .spawn()
-        .map_err(|e| format!("Failed to spawn '{} install' in {}: {}", cmd, ui_dir, e))?;
+        .map_err(|e| format!("Failed to spawn '{cmd} install' in {ui_dir}: {e}"))?;
     let install_status = install_status.wait().await?;
     if !install_status.success() {
-        return Err("dependency install failed".into());
+        return Err(format!("dependency install failed: exit {install_status}").into());
     }
 
     if cfg!(debug_assertions) {
@@ -319,7 +308,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let mut child = cmd_builder
             .spawn()
-            .map_err(|e| format!("Failed to spawn '{} run dev' in {}: {}", cmd, ui_dir, e))?;
+            .map_err(|e| format!("Failed to spawn '{cmd} run dev' in {ui_dir}: {e}"))?;
 
         let status = child.wait().await?;
 
@@ -344,10 +333,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let mut build = build_builder
             .spawn()
-            .map_err(|e| format!("Failed to spawn '{} run build' in {}: {}", cmd, ui_dir, e))?;
+            .map_err(|e| format!("Failed to spawn '{cmd} run build' in {ui_dir}: {e}"))?;
         let build_status = build.wait().await?;
         if !build_status.success() {
-            return Err("Astro build failed".into());
+            return Err(format!("Astro build failed: exit {build_status}").into());
         }
 
         tracing::info!("Starting production server on {}:{}...", ui_host, ui_port);
@@ -365,6 +354,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn infer_ui_dir() -> Result<String, Box<dyn std::error::Error>> {
     if Path::new("juicefront/ui").exists() {
         Ok("juicefront/ui".to_string())
+    } else if Path::new("crates/juicefront/ui").exists() {
+        Ok("crates/juicefront/ui".to_string())
     } else if Path::new("ui").exists() {
         Ok("ui".to_string())
     } else {

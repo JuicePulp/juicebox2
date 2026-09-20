@@ -21,6 +21,7 @@ mod thread;
 
 use ban::BanSettings;
 use directory::DirectorySettings;
+pub use error::ConfigError;
 use feature::FeatureSettings;
 use limits::LimitsSettings;
 use port::ConfigPort;
@@ -31,10 +32,7 @@ use secret::SecretSettings;
 use security::SecuritySettings;
 use thread::ThreadSettings;
 
-pub use error::ConfigError;
-
 /// Holds every setting juicehost needs to run.
-// If any missing in .env.example, tell me.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Public settings
@@ -62,9 +60,10 @@ pub struct Config {
     /// empty and this is false (the default), the server refuses to start
     /// and internal endpoints reject everything - no silent open instances.
     pub allow_no_auth: bool,
-    pub allowed_origins: Vec<String>, // Optional!
+    pub allowed_origins: Vec<String>,  // Optional!
     pub danger_level: ProtectionLevel, // <- (none, low, medium, high)
-    pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>, // Super important if under a rev proxy.
+    pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>, /* Super important if under a rev
+                                        * proxy. */
     /// S3 Settings
     pub s3_bucket: Option<String>,
     pub s3_region: Option<String>,
@@ -97,20 +96,20 @@ pub struct Config {
     pub ban_sync_url: Option<String>,
     pub ban_sync_interval: u64,
     /// Sentry settings (DSN itself stays env-only).
-    pub sentry: juicebox_config::SentrySettings,
+    pub sentry: juiceutils::config::SentrySettings,
 }
 
 /// TOML file layout for juicehost. Every section is optional.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct FileConfig {
     #[serde(default)]
     pub public: PublicFile,
     #[serde(default)]
     pub quic: QuicFile,
     #[serde(default)]
-    pub threads: ThreadsFile,
+    pub threads: ThreadFile,
     #[serde(default)]
-    pub dirs: DirsFile,
+    pub dirs: DirectoryFile,
     #[serde(default)]
     pub security: SecurityFile,
     #[serde(default)]
@@ -122,24 +121,7 @@ pub struct FileConfig {
     #[serde(default)]
     pub ban: BanFile,
     #[serde(default)]
-    pub sentry: juicebox_config::SentrySettings,
-}
-
-impl Default for FileConfig {
-    fn default() -> Self {
-        Self {
-            public: PublicFile::default(),
-            quic: QuicFile::default(),
-            threads: ThreadsFile::default(),
-            dirs: DirsFile::default(),
-            security: SecurityFile::default(),
-            s3: S3File::default(),
-            limits: LimitsFile::default(),
-            features: FeaturesFile::default(),
-            ban: BanFile::default(),
-            sentry: juicebox_config::SentrySettings::default(),
-        }
-    }
+    pub sentry: juiceutils::config::SentrySettings,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -176,11 +158,11 @@ pub struct QuicFile {
     pub max_connections: usize,
     #[serde(default = "default_quic_max_requests")]
     pub max_requests: usize,
-    #[serde(default = "default_quic_handshake")]
+    #[serde(default = "default_quic_handshake", alias = "handshake_secs")]
     pub handshake_seconds: u64,
-    #[serde(default = "default_quic_idle")]
+    #[serde(default = "default_quic_idle", alias = "idle_secs")]
     pub idle_seconds: u64,
-    #[serde(default = "default_quic_request_total")]
+    #[serde(default = "default_quic_request_total", alias = "request_total_secs")]
     pub request_total_seconds: u64,
 }
 
@@ -224,12 +206,12 @@ const fn default_quic_request_total() -> u64 {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ThreadsFile {
+pub struct ThreadFile {
     #[serde(default = "default_worker_threads")]
     pub worker_threads: usize,
 }
 
-impl Default for ThreadsFile {
+impl Default for ThreadFile {
     fn default() -> Self {
         Self {
             worker_threads: default_worker_threads(),
@@ -241,7 +223,7 @@ const fn default_worker_threads() -> usize {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct DirsFile {
+pub struct DirectoryFile {
     #[serde(default = "default_files_dir")]
     pub files_dir: PathBuf,
     #[serde(default)]
@@ -250,7 +232,7 @@ pub struct DirsFile {
     pub frontend_url: Option<String>,
 }
 
-impl Default for DirsFile {
+impl Default for DirectoryFile {
     fn default() -> Self {
         Self {
             files_dir: default_files_dir(),
@@ -272,7 +254,8 @@ pub struct SecurityFile {
     pub allowed_origins: Option<Vec<String>>,
     #[serde(default)]
     pub trusted_proxy_cidrs: Option<String>,
-    /// Explicit opt-out for running without an API key (env JUICEHOST_ALLOW_NO_AUTH wins when set).
+    /// Explicit opt-out for running without an API key (env
+    /// `JUICEHOST_ALLOW_NO_AUTH` wins when set).
     #[serde(default)]
     pub allow_no_auth: bool,
 }
@@ -318,9 +301,15 @@ pub struct LimitsFile {
     pub max_concurrent_downloads: usize,
     #[serde(default = "default_max_concat_parts")]
     pub max_concat_parts: usize,
-    #[serde(default = "default_tcp_body_inactivity")]
+    #[serde(
+        default = "default_tcp_body_inactivity",
+        alias = "tcp_body_inactivity_secs"
+    )]
     pub tcp_body_inactivity_seconds: u64,
-    #[serde(default = "default_tcp_request_total")]
+    #[serde(
+        default = "default_tcp_request_total",
+        alias = "tcp_request_total_secs"
+    )]
     pub tcp_request_total_seconds: u64,
     #[serde(default = "default_tcp_max_concurrent")]
     pub tcp_max_concurrent_requests: usize,
@@ -456,7 +445,7 @@ fn candidate_paths() -> Vec<PathBuf> {
             paths.push(PathBuf::from(trimmed));
         }
     }
-    for name in [".juicehost.toml", "juicehost.toml"] {
+    for name in [".juicehost.toml", "juicehost.toml", "config.toml"] {
         paths.push(PathBuf::from(name));
         paths.push(PathBuf::from("/etc/juicebox").join(name.trim_start_matches('.')));
     }
@@ -510,9 +499,9 @@ impl Config {
         let s3 = S3Settings::load(&file.s3)?;
         let limits = LimitsSettings::load(&file.limits)?;
         let features = FeatureSettings::load(&file.features)?;
-        let secrets = SecretSettings::load(&security);
+        let secrets = SecretSettings::load(&security)?;
         let ban = BanSettings::load(&file.ban);
-        let sentry = juicebox_config::SentrySettings::from_env_or(&file.sentry);
+        let sentry = juiceutils::config::SentrySettings::from_env_or(&file.sentry);
 
         Ok(Self {
             public_host: public.host().to_owned(),
@@ -565,7 +554,7 @@ impl Config {
     }
 
     #[must_use]
-    pub fn is_s3_mode(&self) -> bool {
+    pub const fn is_s3_mode(&self) -> bool {
         self.s3_bucket.is_some()
     }
 }
@@ -595,7 +584,6 @@ where
     Ok(value)
 }
 
-// We say thank you to orng.
 pub(crate) fn env_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
     std::env::var(name).map_or(Ok(default), |value| {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -608,8 +596,9 @@ pub(crate) fn env_bool(name: &'static str, default: bool) -> Result<bool, Config
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
+    use super::*;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -621,6 +610,7 @@ mod tests {
             "BACKEND_URL",
             "BAN_LIST_FILE",
             "BAN_SYNC_INTERVAL",
+            "BAN_SYNC_INTERVAL_SECS",
             "BAN_SYNC_URL",
             "DANGER_LEVEL",
             "DEFAULT_TTL_HOURS",
@@ -646,6 +636,7 @@ mod tests {
             "S3_ENDPOINT",
             "S3_REGION",
             "S3_SECRET_KEY",
+            "JWT_SECRET",
             "TICKET_JWT_SECRET",
             "TRUSTED_PROXY_CIDRS",
             "WORKER_THREADS",
@@ -660,6 +651,9 @@ mod tests {
     fn missing_api_key_is_optional() {
         let _guard = ENV_LOCK.lock().unwrap();
         clear_juicehost_env();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
         assert!(
             std::env::var("QUIC_MAX_CONNECTIONS").is_err(),
             "QUIC_MAX_CONNECTIONS still set: {:?}",
@@ -668,6 +662,28 @@ mod tests {
         let result = Config::from_env();
         assert!(result.is_ok(), "from_env failed: {:?}", result.err());
         assert!(result.unwrap().api_key.is_empty());
+        unsafe {
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
+    }
+
+    #[test]
+    fn missing_ticket_secret_fails_closed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_juicehost_env();
+        let result = Config::from_env();
+        assert!(
+            matches!(
+                result,
+                Err(ConfigError::MissingSecret {
+                    name: "TICKET_JWT_SECRET"
+                })
+            ),
+            "expected MissingSecret, got: {:?}",
+            result
+                .map(|cfg| cfg.ticket_jwt_secret.is_empty())
+                .map_err(|e| e.to_string())
+        );
     }
 
     #[test]
@@ -676,10 +692,14 @@ mod tests {
         clear_juicehost_env();
         unsafe {
             std::env::set_var("JUICEHOST_API_KEY", "   ");
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
         let result = Config::from_env();
         assert!(result.is_ok());
         assert!(result.unwrap().api_key.is_empty());
+        unsafe {
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
     }
 
     #[test]
@@ -718,6 +738,9 @@ mod tests {
     #[test]
     fn toml_values_flow_into_config() {
         let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
         for name in [
             "PUBLIC_HOST",
             "PUBLIC_PORT",
@@ -735,6 +758,9 @@ mod tests {
         )
         .unwrap();
         let cfg = Config::try_load_from(&file).unwrap();
+        unsafe {
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
         assert_eq!(cfg.public_host, "10.0.0.9");
         assert_eq!(cfg.public_port, 6410);
         assert!(!cfg.quick_link);

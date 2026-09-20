@@ -1,0 +1,383 @@
+---
+/**
+ * Host selector modal — rendered on the main page only.
+ * Works without JS via CSS :target; JS adds ping, status, latency,
+ * filters, sorting, and one-click host switching.
+ */
+import { iconSvgHtml } from "../lib/icons";
+import { readCookieHost } from "../lib/server-host";
+import { getOfficialNodes, getUnofficialNodes } from "../lib/hosts";
+import { resolveLocale, t } from "../i18n";
+
+const currentLocale = resolveLocale(Astro.currentLocale);
+const localePrefix = currentLocale === "en" ? "" : `/${currentLocale}`;
+const feedbackHref = `${localePrefix}/feedback`;
+
+const official = getOfficialNodes();
+const unofficial = getUnofficialNodes();
+const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
+---
+
+<div
+  id="host-selector-modal"
+  class="mdloverlay mdl-target"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="host-selector-title"
+  data-str-online={t(currentLocale, "hostsel.online")}
+  data-str-offline={t(currentLocale, "hostsel.offline")}
+  data-str-checking={t(currentLocale, "hostsel.checking")}
+  data-str-ping={t(currentLocale, "hostsel.ping")}
+  data-str-pinging={t(currentLocale, "hostsel.pinging")}
+  data-str-select={t(currentLocale, "hostsel.select")}
+  data-str-selected={t(currentLocale, "hostsel.selected")}
+  data-str-applied={t(currentLocale, "hostsel.applied")}
+>
+  <a href="#!" class="mdl-target__backdrop" aria-label={t(currentLocale, "modal.close")}></a>
+  <div class="mdlcontent mdlcontent--wide hostsel">
+    <div class="mdlheader">
+      <h2 id="host-selector-title" class="mdltitle">
+        <span set:html={iconSvgHtml("settings", 24)} class="mdltitle-icon" />
+        {t(currentLocale, "hostsel.title")}
+      </h2>
+      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+        <span set:html={iconSvgHtml("close", 24)} />
+      </a>
+    </div>
+    <div class="mdlbody hostsel__body">
+      <p class="hostsel__hint">{t(currentLocale, "hostsel.hint")}</p>
+
+      <div class="hostsel-filters" role="search">
+        <div class="form-field hostsel-filters__search">
+          <label class="form-label" for="hostsel-search">{t(currentLocale, "hostsel.search_label")}</label>
+          <input
+            id="hostsel-search"
+            type="search"
+            class="form-input"
+            data-hostsel-search=""
+            placeholder={t(currentLocale, "hostsel.search_ph")}
+            autocomplete="off"
+          />
+        </div>
+        <div class="hostsel-filters__row">
+          <label class="select-option select-option--toggle hostsel-filters__toggle">
+            <input type="checkbox" data-hostsel-online-only="" aria-label={t(currentLocale, "hostsel.online_only")} />
+            <span class="select-option__icon select-option__check" aria-hidden="true">
+              <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+              <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+            </span>
+            <span class="select-option__text">
+              <span class="select-option__label">{t(currentLocale, "hostsel.online_only")}</span>
+            </span>
+          </label>
+          <label class="hostsel-filters__sort">
+            <span class="form-label">{t(currentLocale, "hostsel.sort_label")}</span>
+            <select class="form-input" data-hostsel-sort="">
+              <option value="latency">{t(currentLocale, "hostsel.sort_latency")}</option>
+              <option value="name">{t(currentLocale, "hostsel.sort_name")}</option>
+            </select>
+          </label>
+          <button type="button" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">
+            {t(currentLocale, "hostsel.ping_all")}
+          </button>
+        </div>
+      </div>
+
+      <p class="hostsel-statusline" role="status" data-hostsel-statusline=""></p>
+
+      <section aria-labelledby="hostsel-official-title" data-hostsel-section="">
+        <h3 id="hostsel-official-title" class="hostsel__group-title">{t(currentLocale, "hostsel.official")}</h3>
+        <ul class="hostsel-list" data-hostsel-list="">
+          {official.map((n) => (
+            <li
+              class="hostsel-row"
+              data-hostsel-row=""
+              data-url={n.url}
+              data-name={n.name}
+              data-region={n.region}
+              data-official="true"
+              data-selected={n.url === savedHost ? "" : undefined}
+            >
+              <span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span>
+              <div class="hostsel-meta">
+                <span class="hostsel-name">
+                  {n.name}
+                  <span class="hostsel-current" data-hostsel-current="" hidden={n.url !== savedHost}>
+                    · {t(currentLocale, "hostsel.selected")}
+                  </span>
+                </span>
+                <span class="hostsel-url">{n.url}{n.region ? ` · ${n.region}` : ""}</span>
+                <span class="hostsel-badges" data-hostsel-badges=""></span>
+              </div>
+              <span class="hostsel-latency" data-hostsel-latency="">—</span>
+              <span class="hostsel-status" data-hostsel-status=""></span>
+              <span class="hostsel-actions">
+                <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping="">
+                  <span data-hostsel-ping-label="">{t(currentLocale, "hostsel.ping")}</span>
+                </button>
+                <button
+                  type="button"
+                  class="mdlbtn mdlbtn--primary hostsel-btn"
+                  data-hostsel-use=""
+                  disabled={n.url === savedHost}
+                >
+                  <span data-hostsel-use-label="">{n.url === savedHost ? t(currentLocale, "hostsel.selected") : t(currentLocale, "hostsel.select")}</span>
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p class="hostsel-empty" data-hostsel-empty="" hidden>{t(currentLocale, "hostsel.empty")}</p>
+        <noscript><p class="hostsel-noscript">{t(currentLocale, "hostsel.checking")}</p></noscript>
+      </section>
+
+      <section aria-labelledby="hostsel-unofficial-title" data-hostsel-section="">
+        <h3 id="hostsel-unofficial-title" class="hostsel__group-title">{t(currentLocale, "hostsel.unofficial")}</h3>
+        {unofficial.length > 0 ? (
+          <ul class="hostsel-list" data-hostsel-list="">
+            {unofficial.map((n) => (
+              <li
+                class="hostsel-row"
+                data-hostsel-row=""
+                data-url={n.url}
+                data-name={n.name}
+                data-region={n.region}
+                data-official="false"
+                data-selected={n.url === savedHost ? "" : undefined}
+              >
+                <span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span>
+                <div class="hostsel-meta">
+                  <span class="hostsel-name">
+                    {n.name}
+                    <span class="hostsel-current" data-hostsel-current="" hidden={n.url !== savedHost}>
+                      · {t(currentLocale, "hostsel.selected")}
+                    </span>
+                  </span>
+                  <span class="hostsel-url">{n.url}{n.region ? ` · ${n.region}` : ""}</span>
+                  <span class="hostsel-badges" data-hostsel-badges=""></span>
+                </div>
+                <span class="hostsel-latency" data-hostsel-latency="">—</span>
+                <span class="hostsel-status" data-hostsel-status=""></span>
+                <span class="hostsel-actions">
+                  <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping="">
+                    <span data-hostsel-ping-label="">{t(currentLocale, "hostsel.ping")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="mdlbtn mdlbtn--primary hostsel-btn"
+                    data-hostsel-use=""
+                    disabled={n.url === savedHost}
+                  >
+                    <span data-hostsel-use-label="">{n.url === savedHost ? t(currentLocale, "hostsel.selected") : t(currentLocale, "hostsel.select")}</span>
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p class="hostsel-empty" data-hostsel-empty="" hidden>{t(currentLocale, "hostsel.empty")}</p>
+        ) : (
+          <ul class="hostsel-list" data-hostsel-list=""></ul>
+          <p class="hostsel-empty" data-hostsel-empty="">{t(currentLocale, "hostsel.empty_unofficial")}</p>
+        )}
+      </section>
+
+      <div class="hostsel-add">
+        <div class="hostsel-add__text">
+          <strong>{t(currentLocale, "hostsel.add_title")}</strong>
+          <span>{t(currentLocale, "hostsel.add_desc")}</span>
+        </div>
+        <a href={feedbackHref} class="mdlbtn mdlbtn--primary">{t(currentLocale, "hostsel.add_btn")}</a>
+      </div>
+    </div>
+    <div class="mdlfooter">
+      <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { initHostSelector } from "../lib/host-selector";
+  document.addEventListener("astro:page-load", initHostSelector);
+  initHostSelector();
+</script>
+
+<style>
+  .mdlcontent--wide {
+    max-width: 760px;
+  }
+  .hostsel__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-y: auto;
+  }
+  .hostsel__hint {
+    margin: 0;
+    color: var(--juice-300);
+    font-size: 0.9rem;
+  }
+  .hostsel-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .hostsel-filters__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: end;
+  }
+  .hostsel-filters__toggle {
+    flex: 1;
+    min-width: 160px;
+  }
+  .hostsel-filters__sort {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 160px;
+  }
+  .hostsel-statusline {
+    margin: 0;
+    min-height: 1.25rem;
+    font-size: 0.8rem;
+    color: var(--juice-400);
+  }
+  .hostsel__group-title {
+    margin: 0.5rem 0;
+    font-size: 0.95rem;
+    color: var(--juice-200);
+  }
+  .hostsel-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .hostsel-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    background-color: var(--juice-800);
+    border: 1px solid var(--juice-700);
+    border-radius: 0.5rem;
+  }
+  .hostsel-row[data-selected] {
+    border-color: var(--orange-500);
+  }
+  .hostsel-dot {
+    flex-shrink: 0;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 50%;
+    background-color: var(--juice-600);
+  }
+  .hostsel-dot[data-state="checking"] {
+    background-color: var(--orange-400);
+  }
+  .hostsel-dot[data-state="online"] {
+    background-color: var(--green-500);
+  }
+  .hostsel-dot[data-state="offline"] {
+    background-color: var(--red-500);
+  }
+  .hostsel-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .hostsel-name {
+    font-weight: 600;
+    color: var(--juice-100);
+  }
+  .hostsel-current {
+    font-weight: 400;
+    font-size: 0.8rem;
+    color: var(--orange-400);
+  }
+  .hostsel-url {
+    font-size: 0.8rem;
+    color: var(--juice-400);
+    overflow-wrap: anywhere;
+  }
+  .hostsel-badges {
+    display: flex;
+    gap: 0.35rem;
+  }
+  .hostsel-badge {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background-color: var(--juice-700);
+    color: var(--juice-200);
+  }
+  .hostsel-latency {
+    flex-shrink: 0;
+    min-width: 4.5rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    color: var(--juice-200);
+  }
+  .hostsel-status {
+    flex-shrink: 0;
+    min-width: 4.5rem;
+    font-size: 0.8rem;
+    color: var(--juice-400);
+  }
+  .hostsel-actions {
+    flex-shrink: 0;
+    display: flex;
+    gap: 0.4rem;
+  }
+  .hostsel-btn {
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+  }
+  .hostsel-empty {
+    margin: 0.25rem 0;
+    font-size: 0.85rem;
+    color: var(--juice-400);
+  }
+  .hostsel-noscript {
+    font-size: 0.85rem;
+    color: var(--juice-400);
+  }
+  .hostsel-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background-color: var(--juice-800);
+    border: 1px dashed var(--juice-600);
+    border-radius: 0.5rem;
+  }
+  .hostsel-add__text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.85rem;
+    color: var(--juice-300);
+  }
+  .hostsel-add__text strong {
+    color: var(--juice-100);
+  }
+  @media (max-width: 640px) {
+    .hostsel-row {
+      flex-wrap: wrap;
+    }
+    .hostsel-actions {
+      width: 100%;
+    }
+    .hostsel-btn {
+      flex: 1;
+    }
+  }
+</style>

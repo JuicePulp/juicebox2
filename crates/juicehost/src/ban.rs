@@ -1,6 +1,5 @@
-//! optional IP banning for juicehost. the ban list lives in an in-memory
-use std::sync::Arc;
-use std::time::Duration;
+//! Optional IP banning for juicehost. The ban list lives in an in-memory
+use std::{sync::Arc, time::Duration};
 
 use thiserror::Error;
 
@@ -10,8 +9,6 @@ use crate::state::AppState;
 enum BanSyncError {
     #[error("JUICEHOST_API_KEY not set (needed to authenticate the ban sync)")]
     MissingApiKey,
-    #[error("failed to build HTTP client: {0}")]
-    Client(#[source] reqwest::Error),
     #[error("request failed: {0}")]
     Request(#[source] reqwest::Error),
     #[error("backend returned status {0}")]
@@ -25,7 +22,7 @@ enum BanSyncError {
 pub async fn refresh_ban_list(state: &Arc<AppState>) {
     if let Some(ref url) = state.ban_sync_url {
         if let Err(e) = sync_from_backend(state, url).await {
-            tracing::warn!("ban list sync from {} failed: {e}", url);
+            tracing::warn!("ban list sync from {url} failed: {e}");
         }
     }
     let pepper = state.ban_list.pepper();
@@ -35,20 +32,18 @@ pub async fn refresh_ban_list(state: &Arc<AppState>) {
 }
 
 /// Pull the latest ban hashes + pepper from a juiceback backend.
-/// There is probably a better way to do this, considering juicehost is publicly hostable.
 async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSyncError> {
     if state.api_key.is_empty() {
         return Err(BanSyncError::MissingApiKey);
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(BanSyncError::Client)?;
-
-    let resp = client
+    let resp = state
+        .backend_client
         .get(format!("{url}/internal/ban-snapshot"))
         .header("x-juicehost-api-key", &state.api_key)
+        // The shared client defaults to a 2s TTL-probe timeout; the snapshot
+        // download gets its own budget via per-request override (pooled).
+        .timeout(Duration::from_secs(10))
         .send()
         .await
         .map_err(BanSyncError::Request)?;
@@ -69,7 +64,7 @@ async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSy
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|h| h.as_str().map(|s| s.to_string()))
+                .filter_map(|h| h.as_str().map(std::string::ToString::to_string))
                 .collect()
         })
         .unwrap_or_default();
@@ -83,8 +78,6 @@ async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSy
     Ok(())
 }
 
-/// Loop that keeps the ban list fresh...
-/// It is spawned at startup.
 pub async fn ban_refresh_loop(state: Arc<AppState>) {
     let interval = state.ban_sync_interval.max(5);
 

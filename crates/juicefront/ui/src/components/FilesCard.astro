@@ -1,11 +1,11 @@
 ---
 /**
  * HTML-first files card. Server file list is rendered as native HTML cards
- * (visible without JS). JavaScript enhances by replacing static URL text
- * with copy buttons, wiring up interactive delete, and merging with localStorage.
+ * (visible without JS). JS adds copy buttons, delete handlers, and
+ * localStorage merge.
  */
 import FilesCardSolid from "./FilesCard.tsx";
-import { getRepoUrl } from "../lib/metadata";
+import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
 import { t, resolveLocale } from "../i18n";
 import type { ServerFile } from "../lib/types";
 
@@ -51,7 +51,7 @@ const {
     locale: localeProp,
     title = t(locale, "files.fallback_title"),
     subtitle = t(locale, "files.fallback_subtitle"),
-    footerCommit = "main@a3f8c2d",
+    footerCommit = getFormattedCommitLabel(),
     footerMessage = "juicebox2-epsilon",
     footerRepoUrl = getRepoUrl(),
     footerLinks = [],

@@ -1,4 +1,8 @@
-/** Upload configuration constants. */
+/**
+ * Central upload tunables and endpoint URLs. Chunk sizes adapt at runtime
+ * (see upload-engine.ts); the *_URL constants are the only place backend
+ * route paths are composed with a base.
+ */
 export const UPLOAD_URL = import.meta.env.PUBLIC_API_URL || "";
 
 /** Read max file size in bytes from the server config embedded in the DOM. */
@@ -68,7 +72,7 @@ export const TUS_MAX_PARTS = 32;
 export const PIPELINE_WINDOW = 2;
 
 /** Last measured aggregate upload rate (bytes/sec), persisted between
- * uploads so stream count starts near-optimal instead of guessing. */
+ * uploads so the next upload picks a starting stream count from it. */
 export const LAST_SPEED_KEY = "juicebox_last_upload_bps";
 
 /** Realtime stream tuner cadence: aggregate throughput is sampled every
@@ -114,7 +118,7 @@ export function detectNetTier(): NetTier {
     ).connection;
     if (!c) return "wifi";
     if (c.saveData) return "cellular";
-    // Quality first: effectiveType is measured, not claimed.
+    // Trust measured effectiveType over the claimed type.
     if (
       c.effectiveType === "slow-2g" ||
       c.effectiveType === "2g" ||

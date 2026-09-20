@@ -1,5 +1,3 @@
-//! Library modules for juicehost.
-
 pub mod api_doc;
 pub mod ban;
 pub mod config;

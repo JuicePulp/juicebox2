@@ -10,3 +10,7 @@
 !/LICENSE
 !/rustfmt.toml
 !/deny.toml
+!/juiceback.toml.example
+!/juicehost.toml.example
+!/juicefront.toml.example
+!/.env.example

@@ -1,7 +1,6 @@
 import { onMount, onCleanup } from "solid-js";
 import { t, type Locale } from "../i18n";
-import { formatSize, iconForMime, iconHTML, announce } from "../lib/format";
-import { iconSvgHtml } from "../lib/icons";
+import { formatSize, iconForMime, iconHTML, announce, makeCopyBar, type CopyBarStrings } from "../lib/format";
 import {
   UPLOAD_URL,
   readMaxFileSize,
@@ -9,6 +8,7 @@ import {
   ULTRAFAST_RESERVE_URL,
 } from "../lib/upload-config";
 import { vanityMsg } from "../lib/errors";
+import { apiFetch, apiFetchJob, publicFileInfo } from "../lib/api";
 import { enhanceRetention, rebuildRetention } from "../lib/enhance-retention";
 import {
   enhanceHostSelector,
@@ -47,26 +47,13 @@ function autoCopyUrl(url: string, copyBar?: HTMLElement | null) {
   );
 }
 
-function makeCopyBarNode(url: string, locale: Locale): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "copy-bar";
-  btn.title = t(locale, "upload.copy_bar_title");
-  btn.setAttribute("aria-label", t(locale, "upload.copy_bar_aria"));
-  btn.innerHTML =
-    `<div class="copy-bar__text-wrapper"><span class="copy-bar__copied-text">${t(locale, "upload.copy_bar_copied")}</span><span class="copy-bar__url"></span></div>` +
-    iconSvgHtml("copy", 24, "copy-bar__copy-icon");
-  const urlEl = btn.querySelector(".copy-bar__url");
-  if (urlEl) urlEl.textContent = url;
-  btn.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      btn.classList.add("copy-bar--copied");
-      announce(t(locale, "upload.copy_bar_announce"));
-      setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
-    } catch {}
-  });
-  return btn;
+function copyBarStrings(locale: Locale): CopyBarStrings {
+  return {
+    title: t(locale, "upload.copy_bar_title"),
+    aria: t(locale, "upload.copy_bar_aria"),
+    copied: t(locale, "upload.copy_bar_copied"),
+    announceMsg: t(locale, "upload.copy_bar_announce"),
+  };
 }
 
 export default function UploadCard(props: { uploadedFile?: string | null; locale?: Locale }) {
@@ -224,7 +211,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     if (!item.reserveUrl || row.hasAttribute("data-quick-link")) return;
     if (item.state === "done") return;
     row.setAttribute("data-quick-link", "");
-    getRowParts(row).pill.after(makeCopyBarNode(item.reserveUrl, locale()));
+    getRowParts(row).pill.after(makeCopyBar(item.reserveUrl, copyBarStrings(locale())));
   }
 
   function completeRow(item: UploadItem, row: HTMLElement) {
@@ -244,9 +231,9 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     const existingCopyBar = pill.nextElementSibling;
     let copyBar: HTMLElement | null;
     if (existingCopyBar?.classList.contains("copy-bar")) {
-      existingCopyBar.replaceWith(makeCopyBarNode(item.url || "", locale()));
+      existingCopyBar.replaceWith(makeCopyBar(item.url || "", copyBarStrings(locale())));
     } else {
-      pill.after(makeCopyBarNode(item.url || "", locale()));
+      pill.after(makeCopyBar(item.url || "", copyBarStrings(locale())));
     }
     copyBar = pill.nextElementSibling as HTMLElement | null;
 
@@ -410,7 +397,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       // Show shareable URL immediately if available
       if (reserveUrl) {
         item.setAttribute("data-quick-link", "");
-        pill.after(makeCopyBarNode(reserveUrl, locale()));
+        pill.after(makeCopyBar(reserveUrl, copyBarStrings(locale())));
       }
 
       fill.style.setProperty("--progress", "0%");
@@ -517,7 +504,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
 
       if (reserveUrl) {
         item.setAttribute("data-quick-link", "");
-        pill.after(makeCopyBarNode(reserveUrl, locale()));
+        pill.after(makeCopyBar(reserveUrl, copyBarStrings(locale())));
       }
 
       fill.style.setProperty("--progress", "0%");
@@ -544,15 +531,19 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     deleteToken: string,
   ) {
     const INTERVAL = 1000;
+    const HIDDEN_INTERVAL = 5000;
     const MAX_ATTEMPTS = 150; // 5 minutes max
     let attempts = 0;
+
+    const nextDelay = () =>
+      typeof document !== "undefined" && document.hidden ? HIDDEN_INTERVAL : INTERVAL;
 
     const poll = async () => {
       if (attempts++ >= MAX_ATTEMPTS || !item.isConnected) return;
       try {
-        const res = await fetch(`${UPLOAD_URL}/file/${fileId}/info?t=${Date.now()}`);
+        const res = await fetch(`${UPLOAD_URL}${publicFileInfo(fileId)}?t=${Date.now()}`);
         if (!res.ok) {
-          setTimeout(poll, INTERVAL);
+          setTimeout(poll, nextDelay());
           return;
         }
         const data = await res.json();
@@ -584,9 +575,9 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
           // Show copy bar
           const existingCopyBar = pill.nextElementSibling;
           if (existingCopyBar?.classList.contains("copy-bar")) {
-            existingCopyBar.replaceWith(makeCopyBarNode(realUrl, locale()));
+            existingCopyBar.replaceWith(makeCopyBar(realUrl, copyBarStrings(locale())));
           } else {
-            pill.after(makeCopyBarNode(realUrl, locale()));
+            pill.after(makeCopyBar(realUrl, copyBarStrings(locale())));
           }
           pill.style.display = "none";
           const copyBar = pill.nextElementSibling as HTMLElement | null;
@@ -634,12 +625,12 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
           autoCopyUrl(realUrl, copyBar);
           return;
         }
-        setTimeout(poll, INTERVAL);
+        setTimeout(poll, nextDelay());
       } catch {
-        setTimeout(poll, INTERVAL);
+        setTimeout(poll, nextDelay());
       }
     };
-    setTimeout(poll, INTERVAL);
+    setTimeout(poll, nextDelay());
   }
 
   /** Queue a cobalt fetch job and poll it like a regular upload row. */
@@ -696,7 +687,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     )?.value;
     const betterAudio = audioQualityMode === "enhanced";
 
-    fetch(`${UPLOAD_URL}/api/fetch`, {
+    fetch(`${UPLOAD_URL}${apiFetch}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -739,21 +730,25 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     pill: HTMLElement,
   ) {
     const INTERVAL = 1000;
+    const HIDDEN_INTERVAL = 5000;
     const MAX_ATTEMPTS = 900; // matches the server-side 30 min job timeout
     let attempts = 0;
+
+    const nextDelay = () =>
+      typeof document !== "undefined" && document.hidden ? HIDDEN_INTERVAL : INTERVAL;
 
     const poll = async () => {
       if (attempts++ >= MAX_ATTEMPTS || !item.isConnected) return;
       try {
         const res = await fetch(
-          `${UPLOAD_URL}/api/fetch/${jobId}?t=${Date.now()}`,
+          `${UPLOAD_URL}${apiFetchJob(jobId)}?t=${Date.now()}`,
         );
         if (res.status === 404) {
           failItem(item, pill, fill, status, undefined, t(locale(), "upload.cobalt_gone"));
           return;
         }
         if (!res.ok) {
-          setTimeout(poll, INTERVAL);
+          setTimeout(poll, nextDelay());
           return;
         }
         const data = await res.json();
@@ -777,12 +772,12 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
         } else if (data.status !== "pending") {
           status.textContent = t(locale(), "upload.cobalt_fetching");
         }
-        setTimeout(poll, INTERVAL);
+        setTimeout(poll, nextDelay());
       } catch {
-        setTimeout(poll, INTERVAL);
+        setTimeout(poll, nextDelay());
       }
     };
-    setTimeout(poll, INTERVAL);
+    setTimeout(poll, nextDelay());
   }
 
   function completeCobaltRow(
@@ -820,7 +815,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     // Mirror the upload completion styling exactly.
     pill.querySelector(".spinner")?.remove();
     pill.style.display = "none";
-    pill.after(makeCopyBarNode(file.url, locale()));
+    pill.after(makeCopyBar(file.url, copyBarStrings(locale())));
     const copyBar = pill.nextElementSibling as HTMLElement | null;
     if (copyBar?.classList.contains("copy-bar")) {
       copyBar.style.marginTop = "0.75rem";
@@ -959,7 +954,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     item.querySelector(".file-size")!.textContent = formatSize(data.size_bytes);
     if (data.id) item.setAttribute("data-file-id", data.id);
     const actionArea = item.querySelector(".file-action-area")!;
-    actionArea.appendChild(makeCopyBarNode(data.url, locale()));
+    actionArea.appendChild(makeCopyBar(data.url, copyBarStrings(locale())));
     if (data.id && data.delete_token) {
       actionArea.appendChild(
         createDeleteButton({
@@ -982,7 +977,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       const url = item.getAttribute("data-url") || "";
 
       const link = item.querySelector(".file-card-link");
-      if (link) link.replaceWith(makeCopyBarNode(url, locale()));
+      if (link) link.replaceWith(makeCopyBar(url, copyBarStrings(locale())));
 
       const noscript = item.querySelector("noscript");
       if (noscript) {
@@ -1022,7 +1017,6 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       const uploads = getUploads();
       const present = new Map(uploads.map((u) => [u.id, u]));
 
-      // We remove the GENUINE ones for fucks sake.
       const removed = [...prevSeen.entries()]
         .filter(([id, _]) => !present.has(id) && wasRemoved(id))
         .map(([, it]) => it);

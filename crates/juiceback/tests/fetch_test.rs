@@ -1,122 +1,25 @@
-use axum::body::Body;
-use axum::extract::connect_info::MockConnectInfo;
-use axum::http::{Request, StatusCode};
-use serde_json::{Value, json};
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use tower::ServiceExt;
-use wiremock::matchers::{body_partial_json, header, method, path, path_regex};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+mod common;
 
-use juiceback::config::Config;
-use juiceback::routes::build_router;
-use juiceback::state::AppState;
+use std::{sync::Arc, time::Duration};
+
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use juiceback::{config::Config, state::AppState};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{body_partial_json, header, method, path, path_regex},
+};
 
 fn test_config(cobalt_api_url: String) -> Config {
-    test_config_with_session(cobalt_api_url, None, None)
-}
-
-fn test_config_with_session(
-    cobalt_api_url: String,
-    session_api_url: Option<String>,
-    session_api_key: Option<String>,
-) -> Config {
-    test_config_with_delay(cobalt_api_url, session_api_url, session_api_key, 1)
-}
-
-fn test_config_with_delay(
-    cobalt_api_url: String,
-    session_api_url: Option<String>,
-    session_api_key: Option<String>,
-    delay: u64,
-) -> Config {
-    Config {
-        host: "127.0.0.1".into(),
-        port: 6401,
-        quic_port: 6402,
-        database_path: ":memory:".into(),
-        rate_limit_per_minute: 100,
-        db_pool_size: 1,
-        public_base_url: "http://localhost:6402".into(),
-        log_level: "info".into(),
-        cleanup_interval_minutes: 30,
-        juicehost_api_key: "test-key".into(),
-        // juicehost lives on the same mock server as cobalt here.
-        juicehost_url: cobalt_api_url.clone(),
-        public_juicehost_url: "http://localhost:6402".into(),
-        juiceback_origin: "http://127.0.0.1:6401".into(),
-        jwt_secret: "test-secret".into(),
-        cors_origins: vec![],
-        report_webhook_url: None,
-        smtp_host: None,
-        smtp_port: None,
-        smtp_username: None,
-        smtp_password: None,
-        report_email_recipient: None,
-        report_email_sender: None,
-        quic_cert_path: None,
-        ip_encryption_key: "0000000000000000000000000000000000000000000000000000000000000001"
-            .into(),
-        ip_pepper: "test_pepper".into(),
-        trusted_proxy_cidrs: vec![],
-        report_retention_days: 90,
-        feedback_retention_days: 90,
-        cf_api_token: None,
-        cf_zone_id: None,
-        ticket_jwt_secret: "secret".into(),
-        secure_cookies: false,
-        direct_upload_enabled: false,
-        cobalt_enabled: true,
-        cobalt_api_url,
-        cobalt_api_key: "cobalt_key".into(),
-        cobalt_session_api_url: session_api_url,
-        cobalt_session_api_key: session_api_key,
-        fetch_empty_retry_delay_secs: delay,
-        dte_enabled: false,
-        dte_assumed_bps: juiceback::constants::DTE_ASSUMED_BPS,
-        dte_safety_mult: juiceback::constants::DTE_SAFETY_MULT,
-        dte_base_overhead_secs: juiceback::constants::DTE_BASE_OVERHEAD_SECS,
-        dte_min_ttl_secs: juiceback::constants::DTE_MIN_TTL_SECS,
-        dte_max_ttl_secs: juiceback::constants::DTE_MAX_TTL_SECS,
-        dte_mint_limit: juiceback::constants::DTE_MINT_LIMIT,
-        dte_mint_window_secs: juiceback::constants::DTE_MINT_WINDOW_SECS,
-        dte_mint_burst: juiceback::constants::DTE_MINT_BURST,
-        region_public_juicehosts: std::collections::HashMap::new(),
-    }
-}
-
-fn test_jh_config() -> juiceback::juicehost::JuicehostConfig {
-    juiceback::juicehost::JuicehostConfig {
-        max_file_size_bytes: 524288000,
-        default_ttl_hours: 72.0,
-        allowed_ttl_hours: vec![0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0],
-        danger_level: juiceback::file_validation::ProtectionLevel::High,
-        quick_link: false,
-        custom_id_enabled: true,
-        ultrafast: false,
-    }
+    common::fetch_config_with_delay(cobalt_api_url, None, None, 1)
 }
 
 fn test_state(cobalt_api_url: String) -> Arc<AppState> {
-    let config = test_config(cobalt_api_url);
-    state_from_config(config)
-}
-
-fn state_from_config(config: Config) -> Arc<AppState> {
-    let manager = r2d2_sqlite::SqliteConnectionManager::memory();
-    let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
-    juiceback::db::init_db(&pool.get().unwrap()).unwrap();
-
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("x-juicehost-api-key", "test-key".parse().unwrap());
-    let http = reqwest::Client::new();
-
-    AppState::new(pool, config, http, headers, Some(test_jh_config()))
-}
-
-fn app(state: Arc<AppState>) -> axum::Router {
-    build_router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))))
+    common::state_from_config(test_config(cobalt_api_url))
 }
 
 /// Extract the anon-session cookie pair from a response's Set-Cookie header
@@ -153,7 +56,7 @@ async fn post_fetch(
 }
 
 async fn get_fetch(app: &axum::Router, job_id: &str, cookie: Option<&str>) -> (StatusCode, Value) {
-    let mut builder = Request::builder().uri(format!("/api/fetch/{}", job_id));
+    let mut builder = Request::builder().uri(format!("/api/fetch/{job_id}"));
     if let Some(cookie) = cookie {
         builder = builder.header("cookie", cookie);
     }
@@ -175,20 +78,19 @@ async fn wait_for_completion(app: &axum::Router, job_id: &str, cookie: &str) -> 
     for _ in 0..400 {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let (status, body) = get_fetch(app, job_id, Some(cookie)).await;
-        assert_eq!(status, StatusCode::OK, "status poll failed: {}", body);
+        assert_eq!(status, StatusCode::OK, "status poll failed: {body}");
         assert_eq!(body["job_id"], *job_id);
         if body["status"] == "done" || body["status"] == "failed" {
             return body;
         }
     }
-    panic!("job {} did not complete in time", job_id);
+    panic!("job {job_id} did not complete in time");
 }
 
 #[tokio::test]
 async fn full_tunnel_flow_stores_file_and_links_owner() {
     let server = MockServer::start().await;
 
-    // cobalt API: authenticated POST / returning a tunnel response
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key cobalt_key"))
@@ -206,14 +108,12 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
         .mount(&server)
         .await;
 
-    // cobalt tunnel endpoint serving the actual media bytes
     Mock::given(method("GET"))
         .and(path("/tunnel"))
         .respond_with(ResponseTemplate::new(200).set_body_string("fake-mp4-bytes"))
         .mount(&server)
         .await;
 
-    // juicehost internal stream endpoint receiving the pushed file
     Mock::given(method("POST"))
         .and(path_regex(
             r"^/internal/file/stream/[A-Za-z0-9_-]+/funny%20cat%20video%2Emp4$",
@@ -223,16 +123,16 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
         .mount(&server)
         .await;
 
-    let app = app(test_state(server.uri()));
+    let app = common::mock_router(test_state(server.uri()));
 
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/dQw4w9WgXcQ" }), None).await;
-    assert_eq!(status, StatusCode::OK, "start failed: {}", body);
+    assert_eq!(status, StatusCode::OK, "start failed: {body}");
     let job_id = body["job_id"].as_str().expect("job_id").to_string();
     let cookie = cookie.expect("session cookie");
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
-    assert_eq!(result["status"], "done", "job failed: {}", result);
+    assert_eq!(result["status"], "done", "job failed: {result}");
     let file = &result["file"];
     assert_eq!(file["mime_type"], "video/mp4");
     assert_eq!(file["size_bytes"], 14); // len("fake-mp4-bytes")
@@ -244,7 +144,6 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
     );
     assert!(!file["delete_token"].as_str().unwrap().is_empty());
 
-    // Ownership: without the session cookie we are a different anon user.
     let (status, _) = get_fetch(&app, &job_id, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -283,7 +182,7 @@ async fn audio_only_request_uses_audio_mode_and_mime() {
         .mount(&server)
         .await;
 
-    let app = app(test_state(server.uri()));
+    let app = common::mock_router(test_state(server.uri()));
 
     let (status, start, cookie) = post_fetch(
         &app,
@@ -297,10 +196,10 @@ async fn audio_only_request_uses_audio_mode_and_mime() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{}", start);
+    assert_eq!(status, StatusCode::OK, "{start}");
     let result =
         wait_for_completion(&app, start["job_id"].as_str().unwrap(), &cookie.unwrap()).await;
-    assert_eq!(result["status"], "done", "{}", result);
+    assert_eq!(result["status"], "done", "{result}");
     assert_eq!(result["file"]["mime_type"], "audio/ogg");
 }
 
@@ -317,7 +216,7 @@ async fn cobalt_error_becomes_friendly_failure() {
         .mount(&server)
         .await;
 
-    let app = app(test_state(server.uri()));
+    let app = common::mock_router(test_state(server.uri()));
 
     let (_, start, cookie) =
         post_fetch(&app, json!({ "url": "https://example.com/x" }), None).await;
@@ -352,25 +251,13 @@ async fn oversized_stream_is_rejected() {
         .mount(&server)
         .await;
 
-    // Tiny 8-byte ceiling: the known content-length trips the early check.
-    let jh = juiceback::juicehost::JuicehostConfig {
+    let jh = juiceback::storage_client::JuicehostConfig {
         max_file_size_bytes: 8,
-        ..test_jh_config()
+        ..common::test_jh_config()
     };
     let config = test_config(server.uri());
-    let pool = r2d2::Pool::builder()
-        .max_size(1)
-        .build(r2d2_sqlite::SqliteConnectionManager::memory())
-        .unwrap();
-    juiceback::db::init_db(&pool.get().unwrap()).unwrap();
-    let state = AppState::new(
-        pool,
-        config,
-        reqwest::Client::new(),
-        reqwest::header::HeaderMap::new(),
-        Some(jh),
-    );
-    let app = app(state);
+    let state = common::state_from_config_with_jh(config, jh);
+    let app = common::mock_router(state);
 
     let (_, start, cookie) =
         post_fetch(&app, json!({ "url": "https://example.com/big" }), None).await;
@@ -394,24 +281,12 @@ async fn disabled_feature_returns_not_found() {
         c.cobalt_enabled = false;
         c
     };
-    let pool = r2d2::Pool::builder()
-        .max_size(1)
-        .build(r2d2_sqlite::SqliteConnectionManager::memory())
-        .unwrap();
-    juiceback::db::init_db(&pool.get().unwrap()).unwrap();
-    let disabled_state = AppState::new(
-        pool,
-        config,
-        reqwest::Client::new(),
-        reqwest::header::HeaderMap::new(),
-        Some(test_jh_config()),
-    );
-    let app = app(disabled_state);
+    let disabled_state = common::state_from_config(config);
+    let app = common::mock_router(disabled_state);
 
     let (status, _, _) = post_fetch(&app, json!({ "url": "https://youtu.be/x" }), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // Status endpoint for a nonexistent job is also 404.
     let (status, _) = get_fetch(&app, "nope", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -419,17 +294,18 @@ async fn disabled_feature_returns_not_found() {
 #[tokio::test]
 async fn unsafe_urls_are_rejected_up_front() {
     // Fresh router per URL so the 3/min governor never interferes.
+    // Network-private URLs are covered by the unit tests with the SSRF
+    // policy enforced; the test config permits loopback (wiremock), so
+    // only scheme/credential/shape rejections are asserted here.
     for url in [
-        "http://127.0.0.1:7272/session",
-        "http://192.168.0.5/video",
-        "https://localhost/x",
         "ftp://example.com/f",
         "javascript:alert(1)",
+        "https://u:p@example.com/",
         "",
     ] {
-        let app = app(test_state("http://127.0.0.1:1".into()));
+        let app = common::mock_router(test_state("http://127.0.0.1:1".into()));
         let (status, body, _) = post_fetch(&app, json!({ "url": url }), None).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "accepted {:?}", url);
+        assert_eq!(status, StatusCode::BAD_REQUEST, "accepted {url:?}");
         assert_eq!(body["error"], "BAD_REQUEST");
     }
 }
@@ -448,8 +324,7 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         .mount(&server)
         .await;
 
-    // 200 OK but zero bytes — some youtube videos do this with certain
-    // quality/codec picks.
+    // 200 OK with zero bytes happens on some YouTube quality/codec picks.
     Mock::given(method("GET"))
         .and(path("/empty-media"))
         .respond_with(
@@ -468,16 +343,14 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         .mount(&server)
         .await;
 
-    // delay=0: single-shot semantics for this test (no rescue loop).
-    let config = test_config_with_delay(server.uri(), None, None, 0);
-    let app = app(state_from_config(config));
+    let config = common::fetch_config_with_delay(server.uri(), None, None, 0);
+    let app = common::mock_router(common::state_from_config(config));
 
     let (_, start, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/weird" }), None).await;
     let result =
         wait_for_completion(&app, start["job_id"].as_str().unwrap(), &cookie.unwrap()).await;
     assert_eq!(result["status"], "failed");
-    // youtube link: message must explain the streaming-token enforcement
     assert!(
         result["error"]
             .as_str()
@@ -488,7 +361,7 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
 
 #[tokio::test]
 async fn fetch_start_is_rate_limited_to_three_per_minute() {
-    let app = app(test_state("http://127.0.0.1:1".into())); // cobalt unreachable; fine
+    let app = common::mock_router(test_state("http://127.0.0.1:1".into())); // cobalt unreachable; fine
 
     let mut last = None;
     for i in 0..5 {
@@ -506,7 +379,7 @@ async fn fetch_start_is_rate_limited_to_three_per_minute() {
     assert_eq!(last, Some(StatusCode::TOO_MANY_REQUESTS));
 }
 
-/// When the primary (sessionless) cobalt instance refuses a YouTube link at
+/// When the primary (sessionless) cobalt instance refuses a `YouTube` link at
 /// client level, juiceback must retry against the configured session-enabled
 /// instance and serve its tunnel result.
 #[tokio::test]
@@ -514,7 +387,6 @@ async fn unavailable_from_primary_retries_session_instance() {
     let primary = MockServer::start().await;
     let session = MockServer::start().await;
 
-    // Primary: authenticated, but refuses the link at client level.
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key cobalt_key"))
@@ -525,7 +397,6 @@ async fn unavailable_from_primary_retries_session_instance() {
         .mount(&primary)
         .await;
 
-    // Session instance: same link succeeds behind session auth.
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key session_key"))
@@ -553,22 +424,22 @@ async fn unavailable_from_primary_retries_session_instance() {
         .mount(&primary)
         .await;
 
-    let config = test_config_with_delay(
+    let config = common::fetch_config_with_delay(
         primary.uri(),
         Some(session.uri()),
         Some("session_key".into()),
         1,
     );
-    let app = app(state_from_config(config));
+    let app = common::mock_router(common::state_from_config(config));
 
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/rare" }), None).await;
-    assert_eq!(status, StatusCode::OK, "start failed: {}", body);
+    assert_eq!(status, StatusCode::OK, "start failed: {body}");
     let job_id = body["job_id"].as_str().expect("job_id").to_string();
     let cookie = cookie.expect("session cookie");
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
-    assert_eq!(result["status"], "done", "job failed: {}", result);
+    assert_eq!(result["status"], "done", "job failed: {result}");
     assert_eq!(result["file"]["size_bytes"], 13); // len("session-bytes")
 }
 
@@ -585,7 +456,7 @@ async fn unavailable_without_session_config_fails_friendly() {
         .mount(&server)
         .await;
 
-    let app = app(test_state(server.uri()));
+    let app = common::mock_router(test_state(server.uri()));
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/rare" }), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -622,12 +493,12 @@ async fn non_youtube_unavailable_does_not_retry_session_instance() {
         .mount(&session)
         .await;
 
-    let config = test_config_with_session(
+    let config = common::fetch_config_with_session(
         primary.uri(),
         Some(session.uri()),
         Some("session_key".into()),
     );
-    let app = app(state_from_config(config));
+    let app = common::mock_router(common::state_from_config(config));
 
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://vimeo.com/locked" }), None).await;
@@ -646,7 +517,6 @@ async fn empty_stream_from_primary_retries_session_instance() {
     let primary = MockServer::start().await;
     let session = MockServer::start().await;
 
-    // Primary: accepts the link but its tunnel serves zero bytes.
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key cobalt_key"))
@@ -668,7 +538,6 @@ async fn empty_stream_from_primary_retries_session_instance() {
         .mount(&primary)
         .await;
 
-    // Session instance: patched with per-video PO tokens; serves bytes.
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key session_key"))
@@ -696,22 +565,22 @@ async fn empty_stream_from_primary_retries_session_instance() {
         .mount(&primary)
         .await;
 
-    let config = test_config_with_delay(
+    let config = common::fetch_config_with_delay(
         primary.uri(),
         Some(session.uri()),
         Some("session_key".into()),
         1,
     );
-    let app = app(state_from_config(config));
+    let app = common::mock_router(common::state_from_config(config));
 
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/enforced" }), None).await;
-    assert_eq!(status, StatusCode::OK, "start failed: {}", body);
+    assert_eq!(status, StatusCode::OK, "start failed: {body}");
     let job_id = body["job_id"].as_str().expect("job_id").to_string();
     let cookie = cookie.expect("session cookie");
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
-    assert_eq!(result["status"], "done", "job failed: {}", result);
+    assert_eq!(result["status"], "done", "job failed: {result}");
     assert_eq!(result["file"]["size_bytes"], 15); // len("real-bytes-here")
 }
 
@@ -733,7 +602,6 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.stage, "");
     assert_eq!(job.bytes_received, 0);
 
-    // processing tick
     juiceback::db::update_fetch_job_progress(&conn, "job1", "cobalt", "processing", 0).unwrap();
     let job = juiceback::db::get_fetch_job(&conn, "job1")
         .unwrap()
@@ -741,7 +609,6 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.status, "processing");
     assert_eq!(job.stage, "cobalt");
 
-    // downloading ticks with growing byte count
     juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 512)
         .unwrap();
     juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 4096)
@@ -764,7 +631,6 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.status, "done");
     assert_eq!(job.file_id, "file1");
 
-    // terminal state is immutable: late tasks can't overwrite it.
     juiceback::db::update_fetch_job_progress(&conn, "job1", "late", "downloading", 1).unwrap();
     let job = juiceback::db::get_fetch_job(&conn, "job1")
         .unwrap()
@@ -785,15 +651,13 @@ async fn empty_stream_retries_primary_after_delay() {
     let calls = std::sync::Arc::new(calls_counter);
     let base = server.uri();
 
-    // Cobalt call #1: tunnel that serves zero bytes (enforcement window).
-    // Calls #2+: tunnel serving real bytes once the block clears.
     let calls_a = std::sync::Arc::clone(&calls);
     Mock::given(method("POST"))
         .and(path("/"))
         .and(header("authorization", "Api-Key cobalt_key"))
         .respond_with(move |_req: &wiremock::Request| {
             let n = calls_a.fetch_add(1, Ordering::SeqCst);
-            eprintln!("[dbg-mock] cobalt POST #{}", n);
+            eprintln!("[dbg-mock] cobalt POST #{n}");
             if n == 0 {
                 ResponseTemplate::new(200).set_body_json(json!({
                     "status": "tunnel",
@@ -835,7 +699,7 @@ async fn empty_stream_retries_primary_after_delay() {
         .mount(&server)
         .await;
 
-    let app = app(test_state(server.uri()));
+    let app = common::mock_router(test_state(server.uri()));
 
     let (status, body, cookie) =
         post_fetch(&app, json!({ "url": "https://youtu.be/flaky" }), None).await;
@@ -844,9 +708,8 @@ async fn empty_stream_retries_primary_after_delay() {
     let cookie = cookie.unwrap();
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
-    assert_eq!(result["status"], "done", "job failed: {}", result);
+    assert_eq!(result["status"], "done", "job failed: {result}");
     assert_eq!(result["file"]["size_bytes"], 15); // len("recovered-bytes")
-    // expectation verified when the mock server drops at test end
 }
 
 /// The yt-dlp fallback invocation must carry proxy + PO provider wiring and

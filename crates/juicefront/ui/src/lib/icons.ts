@@ -1,5 +1,5 @@
 /**
- * Icon library -- loaded from public/icons/*.svg at build time via Vite glob import.
+ * Icon library: loaded from public/icons/*.svg at build time via Vite glob import.
  *
  * All icons use `fill="currentColor"` so they inherit the CSS `color` of
  * their parent element.  Render with `shape-rendering: crispEdges` to

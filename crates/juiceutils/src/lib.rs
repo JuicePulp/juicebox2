@@ -1,8 +1,12 @@
 //! Shared QUIC/HTTP/3, ban-list, and file-validation utilities.
 
 pub mod ban;
+pub mod config;
 pub mod file_validation;
+pub mod ids;
+pub mod ip_crypt;
 pub mod proxy;
+pub mod urls;
 
 #[cfg(feature = "quic")]
 pub mod server;
@@ -14,6 +18,7 @@ pub use server::{
 };
 
 /// Compare secret contents without early exit.
+#[must_use]
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     let max_len = a.len().max(b.len());
@@ -27,6 +32,7 @@ pub fn constant_time_eq(a: &str, b: &str) -> bool {
 }
 
 /// Extract a single bearer token from the Authorization header.
+#[must_use]
 pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     let auth = headers.get("authorization")?.to_str().ok()?;
     let mut parts = auth.split_whitespace();
@@ -40,6 +46,10 @@ pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
 }
 
 /// Wait for Ctrl+C or SIGTERM.
+///
+/// # Panics
+///
+/// Panics if the OS signal handlers cannot be installed.
 pub async fn shutdown_signal(service_name: &str) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -59,11 +69,11 @@ pub async fn shutdown_signal(service_name: &str) {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {
-            tracing::info!("{} shutting down...", service_name);
+        () = ctrl_c => {
+            tracing::info!("{service_name} shutting down...");
         },
-        _ = terminate => {
-            tracing::info!("{} terminated...", service_name);
+        () = terminate => {
+            tracing::info!("{service_name} terminated...");
         },
     }
 }

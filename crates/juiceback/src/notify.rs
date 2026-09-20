@@ -1,9 +1,7 @@
 //! notification system for reports (discord webhook + SMTP email).
-//! sends pings when someone reports something. very important stuff
-// Harshy tested, if you read this please test it.
-use crate::config::Config;
-use crate::state::AppState;
-use std::sync::Arc;
+use std::{fmt::Write as _, sync::Arc};
+
+use crate::{config::Config, state::AppState};
 
 pub fn dispatch_report_notifications(
     state: &Arc<AppState>,
@@ -19,61 +17,62 @@ pub fn dispatch_report_notifications(
         let file_url = file_url.to_string();
         let reason = reason.to_string();
         let details = details.to_string();
-        let ip = reporter_ip.map(|s| s.to_string());
+        let ip = reporter_ip.map(ToString::to_string);
         tokio::spawn(async move {
             let Ok(_permit) = semaphore.acquire_owned().await else {
                 return;
             };
             if let Err(e) = send_webhook(&url, &file_url, &reason, &details, ip.as_deref()).await {
-                tracing::warn!("webhook notification failed: {}", e);
+                tracing::warn!("webhook notification failed: {e}");
             }
         });
     }
 
-    if let Some(ref recipient) = config.report_email_recipient {
-        if let (Some(host), Some(sender)) = (&config.smtp_host, &config.report_email_sender) {
-            let semaphore = state.notification_semaphore.clone();
-            let host = host.clone();
-            let port = config.smtp_port.unwrap_or(465);
-            let username = config.smtp_username.clone();
-            let password = config.smtp_password.clone();
-            let recipient = recipient.clone();
-            let sender = sender.clone();
-            let file_url = file_url.to_string();
-            let reason = reason.to_string();
-            let details = details.to_string();
-            let ip = reporter_ip.map(|s| s.to_string());
-            tokio::spawn(async move {
-                let Ok(_permit) = semaphore.acquire_owned().await else {
-                    return;
-                };
-                let mut body = format!("Report submitted for: {}\nReason: {}", file_url, reason);
-                if !details.is_empty() {
-                    body.push_str(&format!("\nDetails: {}", details));
-                }
-                if let Some(ref ip) = ip {
-                    body.push_str(&format!("\nReporter (hashed): {}", ip));
-                }
-                if let Err(e) = send_smtp_email(
-                    &host,
-                    port,
-                    username.as_deref(),
-                    password.as_deref(),
-                    &sender,
-                    &recipient,
-                    &format!("Juicebox Report: {}", reason),
-                    &body,
-                )
-                .await
-                {
-                    tracing::warn!("email notification failed: {}", e);
-                }
-            });
-        }
+    if let Some(ref recipient) = config.report_email_recipient
+        && let (Some(host), Some(sender)) = (&config.smtp_host, &config.report_email_sender)
+    {
+        let semaphore = state.notification_semaphore.clone();
+        let host = host.clone();
+        let port = config.smtp_port.unwrap_or(465);
+        let username = config.smtp_username.clone();
+        let password = config.smtp_password.clone();
+        let recipient = recipient.clone();
+        let sender = sender.clone();
+        let file_url = file_url.to_string();
+        let reason = reason.to_string();
+        let details = details.to_string();
+        let ip = reporter_ip.map(ToString::to_string);
+        tokio::spawn(async move {
+            let Ok(_permit) = semaphore.acquire_owned().await else {
+                return;
+            };
+            let mut body = format!("Report submitted for: {file_url}\nReason: {reason}");
+            if !details.is_empty() {
+                let _ = write!(body, "\nDetails: {details}");
+            }
+            if let Some(ref ip) = ip {
+                let _ = write!(body, "\nReporter (hashed): {ip}");
+            }
+            if let Err(e) = send_smtp_email(
+                &host,
+                port,
+                username.as_deref(),
+                password.as_deref(),
+                &sender,
+                &recipient,
+                &format!("Juicebox Report: {reason}"),
+                &body,
+            )
+            .await
+            {
+                tracing::warn!("email notification failed: {e}");
+            }
+        });
     }
 }
 
-/// Send a confirmation email to the reporter letting them know their report is under review.
+/// Send a confirmation email to the reporter letting them know their report is
+/// under review.
 pub fn send_reporter_confirmation(
     state: &Arc<AppState>,
     config: &Arc<Config>,
@@ -98,11 +97,10 @@ pub fn send_reporter_confirmation(
             let body = format!(
                 "Hi,\n\n\
                  We received your report for:\n\
-                 URL: {}\n\
-                 Reason: {}\n\n\
+                 URL: {file_url}\n\
+                 Reason: {reason}\n\n\
                  Your report is now under review. We appreciate you helping keep the platform safe.\n\n\
                  - Juicebox Team",
-                file_url, reason,
             );
             if let Err(e) = send_smtp_email(
                 &host,
@@ -116,7 +114,7 @@ pub fn send_reporter_confirmation(
             )
             .await
             {
-                tracing::warn!("reporter confirmation email failed: {}", e);
+                tracing::warn!("reporter confirmation email failed: {e}");
             }
         });
     }
@@ -129,19 +127,19 @@ async fn send_webhook(
     details: &str,
     reporter_ip: Option<&str>,
 ) -> Result<(), String> {
-    let mut description = format!("**Reason:** {}\n**URL:** {}", reason, file_url);
+    let mut description = format!("**Reason:** {reason}\n**URL:** {file_url}");
     if !details.is_empty() {
-        description.push_str(&format!("\n**Details:** {}", details));
+        let _ = write!(description, "\n**Details:** {details}");
     }
     if let Some(ip) = reporter_ip {
-        description.push_str(&format!("\n**Reporter (hashed):** {}", ip));
+        let _ = write!(description, "\n**Reporter (hashed):** {ip}");
     }
 
     let payload = serde_json::json!({
         "embeds": [{
             "title": "New Content Report",
             "description": description,
-            "color": 0xED4245,
+            "color": 0x00ED_4245,
         }]
     });
 
@@ -152,17 +150,20 @@ async fn send_webhook(
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| format!("webhook request failed: {}", e))?;
+        .map_err(|e| format!("webhook request failed: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("webhook returned {}: {}", status, body));
+        return Err(format!("webhook returned {status}: {body}"));
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
+)]
 async fn send_smtp_email(
     host: &str,
     port: u16,
@@ -173,26 +174,27 @@ async fn send_smtp_email(
     subject: &str,
     body: &str,
 ) -> Result<(), String> {
-    use lettre::message::header::ContentType;
-    use lettre::transport::smtp::authentication::Credentials;
-    use lettre::{Message, SmtpTransport, Transport};
+    use lettre::{
+        Message, SmtpTransport, Transport, message::header::ContentType,
+        transport::smtp::authentication::Credentials,
+    };
 
     let email = Message::builder()
         .from(
             sender
                 .parse()
-                .map_err(|e| format!("invalid sender email: {}", e))?,
+                .map_err(|e| format!("invalid sender email: {e}"))?,
         )
         .to(recipient
             .parse()
-            .map_err(|e| format!("invalid recipient email: {}", e))?)
+            .map_err(|e| format!("invalid recipient email: {e}"))?)
         .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_string())
-        .map_err(|e| format!("failed to build email: {}", e))?;
+        .map_err(|e| format!("failed to build email: {e}"))?;
 
     let mut builder = SmtpTransport::relay(host)
-        .map_err(|e| format!("SMTP relay error: {}", e))?
+        .map_err(|e| format!("SMTP relay error: {e}"))?
         .port(port);
 
     if let (Some(user), Some(pass)) = (username, password) {
@@ -203,9 +205,9 @@ async fn send_smtp_email(
     tokio::task::spawn_blocking(move || {
         mailer
             .send(&email)
-            .map_err(|e| format!("SMTP send error: {}", e))?;
+            .map_err(|e| format!("SMTP send error: {e}"))?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("SMTP task panicked: {}", e))?
+    .map_err(|e| format!("SMTP task panicked: {e}"))?
 }

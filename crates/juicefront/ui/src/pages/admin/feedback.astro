@@ -7,7 +7,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
     <p><a href="/admin">Back to Admin Panel</a></p>
 
     <div class="admin-toolbar">
-        <input type="text" id="search-input" placeholder="Search message, email..." />
+        <input type="text" id="search-input" placeholder="Search message, email..." aria-label="Search message, email..." />
         <select id="sort-select">
             <option value="created_at">Time</option>
             <option value="id">ID</option>
@@ -56,7 +56,6 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
                 "<td nowrap>" + formatTime(f.created_at) + "</td>" +
                 "<td>" + esc(f.message) + "</td>" +
                 "<td>" + esc(f.email || "???") + "</td>" +
-                "<td>" + esc(f.reporter_ip || "???") + "</td>" +
                 "<td>" +
                     (f.reporter_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.reporter_ip_hash) + '">' + esc(f.reporter_ip_hash) + "</a>"
@@ -89,7 +88,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
         }
         var html = '<div class="table-wrap"><table>' +
             '<thead><tr>' +
-            '<th>ID</th><th>Time</th><th>Message</th><th>Email</th><th>IP</th><th>IP Hash</th><th>Actions</th>' +
+            '<th>ID</th><th>Time</th><th>Message</th><th>Email</th><th>IP Hash</th><th>Actions</th>' +
             "</tr></thead><tbody>" +
             renderRows(toShow) +
             "</tbody></table></div>";
@@ -118,7 +117,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
             "&offset=" + params.offset +
             "&limit=" + params.limit;
         try {
-            var res = await fetch("/api/admin/feedback?" + qs);
+            var res = await fetch("/api/admin/feedbacks?" + qs);
             if (!res.ok) {
                 if (res.status === 401) {
                     listEl.innerHTML = '<p>Not authenticated. <a href="/admin/login">Login</a></p>';
@@ -191,7 +190,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
     async function deleteFeedback(id) {
         if (!confirm("Delete feedback #" + id + "?")) return;
         try {
-            var res = await fetch("/api/admin/feedback/" + encodeURIComponent(id), { method: "DELETE" });
+            var res = await fetch("/api/admin/feedbacks/" + encodeURIComponent(id), { method: "DELETE" });
             if (res.ok) {
                 allFeedback = allFeedback.filter(function (f) { return f.id !== id; });
                 displayedCount = Math.min(displayedCount, allFeedback.length);

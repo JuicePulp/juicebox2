@@ -7,7 +7,7 @@
 import UploadHeader from "./UploadHeader.astro";
 import UploadFooter from "./UploadFooter.astro";
 import ActionsGrid from "./ActionsGrid.astro";
-import { getRepoUrl } from "../lib/metadata";
+import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
 import { t, resolveLocale } from "../i18n";
 
 interface Props {
@@ -41,7 +41,7 @@ const {
     title = t(locale, "report.title"),
     subtitle = t(locale, "report.subtitle"),
     submitted = false,
-    footerCommit = "main@a3f8c2d",
+    footerCommit = getFormattedCommitLabel(),
     footerMessage = "juicebox2-epsilon",
     footerRepoUrl = getRepoUrl(),
     footerLinks = [],

@@ -1,0 +1,22 @@
+# Example config — copy to juicefront.toml and adjust to your setup.
+# Juicefront full default config.
+# Every value below is the code default. Secrets stay env-only (see .env) — never put them here.
+# Lookup order: $JUICEFRONT_CONFIG, ./juicefront.toml, ./config.toml, /etc/juicebox/juicefront.toml, /etc/juicebox/config.toml.
+
+[ui]
+host = "0.0.0.0"
+port = 6400
+# UI working directory override. Unset = auto-detect. Env: none (config file only)
+# dir = "crates/juicefront/ui"
+
+[sentry]
+# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_UI / SENTRY_DSN_JUICEFRONT for siblings). Env: SENTRY_ENVIRONMENT
+environment = "production"
+
+# ---- frontend env vars (read by the Astro app, no TOML keys) ----
+# PUBLIC_API_URL / PUBLIC_CONTACT_EMAIL
+# PUBLIC_ADSTERRA_SKYSCRAPER_160X600 / PUBLIC_ADSTERRA_SKYSCRAPER_160X300
+# PUBLIC_ADSTERRA_LEADERBOARD_468X60 / PUBLIC_ADSTERRA_MOBILE_BANNER_320X50
+# PUBLIC_OFFICIAL_HOSTS / PUBLIC_UNOFFICIAL_HOSTS (Name|https://url|Region,...)
+# JUICEFRONT_KNOWN_HOSTS (server-side extras, comma-separated)
+# TRUSTED_PROXY_CIDRS (proxies allowed to supply X-Forwarded-For, comma-separated IPs/CIDRs; loopback always trusted)

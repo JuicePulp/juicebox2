@@ -52,8 +52,8 @@ impl S3Settings {
             .filter(|s| !s.trim().is_empty())
             .or_else(|| file.endpoint.clone());
         let allow_http = env_bool("S3_ALLOW_HTTP", file.allow_http)?;
-        let access_key = juicebox_config::optional_secret("S3_ACCESS_KEY");
-        let secret_key = juicebox_config::optional_secret("S3_SECRET_KEY");
+        let access_key = juiceutils::config::optional_secret("S3_ACCESS_KEY");
+        let secret_key = juiceutils::config::optional_secret("S3_SECRET_KEY");
         Ok(Self {
             bucket,
             region,

@@ -7,7 +7,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
     <p><a href="/admin">Back to Admin Panel</a></p>
 
     <div class="admin-toolbar">
-        <input type="text" id="search-input" placeholder="Search URL, reason, details, email..." />
+        <input type="text" id="search-input" placeholder="Search URL, reason, details, email..." aria-label="Search URL, reason, details, email..." />
         <select id="sort-select">
             <option value="created_at">Time</option>
             <option value="id">ID</option>
@@ -79,7 +79,6 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
                 "<td>" + esc(r.reason) + "</td>" +
                 '<td><a href="' + esc(r.file_url) + '" target="_blank" rel="noopener noreferrer">' + esc(r.file_url) + "</a></td>" +
                 "<td>" + esc(r.details || "???") + "</td>" +
-                "<td>" + esc(r.reporter_ip || "???") + "</td>" +
                 "<td>" + esc(r.reporter_ip_hash || "???") + "</td>" +
                 "<td>" + esc(r.email || "???") + "</td>" +
                 "<td nowrap>" + actions + "</td></tr>";
@@ -111,7 +110,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
         var html = '<div class="table-wrap"><table>' +
             '<thead><tr>' +
             '<th>ID</th><th>Time</th><th>Reason</th><th>URL</th>' +
-            '<th>Details</th><th>Reporter IP</th><th>IP Hash</th><th>Email</th><th>Actions</th>' +
+            '<th>Details</th><th>IP Hash</th><th>Email</th><th>Actions</th>' +
             "</tr></thead><tbody>" +
             renderRows(toShow) +
             "</tbody></table></div>";

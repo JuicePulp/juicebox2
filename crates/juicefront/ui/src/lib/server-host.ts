@@ -2,9 +2,9 @@
  * Server-side (SSR) resolution of juicehost configs with caching.
  *
  * The default provider (juiceback) and any configured known juicehost are
- * fetched on the server and cached, so a returning user who has a custom host
- * saved (juicebox_host cookie) gets that host's settings baked into the
- * server-rendered HTML - no need to hit "Apply" on every visit.
+ * fetched on the server and cached, so a returning user with a saved
+ * custom host (juicebox_host cookie) gets that host's settings in the
+ * server-rendered HTML without pressing Apply each visit.
  *
  * Only reachable from `.astro` frontmatter (never shipped to the browser).
  */
@@ -224,7 +224,7 @@ const KNOWN_PROVIDERS: string[] = (() => {
 })();
 
 /** Warm the cache for known providers (called once at server boot). */
-export function prewarmKnownProviders(): void {
+function prewarmKnownProviders(): void {
   void Promise.allSettled(
     KNOWN_PROVIDERS.map((host) => fetchHostConfig(host, true)),
   );

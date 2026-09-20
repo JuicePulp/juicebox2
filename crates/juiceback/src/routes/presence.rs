@@ -1,3 +1,9 @@
+use std::{
+    convert::Infallible,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use axum::{
     Json,
     extract::{
@@ -7,19 +13,18 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures::StreamExt;
+use rusqlite::OptionalExtension;
 use serde::Serialize;
-use std::convert::Infallible;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
-use crate::auth::DeviceAuth;
-use crate::error::AppError;
-use crate::routes::UserId;
-use crate::state::{AppState, ConnectedDevice, PresenceEvent};
-use crate::utils::ClientIp;
-use rusqlite::OptionalExtension;
+use crate::{
+    auth::DeviceAuth,
+    error::AppError,
+    routes::UserId,
+    state::{AppState, ConnectedDevice, PresenceEvent},
+    utils::ClientIp,
+};
 
 struct PresenceIpGuard {
     state: Arc<AppState>,
@@ -50,19 +55,38 @@ impl Drop for PresenceIpGuard {
 
 #[derive(Serialize, ToSchema)]
 pub struct DeviceListResponse {
-    pub devices: Vec<DeviceInfo>,
+    pub devices: Vec<PresenceDevice>,
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct DeviceInfo {
+pub struct PresenceDevice {
     pub device_id: String,
     pub device_name: String,
+}
+
+/// Snapshot a user's connected devices for API responses. Devices whose
+/// lock is held are skipped rather than blocking the listing task.
+fn snapshot_device_list(state: &AppState, user_id: &str) -> Vec<PresenceDevice> {
+    let guard = state.connected_devices.get(user_id);
+    guard
+        .map(|d| {
+            d.value()
+                .iter()
+                .filter_map(|d| {
+                    d.try_lock().ok().map(|inner| PresenceDevice {
+                        device_id: inner.device_id.clone(),
+                        device_name: inner.device_name.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 // Device WebSocket endpoint
 
 /// GET /api/device/ws where juicebox-plus connects, auth via Bearer.
-pub async fn device_ws(
+pub async fn device_ws_handler(
     State(state): State<Arc<AppState>>,
     DeviceAuth(claims): DeviceAuth,
     ws: WebSocketUpgrade,
@@ -102,7 +126,7 @@ async fn handle_device_socket(
         "device_name": device_name,
     });
     if socket
-        .send(Message::Text(auth_ok.to_string()))
+        .send(Message::Text(auth_ok.to_string().into()))
         .await
         .is_err()
     {
@@ -121,7 +145,6 @@ async fn handle_device_socket(
             .await;
     }
 
-    // Create broadcast sender for this user if none exists
     let tx = state
         .presence_listeners
         .entry(user_id.clone())
@@ -151,23 +174,7 @@ async fn handle_device_socket(
         .or_default()
         .push(Arc::clone(&device));
 
-    let devices = {
-        let guard = state.connected_devices.get(&user_id);
-        guard
-            .map(|d| {
-                d.value()
-                    .iter()
-                    .map(|d| {
-                        let inner = d.try_lock().unwrap();
-                        DeviceInfo {
-                            device_id: inner.device_id.clone(),
-                            device_name: inner.device_name.clone(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    };
+    let devices = snapshot_device_list(&state, &user_id);
 
     let _ = socket
         .send(Message::Text(
@@ -175,13 +182,16 @@ async fn handle_device_socket(
                 "type": "device_list",
                 "devices": devices,
             })
-            .to_string(),
+            .to_string()
+            .into(),
         ))
         .await;
 
-    // WebSocket message loop
     let mut last_heartbeat = Instant::now();
     let stale_threshold = Duration::from_secs(90);
+    // `last_seen_at` rewrites are coalesced: heartbeats still ack every
+    // message, but the DB write happens at most once per interval.
+    let mut last_seen_write = Instant::now();
 
     loop {
         tokio::select! {
@@ -189,11 +199,15 @@ async fn handle_device_socket(
             msg = socket.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let text_str: &str = text.as_ref();
+                        let text_str: &str = &text;
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(text_str) {
                             match val.get("type").and_then(|t| t.as_str()) {
                                 Some("heartbeat") => {
                                     last_heartbeat = Instant::now();
+                                    if last_seen_write.elapsed()
+                                        >= Duration::from_secs(
+                                            crate::constants::DEVICE_SEEN_TOUCH_INTERVAL_SECS,
+                                        )
                                     {
                                         let did = device_id.clone();
                                         let _ = state.db_call("update_heartbeat", move |db| {
@@ -202,14 +216,15 @@ async fn handle_device_socket(
                                                 rusqlite::params![chrono::Utc::now().timestamp(), did],
                                             )
                                         }).await;
+                                        last_seen_write = Instant::now();
                                     }
                                     let _ = socket.send(Message::Text(
-                                        serde_json::json!({"type":"heartbeat_ack"}).to_string()
+                                        serde_json::json!({"type":"heartbeat_ack"}).to_string().into()
                                     )).await;
                                 }
                                 Some("ping") => {
                                     let _ = socket.send(Message::Text(
-                                        serde_json::json!({"type":"ping_response"}).to_string()
+                                        serde_json::json!({"type":"ping_response"}).to_string().into()
                                     )).await;
                                 }
                                 Some("ping_response") => {
@@ -218,14 +233,12 @@ async fn handle_device_socket(
                                     });
                                 }
                                 Some("upload_progress") => {
-                                    // Forward to SSE listeners
                                     let _ = tx.send(PresenceEvent::DeviceConnected {
                                         device_id: device_id.clone(),
                                         device_name: device_name.clone(),
                                     });
                                 }
                                 Some("upload_complete") | Some("upload_error") => {
-                                    // Could broadcast specific events here
                                 }
                                 _ => {}
                             }
@@ -239,7 +252,7 @@ async fn handle_device_socket(
             // Outgoing messages (e.g., upload_request from juiceback)
             outgoing = device_rx.recv() => {
                 if let Some(text) = outgoing {
-                    if socket.send(Message::Text(text)).await.is_err() {
+                    if socket.send(Message::Text(text.into())).await.is_err() {
                         break;
                     }
                 }
@@ -264,7 +277,6 @@ async fn handle_device_socket(
         }
     }
 
-    // Cleanup on disconnect
     let _ = tx.send(PresenceEvent::DeviceDisconnected {
         device_id: device_id.clone(),
     });
@@ -290,7 +302,7 @@ async fn handle_device_socket(
         }
     }
 
-    tracing::info!("Device {} disconnected", device_id);
+    tracing::info!("Device {device_id} disconnected");
 }
 
 // Device pairing status check (used by juicebox-plus handshake)
@@ -308,7 +320,7 @@ async fn handle_device_socket(
     tag = "Devices",
 )]
 /// GET /api/device/status returns 200 if still paired and 401 if not
-pub async fn device_status(
+pub async fn device_status_handler(
     DeviceAuth(_claims): DeviceAuth,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(serde_json::json!({ "paired": true })))
@@ -325,7 +337,7 @@ pub async fn device_status(
     tag = "Devices",
 )]
 /// `GET /api/presence` - SSE stream of device connect/disconnect events.
-pub async fn presence_sse(
+pub async fn presence_sse_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
     axum::extract::Extension(client_ip): axum::extract::Extension<ClientIp>,
@@ -364,22 +376,7 @@ pub async fn presence_sse(
     let stream = async_stream::stream! {
         let _permit = permit;
         let _ip_guard = ip_guard;
-        let devices = {
-            let guard = state_clone.connected_devices.get(&user_id_clone);
-            guard
-                .map(|d| {
-                    d.value()
-                        .iter()
-                        .filter_map(|d| d.try_lock().ok().map(|inner| {
-                            DeviceInfo {
-                                device_id: inner.device_id.clone(),
-                                device_name: inner.device_name.clone(),
-                            }
-                        }))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
-        };
+        let devices = snapshot_device_list(&state_clone, &user_id_clone);
 
         let initial = serde_json::json!({
             "type": "device_list",
@@ -387,7 +384,6 @@ pub async fn presence_sse(
         });
         yield Ok(Event::default().data(initial.to_string()));
 
-        // Subscribe to presence events
         let mut rx = tx.subscribe();
         while let Ok(event) = rx.recv().await {
             let data = match event {
@@ -432,8 +428,7 @@ pub async fn presence_sse(
     ),
     tag = "Devices",
 )]
-/// `POST /api/device/ping` - Send a ping to the connected device.
-pub async fn ping_device(
+pub async fn ping_device_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -472,27 +467,11 @@ pub async fn ping_device(
     ),
     tag = "Devices",
 )]
-/// `GET /api/device/connected` - list connected devices for the authenticated user.
-pub async fn list_connected_devices(
+pub async fn list_connected_devices_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
 ) -> Result<Json<DeviceListResponse>, AppError> {
-    let devices = {
-        let guard = state.connected_devices.get(&user_id);
-        guard
-            .map(|d| {
-                d.value()
-                    .iter()
-                    .filter_map(|d| {
-                        d.try_lock().ok().map(|inner| DeviceInfo {
-                            device_id: inner.device_id.clone(),
-                            device_name: inner.device_name.clone(),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    };
+    let devices = snapshot_device_list(&state, &user_id);
 
     Ok(Json(DeviceListResponse { devices }))
 }

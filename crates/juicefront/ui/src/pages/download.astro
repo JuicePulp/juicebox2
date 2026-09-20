@@ -38,6 +38,7 @@ async function getLatestTag(): Promise<string> {
   try {
     const res = await fetch(LATEST_API_URL, {
       headers: { "User-Agent": "juicebox-ui", Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`GitHub API ${res.status}`);
     const data = (await res.json()) as { tag_name?: string };
@@ -47,7 +48,6 @@ async function getLatestTag(): Promise<string> {
       return latestTag;
     }
   } catch {
-    // fall through to fallback below
   }
   return FALLBACK_TAG;
 }
@@ -67,15 +67,15 @@ const LINUX_FORMATS = [
 ---
 
 <BaseLayout
-      title="Download Juicebox+ - Juicebox"
-  description="Download the juicebox-plus desktop app for Windows, macOS, or Linux."
+      title={`${t(locale, "download.title")} - Juicebox`}
+  description={t(locale, "download.description")}
   canonical={canonicalUrl}
   bodyClass="content-page"
 >
   <main id="main-content" transition:animate="none">
     <ContentCard
       title="Download Juicebox+"
-      subtitle="The desktop companion app for UltraFast uploads"
+      subtitle="The desktop app for UltraFast uploads"
       footerCommit={footerCommit}
       footerRepoUrl={canonicalUrl}
       actions={customActions}

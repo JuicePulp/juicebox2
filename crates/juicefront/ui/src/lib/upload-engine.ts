@@ -81,12 +81,8 @@ export interface UploadItem {
 }
 
 export function extractServerId(url: string): string {
-  try {
-    const m = url.match(/\/f\/([A-Za-z0-9_-]+)/);
-    return m ? m[1] : "";
-  } catch {
-    return "";
-  }
+  const m = url.match(/\/f\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : "";
 }
 
 export interface UploadControls {
@@ -183,9 +179,8 @@ export function startUpload(
 const _raf = typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : (cb: FrameRequestCallback) => setTimeout(cb, 16) as unknown as number;
 const _caf = typeof cancelAnimationFrame !== "undefined" ? cancelAnimationFrame : clearTimeout;
 
-/** Live upload progress: measures real throughput from network events and
- * projects the byte count forward every frame, so the bar moves continuously
- * at the actual transfer speed instead of stepping per backend report. */
+/** Progress ticks each frame from measured throughput, so the bar keeps
+ * moving between backend reports. */
 class LiveProgress {
   private loaded = 0;
   private total = 0;
@@ -247,8 +242,7 @@ class LiveProgress {
       const dt = (performance.now() - this.lastTime) / 1000;
       if (this.speed > 0 && this.total > 0) {
         // Project at measured speed, capped ~2s past the last real report,
-        // so a stalled connection freezes honestly instead of racing ahead;
-        // the longer horizon bridges the gap between chunk dispatches.
+        // so a stalled connection leaves the bar still.
         const projected = Math.min(
           this.loaded + this.speed * dt,
           this.loaded + this.speed * 2,
@@ -420,7 +414,6 @@ function startDirectUpload(
   };
 }
 
-/** Compress a blob with streaming gzip. */
 async function gzipBlob(blob: Blob): Promise<Blob> {
   return new Response(
     blob.stream().pipeThrough(new CompressionStream("gzip")),
@@ -520,7 +513,7 @@ function startDirectTicketUpload(
           runState,
           xhrRef,
         );
-      } catch (err: any) {
+      } catch (err) {
         progress.destroy();
         if (runState.cancelled) throw err;
         update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
@@ -982,8 +975,8 @@ function startTusUpload(
     const uploadStart = performance.now();
 
     const progress = new LiveProgress((pct: number) => {
-      // Hold just under 100% until the merge response lands; the done-state
-      // update sets exactly 100. A bar parked at fake 100% reads as broken.
+      // Hold under 100% until the merge response lands; the done-state
+      // update sets exactly 100.
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     });
     progress.begin(file.size);
@@ -1028,7 +1021,7 @@ function startTusUpload(
 
     const getReserveId = () => reserveId;
 
-    // ---- adaptive worker pool -------------------------------------------
+    // Adaptive worker pool:
     // Workers claim the next unstarted part index; the tuner promotes spare
     // parts to live workers while aggregate ACKED throughput is still
     // climbing, and lets surplus workers exit when the link backs off.
@@ -1220,8 +1213,8 @@ function startTusUpload(
 
       const maxConc = Math.min(PARALLEL_STREAMS, numParts);
       const workLeft = cursor < numParts || retryQueue.length > 0;
-      // Judge growth on the WORST of the last few windows: a buffer-drain
-      // spike that immediately decays must not read as sustainable capacity.
+      // Grow only if the slowest of the last few windows held up; this
+      // ignores short buffer-drain spikes.
       const steadyMin =
         recentRates.length >= 3 ? Math.min(...recentRates) : rateEwma;
 
@@ -1267,8 +1260,8 @@ function startTusUpload(
         rateEwma < baselineRate * 0.7 &&
         activeWorkers > 1
       ) {
-        // Sustained collapse: shed a worker every few ticks so survivors
-        // get a larger share instead of everyone thrashing together.
+        // Sustained drop: remove one worker every few ticks so the
+        // remaining workers each get more bandwidth.
         saturated = true;
         if (++shrinkTicks >= SHRINK_TICKS) {
           shrinkTicks = 0;
@@ -1326,9 +1319,6 @@ function startTusUpload(
       } catch {}
     }
 
-    // Find charlie (200)
-    //
-    // I know this is horrendous code.
     const merged = settled.find((r) => r.status === 200 && r.data?.url);
     if (merged && "data" in merged && merged.data) {
       const data = merged.data;

@@ -5,6 +5,8 @@
  * Dispatches custom events so other parts of the UI can react.
  */
 
+import { apiPresence } from "./api";
+
 declare global {
   interface Window {
     __juiceboxAppMode: boolean;
@@ -15,14 +17,17 @@ let eventSource: EventSource | null = null;
 let connected = false;
 let devices: Array<{ device_id: string; device_name: string }> = [];
 
+// Reconnect state: exponential backoff so a dead backend doesn't get
+// hammered (and doesn't flood the dev proxy log with ECONNREFUSED).
+const INITIAL_RETRY_MS = 5000;
+const MAX_RETRY_MS = 60000;
+let retryDelay = INITIAL_RETRY_MS;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let visibilityWired = false;
+
 /** Whether juicebox-plus is currently connected. */
 export function isAppMode(): boolean {
   return connected && devices.length > 0;
-}
-
-/** Get the list of connected devices. */
-export function getConnectedDevices(): Array<{ device_id: string; device_name: string }> {
-  return devices;
 }
 
 /** Check if glow should be shown (device connected since last clear). */
@@ -56,9 +61,16 @@ export function onDeviceDisconnected(): void {
 
 /** Connect to the SSE presence stream. */
 export function connectPresence(): void {
-  if (eventSource) return;
+  if (eventSource || typeof window === "undefined") return;
+  // Don't poll in background tabs; the visibility handler reconnects.
+  if (typeof document !== "undefined" && document.hidden) return;
 
-  eventSource = new EventSource("/api/presence");
+  wireVisibilityHandler();
+  eventSource = new EventSource(apiPresence);
+
+  eventSource.onopen = () => {
+    retryDelay = INITIAL_RETRY_MS;
+  };
 
   eventSource.onmessage = (event) => {
     try {
@@ -90,27 +102,41 @@ export function connectPresence(): void {
 
   eventSource.onerror = () => {
     connected = false;
+    // Close the dead source: otherwise its native retry loop keeps firing
+    // alongside our scheduled reconnect (duplicate streams + log spam).
+    try {
+      eventSource?.close();
+    } catch {}
     eventSource = null;
-    setTimeout(connectPresence, 5000);
+    if (retryTimer) clearTimeout(retryTimer);
+    const delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      connectPresence();
+    }, delay);
   };
 }
 
-/** Disconnect from the SSE presence stream. */
-export function disconnectPresence(): void {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
-  connected = false;
-  devices = [];
-}
-
-/** Read whether UltraFast upload is enabled from localStorage. */
-export function isUltraFastEnabled(): boolean {
-  return localStorage.getItem("juicebox_ultrafast_enabled") === "true";
-}
-
-/** Set whether UltraFast upload is enabled. */
-export function setUltraFastEnabled(enabled: boolean): void {
-  localStorage.setItem("juicebox_ultrafast_enabled", enabled ? "true" : "false");
+/** Pause polling while the tab is hidden; resume on return. */
+function wireVisibilityHandler(): void {
+  if (visibilityWired || typeof document === "undefined") return;
+  visibilityWired = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      if (eventSource) {
+        try {
+          eventSource.close();
+        } catch {}
+        eventSource = null;
+      }
+    } else {
+      retryDelay = INITIAL_RETRY_MS;
+      connectPresence();
+    }
+  });
 }
