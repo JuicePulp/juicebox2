@@ -1,0 +1,322 @@
+//! router builder and TCP server starter for juicehost.
+//! wires routes and middleware, then starts the server.
+
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+use axum::{
+    Router,
+    body::Body,
+    extract::{ConnectInfo, DefaultBodyLimit, State},
+    http::{HeaderMap, Request, StatusCode},
+    middleware,
+    response::{IntoResponse, Response},
+    routing::{delete, get, post},
+};
+use juiceutils::{add_security_headers, shutdown_signal};
+use sentry::integrations::tower::NewSentryLayer;
+use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
+use utoipa::OpenApi;
+
+use crate::{
+    api_doc::ApiDoc, config::Config, error::JuicehostError, handlers, state::AppState,
+    ticket::verify_ticket_jwt,
+};
+
+pub const BANNER_ART: &str = r"
+ ▄▄ ▄▄ ▄▄ ▄▄  ▄▄▄▄  ▄▄▄▄ ▄▄ ▄▄  ▄▄▄   ▄▄▄▄ ▄▄▄▄▄
+ ██ ██ ██ ▄▄ ██▀██ ▄█▀▀▀ ██▄▄█ ▄█▀██ ▒█▀▀▀ ▀██▀▀
+▄▄█ ▓▓ █▀ ▓▓ ██ ▀▀ ▓▓▀▀  █▀▀██ ▓▓ ▓▓ ▀▀▓▓▄  ▒▒
+▀▀▀ ▀▀▀▀  ▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀ ▀▀  ▀▀▀  ▀▀▀▀▀  ▀▀
+";
+
+async fn fallback_404() -> impl IntoResponse {
+    crate::error::not_found_html()
+}
+
+use juiceutils::constant_time_eq;
+
+async fn ban_check_middleware(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> Response {
+    if state.ban_list.enabled() {
+        let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map_or(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            |ci| ci.0.ip(),
+        );
+        let ip = juiceutils::proxy::client_ip(&headers, peer, &state.trusted_proxy_cidrs);
+        if state.ban_list.is_banned(&ip.to_string()) {
+            tracing::info!("banned ip blocked from file serving");
+            return JuicehostError::Forbidden.into_response();
+        }
+    }
+    next.run(req).await
+}
+
+/// Authenticate juiceback requests with the API key and optional origin
+/// whitelist. Fail-closed when no API key is configured unless
+/// `JUICEHOST_ALLOW_NO_AUTH` is set.
+async fn require_api_key(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> impl IntoResponse {
+    if state.api_key.is_empty() {
+        // Fail closed: an unset key used to silently disable auth on every
+        // internal endpoint. Two ways through remain: an explicit
+        // JUICEHOST_ALLOW_NO_AUTH=true opt-out (dev/loopback), or a per-file
+        // capability header - for unkeyed instances capabilities ARE the
+        // auth, and handlers verify them against the stored sidecar.
+        let has_capability = req.headers().contains_key("x-juicehost-file-capability");
+        if state.allow_no_auth || has_capability {
+            return next.run(req).await;
+        }
+        tracing::warn!("auth: rejected request - JUICEHOST_API_KEY is not configured");
+        return JuicehostError::Unauthorized.into_response();
+    }
+
+    if req.headers().contains_key("x-juicehost-file-capability") {
+        return next.run(req).await;
+    }
+
+    let provided_key = req
+        .headers()
+        .get("x-juicehost-api-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !constant_time_eq(&state.api_key, provided_key) {
+        tracing::warn!("auth: invalid api key attempt from [redacted]");
+        return JuicehostError::Unauthorized.into_response();
+    }
+
+    if !state.allowed_origins.is_empty() {
+        let origin = req
+            .headers()
+            .get("x-juiceback-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !state.allowed_origins.iter().any(|a| a == origin) {
+            tracing::warn!(
+                "auth: rejected origin '{}' from [redacted] (allowed: {:?})",
+                origin,
+                state.allowed_origins,
+            );
+            return JuicehostError::Forbidden.into_response();
+        }
+    }
+
+    next.run(req).await
+}
+
+/// Middleware that authenticates internal requests with EITHER an API key OR a
+/// ticket JWT.
+async fn require_api_key_or_ticket(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> impl IntoResponse {
+    if !state.api_key.is_empty() {
+        if let Some(provided_key) = req
+            .headers()
+            .get("x-juicehost-api-key")
+            .and_then(|v| v.to_str().ok())
+        {
+            if constant_time_eq(&state.api_key, provided_key) {
+                return next.run(req).await;
+            }
+        }
+    }
+
+    if let Some(token) = juiceutils::extract_bearer_token(req.headers())
+        && verify_ticket_jwt(token, &state.ticket_jwt_secret).is_ok()
+    {
+        return next.run(req).await;
+    }
+
+    tracing::warn!("auth: rejected request (no valid API key or ticket JWT)");
+    JuicehostError::Unauthorized.into_response()
+}
+
+async fn request_body_deadline(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> Response {
+    let (parts, body) = req.into_parts();
+    let body = handlers::deadline_body(body, state.tcp_body_inactivity, state.tcp_request_total);
+    next.run(Request::from_parts(parts, body)).await
+}
+
+/// Serves the `OpenAPI` spec as JSON with the correct content type.
+async fn openapi_json_handler() -> (axum::http::header::HeaderMap, String) {
+    let json = serde_json::to_string_pretty(&ApiDoc::openapi()).unwrap_or_default();
+    let mut headers = axum::http::header::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    (headers, json)
+}
+
+pub fn build_router(state: Arc<AppState>) -> Router {
+    let concat = Router::new()
+        .route("/internal/file/concat", post(handlers::concat_files))
+        .layer(DefaultBodyLimit::max(64 * 1024));
+
+    let internal = Router::new()
+        .route("/internal/file", post(handlers::store_file))
+        .route(
+            "/internal/file/stream/{id}/{filename}",
+            post(handlers::store_file_streaming),
+        )
+        .route("/internal/file/{id}", delete(handlers::delete_file))
+        .route("/internal/file/{id}/rename", post(handlers::rename_file))
+        .route("/internal/file/{id}/stat", get(handlers::stat_file))
+        .merge(concat)
+        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_api_key,
+        ));
+
+    let ticket_upload = Router::new()
+        .route(
+            "/internal/file/upload/{id}",
+            post(handlers::store_file_ticket),
+        )
+        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_api_key_or_ticket,
+        ));
+
+    let files_router = Router::new()
+        .route("/f/{*path}", get(handlers::serve_file_wildcard))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            ban_check_middleware,
+        ));
+
+    let public = Router::new()
+        .route("/api/health", get(handlers::health))
+        .route("/api/ip", get(handlers::ip_handler))
+        .route("/api/storage", get(handlers::storage_handler))
+        .route("/api/config", get(handlers::config_handler))
+        .route("/api/openapi.json", get(openapi_json_handler))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(300),
+        ));
+
+    Router::new()
+        .route("/", get(handlers::index_handler))
+        .merge(public)
+        .merge(files_router)
+        .merge(internal)
+        .merge(ticket_upload)
+        .fallback(fallback_404)
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            state.tcp_request_total,
+        ))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            request_body_deadline,
+        ))
+        .layer({
+            if state.allowed_origins.is_empty() {
+                CorsLayer::permissive()
+            } else {
+                let origins: Vec<axum::http::HeaderValue> = state
+                    .allowed_origins
+                    .iter()
+                    .filter_map(|o| o.parse().ok())
+                    .collect();
+                CorsLayer::new()
+                    .allow_origin(origins)
+                    .allow_methods([
+                        axum::http::Method::GET,
+                        axum::http::Method::POST,
+                        axum::http::Method::DELETE,
+                        axum::http::Method::OPTIONS,
+                    ])
+                    .allow_headers([
+                        axum::http::header::CONTENT_TYPE,
+                        axum::http::header::AUTHORIZATION,
+                        axum::http::header::HeaderName::from_static("x-juicehost-api-key"),
+                        axum::http::header::HeaderName::from_static("x-juiceback-origin"),
+                        axum::http::header::HeaderName::from_static("x-mime-type"),
+                    ])
+            }
+        })
+        .layer(middleware::from_fn(add_security_headers))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                tracing::info_span!(
+                    "http.request",
+                    method = %request.method(),
+                    path = request.uri().path(),
+                    version = ?request.version(),
+                )
+            }),
+        )
+        .layer(NewSentryLayer::<Request<Body>>::new_from_top())
+        .with_state(state)
+}
+
+/// Start the TCP server with graceful shutdown.
+pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests: usize) {
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()
+    } else {
+        tokio::net::TcpSocket::new_v6()
+    }
+    .expect("Failed to create TCP socket");
+    socket.set_nodelay(true).expect("Failed to set TCP_NODELAY");
+    socket.bind(addr).expect("Failed to bind server");
+    let listener = socket.listen(1024).expect("Failed to listen");
+
+    tracing::info!("juicehost listening on {addr}");
+
+    axum::serve(
+        listener,
+        app.layer(tower::limit::ConcurrencyLimitLayer::new(
+            max_concurrent_requests,
+        ))
+        .into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal("juicehost"))
+    .await
+    .expect("Server error");
+}
+
+pub fn print_startup_banner(config: &Config) {
+    println!("{BANNER_ART}");
+    tracing::info!("juicehost v{} starting", env!("CARGO_PKG_VERSION"));
+    if config.api_key.is_empty() {
+        tracing::warn!(
+            "JUICEHOST_API_KEY is not set: internal API authentication is disabled; use per-file capabilities for destructive operations"
+        );
+    }
+    if config.is_s3_mode() {
+        tracing::info!(
+            "storage: S3 (bucket={})",
+            config.s3_bucket.as_deref().unwrap_or("?")
+        );
+    } else {
+        tracing::info!("files: {:?}", config.files_dir);
+    }
+    if let Some(ref backend) = config.backend_url {
+        tracing::info!("backend: {backend}");
+    } else {
+        tracing::info!("backend: none (backendless mode)");
+    }
+    let min_gb = config.min_free_space_bytes / (1024 * 1024 * 1024);
+    tracing::info!("min free space: {min_gb} GB");
+    if !config.allowed_origins.is_empty() {
+        tracing::info!("allowed origins: {:?}", config.allowed_origins);
+    }
+}

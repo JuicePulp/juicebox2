@@ -1,0 +1,52 @@
+[package]
+name = "juicehost"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "File storage and delivery service for Juicebox"
+publish = false
+
+[features]
+default = ["mimalloc", "quic"]
+mimalloc = ["dep:mimalloc"]
+quic = ["juiceutils/quic"]
+
+[dependencies]
+async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
+dashmap.workspace = true
+fs2.workspace = true
+futures.workspace = true
+hex.workspace = true
+infer.workspace = true
+jsonwebtoken.workspace = true
+juiceutils = { path = "../juiceutils" }
+libc.workspace = true
+mimalloc = { workspace = true, optional = true }
+mime_guess.workspace = true
+object_store.workspace = true
+reqwest.workspace = true
+sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
+sentry-tracing = { workspace = true, features = ["logs"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+# Full runtime: HTTP/QUIC servers, blocking disk I/O bridge, timers.
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+tower = { workspace = true, features = ["limit", "util"] }
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

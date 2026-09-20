@@ -1,0 +1,177 @@
+//! juicehost: the file storage side of juicebox.
+//! files get pushed here by juiceback, stored on disk (or S3), served with
+//! `ETags`, and cleaned up when they expire. also has an optional QUIC/HTTP/3
+//! port over QUIC/HTTP/3.
+
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+use juicehost::{
+    config::Config,
+    server::{build_router, print_startup_banner, start_server},
+    state::AppState,
+    storage::{LocalBackend, S3Backend, StorageBackend},
+};
+#[cfg(feature = "quic")]
+use tokio::sync::Notify;
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+fn main() {
+    // Load ./.env first so standalone runs pick up cwd secrets exactly
+    // like `juicebox` supervision does. Explicit env always wins.
+    juiceutils::config::load_dotenv();
+
+    // Initialize Sentry before configuration so it captures startup failures.
+    // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN.
+    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
+        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
+        .map(|dsn| {
+            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|rate| rate.clamp(0.0, 1.0))
+                .unwrap_or(0.05);
+            sentry::init((
+                dsn.as_str(),
+                sentry::ClientOptions::default()
+                    .maybe_release(sentry::release_name!())
+                    .environment(
+                        std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "production".into()),
+                    )
+                    .traces_sample_rate(traces_sample_rate)
+                    .send_default_pii(false),
+            ))
+        });
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
+        .with(sentry_tracing::layer())
+        .init();
+
+    let config = Config::try_load().expect("Failed to load configuration");
+
+    // Refuse to boot an unauthenticated instance by accident. Internal
+    // endpoints can store, overwrite, and delete files - open-by-default
+    // is a footgun. Set JUICEHOST_API_KEY, or JUICEHOST_ALLOW_NO_AUTH=true
+    // to explicitly accept the risk (dev/loopback only).
+    if config.api_key.is_empty() && !config.allow_no_auth {
+        tracing::error!(
+            "JUICEHOST_API_KEY is not set - refusing to start with unauthenticated internal endpoints. Configure a key or set JUICEHOST_ALLOW_NO_AUTH=true to override."
+        );
+        std::process::exit(1);
+    }
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(config.worker_threads)
+        .enable_all()
+        .build()
+        .expect("tokio runtime creation failed");
+
+    runtime.block_on(async {
+        let storage: Arc<dyn StorageBackend> = if config.is_s3_mode() {
+            let bucket = config
+                .s3_bucket
+                .as_deref()
+                .expect("is_s3_mode guarantees s3_bucket is set");
+            let region = config.s3_region.as_deref().unwrap_or("us-east-1");
+            let endpoint = config.s3_endpoint.as_deref();
+            let access_key = config.s3_access_key.as_deref().unwrap_or("");
+            let secret_key = config.s3_secret_key.as_deref().unwrap_or("");
+
+            tracing::info!("S3 storage mode: bucket={bucket}, region={region}");
+
+            let backend = S3Backend::new(
+                bucket,
+                region,
+                endpoint,
+                access_key,
+                secret_key,
+                config.s3_allow_http,
+            )
+                .expect("Failed to create S3 storage backend");
+            Arc::new(backend)
+        } else {
+            if !config.files_dir.exists() {
+                std::fs::create_dir_all(&config.files_dir)
+                    .expect("failed to create files directory");
+                tracing::info!("created files directory at: {:?}", config.files_dir);
+            }
+
+            let backend = LocalBackend::new(config.files_dir.clone(), config.min_free_space_bytes)
+                .expect("invalid files directory");
+            backend.init_cache().await.expect("invalid files directory entry");
+            Arc::new(backend)
+        };
+
+        let state = Arc::new(AppState::new(&config, storage));
+
+        if !config.ip_pepper.is_empty()
+            || config.ban_list_file.is_some()
+            || config.ban_sync_url.is_some()
+        {
+            tokio::spawn(juicehost::ban::ban_refresh_loop(Arc::clone(&state)));
+        }
+
+        let app = build_router(Arc::clone(&state));
+
+        let addr = SocketAddr::from((
+            config
+                .public_host
+                .parse::<std::net::IpAddr>()
+                .expect("Invalid PUBLIC_HOST"),
+            config.public_port,
+        ));
+
+        #[cfg(feature = "quic")]
+        {
+            let shutdown = Arc::new(Notify::new());
+            let quic_shutdown = Arc::clone(&shutdown);
+
+            let quic_addr = SocketAddr::from((
+                config
+                    .quic_host
+                    .parse::<std::net::IpAddr>()
+                    .expect("Invalid QUIC_HOST"),
+                config.quic_port,
+            ));
+
+            let quic_router = build_router(Arc::clone(&state));
+            let quic_cert = config.quic_cert_path.clone();
+
+            tokio::select! {
+                () = async {
+                    let quic_limits = juiceutils::QuicServerLimits {
+                        max_connections: config.quic_max_connections,
+                        max_requests: config.quic_max_requests,
+                        handshake_timeout: Duration::from_secs(config.quic_handshake_seconds),
+                        idle_timeout: Duration::from_secs(config.quic_idle_seconds),
+                        request_timeout: Duration::from_secs(config.quic_request_total_seconds),
+                    };
+                    tokio::spawn(juiceutils::start_quic_server_with_limits(quic_router, quic_addr, quic_shutdown, "juicehost", quic_cert, quic_limits));
+                    print_startup_banner(&config);
+                    start_server(app, addr, config.tcp_max_concurrent_requests).await;
+                } => {}
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("shutting down...");
+                    shutdown.notify_one();
+                }
+            }
+        }
+
+        #[cfg(not(feature = "quic"))]
+        {
+            print_startup_banner(&config);
+            start_server(app, addr, config.tcp_max_concurrent_requests).await;
+        }
+    });
+
+    if let Some(client) = sentry::Hub::current().client() {
+        client.close(Some(Duration::from_secs(2)));
+    }
+}

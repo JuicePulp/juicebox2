@@ -1,20 +1,80 @@
 [workspace]
 resolver = "3"
 members = [
-    # The actual orchestrator for juicebox2
+    "crates/*",
+]
+default-members = [
     "crates/juicebox",
-
-    # Implementation libraries
-    "crates/juicebox-*",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "LGPL-3.0-or-later"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
 
 [workspace.lints.clippy]
 pedantic = "warn"
-nursery  = "warn"
+nursery = "warn"
 
 [workspace.dependencies]
+aes-gcm = "0.11"
+anyhow = "1"
+argon2 = "0.6"
+async-compression = { version = "0.4", features = ["tokio", "gzip"] }
+async-stream = "0.3"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart", "ws"] }
+base64 = "0.23"
+blake3 = "1"
+bytes = "1"
+chrono = "0.4"
+dashmap = "6"
+flate2 = "1"
+fs2 = "0.4"
+futures = "0.3"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+hex = "0.4"
+hmac = "0.13"
+http-body-util = { version = "0.1", features = ["channel"] }
+infer = "0.22"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
+libc = "0.2"
+mime_guess = "2"
+mimalloc = "0.1"
+nanoid = "0.5"
+object_store = { version = "0.14", default-features = false, features = ["aws"] }
+percent-encoding = "2"
+quinn = { version = "0.11", features = ["runtime-tokio"] }
+quinn-proto = "0.11"
+r2d2 = "0.8"
+r2d2_sqlite = "0.35"
+rand = "0.10"
+rcgen = "0.14"
+reqwest = { version = "0.13", features = ["multipart", "stream", "json"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+rustls = "0.23"
+rustls-pki-types = "1"
+sentry = "0.49"
+sentry-tracing = "0.49"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+subtle = "2"
+tempfile = "3"
+thiserror = "2"
+tokio = "1"
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
+toml = "1"
+tower = "0.5"
+tower-http = { version = "0.7", features = ["fs", "trace", "compression-gzip", "compression-br", "compression-zstd", "limit", "cors", "timeout"] }
+tower_governor = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+utoipa = { version = "5", features = ["axum_extras"] }
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+wiremock = "0.6"
