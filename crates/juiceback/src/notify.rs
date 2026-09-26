@@ -1,4 +1,3 @@
-//! notification system for reports (discord webhook + SMTP email).
 use std::{fmt::Write as _, sync::Arc};
 
 use crate::{config::Config, state::AppState};
@@ -71,8 +70,6 @@ pub fn dispatch_report_notifications(
     }
 }
 
-/// Send a confirmation email to the reporter letting them know their report is
-/// under review.
 pub fn send_reporter_confirmation(
     state: &Arc<AppState>,
     config: &Arc<Config>,

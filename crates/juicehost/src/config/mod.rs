@@ -1,6 +1,3 @@
-//! Configuration loaded from a TOML file.
-//! Secrets always come from the environment, never from TOML.
-
 use std::path::{Path, PathBuf};
 
 use juiceutils::file_validation::ProtectionLevel;
@@ -30,94 +27,130 @@ use secret::SecretSettings;
 use security::SecuritySettings;
 use thread::ThreadSettings;
 
-/// Holds every setting juicehost needs to run.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Public settings
     pub public_host: String,
+
     pub public_port: u16,
-    /// QUIC settings
+
     pub quic_host: String,
+
     pub quic_port: u16,
+
     pub quic_cert_path: Option<std::path::PathBuf>,
+
     pub quic_max_connections: usize,
+
     pub quic_max_requests: usize,
+
     pub quic_handshake_seconds: u64,
+
     pub quic_idle_seconds: u64,
+
     pub quic_request_total_seconds: u64,
-    /// Thread Settings
+
     pub worker_threads: usize,
-    /// Directory Settings
+
     pub files_dir: PathBuf,
+
     pub backend_url: Option<String>,
-    // Frontend Settings
-    pub frontend_url: Option<String>, // juicefront URL that GET / redirects to
-    /// Security Settings
-    pub api_key: String, // Optional!
-    /// Explicit opt-out for running without an API key. When `api_key` is
-    /// empty and this is false (the default), the server refuses to start
-    /// and internal endpoints reject everything - no silent open instances.
+
+    pub frontend_url: Option<String>,
+
+    pub api_key: String,
+
     pub allow_no_auth: bool,
-    pub allowed_origins: Vec<String>,  // Optional!
-    pub danger_level: ProtectionLevel, // <- (none, low, medium, high)
-    pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>, /* Super important if under a rev
-                                        * proxy. */
-    /// S3 Settings
+
+    pub allowed_origins: Vec<String>,
+
+    pub danger_level: ProtectionLevel,
+
+    pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
+
     pub s3_bucket: Option<String>,
+
     pub s3_region: Option<String>,
+
     pub s3_endpoint: Option<String>,
+
     pub s3_allow_http: bool,
+
     pub s3_access_key: Option<String>,
+
     pub s3_secret_key: Option<String>,
-    /// Limits Settings
+
     pub min_free_space_bytes: u64,
+
     pub max_file_size_bytes: u64,
+
     pub max_range_response_bytes: u64,
+
     pub max_concurrent_uploads: usize,
+
     pub max_concurrent_downloads: usize,
+
     pub max_concat_parts: usize,
+
     pub tcp_body_inactivity_seconds: u64,
+
     pub tcp_request_total_seconds: u64,
+
     pub tcp_max_concurrent_requests: usize,
-    /// Features Settings
+
     pub quick_link: bool,
+
     pub custom_id: bool,
+
     pub file_cache_enabled: bool,
+
     pub file_cache_max_age_secs: u64,
+
     pub default_ttl_hours: f64,
+
     pub allowed_ttl_hours: Vec<f64>,
-    /// Secrets
+
     pub ticket_jwt_secret: String,
+
     pub ip_pepper: String,
-    /// Ban Settings
+
     pub ban_list_file: Option<PathBuf>,
+
     pub ban_sync_url: Option<String>,
+
     pub ban_sync_interval: u64,
-    /// Sentry settings (DSN itself stays env-only).
+
     pub sentry: juiceutils::config::SentrySettings,
 }
 
-/// TOML file layout for juicehost. Every section is optional.
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct FileConfig {
     #[serde(default)]
     pub public: PublicFile,
+
     #[serde(default)]
     pub quic: QuicFile,
+
     #[serde(default)]
     pub threads: ThreadFile,
+
     #[serde(default)]
     pub dirs: DirectoryFile,
+
     #[serde(default)]
     pub security: SecurityFile,
+
     #[serde(default)]
     pub s3: S3File,
+
     #[serde(default)]
     pub limits: LimitsFile,
+
     #[serde(default)]
     pub features: FeaturesFile,
+
     #[serde(default)]
     pub ban: BanFile,
+
     #[serde(default)]
     pub sentry: juiceutils::config::SentrySettings,
 }
@@ -126,6 +159,7 @@ pub struct FileConfig {
 pub struct PublicFile {
     #[serde(default = "default_public_host")]
     pub host: String,
+
     #[serde(default = "default_public_port")]
     pub port: u16,
 }
@@ -149,17 +183,24 @@ const fn default_public_port() -> u16 {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QuicFile {
     pub host: Option<String>,
+
     pub port: Option<u16>,
+
     #[serde(default = "default_quic_cert")]
     pub cert_path: PathBuf,
+
     #[serde(default = "default_quic_max_connections")]
     pub max_connections: usize,
+
     #[serde(default = "default_quic_max_requests")]
     pub max_requests: usize,
+
     #[serde(default = "default_quic_handshake", alias = "handshake_secs")]
     pub handshake_seconds: u64,
+
     #[serde(default = "default_quic_idle", alias = "idle_secs")]
     pub idle_seconds: u64,
+
     #[serde(default = "default_quic_request_total", alias = "request_total_secs")]
     pub request_total_seconds: u64,
 }
@@ -224,8 +265,10 @@ const fn default_worker_threads() -> usize {
 pub struct DirectoryFile {
     #[serde(default = "default_files_dir")]
     pub files_dir: PathBuf,
+
     #[serde(default)]
     pub backend_url: Option<String>,
+
     #[serde(default)]
     pub frontend_url: Option<String>,
 }
@@ -248,12 +291,13 @@ fn default_files_dir() -> PathBuf {
 pub struct SecurityFile {
     #[serde(default = "default_danger_level")]
     pub danger_level: String,
+
     #[serde(default)]
     pub allowed_origins: Option<Vec<String>>,
+
     #[serde(default)]
     pub trusted_proxy_cidrs: Option<String>,
-    /// Explicit opt-out for running without an API key (env
-    /// `JUICEHOST_ALLOW_NO_AUTH` wins when set).
+
     #[serde(default)]
     pub allow_no_auth: bool,
 }
@@ -277,10 +321,13 @@ fn default_danger_level() -> String {
 pub struct S3File {
     #[serde(default)]
     pub bucket: Option<String>,
+
     #[serde(default)]
     pub region: Option<String>,
+
     #[serde(default)]
     pub endpoint: Option<String>,
+
     #[serde(default)]
     pub allow_http: bool,
 }
@@ -289,26 +336,34 @@ pub struct S3File {
 pub struct LimitsFile {
     #[serde(default = "default_min_free_space_gb")]
     pub min_free_space_gb: u64,
+
     #[serde(default = "default_max_file_size_mb")]
     pub max_file_size_mb: u64,
+
     #[serde(default = "default_max_range_response_mb")]
     pub max_range_response_mb: u64,
+
     #[serde(default = "default_max_concurrent_uploads")]
     pub max_concurrent_uploads: usize,
+
     #[serde(default = "default_max_concurrent_downloads")]
     pub max_concurrent_downloads: usize,
+
     #[serde(default = "default_max_concat_parts")]
     pub max_concat_parts: usize,
+
     #[serde(
         default = "default_tcp_body_inactivity",
         alias = "tcp_body_inactivity_secs"
     )]
     pub tcp_body_inactivity_seconds: u64,
+
     #[serde(
         default = "default_tcp_request_total",
         alias = "tcp_request_total_secs"
     )]
     pub tcp_request_total_seconds: u64,
+
     #[serde(default = "default_tcp_max_concurrent")]
     pub tcp_max_concurrent_requests: usize,
 }
@@ -369,14 +424,19 @@ const fn default_tcp_max_concurrent() -> usize {
 pub struct FeaturesFile {
     #[serde(default = "default_true")]
     pub quick_link: bool,
+
     #[serde(default = "default_true")]
     pub custom_id: bool,
+
     #[serde(default)]
     pub file_cache_enabled: bool,
+
     #[serde(default = "default_file_cache_max_age")]
     pub file_cache_max_age_secs: u64,
+
     #[serde(default = "default_default_ttl")]
     pub default_ttl_hours: f64,
+
     #[serde(default = "default_allowed_ttls")]
     pub allowed_ttl_hours: Vec<f64>,
 }
@@ -414,8 +474,10 @@ fn default_allowed_ttls() -> Vec<f64> {
 pub struct BanFile {
     #[serde(default)]
     pub list_file: Option<PathBuf>,
+
     #[serde(default)]
     pub sync_url: Option<String>,
+
     #[serde(default = "default_ban_sync_interval")]
     pub sync_interval_secs: u64,
 }
@@ -434,7 +496,6 @@ const fn default_ban_sync_interval() -> u64 {
     BanSettings::DEFAULT_SYNC_INTERVAL
 }
 
-/// Candidate config file locations, first hit wins.
 fn candidate_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(dir) = std::env::var("JUICEHOST_CONFIG") {
@@ -462,15 +523,18 @@ fn load_file_config() -> FileConfig {
 
 fn load_one_file(path: &Path) -> FileConfig {
     let Ok(text) = std::fs::read_to_string(path) else {
-        tracing::warn!("config file {} unreadable, using defaults", path.display());
+        tracing::warn!(
+            "config file {path} unreadable, using defaults",
+            path = path.display()
+        );
         return FileConfig::default();
     };
     match toml::from_str::<FileConfig>(&text) {
         Ok(cfg) => cfg,
         Err(err) => {
             tracing::warn!(
-                "config file {} invalid ({err}), using defaults",
-                path.display()
+                "config file {path} invalid ({err}), using defaults",
+                path = path.display()
             );
             FileConfig::default()
         }
@@ -478,13 +542,10 @@ fn load_one_file(path: &Path) -> FileConfig {
 }
 
 impl Config {
-    /// Load configuration from a TOML file.
     pub fn try_load() -> Result<Self, ConfigError> {
         Self::try_load_from(&load_file_config())
     }
 
-    /// Load configuration from defaults (tests). Secrets still come from
-    /// the environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::try_load_from(&FileConfig::default())
     }
@@ -515,19 +576,19 @@ impl Config {
             quic_request_total_seconds: quic.request_total_seconds(),
             worker_threads: threads.worker_threads(),
             files_dir: directories.files_dir().to_owned(),
-            backend_url: directories.backend_url().cloned(),
-            frontend_url: directories.frontend_url().cloned(),
+            backend_url: directories.backend_url().map(str::to_owned),
+            frontend_url: directories.frontend_url().map(str::to_owned),
             api_key: security.api_key().to_owned(),
             allow_no_auth: security.allow_no_auth(),
             allowed_origins: security.allowed_origins().to_owned(),
             danger_level: security.danger_level(),
             trusted_proxy_cidrs: security.trusted_proxy_cidrs().to_owned(),
-            s3_bucket: s3.bucket().cloned(),
-            s3_region: s3.region().cloned(),
-            s3_endpoint: s3.endpoint().cloned(),
+            s3_bucket: s3.bucket().map(str::to_owned),
+            s3_region: s3.region().map(str::to_owned),
+            s3_endpoint: s3.endpoint().map(str::to_owned),
             s3_allow_http: s3.allow_http(),
-            s3_access_key: s3.access_key().cloned(),
-            s3_secret_key: s3.secret_key().cloned(),
+            s3_access_key: s3.access_key().map(str::to_owned),
+            s3_secret_key: s3.secret_key().map(str::to_owned),
             min_free_space_bytes: limits.min_free_space_bytes(),
             max_file_size_bytes: limits.max_file_size_bytes(),
             max_range_response_bytes: limits.max_range_response_bytes(),
@@ -546,7 +607,7 @@ impl Config {
             ticket_jwt_secret: secrets.ticket_jwt_secret().to_owned(),
             ip_pepper: secrets.ip_pepper().to_owned(),
             ban_list_file: ban.list_file().cloned(),
-            ban_sync_url: ban.sync_url().cloned(),
+            ban_sync_url: ban.sync_url().map(str::to_owned),
             ban_sync_interval: ban.sync_interval(),
             sentry,
         })
@@ -567,8 +628,6 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn clear_juicehost_env() {
-        // Only secrets and the config path still come from the environment;
-        // everything else is TOML-driven.
         for name in [
             "JUICEHOST_API_KEY",
             "JUICEHOST_CONFIG",

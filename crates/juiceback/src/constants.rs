@@ -65,7 +65,7 @@ pub fn clamp_to_nearest(value: f64, allowed: &[f64]) -> f64 {
     *allowed
         .iter()
         .min_by_key(|&&a| ((a - value).abs() * 1000.0) as u64)
-        .unwrap()
+        .expect("allowed list is non-empty, so a minimum exists")
 }
 
 #[cfg(test)]

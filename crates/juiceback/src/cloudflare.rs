@@ -1,10 +1,7 @@
-//! Purge the Cloudflare cache when files get deleted
-
 use std::sync::Arc;
 
 use crate::config::Config;
 
-/// Purge Cloudflare URLs, it's fire-and-forget so failures just get logged
 pub async fn purge_urls(config: Arc<Config>, urls: Vec<String>) {
     purge_cache(config, serde_json::json!({ "files": urls }), "urls").await;
 }
@@ -65,7 +62,7 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
     });
 }
 
-pub fn purge_file(config: &Arc<Config>, id: &str, filename: &str, storage_host: &Option<String>) {
+pub fn purge_file(config: &Arc<Config>, id: &str, filename: &str, storage_host: Option<&str>) {
     let url = crate::utils::public_url(&config.public_base_url, storage_host, id, filename);
     let config = Arc::clone(config);
     let id = id.to_string();

@@ -1,6 +1,3 @@
-//! router builder and TCP server starter for juicehost.
-//! wires routes and middleware, then starts the server.
-
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
@@ -55,20 +52,12 @@ async fn ban_check_middleware(
     next.run(req).await
 }
 
-/// Authenticate juiceback requests with the API key and optional origin
-/// whitelist. Fail-closed when no API key is configured unless
-/// `JUICEHOST_ALLOW_NO_AUTH` is set.
 async fn require_api_key(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: middleware::Next,
 ) -> impl IntoResponse {
     if state.api_key.is_empty() {
-        // Fail closed: an unset key used to silently disable auth on every
-        // internal endpoint. Two ways through remain: an explicit
-        // JUICEHOST_ALLOW_NO_AUTH=true opt-out (dev/loopback), or a per-file
-        // capability header - for unkeyed instances capabilities ARE the
-        // auth, and handlers verify them against the stored sidecar.
         let has_capability = req.headers().contains_key("x-juicehost-file-capability");
         if state.allow_no_auth || has_capability {
             return next.run(req).await;
@@ -100,9 +89,8 @@ async fn require_api_key(
             .unwrap_or("");
         if !state.allowed_origins.iter().any(|a| a == origin) {
             tracing::warn!(
-                "auth: rejected origin '{}' from [redacted] (allowed: {:?})",
-                origin,
-                state.allowed_origins,
+                "auth: rejected origin '{origin}' from [redacted] (allowed: {allowed:?})",
+                allowed = state.allowed_origins,
             );
             return JuicehostError::Forbidden.into_response();
         }
@@ -111,23 +99,19 @@ async fn require_api_key(
     next.run(req).await
 }
 
-/// Middleware that authenticates internal requests with EITHER an API key OR a
-/// ticket JWT.
 async fn require_api_key_or_ticket(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: middleware::Next,
 ) -> impl IntoResponse {
-    if !state.api_key.is_empty() {
-        if let Some(provided_key) = req
+    if !state.api_key.is_empty()
+        && let Some(provided_key) = req
             .headers()
             .get("x-juicehost-api-key")
             .and_then(|v| v.to_str().ok())
-        {
-            if constant_time_eq(&state.api_key, provided_key) {
-                return next.run(req).await;
-            }
-        }
+        && constant_time_eq(&state.api_key, provided_key)
+    {
+        return next.run(req).await;
     }
 
     if let Some(token) = juiceutils::extract_bearer_token(req.headers())
@@ -150,7 +134,6 @@ async fn request_body_deadline(
     next.run(Request::from_parts(parts, body)).await
 }
 
-/// Serves the `OpenAPI` spec as JSON with the correct content type.
 async fn openapi_json_handler() -> (axum::http::header::HeaderMap, String) {
     let json = serde_json::to_string_pretty(&ApiDoc::openapi()).unwrap_or_default();
     let mut headers = axum::http::header::HeaderMap::new();
@@ -267,7 +250,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// Start the TCP server with graceful shutdown.
 pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests: usize) {
     let socket = if addr.is_ipv4() {
         tokio::net::TcpSocket::new_v4()

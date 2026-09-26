@@ -1,5 +1,3 @@
-//! Errors sent to juiceback
-
 use axum::{
     Json,
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -12,40 +10,36 @@ use utoipa::ToSchema;
 const NOT_FOUND_HTML_TEMPLATE: &str = include_str!("templates/not_found.html");
 const TEAPOT_HTML_TEMPLATE: &str = include_str!("templates/teapot_uploading.html");
 
-/// Standard error response body returned by all juicehost endpoints on failure.
 #[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
-    /// Machine-readable error code (e.g. "`FILE_NOT_FOUND`", "FORBIDDEN").
     pub error: String,
-    /// Human-readable description of what went wrong.
+
     pub message: String,
 }
 
-/// Errors returned by storage backends.
 #[derive(Debug, Error)]
 pub enum StorageError {
-    /// The requested file does not exist.
     #[error("file not found")]
     NotFound,
-    /// The target file already exists (conflict on create/rename).
+
     #[error("conflict: file already exists")]
     Conflict,
-    /// The uploaded file exceeds the size limit.
+
     #[error("payload too large")]
     PayloadTooLarge,
-    /// A stream ended at a size other than its required exact length.
+
     #[error("payload size mismatch")]
     SizeMismatch,
-    /// The storage backend has run out of space.
+
     #[error("insufficient storage")]
     InsufficientStorage,
-    /// The supplied per-file capability did not authorize the operation.
+
     #[error("invalid file capability")]
     Forbidden,
-    /// The request body failed mid-stream (client disconnect or truncation).
+
     #[error("request body failed: {0}")]
     BodyRead(String),
-    /// An I/O or backend-specific error occurred.
+
     #[error("{0}")]
     Io(String),
 }
@@ -65,7 +59,6 @@ impl From<StorageError> for JuicehostError {
     }
 }
 
-/// Build a styled HTML 404 response with the Juicebox color scheme.
 pub fn not_found_html() -> (StatusCode, Html<String>) {
     (
         StatusCode::NOT_FOUND,
@@ -73,7 +66,6 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
     )
 }
 
-/// Return 418 while a file is still uploading so social previews can retry.
 pub fn teapot_html(
     filename: &str,
     public_url: &str,
@@ -111,40 +103,38 @@ fn escape_html(value: &str) -> String {
 }
 
 #[derive(Debug, Error)]
+
 pub enum JuicehostError {
-    /// The requested file does not exist.
     #[error("file not found")]
     NotFound,
-    /// The request was malformed or missing required fields.
+
     #[error("bad request")]
     BadRequest,
-    /// The target file already exists (conflict on create/rename).
+
     #[error("target file already exists")]
     Conflict,
-    /// The uploaded file exceeds the size limit.
+
     #[error("file too large")]
     PayloadTooLarge,
-    /// The storage backend has run out of space.
+
     #[error("insufficient storage")]
     InsufficientStorage,
-    /// An unexpected internal error occurred.
+
     #[error("internal server error")]
     Internal,
-    /// The request lacked valid authentication credentials.
+
     #[error("authentication required")]
     Unauthorized,
-    /// The request was authenticated but is not allowed to perform this
-    /// operation (banned IP, wrong-resource ticket, disallowed origin).
+
     #[error("forbidden")]
     Forbidden,
-    /// The uploaded file type was blocked by validation (dangerous extension or
-    /// magic bytes).
+
     #[error("{0}")]
     BlockedFileType(String),
-    /// A declared or signed request size did not match the body.
+
     #[error("request body size does not match the signed file size")]
     SizeMismatch,
-    /// A configured concurrency limit is currently exhausted.
+
     #[error("server concurrency limit reached")]
     ServiceUnavailable,
 }

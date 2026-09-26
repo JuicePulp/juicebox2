@@ -7,20 +7,15 @@ use crate::{
     state::AppState,
 };
 
-/// Finish a non-parallel TUS upload by closing the sender and writing the DB
-/// record
 pub(crate) async fn complete_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
 ) -> Result<serde_json::Value, AppError> {
-    // Close the sender side so the push task sees EOF and finishes.
     state.tus_senders.remove(&meta.id);
     await_storage_push(state, &meta.id).await?;
     finish_tus_upload(state, meta).await
 }
 
-/// Finalize a TUS upload whose storage push has already been awaited: write the
-/// DB record and return the public URL response.
 pub(crate) async fn finish_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
@@ -37,14 +32,12 @@ pub(crate) async fn finish_tus_upload(
         .map_err(AppError::from_juicehost_error)?;
     }
 
-    let record = if let Some(ref reserve_id) = meta.reserve_id {
-        // This was a pre-reserved upload (Quick Link). Update the existing record.
-        let rid = reserve_id.clone();
+    let record = if let Some(reserve_id) = meta.reserve_id.as_deref() {
         let reservation_token = meta
             .reservation_token
             .clone()
             .ok_or_else(|| AppError::Forbidden("reservation delete token required".into()))?;
-        let update_id = rid;
+        let update_id = reserve_id.to_string();
         let fname = meta.filename.clone();
         let mtype = meta.mime_type.clone();
         let size = meta.total_length as i64;
@@ -76,11 +69,9 @@ pub(crate) async fn finish_tus_upload(
                 ));
             }
         };
-        tracing::info!(
-            "reserved TUS upload completed: id={} size={}",
-            completed.id,
-            completed.size_bytes
-        );
+        let completed_id = &completed.id;
+        let completed_size = completed.size_bytes;
+        tracing::info!("reserved TUS upload completed: id={completed_id} size={completed_size}");
         completed
     } else {
         let record = FileRecord::from_upload_with_token(
@@ -106,7 +97,7 @@ pub(crate) async fn finish_tus_upload(
 
     let public_url = crate::utils::public_url(
         &state.config.public_base_url,
-        &record.storage_host,
+        record.storage_host.as_deref(),
         &record.id,
         &record.filename,
     );

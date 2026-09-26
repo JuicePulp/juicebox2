@@ -17,7 +17,6 @@ fn file_sort_column(sort: &str) -> &str {
     }
 }
 
-/// Whitelist of allowed sort columns for reports.
 fn report_sort_column(sort: &str) -> &str {
     match sort {
         "reason" => "reason",
@@ -26,7 +25,6 @@ fn report_sort_column(sort: &str) -> &str {
     }
 }
 
-/// Whitelist of allowed sort columns for feedback.
 fn feedback_sort_column(sort: &str) -> &str {
     match sort {
         "id" => "id",
@@ -34,7 +32,6 @@ fn feedback_sort_column(sort: &str) -> &str {
     }
 }
 
-/// Whitelist of allowed sort columns for bans.
 fn ban_sort_column(sort: &str) -> &str {
     match sort {
         "reason" => "reason",
@@ -64,8 +61,6 @@ pub fn list_files_paginated(
         )
     };
 
-    // Single scan: COUNT(*) OVER() carries the match total on every row, so
-    // the separate COUNT query (a second full table scan) is gone.
     let sql = format!(
         "SELECT {}, COUNT(*) OVER() AS total FROM files {} ORDER BY {} {} LIMIT ?{} OFFSET ?{}",
         FILE_COLUMNS,
@@ -95,7 +90,6 @@ pub fn list_files_paginated(
     Ok((rows, total))
 }
 
-/// Paginated reports with search, sort, offset, limit.
 pub fn list_reports_paginated(
     conn: &Connection,
     search: &str,
@@ -161,7 +155,6 @@ pub fn list_reports_paginated(
     Ok((rows, total))
 }
 
-/// Paginated feedback with search, sort, offset, limit.
 pub fn list_feedback_paginated(
     conn: &Connection,
     search: &str,
@@ -220,7 +213,6 @@ pub fn list_feedback_paginated(
     Ok((rows, total))
 }
 
-/// Paginated bans with search, sort, offset, limit.
 pub fn list_banned_ips_paginated(
     conn: &Connection,
     search: &str,

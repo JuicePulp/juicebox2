@@ -888,22 +888,19 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
     if pairs.is_empty() {
         return Vec::new();
     }
-    let files = match tokio::time::timeout(
-        Duration::from_secs(5),
-        async {
-            let response = state
-                .http
-                .post(format!("{}/api/owned-files", state.config.juiceback_url))
-                .json(&serde_json::json!({ "pairs": pairs }))
-                .send()
-                .await
-                .ok()?;
-            if !response.status().is_success() {
-                return None;
-            }
-            response.json::<serde_json::Value>().await.ok()
-        },
-    )
+    let files = match tokio::time::timeout(Duration::from_secs(5), async {
+        let response = state
+            .http
+            .post(format!("{}/api/owned-files", state.config.juiceback_url))
+            .json(&serde_json::json!({ "pairs": pairs }))
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        response.json::<serde_json::Value>().await.ok()
+    })
     .await
     {
         Ok(Some(data)) => data,
@@ -1151,23 +1148,20 @@ async fn latest_tag(state: &AppState) -> String {
         return tag.clone();
     }
     let tag = async {
-        let response = tokio::time::timeout(
-            Duration::from_secs(5),
-            async {
-                let response = state
-                    .http
-                    .get("https://api.github.com/repos/juiceboxdev/juicebox-plus/releases/latest")
-                    .header("User-Agent", "juicebox-ui")
-                    .header("Accept", "application/vnd.github+json")
-                    .send()
-                    .await
-                    .ok()?;
-                if !response.status().is_success() {
-                    return None;
-                }
-                response.json::<serde_json::Value>().await.ok()
-            },
-        )
+        let response = tokio::time::timeout(Duration::from_secs(5), async {
+            let response = state
+                .http
+                .get("https://api.github.com/repos/juiceboxdev/juicebox-plus/releases/latest")
+                .header("User-Agent", "juicebox-ui")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .ok()?;
+            if !response.status().is_success() {
+                return None;
+            }
+            response.json::<serde_json::Value>().await.ok()
+        })
         .await
         .ok()??;
         response

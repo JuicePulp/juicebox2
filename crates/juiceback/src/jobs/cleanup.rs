@@ -1,5 +1,3 @@
-//! Background job that removes expired files and their metadata.
-
 use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
@@ -17,7 +15,7 @@ pub async fn run_cleanup_loop(state: Arc<AppState>) {
 
     loop {
         ticker.tick().await;
-        // Catch panics so one failed cleanup cycle doesn't kill the loop forever.
+
         let state_clone = Arc::clone(&state);
         let result = tokio::spawn(async move { run_cleanup_once(&state_clone).await }).await;
         if let Err(e) = result {
@@ -139,7 +137,7 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
             .map(|r| {
                 crate::utils::public_url(
                     &state.config.public_base_url,
-                    &r.storage_host,
+                    r.storage_host.as_deref(),
                     &r.id,
                     &r.filename,
                 )
@@ -155,13 +153,12 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         }
 
         let state3 = Arc::clone(state);
-        let ids_for_purge = ids_to_purge.clone();
         let purge_result = tokio::task::spawn_blocking(move || -> Result<usize, AppError> {
             let db = state3
                 .db
                 .get()
                 .map_err(|e| AppError::DbPoolError(e.to_string()))?;
-            db::delete_files_by_ids(&db, &ids_for_purge).map_err(AppError::DatabaseError)
+            db::delete_files_by_ids(&db, &ids_to_purge).map_err(AppError::DatabaseError)
         })
         .await
         .map_err(|e| tracing::error!("cleanup: purge task panicked: {e}"));

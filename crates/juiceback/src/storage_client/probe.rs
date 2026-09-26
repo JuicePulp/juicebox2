@@ -1,13 +1,8 @@
 use std::sync::Arc;
 
-use super::target::{require_juicehost_url, resolve_juicehost_target};
+use super::{client::StorageClient, target::require_juicehost_url};
 use crate::state::AppState;
 
-/// Query juicehost to confirm a file physically exists on disk and report its
-/// stored size. Returns `Ok(Some(size_bytes))` when present, `Ok(None)` when
-/// the file is not on juicehost, and `Err(String)` when juicehost is
-/// unreachable or returned an unexpected status. Used to verify ultrafast
-/// uploads actually landed before marking them ready.
 pub async fn stat_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
@@ -18,22 +13,13 @@ pub async fn stat_file_on_juicehost(
     if custom_host.is_none() {
         require_juicehost_url(&state.config.juicehost_url).map_err(|e| e.to_string())?;
     }
-    let target = resolve_juicehost_target(state, custom_host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = StorageClient::resolve(state, custom_host).await?;
 
-    let mut headers = target.headers.clone();
-    if let Some(cap) = capability {
-        headers.insert(
-            "x-juicehost-file-capability",
-            cap.parse::<reqwest::header::HeaderValue>()
-                .map_err(|_| "invalid file capability".to_string())?,
-        );
-    }
+    let headers = client.headers_with(capability)?;
 
-    let resp = target
-        .client
-        .get(format!("{}/internal/file/{}/stat", target.base_url, id))
+    let resp = client
+        .http()
+        .get(format!("{}/internal/file/{}/stat", client.base_url(), id))
         .headers(headers)
         .send()
         .await

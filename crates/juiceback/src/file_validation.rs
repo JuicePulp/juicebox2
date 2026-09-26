@@ -2,10 +2,6 @@ pub use juiceutils::file_validation::*;
 
 use crate::error::AppError;
 
-/// Map a `FileValidation` to its `BlockedFileType` error.
-///
-/// Returns `None` for `Allowed` so call sites collapse their repeated
-/// four-arm match into a single `if let Some(err)` check.
 #[must_use]
 pub fn blocked_file_error(validation: FileValidation) -> Option<AppError> {
     match validation {

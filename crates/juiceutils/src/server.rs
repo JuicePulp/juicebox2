@@ -1,5 +1,3 @@
-//! QUIC/HTTP/3 server setup shared between juiceback and juicehost.
-
 use std::{sync::Arc, time::Duration};
 
 use axum::{
@@ -18,13 +16,14 @@ use tower::Service;
 
 #[must_use]
 pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
-    let certified_key = generate_simple_self_signed(vec!["juicebox.local".into()]).unwrap();
+    let certified_key =
+        generate_simple_self_signed(vec!["juicebox.local".into()]).expect("rcgen self-sign failed");
     let cert_der = certified_key.cert.der().clone();
-    let key_der = PrivateKeyDer::try_from(certified_key.signing_key.serialize_der()).unwrap();
+    let key_der = PrivateKeyDer::try_from(certified_key.signing_key.serialize_der())
+        .expect("rcgen key is valid PKCS#8");
     (cert_der, key_der)
 }
 
-/// Generate or load a self-signed certificate used for certificate pinning.
 pub fn get_or_generate_cert(
     cert_path: &std::path::Path,
 ) -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
@@ -37,7 +36,9 @@ pub fn get_or_generate_cert(
         tracing::info!("loaded QUIC cert from {}", cert_path.display());
         return (cert_der, key_der);
     }
-    let certified_key = generate_simple_self_signed(vec!["juicebox.local".into()]).unwrap();
+
+    let certified_key =
+        generate_simple_self_signed(vec!["juicebox.local".into()]).expect("rcgen self-sign failed");
     let cert_der = certified_key.cert.der().clone();
     let key_der_bytes = certified_key.signing_key.serialize_der();
     let key_der =
@@ -82,9 +83,13 @@ pub fn load_cert_for_pinning(
 #[derive(Debug, Clone)]
 pub struct QuicServerLimits {
     pub max_connections: usize,
+
     pub max_requests: usize,
+
     pub handshake_timeout: Duration,
+
     pub idle_timeout: Duration,
+
     pub request_timeout: Duration,
 }
 
@@ -141,13 +146,13 @@ pub async fn start_quic_server_with_limits(
         let mut tls = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert_der], key_der)
-            .unwrap();
+            .expect("generated cert/key pair is valid TLS material");
         tls.alpn_protocols = vec![b"h3".to_vec()];
         tls
     };
 
-    let quic_server_config =
-        QuicServerConfig::try_from(Arc::new(tls_config)).expect("QuicServerConfig creation failed");
+    let quic_server_config = QuicServerConfig::try_from(Arc::new(tls_config))
+        .expect("valid TLS config converts to a QUIC server config");
 
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(16u32.into());
@@ -165,17 +170,17 @@ pub async fn start_quic_server_with_limits(
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server_config));
     server_config.transport_config(Arc::new(transport));
 
-    let socket = std::net::UdpSocket::bind(addr).expect("Failed to bind QUIC UDP socket");
+    let socket = std::net::UdpSocket::bind(addr).expect("bind QUIC UDP socket");
     socket
         .set_nonblocking(true)
-        .expect("Failed to set socket nonblocking");
+        .expect("set QUIC socket nonblocking");
     let endpoint = Endpoint::new(
         quinn::EndpointConfig::default(),
         Some(server_config),
         socket,
         Arc::new(quinn::TokioRuntime),
     )
-    .expect("Failed to create QUIC endpoint");
+    .expect("create QUIC endpoint from a bound socket");
 
     tracing::info!("{service_name} QUIC listening on udp://{addr}");
 
@@ -357,7 +362,7 @@ async fn proxy_axum(
         .method(method)
         .uri(uri)
         .body(Body::new(body))
-        .unwrap();
+        .expect("method and uri came from a valid request");
     *axum_req.headers_mut() = headers;
     axum_req
         .extensions_mut()
@@ -371,14 +376,16 @@ async fn proxy_axum(
     let mut resp_body = response.into_body();
 
     if !status.is_success() {
-        tracing::warn!("proxy_axum: {} {} -> {}", method_str, uri_str, status,);
+        tracing::warn!("proxy_axum: {method_str} {uri_str} -> {status}");
     }
 
     let mut builder = Response::builder().status(status);
     for (k, v) in &resp_headers {
         builder = builder.header(k, v);
     }
-    send_stream.send_response(builder.body(()).unwrap()).await?;
+    send_stream
+        .send_response(builder.body(()).expect("status-only response builds"))
+        .await?;
     while let Some(frame) = resp_body.frame().await {
         let frame = frame?;
         if let Some(data) = frame.data_ref() {

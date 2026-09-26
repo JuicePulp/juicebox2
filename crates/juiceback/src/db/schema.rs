@@ -8,13 +8,10 @@ pub fn init_db(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Number of ordered migrations in [`MIGRATIONS`]. Bump by appending; never
-/// reorder or edit an applied migration.
 pub fn migration_count() -> u32 {
     MIGRATIONS.len() as u32
 }
 
-/// Highest applied migration version recorded for this database.
 pub fn schema_version(conn: &Connection) -> Result<u32> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -30,9 +27,6 @@ pub fn schema_version(conn: &Connection) -> Result<u32> {
     Ok(max.unwrap_or(0))
 }
 
-/// Ordered schema migrations. Each entry runs once per database, tracked in
-/// `schema_migrations`; every statement is safe to re-run (IF NOT EXISTS or
-/// existence-checked ALTERs), so concurrent startups converge harmlessly.
 const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("failed_logins.ip_hash", m01_failed_logins_ip_hash),
     ("files.storage_host", m02_files_storage_host),
@@ -57,8 +51,7 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
         }
         tracing::debug!("applying schema migration v{version}: {name}");
         migrate(conn)?;
-        // OR IGNORE: a concurrent startup may have applied it first; the
-        // statements above are all idempotent.
+
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)",
             params![version],
@@ -118,8 +111,7 @@ fn m05_files_status(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
-    // Serves the abandoned-uploads cleanup sweep (status filter) and its
-    // companion ordered scan. Created here so the column always exists first.
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_files_status_uploaded ON files(status, uploaded_at)",
         [],
@@ -138,8 +130,6 @@ fn m06_pairing_codes_ip_hash(conn: &Connection) -> Result<()> {
 }
 
 fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
-    // Progress columns (added after the table shipped); ignore errors when
-    // they already exist on upgraded databases.
     let _ = conn.execute(
         "ALTER TABLE fetch_jobs ADD COLUMN stage TEXT NOT NULL DEFAULT ''",
         [],
@@ -152,8 +142,6 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
 }
 
 fn m08_client_files_legacy_index(conn: &Connection) -> Result<()> {
-    // The PK (client_key, file_id) already covers bare client_key lookups,
-    // so the old single-column index is redundant.
     conn.execute("DROP INDEX IF EXISTS idx_client_files_client", [])?;
     Ok(())
 }
@@ -241,8 +229,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    // Known custom hosts users have pointed the UI at. First use is tracked so
-    // admins can see who's been used and ban offenders.
     conn.execute(
         "CREATE TABLE IF NOT EXISTS hosters (
             host          TEXT PRIMARY KEY,
@@ -277,7 +263,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    // Table for persisting admin failed login attempts (survives restarts)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS failed_logins (
             username   TEXT NOT NULL,
@@ -287,7 +272,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    // Maps previous file IDs to their current ID so old URLs can redirect.
     conn.execute(
         "CREATE TABLE IF NOT EXISTS aliases (
             old_id    TEXT PRIMARY KEY,
@@ -300,13 +284,12 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_failed_logins_username ON failed_logins(username)",
         [],
     )?;
-    // Serve the per-login attempt COUNT guard.
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_failed_logins_user_ip ON failed_logins(username, ip_hash, attempt_at)",
         [],
     )?;
 
-    // Pairing codes: short-lived codes for juicebox-plus device registration
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS pairing_codes (
             code_hash TEXT PRIMARY KEY,
@@ -318,7 +301,7 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_pairing_codes_expires ON pairing_codes(expires_at);",
     )?;
-    // Serve the per-generate COUNT guards (user and IP quotas).
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_pairing_codes_user ON pairing_codes(user_id, used, expires_at)",
         [],
@@ -328,7 +311,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    // Registered devices (juicebox-plus instances paired to user accounts)
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
@@ -340,9 +322,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);",
     )?;
 
-    // Per-client upload registry: the browser's upload list mirrored server-side
-    // (keyed by the `jb_uid` user id), so no-JS /files can render the full list
-    // without the ~4KB cookie cap and without the files table knowing the owner.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS client_files (
             client_key   TEXT NOT NULL,
@@ -358,9 +337,6 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_client_files_client_uploaded ON client_files(client_key, uploaded_at);",
     )?;
 
-    // JuiceBox x Cobalt.Tools URL fetch jobs. Tracks async cobalt processing
-    // so the browser can poll for completion; file_id links to a normal
-    // record in the files table once the transfer succeeds.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS fetch_jobs (
             id          TEXT PRIMARY KEY,

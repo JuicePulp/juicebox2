@@ -1,8 +1,5 @@
-//! File-type validation with tiered extension and signature denylists.
-
 use std::path::Path;
 
-/// Protection level parsed from the `DANGER_LEVEL` env var.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProtectionLevel {
     None = 0,
@@ -12,7 +9,6 @@ pub enum ProtectionLevel {
 }
 
 impl ProtectionLevel {
-    /// Parse from a string like "none", "low", "medium", "high".
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -24,14 +20,11 @@ impl ProtectionLevel {
         }
     }
 
-    /// Whether the given danger tier should be blocked at this protection
-    /// level.
     #[must_use]
     pub fn blocks(self, tier: DangerTier) -> bool {
         self >= tier.level()
     }
 
-    /// Return the string representation for API responses.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -43,7 +36,6 @@ impl ProtectionLevel {
     }
 }
 
-/// Danger tier of a file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DangerTier {
     Low,
@@ -52,7 +44,6 @@ pub enum DangerTier {
 }
 
 impl DangerTier {
-    /// The minimum protection level needed to block this tier.
     #[must_use]
     pub const fn level(self) -> ProtectionLevel {
         match self {
@@ -63,10 +54,7 @@ impl DangerTier {
     }
 }
 
-/// Low-tier dangerous extensions: Windows executables, installers, DLLs,
-/// system files, disk images.
 const LOW_TIER_EXTENSIONS: &[&str] = &[
-    // Windows executables and installers
     "exe",
     "msi",
     "msp",
@@ -78,58 +66,39 @@ const LOW_TIER_EXTENSIONS: &[&str] = &[
     "hta",
     "application",
     "gadget",
-    // DLLs, libraries, system files
     "dll",
     "so",
     "dylib",
     "ko",
     "sys",
     "drv",
-    // Disk images (can contain executable payloads)
     "iso",
     "img",
     "vhd",
     "vmdk",
     "vdi",
-    // Other binary formats
     "pyc",
     "pyo",
     "class",
     "jar",
 ];
 
-/// Medium-tier dangerous extensions: scripts, batch files, scripting languages.
 const MEDIUM_TIER_EXTENSIONS: &[&str] = &[
-    // Windows scripting
-    "bat", "cmd", "inf", "jse", "lnk", "vbs", "vbe", "wsf", "wsh", "ws", "reg", "rgs", "sct", "shb",
-    "shs", "ps1", "psm1", "psd1", "psc1", "psc2", "ps1xml", "psc1xml", // Shell scripts
-    "sh", "bash", "csh", "ksh", "zsh", "fish", // macOS
-    "app", "command", "terminal", // Other
-    "url", "website", "xnk", "xbap",
+    "bat", "cmd", "inf", "jse", "lnk", "vbs", "vbe", "wsf", "wsh", "ws", "reg", "rgs", "sct",
+    "shb", "shs", "ps1", "psm1", "psd1", "psc1", "psc2", "ps1xml", "psc1xml", "sh", "bash", "csh",
+    "ksh", "zsh", "fish", "app", "command", "terminal", "url", "website", "xnk", "xbap",
 ];
 
-/// High-tier dangerous extensions: JavaScript, HTML/SVG, PHP, Python, etc.
-/// These are potential XSS/RFI vectors if served directly.
 const HIGH_TIER_EXTENSIONS: &[&str] = &[
-    // JavaScript variants
-    "js", "mjs", "cjs", "jsx", "ts", "tsx", // HTML and variants (XSS risk)
-    "html", "htm", "xhtml", "xht", "shtml", "svg", // PHP
-    "php", "php3", "php4", "php5", "phtml", "phar", // Python
-    "py", "pyw", "pyi", // Ruby
-    "rb", "erb", "rake", // Perl
-    "pl", "pm", "cgi", // ASP
-    "asp", "aspx", "ascx", "ashx", "asmx", // ColdFusion
-    "cfm", "cfc", // Other scripting
-    "lua", "tcl", "groovy", "gradle", "jsp", "jspx", "wss",
+    "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm", "xhtml", "xht", "shtml", "svg", "php",
+    "php3", "php4", "php5", "phtml", "phar", "py", "pyw", "pyi", "rb", "erb", "rake", "pl", "pm",
+    "cgi", "asp", "aspx", "ascx", "ashx", "asmx", "cfm", "cfc", "lua", "tcl", "groovy", "gradle",
+    "jsp", "jspx", "wss",
 ];
 
-/// Magic byte signatures mapped to danger tiers.
 const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
-    // PE executable (Windows), Low tier
     (&[0x4D, 0x5A], "PE executable", DangerTier::Low),
-    // ELF executable (Linux), Low tier
     (&[0x7F, 0x45, 0x4C, 0x46], "ELF executable", DangerTier::Low),
-    // Mach-O executable (macOS), Low tier
     (
         &[0xFE, 0xED, 0xFA, 0xCE],
         "Mach-O executable",
@@ -150,45 +119,37 @@ const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
         "Mach-O 64-bit executable",
         DangerTier::Low,
     ),
-    // Java class file, Low tier
     (
         &[0xCA, 0xFE, 0xBA, 0xBE],
         "Java class file",
         DangerTier::Low,
     ),
-    // Batch file (@echo off), Medium tier
     (
         &[0x40, 0x65, 0x63, 0x68, 0x6F],
         "batch script",
         DangerTier::Medium,
     ),
-    // Shebang line (#!/...), Medium tier
     (&[0x23, 0x21], "shell script", DangerTier::Medium),
-    // JavaScript (common patterns), High tier
     (
         &[0x66, 0x75, 0x6E, 0x63, 0x74, 0x69, 0x6F, 0x6E],
         "JavaScript",
         DangerTier::High,
     ),
-    // HTML DOCTYPE, High tier
     (
         &[0x3C, 0x21, 0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45],
         "HTML document",
         DangerTier::High,
     ),
-    // HTML <html, High tier
     (
         &[0x3C, 0x68, 0x74, 0x6D, 0x6C],
         "HTML document",
         DangerTier::High,
     ),
-    // SVG, High tier
     (
         &[0x3C, 0x3F, 0x78, 0x6D, 0x6C],
         "XML/SVG document",
         DangerTier::High,
     ),
-    // PHP, High tier
     (
         &[0x3C, 0x3F, 0x70, 0x68, 0x70],
         "PHP script",
@@ -199,21 +160,20 @@ const DANGEROUS_MAGIC: &[(&[u8], &str, DangerTier)] = &[
 #[derive(Debug)]
 pub enum FileValidation {
     Allowed,
-    /// File was rejected because of a dangerous extension.
+
     BlockedExtension {
         ext: String,
         tier: DangerTier,
     },
-    /// File was rejected because its magic bytes indicate a dangerous type.
+
     BlockedMagic {
         description: String,
         tier: DangerTier,
     },
-    /// File was rejected because it's empty.
+
     Empty,
 }
 
-/// User-friendly message for why a file type was blocked.
 #[must_use]
 pub fn friendly_block_reason(tier: DangerTier) -> String {
     match tier {
@@ -223,7 +183,6 @@ pub fn friendly_block_reason(tier: DangerTier) -> String {
     }
 }
 
-/// Validate a filename against the configured extension policy.
 #[must_use]
 pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidation {
     if level == ProtectionLevel::None {
@@ -258,7 +217,6 @@ pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidati
     FileValidation::Allowed
 }
 
-/// Validate a filename and the available leading file bytes.
 #[must_use]
 pub fn validate_file(filename: &str, data: &[u8], level: ProtectionLevel) -> FileValidation {
     let filename_result = validate_filename(filename, level);
@@ -450,7 +408,6 @@ mod tests {
 
     #[test]
     fn tier_blocks_include_lower() {
-        // Medium should also block Low-tier files
         assert!(matches!(
             validate_file("app.exe", b"MZ", ProtectionLevel::Medium),
             FileValidation::BlockedExtension {
@@ -458,7 +415,7 @@ mod tests {
                 ..
             }
         ));
-        // High should also block Low and Medium-tier files
+
         assert!(matches!(
             validate_file("script.sh", b"#!/bin/bash", ProtectionLevel::High),
             FileValidation::BlockedExtension {

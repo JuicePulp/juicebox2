@@ -15,7 +15,6 @@ pub fn insert_feedback(
     Ok(conn.last_insert_rowid())
 }
 
-/// List all feedback, newest first.
 pub fn list_feedback(conn: &Connection) -> Result<Vec<FeedbackRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, message, email, reporter_ip, created_at FROM feedback ORDER BY created_at DESC",
@@ -32,8 +31,6 @@ pub fn list_feedback(conn: &Connection) -> Result<Vec<FeedbackRecord>> {
     rows.collect()
 }
 
-/// Delete a feedback entry by ID and return true if anything was actually
-/// removed
 pub fn delete_feedback(conn: &Connection, id: i64) -> Result<bool> {
     let affected = conn.execute("DELETE FROM feedback WHERE id = ?1", params![id])?;
     Ok(affected > 0)

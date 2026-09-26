@@ -1,4 +1,3 @@
-//! No-JS HTML endpoints: upload confirm, file list, report/feedback.
 use std::sync::Arc;
 
 use axum::{
@@ -20,16 +19,17 @@ const COOKIE_MAX_AGE: &str = "2592000";
 pub struct ReportRequest {
     #[serde(default)]
     pub file_url: String,
+
     #[serde(default)]
     pub reason: String,
+
     #[serde(default)]
     pub details: String,
+
     #[serde(default)]
     pub email: String,
 }
 
-/// POST /api/report accepts a form submission, stores it, notifies admins, and
-/// redirects back
 #[utoipa::path(
     post,
     path = "/api/report",
@@ -89,16 +89,12 @@ pub async fn report_submit_handler(
         })
         .await?;
 
-    tracing::info!(
-        "report #{}: url={} reason={} ip={}",
-        report_id,
-        file_url,
-        form.reason,
-        hashed_ip
-            .as_ref()
-            .map(|h| crate::utils::truncate_hash(h))
-            .unwrap_or("unknown"),
-    );
+    let report_reason = &form.reason;
+    let report_ip = hashed_ip
+        .as_ref()
+        .map(|h| crate::utils::truncate_hash(h))
+        .unwrap_or("unknown");
+    tracing::info!("report #{report_id}: url={file_url} reason={report_reason} ip={report_ip}");
 
     notify::dispatch_report_notifications(
         &state,
@@ -126,12 +122,11 @@ pub async fn report_submit_handler(
 pub struct FeedbackRequest {
     #[serde(default)]
     pub message: String,
+
     #[serde(default)]
     pub email: String,
 }
 
-/// POST /api/feedback - accept a feedback form submission and redirect to
-/// confirmation.
 #[utoipa::path(
     post,
     path = "/api/feedback",
@@ -181,15 +176,14 @@ pub async fn feedback_submit_handler(
         })
         .await?;
 
+    let message_len = message.len();
+    let feedback_email = &form.email;
+    let feedback_ip = hashed_ip
+        .as_ref()
+        .map(|h| crate::utils::truncate_hash(h))
+        .unwrap_or("unknown");
     tracing::info!(
-        "feedback #{}: len={} email={} ip={}",
-        feedback_id,
-        message.len(),
-        form.email,
-        hashed_ip
-            .as_ref()
-            .map(|h| crate::utils::truncate_hash(h))
-            .unwrap_or("unknown"),
+        "feedback #{feedback_id}: len={message_len} email={feedback_email} ip={feedback_ip}"
     );
 
     Ok(Redirect::to("/feedback?submitted=1"))
@@ -204,6 +198,7 @@ pub struct DeleteRequest {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileCookieEntry {
     pub id: String,
+
     pub token: String,
 }
 
@@ -241,11 +236,7 @@ pub fn file_cookie_header(existing: &HeaderMap, new_entry: &FileCookieEntry) -> 
     cookie_header_value(&val, existing)
 }
 
-/// Build the Set-Cookie header for a `jb_files` value, mirroring the request's
-/// security context (Secure only over HTTPS / non-localhost).
 fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
-    // Only set Secure when the request is over HTTPS (or from localhost over plain
-    // HTTP)
     let is_localhost = existing
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
@@ -258,22 +249,13 @@ fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
         .is_some_and(|p| p == "https");
     let secure = !(is_localhost && !is_https);
 
+    let secure_flag = if secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
-        "{}={}; Path=/; SameSite=Strict{}; Max-Age={}",
-        COOKIE_NAME,
-        val,
-        if secure { "; Secure" } else { "" },
-        COOKIE_MAX_AGE
+        "{COOKIE_NAME}={val}; Path=/; SameSite=Strict{secure_flag}; Max-Age={COOKIE_MAX_AGE}"
     ))
     .unwrap_or_else(|_| HeaderValue::from_static("jb_files=; Path=/; Max-Age=0"))
 }
 
-/// Rewrite the `jb_files` cookie so a renamed file's old ID becomes its new
-/// one.
-///
-/// A rename keeps the delete token, so the entry just swaps its id in place
-/// (deduping against any entry already under the new id). Returns the new
-/// Set-Cookie header value to attach to the redirect response.
 #[must_use]
 pub fn rename_file_cookie_header(
     existing: &HeaderMap,
@@ -297,8 +279,6 @@ pub fn rename_file_cookie_header(
     cookie_header_value(&val, existing)
 }
 
-/// Redirect to the index page with file metadata encoded as base64url so it
-/// shows up in the file list for no-JS uploads
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -429,8 +409,6 @@ mod tests {
         assert!(s.starts_with("jb_files="));
         assert!(s.contains("Path=/"));
         assert!(s.contains("SameSite=Strict"));
-        // No Secure flag when no host header and no x-forwarded-proto (plain
-        // HTTP dev)
     }
 
     #[test]

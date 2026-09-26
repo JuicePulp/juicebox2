@@ -10,12 +10,11 @@ pub fn migrate_raw_ips_to_encrypted(
         if trimmed.is_empty() {
             return false;
         }
-        // Already encrypted values contain ':' separator between nonce and ciphertext
-        // and are long hex strings
+
         if trimmed.len() > 40 && trimmed.contains(':') {
             return false;
         }
-        // Already HMAC hashes are 64-char hex
+
         if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             return false;
         }
@@ -31,7 +30,6 @@ pub fn migrate_raw_ips_to_encrypted(
     let mut encrypted_count = 0u64;
     let mut hashed_count = 0u64;
 
-    // Migrate files.uploader_ip -> encrypted
     {
         let mut stmt =
             conn.prepare("SELECT id, uploader_ip FROM files WHERE uploader_ip IS NOT NULL")?;
@@ -51,7 +49,6 @@ pub fn migrate_raw_ips_to_encrypted(
         }
     }
 
-    // Migrate reports.reporter_ip -> encrypted
     {
         let mut stmt =
             conn.prepare("SELECT id, reporter_ip FROM reports WHERE reporter_ip IS NOT NULL")?;
@@ -71,7 +68,6 @@ pub fn migrate_raw_ips_to_encrypted(
         }
     }
 
-    // Migrate feedback.reporter_ip -> encrypted
     {
         let mut stmt =
             conn.prepare("SELECT id, reporter_ip FROM feedback WHERE reporter_ip IS NOT NULL")?;
@@ -91,7 +87,6 @@ pub fn migrate_raw_ips_to_encrypted(
         }
     }
 
-    // Migrate banned_ips.ip -> HMAC hash
     {
         let mut stmt = conn.prepare("SELECT ip FROM banned_ips")?;
         let rows: Vec<String> = stmt
@@ -112,9 +107,7 @@ pub fn migrate_raw_ips_to_encrypted(
 
     if encrypted_count > 0 || hashed_count > 0 {
         tracing::info!(
-            "ip migration: {} IPs encrypted, {} ban entries hashed",
-            encrypted_count,
-            hashed_count
+            "ip migration: {encrypted_count} IPs encrypted, {hashed_count} ban entries hashed",
         );
     }
 

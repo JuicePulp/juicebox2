@@ -1,12 +1,12 @@
 use crate::config::{ConfigError, ThreadFile};
 
-/// Tokio worker thread settings.
 #[derive(Debug)]
 pub struct ThreadSettings {
     worker_threads: usize,
 }
 
 impl ThreadSettings {
+    #[must_use]
     pub const fn worker_threads(&self) -> usize {
         self.worker_threads
     }

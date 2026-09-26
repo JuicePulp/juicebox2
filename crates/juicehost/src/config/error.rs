@@ -1,4 +1,3 @@
-/// Errors that could happen while loading file configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("QUIC_PORT must be set when PUBLIC_PORT is 65535")]

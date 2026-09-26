@@ -8,9 +8,6 @@ use axum::{
 use super::common::required_file_capability;
 use crate::{error::JuicehostError, state::AppState, storage::valid_component as is_valid_id};
 
-/// Delete a stored file by its ID.
-///
-/// Returns `204 No Content` on success. Returns 404 if the file does not exist.
 #[utoipa::path(
     delete,
     path = "/internal/file/{id}",

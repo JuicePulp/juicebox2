@@ -1,5 +1,3 @@
-//! Handlers for file serve, store, rename, and delete.
-
 pub mod common;
 pub mod concat;
 pub mod delete;

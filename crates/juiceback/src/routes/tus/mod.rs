@@ -1,5 +1,3 @@
-//! TUS resumable upload protocol endpoints.
-
 use std::sync::Arc;
 
 use axum::routing;
@@ -22,6 +20,7 @@ pub use create::create_upload_handler;
 pub use patch::patch_upload_handler;
 pub use query::{delete_upload_handler, get_upload_handler, options_handler};
 
+#[must_use]
 pub fn tus_routes() -> axum::Router<Arc<AppState>> {
     tus_create_routes().merge(tus_data_routes())
 }

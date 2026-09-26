@@ -133,16 +133,18 @@ pub async fn fetch_host_config(
         return Some(cached.clone());
     }
     let fetched = async {
-        let response = tokio::time::timeout(
-            FETCH_TIMEOUT,
-            async {
-                let response = state.http.get(format!("{base}/api/config")).send().await.ok()?;
-                if !response.status().is_success() {
-                    return None;
-                }
-                response.json::<HostConfig>().await.ok()
-            },
-        )
+        let response = tokio::time::timeout(FETCH_TIMEOUT, async {
+            let response = state
+                .http
+                .get(format!("{base}/api/config"))
+                .send()
+                .await
+                .ok()?;
+            if !response.status().is_success() {
+                return None;
+            }
+            response.json::<HostConfig>().await.ok()
+        })
         .await
         .ok()??;
         sanitize(response)
@@ -175,7 +177,8 @@ pub async fn fetch_cobalt_services(state: &AppState) -> Vec<String> {
     match tokio::time::timeout(FETCH_TIMEOUT, fetch).await {
         Ok(Some(data)) => data
             .get("services")
-            .and_then(|services| services.as_array()).cloned()
+            .and_then(|services| services.as_array())
+            .cloned()
             .map(|services| {
                 services
                     .into_iter()

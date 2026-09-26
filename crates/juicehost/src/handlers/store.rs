@@ -71,9 +71,8 @@ pub async fn store_file(
         }
     }
 
-    let data = match file_data {
-        Some(d) => d,
-        None => return Err(JuicehostError::BadRequest),
+    let Some(data) = file_data else {
+        return Err(JuicehostError::BadRequest);
     };
 
     if file_id.is_empty() || !is_valid_id(&file_id) || filename.is_empty() {
@@ -105,9 +104,6 @@ pub async fn store_file(
     Ok(Json(serde_json::json!({"status": "ok", "id": file_id})))
 }
 
-/// Validate a file (extension + magic bytes) against the configured danger
-/// level and return a `BlockedFileType` error when it must be rejected.
-/// `context` is appended to the rejection log line (e.g. `"(id=abc)"`).
 pub(crate) fn validate_or_block(
     filename: &str,
     bytes: &[u8],
@@ -141,8 +137,6 @@ pub(crate) fn validate_or_block(
     }
 }
 
-/// Sniff the first up-to-512 bytes of a streaming body and validate the file
-/// type (extension + magic bytes) against the configured danger level.
 pub(crate) async fn sniff_and_validate(
     body: axum::body::Body,
     filename: &str,
@@ -180,17 +174,11 @@ pub(crate) async fn sniff_and_validate(
     }
     let body = axum::body::Body::from_stream(futures::stream::iter(chunks).chain(stream));
 
-    // Detect the MIME type from the magic bytes so the stored extension (and thus
-    // the served Content-Type) reflects the actual content, not the client-chosen
-    // filename. Detection is best-effort: text and unknown formats return None.
     let detected = infer::get(&prefix);
     Ok((body, detected))
 }
 
-/// Rewrite a filename so storage uses the content-detected extension. When
-/// magic-byte detection found a signature (e.g. a PNG uploaded as `notes.txt`),
-/// the stored file gets `.png` and is served as `image/png` and it falls back
-/// to the original filename when nothing was detected.
+#[must_use]
 pub(crate) fn content_filename(filename: &str, detected: Option<&infer::Type>) -> String {
     match detected {
         Some(typ) => {
@@ -264,18 +252,13 @@ pub async fn store_file_streaming(
         0.0
     };
     tracing::info!(
-        "stored file (streaming): {} ({}) bytes={} {:.2} MB/s",
-        id,
-        filename,
-        total,
+        "stored file (streaming): {id} ({filename}) bytes={total} {:.2} MB/s",
         bytes_per_sec / (1024.0 * 1024.0),
     );
 
     Ok(Json(serde_json::json!({"status": "ok", "id": id})))
 }
 
-/// Store a file from juicebox-plus, ticket JWT in Authorization header and the
-/// body as octet-stream.
 #[utoipa::path(
     post,
     path = "/internal/file/upload/{id}",
@@ -383,17 +366,15 @@ pub async fn store_file_ticket(
         0.0
     };
     tracing::info!(
-        "stored file (ticket): {} ({}) bytes={} {:.2} MB/s device={}",
-        id,
-        real_filename,
-        total,
+        "stored file (ticket): {id} ({real_filename}) bytes={total} {:.2} MB/s device={sub}",
         bytes_per_sec / (1024.0 * 1024.0),
-        ticket.claims.sub,
+        sub = ticket.claims.sub,
     );
 
     Ok(Json(serde_json::json!({"status": "ok", "id": id})))
 }
 
+#[must_use]
 pub(crate) fn sized_stream(
     body: Body,
     max_size: u64,

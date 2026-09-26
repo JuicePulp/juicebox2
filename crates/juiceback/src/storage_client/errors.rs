@@ -1,4 +1,3 @@
-/// Parse juicehost's error json into something readable. used by http + quic.
 pub(crate) fn format_error_response(status: u16, body_text: String) -> String {
     let parsed = serde_json::from_str::<serde_json::Value>(&body_text).ok();
     let error_code = parsed

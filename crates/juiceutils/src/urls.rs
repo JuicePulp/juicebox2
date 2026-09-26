@@ -1,16 +1,7 @@
-//! Shared public-URL building for stored files.
-
-/// Build the public URL for a file, including an extension for client
-/// compatibility.
 #[must_use]
-pub fn public_url(
-    base_url: &str,
-    storage_host: &Option<String>,
-    id: &str,
-    filename: &str,
-) -> String {
+pub fn public_url(base_url: &str, storage_host: Option<&str>, id: &str, filename: &str) -> String {
     let host = match storage_host {
-        Some(host) if !host.is_empty() => host.as_str(),
+        Some(host) if !host.is_empty() => host,
         _ => base_url,
     };
     let host = if host.contains("://") {
@@ -32,7 +23,7 @@ mod tests {
     fn with_storage_host() {
         let url = public_url(
             "http://localhost:6402",
-            &Some("https://files.example.com".into()),
+            Some("https://files.example.com"),
             "abc123",
             "cute.gif",
         );
@@ -41,18 +32,13 @@ mod tests {
 
     #[test]
     fn without_storage_host() {
-        let url = public_url("http://localhost:6402", &None, "abc123", "cute.gif");
+        let url = public_url("http://localhost:6402", None, "abc123", "cute.gif");
         assert_eq!(url, "http://localhost:6402/f/abc123.gif");
     }
 
     #[test]
     fn empty_storage_host() {
-        let url = public_url(
-            "http://localhost:6402",
-            &Some(String::new()),
-            "abc123",
-            "cute.gif",
-        );
+        let url = public_url("http://localhost:6402", Some(""), "abc123", "cute.gif");
         assert_eq!(url, "http://localhost:6402/f/abc123.gif");
     }
 
@@ -60,7 +46,7 @@ mod tests {
     fn bare_storage_host() {
         let url = public_url(
             "https://f.juicey.dev",
-            &Some("fx.juicey.dev".into()),
+            Some("fx.juicey.dev"),
             "abc123",
             "cute.gif",
         );
@@ -69,7 +55,7 @@ mod tests {
 
     #[test]
     fn filename_without_extension() {
-        let url = public_url("http://localhost:6402", &None, "abc123", "README");
+        let url = public_url("http://localhost:6402", None, "abc123", "README");
         assert_eq!(url, "http://localhost:6402/f/abc123");
     }
 }

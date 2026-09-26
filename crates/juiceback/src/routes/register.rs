@@ -1,5 +1,3 @@
-//! Register pre-existing juicehost files without re-pushing bytes.
-
 use std::sync::Arc;
 
 use axum::{Json, extract::State, http::HeaderMap};
@@ -16,19 +14,26 @@ use crate::{
 #[derive(Deserialize, ToSchema)]
 pub struct RegisterRequest {
     pub id: String,
+
     pub filename: String,
+
     pub mime_type: String,
+
     pub size_bytes: i64,
+
     pub ttl_hours: Option<f64>,
+
     pub uploader_ip: Option<String>,
+
     pub storage_host: Option<String>,
-    /// Required to complete an existing reserved ID.
+
     pub delete_token: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct RegisterResponse {
     pub delete_token: String,
+
     pub expires_at: i64,
 }
 
@@ -163,11 +168,7 @@ pub async fn register_handler(
     };
 
     tracing::info!(
-        "register: id={} size={} mime={} expires_at={}",
-        rec_id,
-        rec_size,
-        rec_mime,
-        rec_expires,
+        "register: id={rec_id} size={rec_size} mime={rec_mime} expires_at={rec_expires}"
     );
 
     Ok(Json(RegisterResponse {

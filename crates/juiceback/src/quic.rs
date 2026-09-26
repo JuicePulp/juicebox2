@@ -1,5 +1,3 @@
-//! the QUIC/HTTP/3 client for juiceback
-
 use std::{sync::Arc, time::Duration};
 
 use axum::http::{Request, Uri};
@@ -92,7 +90,6 @@ impl ServerCertVerifier for PinnedCertVerifier {
     }
 }
 
-/// Create a QUIC endpoint, pinning the certificate when configured.
 fn create_quic_endpoint(
     cert_path: Option<&std::path::Path>,
 ) -> Result<h3_quinn::quinn::Endpoint, String> {
@@ -132,9 +129,9 @@ fn create_quic_endpoint(
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(64u32.into());
     transport.max_concurrent_uni_streams(128u32.into());
-    transport.stream_receive_window(VarInt::from_u32(16 * 1024 * 1024)); // 16 MiB per stream
-    transport.receive_window(VarInt::from_u32(64 * 1024 * 1024)); // 64 MiB connection-level
-    transport.send_window(64 * 1024 * 1024); // 64 MiB send window
+    transport.stream_receive_window(VarInt::from_u32(16 * 1024 * 1024));
+    transport.receive_window(VarInt::from_u32(64 * 1024 * 1024));
+    transport.send_window(64 * 1024 * 1024);
 
     let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
     client_config.transport_config(Arc::new(transport));
@@ -161,7 +158,6 @@ async fn get_endpoint(state: &Arc<AppState>) -> Result<h3_quinn::quinn::Endpoint
         .cloned()
 }
 
-/// Turn a juicehost URL into a QUIC socket addr.
 async fn resolve_quic_addr(juicehost_url: &str) -> Result<(std::net::SocketAddr, String), String> {
     let uri: Uri = juicehost_url
         .parse()
@@ -187,8 +183,6 @@ async fn resolve_quic_addr(juicehost_url: &str) -> Result<(std::net::SocketAddr,
     Ok((addr, hostname))
 }
 
-/// Set up a QUIC connection to juicehost and return the h3 `send_request`
-/// handle. Reuses the persistent endpoint from `AppState`.
 #[tracing::instrument(skip_all)]
 async fn quic_connect(
     state: &Arc<AppState>,
@@ -226,7 +220,6 @@ async fn quic_connect(
     Ok(send_request)
 }
 
-/// Build an h3 request to push a file over QUIC.
 fn quic_stream_request(
     juicehost_url: &str,
     id: &str,
@@ -254,7 +247,6 @@ fn quic_stream_request(
         .map_err(|e| format!("failed to build request: {e}"))
 }
 
-/// After sending all data and calling `finish()`, wait for the server response.
 async fn quic_recv_response(
     stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<(u16, Vec<u8>), String> {
@@ -292,19 +284,14 @@ fn quic_result(id: &str, url: &str, status: u16, body_bytes: Vec<u8>) -> Result<
         Ok(())
     } else {
         let body_text = String::from_utf8_lossy(&body_bytes).to_string();
+        let body_len = body_bytes.len();
+        let detail = crate::storage_client::format_error_response(status, body_text);
         Err(format!(
-            "{} (url={}, status={}, body_len={})",
-            crate::storage_client::format_error_response(status, body_text.clone()),
-            url,
-            status,
-            body_bytes.len(),
+            "{detail} (url={url}, status={status}, body_len={body_len})"
         ))
     }
 }
 
-/// Push to juicehost over QUIC while streaming chunks from a receiver.
-/// Each chunk is also retained in the bounded fallback buffer so the caller
-/// can replay over HTTP on failure without pinning the whole file in RAM.
 pub async fn push_file_streaming_quic_streamed(
     state: &Arc<AppState>,
     id: &str,

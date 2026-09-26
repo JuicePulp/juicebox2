@@ -1,8 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UploadMode {
-    /// Standard HTTP upload via axum.
     Standard,
-    /// QUIC/HTTP3 upload via h3.
+
     Quic,
 }
 

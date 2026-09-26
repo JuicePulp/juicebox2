@@ -1,7 +1,5 @@
-//! juiceback library root. re-exports every module so integration tests
-//! and the main binary can both use the same code.
-
 pub mod auth;
+pub mod ban;
 pub mod cloudflare;
 pub mod cobalt;
 pub mod config;

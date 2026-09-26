@@ -68,8 +68,7 @@ async fn test_state(dir: &std::path::Path) -> Arc<AppState> {
     let backend = Arc::new(LocalBackend::new(dir.to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
     let mut cfg = test_config("", None);
-    // Handler-level fixtures exercise business logic; keep the legacy
-    // open-mode behavior here explicitly (auth has its own test below).
+
     cfg.allow_no_auth = true;
     Arc::new(AppState::new(&cfg, backend))
 }
@@ -714,7 +713,6 @@ async fn streaming_serves_mime_from_magic_bytes_not_extension() {
     let state = test_state(dir.path()).await;
     let app = build_router(state);
 
-    // PNG bytes uploaded under a .txt name; the sniffed magic bytes must win.
     let png_magic: &[u8] = b"\x89PNG\r\n\x1a\n";
     let resp = app
         .clone()
@@ -730,7 +728,6 @@ async fn streaming_serves_mime_from_magic_bytes_not_extension() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Fresh backend so the extension cache is rebuilt from the stored filename.
     let app = build_router(test_state(dir.path()).await);
     let resp = app
         .oneshot(
@@ -797,14 +794,12 @@ async fn internal_endpoints_open_when_no_api_key_configured() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = test_config("", None);
     config.api_key = String::new();
-    // Open mode is now opt-in: an unset key alone refuses all internal
-    // traffic (see empty_api_key_fails_closed_without_explicit_opt_out).
+
     config.allow_no_auth = true;
     let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
     let app = build_router(Arc::new(AppState::new(&config, backend)));
 
-    // Streaming upload with NO api key header must not be 403.
     let resp = app
         .clone()
         .oneshot(
@@ -818,7 +813,6 @@ async fn internal_endpoints_open_when_no_api_key_configured() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Serve it back.
     let resp = app
         .oneshot(
             Request::builder()
@@ -1017,7 +1011,6 @@ async fn streaming_blocks_magic_bytes() {
     let state = test_state(dir.path()).await;
     let app = build_router(state);
 
-    // Renamed .txt that's actually a PE executable -> magic byte check catches it.
     let resp = app
         .oneshot(
             Request::builder()
@@ -1040,8 +1033,7 @@ async fn streaming_blocks_magic_bytes() {
 #[tokio::test]
 async fn ticket_upload_uses_only_signed_filename() {
     let dir = tempfile::tempdir().unwrap();
-    // Need a ticket JWT secret to exercise the ticket path.
-    use juicehost::server::build_router;
+
     let secret = "test-ticket-secret".to_string();
     let state = Arc::new(AppState::new(
         &test_config(&secret, None),
@@ -1054,7 +1046,6 @@ async fn ticket_upload_uses_only_signed_filename() {
         .unwrap();
     let app = build_router(state);
 
-    // Build a signed ticket JWT claiming a safe filename.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -1078,7 +1069,6 @@ async fn ticket_upload_uses_only_signed_filename() {
     )
     .unwrap();
 
-    // An unsigned filename header cannot override the signed filename.
     let resp = app
         .oneshot(
             Request::builder()
@@ -1097,7 +1087,6 @@ async fn ticket_upload_uses_only_signed_filename() {
 #[tokio::test]
 async fn ticket_upload_uses_signed_filename_extension() {
     let dir = tempfile::tempdir().unwrap();
-    use juicehost::server::build_router;
     let secret = "test-ticket-secret".to_string();
     let state = Arc::new(AppState::new(
         &test_config(&secret, None),
@@ -1132,7 +1121,6 @@ async fn ticket_upload_uses_signed_filename_extension() {
     )
     .unwrap();
 
-    // The unsigned header is ignored; the signed filename determines extension.
     let resp = app
         .oneshot(
             Request::builder()
@@ -1147,7 +1135,6 @@ async fn ticket_upload_uses_signed_filename_extension() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Served with the PDF MIME type from the signed ticket.
     let app = test_state(dir.path()).await;
     let app = build_router(app);
     let resp = app
@@ -1185,7 +1172,6 @@ async fn banned_ip_blocked_from_file_serving() {
         .merge_hashes([juiceutils::ban::hash_ip_for_ban(banned_ip, "test-pepper")]);
     let app = build_router(state);
 
-    // Banned client (via X-Forwarded-For, as juicefront would send it) gets 403.
     let resp = app
         .clone()
         .oneshot(
@@ -1199,7 +1185,6 @@ async fn banned_ip_blocked_from_file_serving() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
-    // A different client is allowed through (file doesn't exist -> not 403).
     let resp = app
         .oneshot(
             Request::builder()
@@ -1237,8 +1222,6 @@ async fn empty_api_key_fails_closed_without_explicit_opt_out() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    // Explicit JUICEHOST_ALLOW_NO_AUTH opt-out keeps legacy open uploads
-    // working (mutations like rename still demand per-file capabilities).
     let mut cfg = test_config("", None);
     cfg.api_key = String::new();
     cfg.allow_no_auth = true;

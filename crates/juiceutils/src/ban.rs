@@ -1,5 +1,3 @@
-//! Shared IP-ban helpers for juiceback and juicehost.
-
 use std::{collections::HashSet, net::IpAddr, path::Path, sync::RwLock};
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -7,19 +5,18 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Compute HMAC-SHA256(pepper, canonical IP address) for ban lookups.
 #[must_use]
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
     let ip = ip
         .parse::<IpAddr>()
-        .map_or_else(|_| ip.to_string(), |ip| ip.to_string());
+        .map(|parsed| parsed.to_string())
+        .unwrap_or_else(|_| ip.to_owned());
     let mut mac = <HmacSha256 as KeyInit>::new_from_slice(pepper.as_bytes())
         .expect("HMAC accepts any key length");
     mac.update(ip.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
 
-/// Truncate a hex string to 12 characters for display in logs/notifications.
 #[must_use]
 pub fn truncate_hash(hex_str: &str) -> &str {
     if hex_str.len() <= 12 {
@@ -35,7 +32,6 @@ struct BanListInner {
     hashes: HashSet<String>,
 }
 
-/// In-memory set of banned hashes plus the pepper used to compute them.
 pub struct BanList {
     inner: RwLock<BanListInner>,
 }
@@ -47,8 +43,6 @@ impl Default for BanList {
 }
 
 impl BanList {
-    /// Create an empty ban list with an optional pepper for hashing incoming
-    /// IPs.
     pub fn new(pepper: impl Into<String>) -> Self {
         Self {
             inner: RwLock::new(BanListInner {
@@ -58,7 +52,6 @@ impl BanList {
         }
     }
 
-    /// Number of banned hashes currently loaded.
     pub fn len(&self) -> usize {
         self.inner
             .read()
@@ -67,13 +60,10 @@ impl BanList {
             .len()
     }
 
-    /// True when no hashes are loaded.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Whether banning is enabled: requires a pepper so incoming IPs can be
-    /// hashed.
     pub fn enabled(&self) -> bool {
         !self
             .inner
@@ -83,8 +73,7 @@ impl BanList {
             .is_empty()
     }
 
-    /// Check an IP against the ban list. Always false while banning is
-    /// disabled.
+    #[must_use]
     pub fn is_banned(&self, ip: &str) -> bool {
         let inner = self
             .inner
@@ -112,7 +101,6 @@ impl BanList {
             .pepper = pepper.to_string();
     }
 
-    /// Replace the whole snapshot (authoritative sync from a backend).
     pub fn set_snapshot(&self, pepper: &str, hashes: impl IntoIterator<Item = String>) {
         let hashes: HashSet<String> = hashes.into_iter().collect();
         let mut inner = self
@@ -123,7 +111,6 @@ impl BanList {
         inner.hashes = hashes;
     }
 
-    /// Merge extra hashes into the current set (local file additions).
     pub fn merge_hashes(&self, hashes: impl IntoIterator<Item = String>) {
         self.inner
             .write()
@@ -132,7 +119,6 @@ impl BanList {
             .extend(hashes);
     }
 
-    /// Load a ban list file and merge its entries into the set.
     pub fn load_file(&self, path: &Path, config_pepper: &str) -> (usize, usize) {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -190,7 +176,6 @@ impl BanList {
     }
 }
 
-/// Recursively collect hashes/raw IPs from a parsed JSON document.
 fn collect_ban_entries(
     value: &serde_json::Value,
     hashes: &mut Vec<String>,
