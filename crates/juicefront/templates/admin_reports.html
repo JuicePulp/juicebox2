@@ -1,0 +1,29 @@
+{% extends "admin.html" %}
+{% block content %}
+<h1>Reports</h1>
+<p><a href="/admin">Back to Admin Panel</a></p>
+<div class="admin-toolbar">
+<input type="text" id="search-input" placeholder="Search URL, reason, details, email..." aria-label="Search URL, reason, details, email...">
+<select id="sort-select">
+<option value="created_at">Time</option>
+<option value="id">ID</option>
+<option value="reason">Reason</option>
+</select>
+<select id="dir-select">
+<option value="desc">Newest first</option>
+<option value="asc">Oldest first</option>
+</select>
+<select id="filter-reason">
+<option value="">All reasons</option>
+<option value="malware">Malware</option>
+<option value="illegal">Illegal content</option>
+<option value="copyright">Copyright</option>
+<option value="spam">Spam</option>
+<option value="inappropriate">Inappropriate</option>
+<option value="other">Other</option>
+</select>
+<button class="btn btn-primary" id="search-btn">Search</button>
+</div>
+<div id="reports-list"><p>Loading...</p></div>
+<div class="admin-status" id="reports-status"></div>
+{% endblock %}

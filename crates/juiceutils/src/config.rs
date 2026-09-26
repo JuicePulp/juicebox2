@@ -59,6 +59,10 @@ where
     }
 }
 
+/// Load `./.env` for vars not already set.
+///
+/// Explicit environment always wins; a missing file is fine. Every binary
+/// calls this first so standalone runs behave like `juicebox` supervision.
 pub fn load_dotenv() {
     let Ok(text) = std::fs::read_to_string(".env") else {
         return;
@@ -83,6 +87,11 @@ pub fn load_dotenv() {
     }
 }
 
+/// Read a required secret from the environment, trimmed.
+///
+/// # Errors
+///
+/// Returns an error when the variable is unset or blank.
 pub fn required_secret(name: &str) -> anyhow::Result<String> {
     std::env::var(name)
         .map_err(|_| anyhow::anyhow!("{name} is not set"))
@@ -104,6 +113,12 @@ pub fn optional_secret(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Whether a secret value is empty or one of the documented placeholder
+/// values shipped in `.env.example`.
+///
+/// Matches by prefix (`change_me`, `change_this`) so every documented
+/// placeholder shape is rejected, not just two exact strings. Services
+/// refuse to start with these.
 #[must_use]
 pub fn is_placeholder_secret(value: &str) -> bool {
     let trimmed = value.trim();

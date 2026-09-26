@@ -68,6 +68,7 @@
               cargo-tarpaulin
               cargo-nextest
               cargo-sort
+              cargo-watch
             ];
 
             env = {

@@ -33,14 +33,13 @@ pub mod register;
 pub mod tus;
 pub mod upload;
 
+pub(crate) use health::openapi_json_handler;
 pub use health::{
     announcement_handler, ban_snapshot_handler, ban_status_handler, config_handler, health_handler,
     ip_handler, validate_host_handler,
 };
 pub(crate) use identity::user_identity_middleware;
 pub use identity::{UserId, UserIdMissing};
-
-pub(crate) use health::openapi_json_handler;
 
 #[cfg(feature = "quic")]
 async fn add_security_headers(req: Request<Body>, next: middleware::Next) -> impl IntoResponse {
@@ -144,12 +143,35 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
+    // TUS traffic (session creation, chunk PATCH, offset GET, session
+    // DELETE) gets its own generous budget: a parallel upload fans out
+    // dozens of requests in seconds and sustains a dozen per second on fast
+    // links, which would starve on the action governor and wedge uploads
+    // behind 429s. Abandoned sessions expire via the cleanup job.
+    let mut tus_data_builder = GovernorConfigBuilder::default();
+    tus_data_builder.period(std::time::Duration::from_secs_f64(
+        60.0 / f64::from(crate::constants::TUS_DATA_RATE_LIMIT_PER_MINUTE),
+    ));
+    tus_data_builder.burst_size(crate::constants::TUS_DATA_RATE_LIMIT_PER_MINUTE);
+    let tus_data_governor_conf = Arc::new(
+        tus_data_builder
+            .key_extractor(TrustedClientIpKeyExtractor::new(
+                state.config.trusted_proxy_cidrs.clone(),
+            ))
+            .finish()
+            .unwrap(),
+    );
+
+    // Reap stale per-IP buckets so NAT/IPv6 churn can't grow the governor
+    // stores without bound. `retain_recent` only drops buckets that are
+    // indistinguishable from fresh, so live limiters are untouched.
     {
         let governors = [
             Arc::clone(&upload_governor_conf),
             Arc::clone(&action_governor_conf),
             Arc::clone(&sse_governor_conf),
             Arc::clone(&fetch_governor_conf),
+            Arc::clone(&tus_data_governor_conf),
         ];
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(120));
@@ -223,8 +245,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             max_size_bytes + crate::constants::UPLOAD_SIZE_OVERHEAD_BYTES,
         ));
 
-    let tus_router = tus::tus_routes()
-        .layer(GovernorLayer::new(action_governor_conf.clone()))
+    let tus_router = tus::tus_create_routes()
+        .layer(GovernorLayer::new(tus_data_governor_conf.clone()))
+        .layer(middleware::from_fn(rate_limit_error_mapper))
+        .layer(DefaultBodyLimit::max(
+            max_size_bytes + crate::constants::UPLOAD_SIZE_OVERHEAD_BYTES,
+        ));
+
+    let tus_data_router = tus::tus_data_routes()
+        .layer(GovernorLayer::new(tus_data_governor_conf.clone()))
+        .layer(middleware::from_fn(rate_limit_error_mapper))
         .layer(DefaultBodyLimit::max(
             max_size_bytes + crate::constants::UPLOAD_SIZE_OVERHEAD_BYTES,
         ));
@@ -272,6 +302,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .nest("/upload", upload_router)
         .merge(tus_router)
+        .merge(tus_data_router)
         .route("/file/{id}/info", get(manage::file_info_handler))
         .route("/file/{id}/renew", post(manage::renew_file_id_handler))
         .route("/file/{id}", delete(manage::delete_file_handler))

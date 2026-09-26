@@ -1,0 +1,41 @@
+{% extends "admin.html" %}
+{% block content %}
+<h1>Banned IPs</h1>
+<p><a href="/admin">Back to Admin Panel</a></p>
+<br>
+<div>
+<h2>Ban an IP</h2>
+<form id="ban-form">
+<fieldset>
+<legend>Ban an IP address</legend>
+<label>IP Address (will be hashed server-side)<input type="text" id="ban-ip" name="ip" placeholder="1.2.3.4"></label>
+<br>
+<label>Or Hash (pre-computed, from click-to-ban)<input type="text" id="ban-hash" name="hash" placeholder="a1b2c3d4..."></label>
+<br>
+<label>Reason (optional)<input type="text" id="ban-reason" name="reason" placeholder="spam, abuse, etc."></label>
+<br><br>
+<button type="submit">Ban IP</button>
+</fieldset>
+</form>
+<p id="ban-status" aria-live="polite"></p>
+</div>
+<br>
+<div class="admin-toolbar">
+<input type="text" id="search-input" placeholder="Search hash, reason, banned by..." aria-label="Search hash, reason, banned by...">
+<select id="sort-select">
+<option value="banned_at">Banned At</option>
+<option value="reason">Reason</option>
+<option value="banned_by">Banned By</option>
+</select>
+<select id="dir-select">
+<option value="desc">Newest first</option>
+<option value="asc">Oldest first</option>
+</select>
+<button class="btn btn-primary" id="search-btn">Search</button>
+<button class="btn" id="export-btn">Export</button>
+<button class="btn" id="import-btn">Import</button>
+<input type="file" id="import-file" accept="application/json,.json" style="display:none">
+</div>
+<div id="bans-list"><p>Loading...</p></div>
+<div class="admin-status" id="bans-status"></div>
+{% endblock %}

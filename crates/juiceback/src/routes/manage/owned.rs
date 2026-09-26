@@ -4,12 +4,11 @@ use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::files::FileInfoResponse;
 use crate::{
     db, db::ClientFileRecord, error::AppError, routes::UserId, state::AppState,
     utils::constant_time_eq,
 };
-
-use super::files::FileInfoResponse;
 
 #[derive(Deserialize, ToSchema)]
 pub struct OwnedFilesRequest {

@@ -4,17 +4,36 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Astro frontend runner for Juicebox"
+description = "Rust frontend server and reverse proxy for Juicebox"
 publish = false
 
 [dependencies]
+anyhow.workspace = true
+askama.workspace = true
+async-stream.workspace = true
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 juiceutils = { path = "../juiceutils" }
-sentry = { workspace = true, features = ["tower", "tower-axum-matched-path"] }
+mimalloc.workspace = true
+reqwest.workspace = true
+sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
+sentry-tracing = { workspace = true, features = ["logs"] }
 serde.workspace = true
-# Spawns the Node/Astro child process; no networking or timers of its own.
-tokio = { workspace = true, features = ["process", "macros", "rt-multi-thread"] }
+serde_json.workspace = true
+# Full runtime: HTTP server, proxy streaming, timers, signals.
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+tower = { workspace = true, features = ["util"] }
+tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

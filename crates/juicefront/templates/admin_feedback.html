@@ -1,0 +1,19 @@
+{% extends "admin.html" %}
+{% block content %}
+<h1>Feedback</h1>
+<p><a href="/admin">Back to Admin Panel</a></p>
+<div class="admin-toolbar">
+<input type="text" id="search-input" placeholder="Search message, email..." aria-label="Search message, email...">
+<select id="sort-select">
+<option value="created_at">Time</option>
+<option value="id">ID</option>
+</select>
+<select id="dir-select">
+<option value="desc">Newest first</option>
+<option value="asc">Oldest first</option>
+</select>
+<button class="btn btn-primary" id="search-btn">Search</button>
+</div>
+<div id="feedback-list"><p>Loading...</p></div>
+<div class="admin-status" id="feedback-status"></div>
+{% endblock %}

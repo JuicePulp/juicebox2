@@ -3,8 +3,6 @@ Welcome and thanks for helping out juicebox.
 
 ## Setup
 To start working you must have a recent and proper Rust install.
-If you plan on working or running the frontend, `bun` is preferred for the frontend 
-however standard NodeJS installs can also work.
 
 Copy `.env.example` to `.env` and fill in local-only secrets. Never EVER commit `.env` please.
 
@@ -12,6 +10,20 @@ then run the checks for whatever you touch:
   - `cargo fmt -p <crate> -- --check`
   - `cargo clippy -p <crate> --all-targets`
   - `cargo test -p <crate>`
+
+## Frontend development (juicefront)
+The frontend is Rust (Axum + Askama templates + vanilla JS in
+`crates/juicefront/static/js/`). There is no Node/bundler step.
+
+Live reload while developing:
+
+  cargo watch -w crates/juicefront -x 'run -p juicefront'
+
+Saving any `.rs` file, template, `static/` asset, or `i18n/` dict rebuilds
+and restarts the server, and the browser reloads automatically via the
+dev-only `GET /__live` event stream. Live reload is on by default for
+`cargo run` and off for release builds; override with `JUICEFRONT_LIVE=1`
+(force on) or `JUICEFRONT_LIVE=0` (force off).
 
 ## Pull requests
 

@@ -3,13 +3,12 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::http::HeaderMap;
 use jsonwebtoken::{EncodingKey, Header, encode};
 
+use super::common::{dte_ticket_ttl_secs, enforce_mint_limit, region_host};
 use crate::{
     db::{self, FileRecord},
     error::AppError,
     state::AppState,
 };
-
-use super::common::{dte_ticket_ttl_secs, enforce_mint_limit, region_host};
 
 pub fn clamp_ttl_seconds(
     allowed_ttl: &[f64],

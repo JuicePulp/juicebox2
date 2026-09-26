@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["main","shutdown_signal"],"mod":["auth","config","db","error","jobs","juicehost","quic","routes","state","tus"],"static":["GLOBAL"]};

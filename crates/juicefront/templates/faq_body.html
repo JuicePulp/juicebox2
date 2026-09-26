@@ -1,0 +1,6 @@
+<div class="faq-accordion" role="list">
+{% for item in items %}<details class="faq-item" role="listitem"{% if item.open %} open{% endif %}>
+<summary class="faq-question"><span class="faq-chevron" aria-hidden="true"></span>{{ item.q }}</summary>
+<div class="faq-answer"><div class="faq-answer-inner"><p>{{ item.a }}</p></div></div>
+</details>
+{% endfor %}</div>

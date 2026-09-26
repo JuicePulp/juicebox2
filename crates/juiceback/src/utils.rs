@@ -11,16 +11,11 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-
-pub use juiceutils::ban::hash_ip_for_ban;
-
-pub use juiceutils::ban::truncate_hash;
-
 pub(crate) use juiceutils::constant_time_eq;
-
-pub use juiceutils::ip_crypt::decrypt_ip;
-
-pub use juiceutils::ip_crypt::encrypt_ip;
+pub use juiceutils::{
+    ban::{hash_ip_for_ban, truncate_hash},
+    ip_crypt::{decrypt_ip, encrypt_ip},
+};
 
 use crate::state::AppState;
 
@@ -33,9 +28,7 @@ pub fn is_valid_id(id: &str) -> bool {
     )
 }
 
-pub use juiceutils::ids::normalize_custom_id;
-
-pub use juiceutils::urls::public_url;
+pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {
     let throughput = if total.as_secs_f64() > 0.0 {

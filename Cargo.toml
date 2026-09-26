@@ -24,6 +24,7 @@ argon2 = "0.6"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 async-stream = "0.3"
 async-trait = "0.1"
+askama = "0.14"
 axum = { version = "0.8", features = ["multipart", "ws"] }
 base64 = "0.23"
 blake3 = "1"
@@ -38,6 +39,8 @@ h3-quinn = "0.0.10"
 hex = "0.4"
 hmac = "0.13"
 http-body-util = { version = "0.1", features = ["channel"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 infer = "0.22"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
@@ -70,7 +73,7 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["io"] }
 toml = "1"
 tower = "0.5"
-tower-http = { version = "0.7", features = ["fs", "trace", "compression-gzip", "compression-br", "compression-zstd", "limit", "cors", "timeout"] }
+tower-http = { version = "0.7", features = ["fs", "trace", "compression-gzip", "compression-br", "compression-zstd", "limit", "cors", "timeout", "set-header"] }
 tower_governor = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

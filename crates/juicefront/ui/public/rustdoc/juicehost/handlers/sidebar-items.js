@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["delete_file","health","rename_file","serve_file","storage_handler","store_file","store_file_streaming"],"struct":["StorageInfo"]};

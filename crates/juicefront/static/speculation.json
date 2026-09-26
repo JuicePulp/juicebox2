@@ -1,0 +1,20 @@
+{
+  "prefetch": [
+    {
+      "source": "document",
+      "where": {
+        "and": [
+          { "selector_matches": ".act a[href], .select-options-list a[href]" },
+          { "href_matches": "/*" },
+          { "not": { "href_matches": "/api/*" } },
+          { "not": { "href_matches": "/admin*" } },
+          { "not": { "href_matches": "/static/*" } },
+          { "not": { "href_matches": "/file/*" } },
+          { "not": { "href_matches": "/f/*" } },
+          { "not": { "href_matches": "/upload*" } }
+        ]
+      },
+      "eagerness": "conservative"
+    }
+  ]
+}

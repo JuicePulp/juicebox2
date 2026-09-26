@@ -1,0 +1,182 @@
+<div class="upload-card" id="upload-card" data-upload-card="" style="view-transition-name: main-card;" aria-labelledby="upload-card-header">
+<header id="upload-card-header" class="upload-header upload-header--centered">
+<h1 class="upload-header__title"><img src="/static/assets/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high">Juicebox²</h1>
+<p class="upload-header__subtitle">{{ cx.t("upload.subtitle") }}</p>
+</header>
+<a href="#host-modal" data-host-btn="" class="host-btn host-btn--card" title="{{ cx.t("upload.settings_aria") }}" aria-label="{{ cx.t("upload.settings_aria") }}"><span>{{ cx.icon("settings", 24)|safe }}</span></a>
+<form class="upload-form" data-upload-form="" data-cobalt-services="{{ cobalt_services }}" method="POST" action="/upload" enctype="multipart/form-data">
+<section class="rttoolbar" data-rttoolbar="" aria-labelledby="upload-card-retention-label">
+<div class="rttinfo"><div class="rttlabel-group"><span class="rtticon">{{ cx.icon("clock", 24)|safe }}</span><span id="upload-card-retention-label" class="rttlabel">{{ cx.t("upload.retention") }}</span></div></div>
+<fieldset class="rtt-options">
+<legend class="sr-only">{{ cx.t("upload.retention_hint") }}</legend>
+{% for opt in retention %}<label class="rtt-option"><input type="radio" name="ttl_hours" value="{{ opt.hours }}"{% if opt.checked %} checked{% endif %}><span>{{ opt.label }}</span></label>
+{% endfor %}</fieldset>
+</section>
+<input type="radio" name="upload_mode" id="mode-file" value="file" checked class="tab-radio" aria-label="{{ cx.t("upload.tab_file") }}">
+<input type="radio" name="upload_mode" id="mode-text" value="text" class="tab-radio" aria-label="{{ cx.t("upload.tab_text") }}">
+{% if cobalt %}<input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label="{{ cx.t("upload.tab_cobalt") }}">{% endif %}
+<div class="upload-tabs nojs-only">
+<label for="mode-file" class="upload-tab">{{ cx.t("upload.tab_file") }}</label>
+<label for="mode-text" class="upload-tab">{{ cx.t("upload.tab_text") }}</label>
+{% if cobalt %}<label for="mode-cobalt" class="upload-tab">{{ cx.t("upload.tab_cobalt") }}</label>{% endif %}
+</div>
+<div class="upload-tabs upload-tabs--mobile">
+<label for="mode-file" class="upload-tab">{{ cx.t("upload.tab_file") }}</label>
+{% if cobalt %}<label for="mode-cobalt" class="upload-tab">{{ cx.t("upload.tab_video") }}</label>{% endif %}
+<label for="mode-text" class="upload-tab">{{ cx.t("upload.tab_text") }}</label>
+</div>
+<div class="upload-mode-wrapper" data-mode-wrapper="">
+<div class="upload-mode-file" data-mode-file="">
+<label class="drop-zone" data-drop-zone="" for="dropzone-input">
+<div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
+<div class="drop-icon-wrapper"><span class="drop-icon">{{ cx.icon("upload", 64)|safe }}</span></div>
+<div class="drop-text">
+<p class="drop-text-primary">{{ cx.t("upload.drop_primary") }}</p>
+<p class="drop-file-selected">{{ cx.t("upload.drop_selected") }}</p>
+<p class="drop-text-secondary">{{ cx.t("upload.drop_secondary") }}</p>
+<div class="drop-text-meta" data-drop-max-template="{{ cx.t("upload.drop_max") }}">{{ drop_max_html|safe }}</div>
+</div>
+<div class="drop-zone-offline">
+<span class="drop-offline-icon">{{ cx.icon("x", 48)|safe }}</span>
+<p class="drop-offline-primary">{{ cx.t("upload.drop_offline") }}</p>
+<p class="drop-offline-secondary">{{ cx.t("upload.drop_offline_desc") }}</p>
+</div>
+<input id="dropzone-input" class="drop-zone__input" type="file" name="file" multiple required>
+</label>
+<button type="submit" class="report-btn report-btn--primary upload-submit" data-upload-submit="">
+<div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
+<span style="position:relative;z-index:1">{{ cx.t("upload.button") }}</span>
+</button>
+</div>
+<div class="upload-mode-text" data-mode-text="">
+<div class="text-editor" data-text-editor="">
+<div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
+<textarea class="text-editor-textarea" data-text-textarea="" name="paste_text" placeholder="{{ cx.t("upload.text_placeholder") }}" aria-label="{{ cx.t("upload.text_placeholder") }}"></textarea>
+<div class="text-editor-actions">
+<button type="button" class="text-editor-cancel js-only" data-text-cancel="">{{ cx.t("upload.text_cancel") }}</button>
+<button type="button" class="text-editor-upload js-only" data-text-upload="">{{ cx.t("upload.text_upload") }}</button>
+<noscript><button type="submit" class="text-editor-submit" formnovalidate="">{{ cx.t("upload.text_submit") }}</button></noscript>
+</div>
+</div>
+</div>
+{% if cobalt %}<div class="upload-mode-cobalt" data-mode-cobalt="">
+<div class="text-editor cobalt-editor">
+<div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
+<div class="cobalt-branding">
+<img src="/static/assets/logo.png?v=2" alt="" width="24" height="24" loading="lazy">
+<span class="cobalt-branding__name">Juicebox²</span>
+<span class="cobalt-branding__x">&times;</span>
+<img src="/static/assets/cobalt.png" alt="" width="22" height="24" loading="lazy">
+<a class="cobalt-branding__link" href="https://cobalt.tools" target="_blank" rel="noopener noreferrer">Cobalt.tools</a>
+</div>
+<details class="services-info">
+<summary title="{{ cx.t("upload.services_title") }}" aria-label="{{ cx.t("upload.services_title") }}"><span>{{ cx.icon("info", 24)|safe }}</span></summary>
+<div class="services-info__tip" role="tooltip">
+<strong>{{ cx.t("upload.services_title") }}</strong>
+<div class="services-info__cards" data-services-cards="">
+{% if services.is_empty() %}<code class="services-info__card services-info__loading">…</code>{% else %}{% for svc in services %}<code class="services-info__card">{{ svc }}</code>{% endfor %}{% endif %}
+</div>
+</div>
+</details>
+<textarea class="text-editor-textarea" data-cobalt-textarea="" name="cobalt_url" placeholder="{{ cx.t("upload.cobalt_placeholder") }}" aria-label="{{ cx.t("upload.cobalt_placeholder") }}" spellcheck="false"></textarea>
+<div class="cobalt-bottom">
+<div class="cobalt-settings js-only" data-cobalt-settings="">
+<label class="cobalt-option select-option--toggle" title="{{ cx.t("upload.cobalt_audio_only") }}">
+<input type="checkbox" data-cobalt-audio-only="" aria-label="{{ cx.t("upload.cobalt_audio_only") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span>{{ cx.t("upload.cobalt_audio_only") }}</span>
+</label>
+<label class="cobalt-option" data-cobalt-quality-row="">
+<span>{{ cx.t("upload.cobalt_quality") }}</span>
+<select data-cobalt-quality="">
+<option value="max" selected>Max</option>
+<option value="2160">2160p</option>
+<option value="1440">1440p</option>
+<option value="1080">1080p</option>
+<option value="720">720p</option>
+<option value="480">480p</option>
+<option value="360">360p</option>
+</select>
+</label>
+<label class="cobalt-option" data-cobalt-container-row="">
+<span>{{ cx.t("upload.cobalt_container") }}</span>
+<select data-cobalt-container="">
+<option value="auto" selected>Auto</option>
+<option value="mp4">MP4</option>
+<option value="webm">WebM</option>
+<option value="mkv">MKV</option>
+</select>
+</label>
+<label class="cobalt-option" data-cobalt-format-row="" hidden>
+<span>{{ cx.t("upload.cobalt_format") }}</span>
+<select data-cobalt-format="">
+<option value="best" selected>Best</option>
+<option value="mp3">MP3</option>
+<option value="opus">Opus</option>
+<option value="ogg">OGG</option>
+<option value="wav">WAV</option>
+</select>
+</label>
+<label class="cobalt-option" data-cobalt-better-audio-row="" hidden>
+<span>{{ cx.t("upload.cobalt_better_audio") }}</span>
+<select data-cobalt-better-audio-mode="">
+<option value="standard" selected>Standard</option>
+<option value="enhanced">Enhanced</option>
+</select>
+</label>
+</div>
+<div class="text-editor-actions">
+<button type="button" class="text-editor-cancel js-only" data-cobalt-cancel="">{{ cx.t("upload.text_cancel") }}</button>
+<button type="button" class="text-editor-upload js-only" data-cobalt-fetch=""><span style="position:relative;z-index:1">{{ cx.t("upload.cobalt_fetch") }}</span></button>
+</div>
+</div>
+</div>
+</div>{% endif %}
+</div>
+</form>
+<p class="upload-paste-hint">{{ cx.t("upload.paste_hint") }}</p>
+<section class="file-list-container" data-file-list="" aria-live="polite">
+<div class="scroll-element scroll-cover-top" aria-hidden="true"></div>
+<div class="scroll-element sticky-shadow-top" aria-hidden="true"></div>
+<div class="file-list-content" role="group" aria-label="{{ cx.t("upload.queued_aria") }}" data-component="upload-card">
+<div class="empty-text visible">{{ cx.t("upload.empty") }}</div>
+</div>
+{% if let Some(f) = uploaded %}<noscript>
+<style>[data-component="upload-card"] { display: none !important; }</style>
+<div class="file-item complete" role="listitem" data-file-id="{{ f.id }}" data-delete-token="{{ f.delete_token }}" data-url="{{ f.url }}" data-server-rendered="">
+<div class="file-item-header">
+<div class="file-card-icon">{{ cx.icon(f.icon.as_str(), 24)|safe }}</div>
+<div class="file-info-left"><span class="file-name">{{ f.filename }}</span><span class="file-size">{{ f.size_str }}</span></div>
+</div>
+<div class="file-action-area complete">
+<a href="{{ f.url }}" class="copy-bar" target="_blank" rel="noopener" aria-label="{{ cx.t("upload.open_link_aria") }}"><div class="copy-bar__text-wrapper"><span class="copy-bar__url">{{ f.url }}</span></div></a>
+<form method="POST" action="/file/{{ f.id }}/delete">
+<input type="hidden" name="token" value="{{ f.delete_token }}">
+<button type="submit" class="delete-btn" aria-label="{{ cx.t("upload.delete_file_aria") }}"><span class="file-card-icon">{{ cx.icon("trash", 24)|safe }}</span></button>
+</form>
+</div>
+</div>
+</noscript>{% endif %}
+<div class="scroll-element sticky-shadow-bottom" aria-hidden="true"></div>
+<div class="scroll-element scroll-cover-bottom" aria-hidden="true"></div>
+</section>
+<span id="actions-area" tabindex="-1" style="position:absolute"></span>
+<nav id="upload-card-actions" class="act" aria-label="{{ cx.t("actions.upload_actions") }}" data-act="">
+<a class="action-btn" href="{{ cx.lp("/files") }}" aria-label="{{ cx.t("nav.files") }}" title="{{ cx.t("nav.files") }}" data-action-id="files"><span class="action-btn__icon">{{ cx.icon("files", 24)|safe }}</span><span>{{ cx.t("nav.files") }}</span></a>
+<a class="action-btn" href="{{ cx.lp("/report") }}" aria-label="{{ cx.t("nav.report") }}" title="{{ cx.t("nav.report") }}" data-action-id="report"><span class="action-btn__icon">{{ cx.icon("report", 24)|safe }}</span><span>{{ cx.t("nav.report") }}</span></a>
+<details class="select-details" data-select-details="">
+<summary class="action-btn" aria-haspopup="menu" aria-label="{{ cx.t("nav.more") }}" aria-describedby="upload-card-more-desc" title="{{ cx.t("nav.more") }}"><span class="action-btn__icon">{{ cx.icon("more", 24)|safe }}</span><span>{{ cx.t("nav.more") }}</span></summary>
+<span id="upload-card-more-desc" class="sr-only">{{ cx.t("sr.more_menu_sr") }}</span>
+<summary class="select-backdrop" data-select-backdrop=""></summary>
+<summary class="select-close-btn nojs-only">{{ cx.t("sr.close_btn") }}</summary>
+<div class="select-menu select-menu--details" role="menu" aria-label="{{ cx.t("sr.more_options") }}" aria-describedby="upload-card-more-desc">
+<div class="select-options-list">
+{% for entry in cx.menu() %}{% if let Some(item) = entry.item %}<a class="select-option{% if item.js_only %} js-only{% endif %}" role="menuitem" href="{{ item.href }}"><span class="select-option__icon">{{ cx.icon(item.icon.as_str(), 24)|safe }}</span><span class="select-option__label">{{ item.label }}</span></a>{% else %}<div class="select-option--divider"></div>{% endif %}{% endfor %}
+</div>
+</div>
+</details>
+</nav>
+<footer class="footr footr--divd" data-footr="">
+<div class="footr__primary"><p class="footr__message"></p><a class="footr__commit footr__link" href="{{ repo_url }}" target="_blank" rel="noopener noreferrer">{{ commit_short }}</a></div>
+</footer>
+</div>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="{{ head.lang }}" class="no-js"{% if head.live_reload %} data-live="1"{% endif %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1a1613">
+<meta name="color-scheme" content="dark">
+<title>{{ head.title }}</title>
+<meta name="description" content="{{ head.description }}">
+<meta name="x-commit-ref" content="{{ head.commit_label }}">
+<link rel="icon" href="/static/assets/logo.png">
+<link rel="apple-touch-icon" href="/static/assets/logo.png">
+<link rel="preload" as="font" href="/static/assets/general-latin.woff2" type="font/woff2" crossorigin>
+<link rel="preload" as="image" href="/static/assets/logo_big.webp?v=2" type="image/webp">
+{% for link in head.hreflang %}<link rel="alternate" hreflang="{{ link.code }}" href="{{ link.href }}">
+{% endfor %}<link rel="alternate" hreflang="x-default" href="{{ head.current_path }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ head.title }}">
+<meta property="og:description" content="{{ head.description }}">
+<meta property="og:url" content="{{ head.canonical }}">
+<meta property="og:site_name" content="Juicebox">
+<meta property="og:image" content="{{ head.og_image }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ head.title }}">
+<meta name="twitter:description" content="{{ head.description }}">
+<meta name="twitter:image" content="{{ head.og_image }}">
+<script type="application/ld+json">{{ head.structured_data|safe }}</script>
+<link rel="stylesheet" href="/static/bundle.css">
+<script src="/static/js/boot.js"></script>
+<script type="speculationrules" src="/static/speculation.json"></script>
+</head>
+<body{% if head.body_class != "" %} class="{{ head.body_class }}"{% endif %}>
+<a href="#main-content" class="skip-link">{{ head.cx.t("accessibility.skip_main") }}</a>
+<a href="#actions-area" class="skip-link skip-link--actions">{{ head.cx.t("accessibility.skip_actions") }}</a>
+<div class="content">

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use mimalloc::MiMalloc;
-use tokio::net::TcpListener;
+use tokio::net::TcpSocket;
 #[cfg(feature = "quic")]
 use tokio::sync::Notify;
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
@@ -236,9 +236,14 @@ fn main() {
         let host = &state.config.host;
         let port = state.config.port;
         let addr = format!("{host}:{port}");
-        let listener = TcpListener::bind(&addr)
-            .await
+        let socket = TcpSocket::new_v4().expect("Failed to create TCP socket");
+        socket
+            .set_reuseaddr(true)
+            .expect("Failed to set SO_REUSEADDR");
+        socket
+            .bind(addr.parse().expect("Invalid bind address"))
             .expect("Failed to bind to address");
+        let listener = socket.listen(1024).expect("Failed to listen");
 
         #[cfg(feature = "quic")]
         {
