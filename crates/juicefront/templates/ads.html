@@ -1,0 +1,7 @@
+{% for group in groups %}
+{% if group.aside %}<aside class="{{ group.cls }}" aria-label="Advertisements">
+{% else %}<div class="{{ group.cls }}">
+{% endif %}{% for slot in group.slots %}<div id="{{ slot.id }}" class="{{ slot.cls }}" data-box-w="{{ slot.w }}" data-box-h="{{ slot.h }}"{% if slot.key != "" %} data-box-key="{{ slot.key }}" data-box-format="{{ slot.format }}"{% endif %}{% if eligible %} data-box-loading=""{% endif %} style="--box-w:{{ slot.w }}px;--box-h:{{ slot.h }}px"><div class="box-shimmer"></div><div class="box-note" data-box-note="" role="note" aria-label="{{ cx.t("adblock.aria") }}"><span class="box-note__icon"></span><span class="box-note__title">{{ cx.t("adblock.title") }}</span><span class="box-note__text">{{ cx.t("adblock.text") }}</span></div></div>
+{% endfor %}{% if group.aside %}</aside>
+{% else %}</div>
+{% endif %}{% endfor %}

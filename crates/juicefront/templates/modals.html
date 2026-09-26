@@ -1,0 +1,153 @@
+<div id="server-config" hidden data-quick-link="{% if flags.quick_link %}true{% else %}false{% endif %}" data-quic="{% if flags.quic %}true{% else %}false{% endif %}" data-custom-id="{% if flags.custom_id %}true{% else %}false{% endif %}" data-ultrafast="{% if flags.ultrafast %}true{% else %}false{% endif %}" data-cobalt="{% if flags.cobalt %}true{% else %}false{% endif %}" data-upload-mode="{{ upload_mode }}" data-danger-level="{{ danger_level }}" data-max-file-size-bytes="{{ max_bytes }}" data-allowed-ttl-hours="{{ allowed_ttl }}" data-default-ttl-hours="{{ default_ttl }}" data-public-base-url="{{ public_base_url }}"></div>
+
+<div id="share-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+<a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+<div class="mdlcontent">
+<div class="mdlheader">
+<h2 id="share-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("share", 24)|safe }}</span>{{ cx.t("share.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody">
+<div class="share-grid">
+<a class="share-grid__btn share-grid__btn--bluesky" href="https://bsky.app/intent/compose?text={{ encoded_url }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-bluesky", 20)|safe }}</span><span>Bluesky</span></a>
+<a class="share-grid__btn share-grid__btn--twitter" href="https://twitter.com/intent/tweet?url={{ encoded_url }}&amp;text={{ share_check_empty }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-twitter", 20)|safe }}</span><span>Twitter</span></a>
+<a class="share-grid__btn share-grid__btn--reddit" href="https://reddit.com/submit?url={{ encoded_url }}&amp;title=Juicebox" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-reddit", 20)|safe }}</span><span>Reddit</span></a>
+<a class="share-grid__btn share-grid__btn--mastodon" href="https://mastodon.social/share?text={{ encoded_text }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-mastodon", 20)|safe }}</span><span>Mastodon</span></a>
+<a class="share-grid__btn share-grid__btn--linkedin" href="https://www.linkedin.com/sharing/share-offsite/?url={{ encoded_url }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-linkedin", 20)|safe }}</span><span>LinkedIn</span></a>
+<a class="share-grid__btn share-grid__btn--telegram" href="https://t.me/share/url?url={{ encoded_url }}&amp;text={{ share_check_empty }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-telegram", 20)|safe }}</span><span>Telegram</span></a>
+<a class="share-grid__btn share-grid__btn--whatsapp" href="https://api.whatsapp.com/send?text={{ encoded_text }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">{{ cx.icon("brand-whatsapp", 20)|safe }}</span><span>WhatsApp</span></a>
+<a class="share-grid__btn share-grid__btn--email" href="mailto:?subject=Juicebox&amp;body={{ encoded_text }}"><span aria-hidden="true">{{ cx.icon("email", 20)|safe }}</span><span>Email</span></a>
+</div>
+<div class="share-url-field">
+<label class="form-label" for="share-url-input">{{ cx.t("share.copy") }}</label>
+<input id="share-url-input" type="text" class="form-input share-url-input" value="{{ share_url }}" readonly data-share-select="">
+</div>
+</div>
+<div class="mdlfooter"><a href="#!" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a></div>
+</div>
+</div>
+
+<div id="shortcuts-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
+<a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+<div class="mdlcontent">
+<div class="mdlheader">
+<h2 id="shortcuts-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("command", 24)|safe }}</span>{{ cx.t("shortcuts.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody">
+<ul class="shortcut-list">
+{% for sc in shortcuts %}<li class="shortcut-row"><span>{{ sc.action }}</span><span class="shortcut-keys">{% for k in sc.keys %}<kbd>{{ k }}</kbd>{% endfor %}</span></li>
+{% endfor %}</ul>
+</div>
+<div class="mdlfooter"><a href="#!" class="mdlbtn mdlbtn--primary">{{ cx.t("modal.done") }}</a></div>
+</div>
+</div>
+
+<div id="language-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="language-modal-title">
+<a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+<div class="mdlcontent language-modal">
+<div class="mdlheader">
+<h2 id="language-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("globe", 24)|safe }}</span>{{ cx.t("language.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody">
+<p class="language-modal__hint">{{ cx.t("language.hint") }}</p>
+<ul class="language-list" aria-label="{{ cx.t("language.title") }}">
+{% for l in lang_links %}<li><a class="language-option{% if l.active %} language-option--active{% endif %}" href="{{ l.href }}" data-lang-link="{{ l.code }}"><span class="language-option__label">{{ l.label }}</span><span class="language-option__code">{{ l.code }}</span></a></li>
+{% endfor %}</ul>
+</div>
+<div class="mdlfooter"><a href="#!" class="mdlbtn mdlbtn--primary">{{ cx.t("modal.done") }}</a></div>
+</div>
+</div>
+
+<div id="pair-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="pair-modal-title">
+<a href="#!" class="mdl-target__backdrop" aria-label="{{ cx.t("modal.close") }}"></a>
+<div class="mdlcontent">
+<div class="mdlheader">
+<h2 id="pair-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("smartphone", 24)|safe }}</span>{{ cx.t("pair.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody">
+<div id="pair-not-paired" class="pair-section">
+<p class="pair-hint">{{ cx.t("pair.not_paired") }}</p>
+<button type="button" id="pair-generate-btn" class="mdlbtn mdlbtn--primary">{{ cx.t("pair.generate_code") }}</button>
+<div id="pair-code-display" class="pair-code-display" hidden>
+<p>{{ cx.t("pair.instructions") }}</p>
+<button type="button" class="pair-code" id="pair-code-text" aria-label="Copy pairing code">
+<div class="pair-code__text-wrapper"><span class="pair-code__copied-text">Copied!</span><span class="pair-code__code">----</span></div>
+{{ cx.icon_c("copy", 24, "pair-code__copy-icon")|safe }}
+</button>
+<p class="pair-expires" id="pair-expires-text"></p>
+</div>
+</div>
+<div id="pair-paired" class="pair-section" hidden>
+<p class="pair-device-name" id="pair-device-name"></p>
+<p class="pair-paired-date" id="pair-paired-date"></p>
+<div id="pair-device-status" class="pair-device-status"><span id="pair-status-label" class="pair-status-label">Not Connected</span></div>
+<button type="button" id="pair-unpair-btn" class="mdlbtn mdlbtn--danger">{{ cx.t("pair.unpair") }}</button>
+</div>
+<div id="pair-status" class="pair-status" hidden></div>
+</div>
+<div class="mdlfooter">
+<a href="{{ cx.lp("/download") }}" class="pair-download-link" target="_blank" rel="noopener">Download juicebox-plus</a>
+<a href="#!" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a>
+</div>
+</div>
+</div>
+
+<div id="host-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-modal-title">
+<a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+<div class="mdlcontent host-modal">
+<div class="mdlheader">
+<h2 id="host-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("settings", 24)|safe }}</span>{{ cx.t("host.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody">
+<p class="host-modal__hint">{{ cx.t("host.hint") }}</p>
+<div class="form-field">
+<label class="form-label" for="host-input">{{ cx.t("host.label") }}</label>
+<input id="host-input" type="text" class="form-input host-input" data-host-input="" placeholder="f.juicey.dev">
+<div class="host-modal-actions js-only">
+<button type="button" class="mdlbtn mdlbtn--secondary host-check-btn" data-host-check="">{{ cx.t("host.check") }}</button>
+<button type="button" class="mdlbtn mdlbtn--primary host-apply-btn" data-host-apply="">{{ cx.t("host.apply") }}</button>
+<span class="host-status" data-host-status=""></span>
+</div>
+</div>
+<div class="host-options-group">
+<label class="form-label">{{ cx.t("host.options") }}</label>
+<div class="form-field">
+<label class="select-option select-option--toggle">
+<input type="checkbox" data-quic-toggle="" aria-label="{{ cx.t("host.quic") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("host.quic") }}</span><span class="select-option__desc">{{ cx.t("host.quic_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle">
+<input type="checkbox" data-quick-link-toggle="" aria-label="{{ cx.t("host.quick_link") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("host.quick_link") }}</span><span class="select-option__desc">{{ cx.t("host.quick_link_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle">
+<input type="checkbox" data-ultrafast-toggle="" aria-label="UltraFast">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">UltraFast</span><span class="select-option__desc">Upload directly from your device (requires paired device)</span></span>
+</label>
+</div>
+</div>
+<div class="form-field">
+<label class="form-label">{{ cx.t("host.blocked_types") }}</label>
+<div class="blocked-types-info" data-blocked-types-info><p class="blocked-types-text" data-blocked-types-text>{{ blocked_text }}</p></div>
+</div>
+</div>
+<div class="mdlfooter">
+<a href="{{ selector_href }}" class="mdlbtn mdlbtn--primary">{{ cx.t("host.browse") }}</a>
+<a href="#!" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a>
+</div>
+</div>
+</div>
+
+<div data-i18n-config data-locale-codes="{{ locale_codes_json }}" data-default-locale="en" hidden aria-hidden="true"></div>
+<div id="chord-indicator" class="chord-indicator" aria-live="polite" hidden><span class="chord-indicator__keys"></span></div>

@@ -1,0 +1,35 @@
+<div class="download-cards">
+<div class="download-card">
+<div class="download-card__icon">{{ cx.icon("windows", 40)|safe }}</div>
+<h3 class="download-card__name">Windows</h3>
+<p class="download-card__desc">Windows 10/11</p>
+<a href="{{ windows_url }}" class="mdlbtn mdlbtn--primary download-card__btn">Download</a>
+</div>
+<div class="download-divider" aria-hidden="true"></div>
+<div class="download-card">
+<div class="download-card__icon">{{ cx.icon("apple", 40)|safe }}</div>
+<h3 class="download-card__name">macOS</h3>
+<p class="download-card__desc">macOS 12+ (Apple &amp; Intel)</p>
+<a href="{{ macos_url }}" class="mdlbtn mdlbtn--primary download-card__btn">Download</a>
+</div>
+<div class="download-divider" aria-hidden="true"></div>
+<div class="download-card">
+<div class="download-card__icon">{{ cx.icon("linux", 40)|safe }}</div>
+<h3 class="download-card__name">Linux</h3>
+<p class="download-card__desc">AppImage, .deb, .rpm</p>
+<div class="download-split">
+<a href="{{ linux_url }}" class="mdlbtn mdlbtn--primary download-split__main">Download</a>
+<details class="select-details download-split__details" data-select-details="">
+<summary class="mdlbtn mdlbtn--primary download-split__arrow" aria-label="Choose Linux format">{{ cx.icon("chevron-up", 24)|safe }}</summary>
+<summary class="select-close-btn nojs-only">{{ cx.t("sr.close_btn") }}</summary>
+<div class="select-menu select-menu--details download-split__menu" role="menu" aria-label="Linux formats">
+<div class="select-options-list">
+{% for f in linux_formats %}<a class="select-option" role="menuitem" href="{{ f.href }}"><span class="select-option__icon">{{ cx.icon(f.icon.as_str(), 24)|safe }}</span><span class="select-option__label">{{ f.label }}</span></a>
+{% endfor %}</div>
+</div>
+</details>
+</div>
+</div>
+</div>
+<p class="download-soon">Android and iOS versions soon.</p>
+<p class="download-nojs-warning nojs-only">{{ cx.t("download.nojs_disclaimer") }}</p>

@@ -36,6 +36,14 @@ pub const DEGRADED_RETRY_INTERVAL_SECS: u64 = 30;
 pub const STARTUP_CONFIG_RETRIES: u32 = 3;
 pub const STARTUP_BACKOFF_BASE_SECS: u64 = 2;
 pub const COBALT_FETCH_RATE_LIMIT_PER_MINUTE: u32 = 3;
+/// TUS budget (session creation, chunk PATCH, offset GET, session DELETE).
+/// A parallel upload fans out dozens of requests in seconds (session per
+/// part plus pipelined chunks) and sustains a dozen per second on fast
+/// links, which the 10-per-6s action budget cannot carry — uploads wedged
+/// behind 429 storms. Creation stays inside this budget (not the action
+/// one) because a single upload legitimately opens up to TUS_MAX_PARTS
+/// sessions at once; abandoned sessions expire via the cleanup job.
+pub const TUS_DATA_RATE_LIMIT_PER_MINUTE: u32 = 1024;
 pub const FETCH_JOB_TIMEOUT_SECS: u64 = 30 * 60;
 pub const FETCH_EMPTY_RETRY_DELAY_SECS: u64 = 10;
 pub const FETCH_RESCUE_MAX_PASSES: u32 = 30;

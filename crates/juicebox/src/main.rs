@@ -33,6 +33,66 @@ fn sibling_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Workspace root when running from `target/debug` or `target/release`.
+/// Returns `None` for installed binaries outside a checkout.
+fn workspace_dir() -> Option<PathBuf> {
+    let dir = sibling_dir();
+    let profile = dir.file_name()?.to_str()?;
+    if profile != "debug" && profile != "release" {
+        return None;
+    }
+    let target = dir.parent()?;
+    if target.file_name()?.to_str()? != "target" {
+        return None;
+    }
+    let root = target.parent()?;
+    if !root.join("Cargo.toml").is_file() {
+        return None;
+    }
+    Some(root.to_path_buf())
+}
+
+/// Build service binaries before spawning. Always runs (a no-op when
+/// fresh) so `cargo run` never supervises stale code after `target/`
+/// rebuilds or branch switches. Set `JUICEBOX_NO_BUILD=1` to skip (e.g.
+/// production images with prebuilt binaries). `cargo run` releases the
+/// target-dir lock once the orchestrator itself is built, so invoking
+/// cargo here cannot deadlock.
+fn ensure_services_built() {
+    if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        return;
+    }
+    let Some(root) = workspace_dir() else {
+        tracing::warn!(
+            "no workspace checkout found; run `cargo build` first so all services are compiled"
+        );
+        return;
+    };
+    tracing::info!("building services");
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.arg("build")
+        .args(SERVICES.iter().flat_map(|name| ["-p", name]))
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    match cmd.status() {
+        Ok(status) if status.success() => {
+            tracing::info!("service build finished");
+        }
+        Ok(status) => {
+            tracing::error!("service build failed with {status}; run `cargo build` manually");
+        }
+        Err(e) => {
+            tracing::error!(
+                "could not run `cargo build`: {e}; run `cargo build` manually so all services are compiled"
+            );
+        }
+    }
+}
+
 /// Load `./.env` (repo root in dev) for vars not already set. Explicit
 /// environment always wins; missing file is fine.
 fn load_dotenv() {
@@ -44,7 +104,20 @@ fn spawn(name: &str) -> std::io::Result<Child> {
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "service binary '{name}' not found next to the juicebox binary; \
+                         run `cargo build` first so all services are compiled"
+                    ),
+                )
+            } else {
+                e
+            }
+        })?;
     Ok(child)
 }
 
@@ -128,8 +201,7 @@ fn check_service_config(name: &str) -> Result<(), String> {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -146,6 +218,8 @@ async fn main() {
         tracing::error!("missing required configuration, not starting services");
         std::process::exit(1);
     }
+
+    ensure_services_built();
 
     let mut children: HashMap<String, Child> = HashMap::new();
     let mut spawned_at: HashMap<String, Instant> = HashMap::new();

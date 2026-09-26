@@ -1,360 +1,263 @@
-//! juicefront runs the Astro frontend dev = astro dev, prod = build + node.
-//! bun > npm. syncs version from cargo workspace.
-//!
-//! Configuration: TOML file. Secrets (Sentry DSN) stay env-only.
-
 use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use juiceutils::config::SentrySettings;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
+use axum::{
+    Router,
+    body::Body,
+    http::Request,
+    middleware,
+    routing::{any, get},
+};
+use mimalloc::MiMalloc;
+use sentry::integrations::tower::NewSentryLayer;
+use tokio::net::TcpSocket;
+use tower_http::{
+    compression::{
+        CompressionLayer,
+        predicate::{DefaultPredicate, NotForContentType, Predicate},
+    },
+    services::{ServeDir, ServeFile},
+    set_header::SetResponseHeaderLayer,
+    trace::TraceLayer,
+};
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// TOML file layout for juicefront. Every section is optional.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct FileConfig {
-    #[serde(default)]
-    pub ui: UiFile,
-    #[serde(default)]
-    pub sentry: SentrySettings,
+mod admin;
+mod config;
+mod cx;
+mod handlers;
+mod i18n;
+mod icons;
+mod live;
+mod proxy;
+mod ssr;
+mod state;
+mod ws;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+async fn shutdown_signal() {
+    juiceutils::shutdown_signal("juicefront").await;
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct UiFile {
-    #[serde(default = "default_ui_host")]
-    pub host: String,
-    #[serde(default = "default_ui_port")]
-    pub port: u16,
-    #[serde(default)]
-    pub dir: Option<String>,
-}
-
-fn default_ui_host() -> String {
-    "0.0.0.0".into()
-}
-const fn default_ui_port() -> u16 {
-    6400
-}
-
-/// Candidate config file locations, first hit wins.
-fn candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(dir) = juiceutils::config::optional_secret("JUICEFRONT_CONFIG") {
-        paths.push(PathBuf::from(dir));
-    }
-    for name in ["juicefront.toml", "config.toml"] {
-        paths.push(PathBuf::from(name));
-        paths.push(PathBuf::from("/etc/juicebox").join(name));
-    }
-    paths
-}
-
-fn load_file_config() -> FileConfig {
-    for path in candidate_paths() {
-        if path.exists() {
-            return juiceutils::config::load_toml_or_default(&path);
-        }
-    }
-    tracing::warn!("no juicefront config file found, using defaults");
-    FileConfig::default()
-}
-
-/// Set `PR_SET_PDEATHSIG` so we die with our parent.
-unsafe fn watch_parent() {
-    unsafe extern "C" {
-        fn prctl(option: i32, ...) -> i32;
-    }
-    const PR_SET_PDEATHSIG: i32 = 1;
-    const SIGTERM: i32 = 15;
-    unsafe {
-        prctl(PR_SET_PDEATHSIG, SIGTERM);
-    }
-}
-
-/// Pull the version from [workspace.package] in Cargo.toml.
-fn workspace_version() -> Option<String> {
-    let candidates = ["Cargo.toml", "../Cargo.toml"];
-    for path in candidates {
-        let Ok(text) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let mut in_target_section = false;
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                in_target_section = trimmed == "[workspace.package]" || trimmed == "[package]";
-                continue;
-            }
-            if in_target_section {
-                if let Some(v) = trimmed.strip_prefix("version") {
-                    let v = v.trim().strip_prefix('=')?.trim().trim_matches('"');
-                    return Some(v.to_string());
-                }
-            }
+fn static_base() -> Option<std::path::PathBuf> {
+    for candidate in ["crates/juicefront/static", "static"] {
+        let path = std::path::PathBuf::from(candidate);
+        if path.is_dir() {
+            return Some(path);
         }
     }
     None
 }
 
-/// Find-replace the version string in a json file. first match only.
-fn patch_json_version(path: &std::path::Path, new_version: &str) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let full_start = match text.find("\"version\"") {
-        Some(i) => i,
-        None => return false,
-    };
-    let after = &text[full_start..];
-    let colon = match after.find(':') {
-        Some(i) => i,
-        None => return false,
-    };
-    let val_start = match after[colon..].find('"') {
-        Some(i) => colon + i + 1,
-        None => return false,
-    };
-    let val_end = match after[val_start..].find('"') {
-        Some(i) => val_start + i,
-        None => return false,
-    };
-    if val_end <= val_start {
-        return false;
-    }
-    let old = &after[val_start..val_end];
-    if old == new_version {
-        return false;
-    }
-    let before = &text[..full_start + val_start];
-    let after_ver = &text[full_start + val_end..];
-    let new_text = format!("{before}{new_version}{after_ver}");
-    std::fs::write(path, new_text).is_ok()
-}
-
-/// Bump package.json to match the cargo workspace version.
-fn sync_version(ui_dir: &str) {
-    let Some(version) = workspace_version() else {
-        tracing::warn!("could not read workspace version from Cargo.toml");
-        return;
-    };
-
-    let pkg_json = Path::new(ui_dir).join("package.json");
-    match patch_json_version(&pkg_json, &version) {
-        true => tracing::info!("synced package.json version to {}", version),
-        false => tracing::debug!("package.json version already up to date ({})", version),
-    }
-}
-
-/// Spawn the production node server for the given UI directory.
-fn spawn_node_server(
-    ui_dir: &str,
-    ui_port: &str,
-    ui_host: &str,
-) -> Result<tokio::process::Child, Box<dyn std::error::Error>> {
-    let server_entry = format!("{ui_dir}/server.mjs");
-    let mut server_builder = Command::new("node");
-    server_builder
-        .arg(&server_entry)
-        .env("PORT", ui_port)
-        .env("HOST", ui_host)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    unsafe {
-        server_builder.pre_exec(|| {
-            watch_parent();
-            Ok(())
-        })
-    };
-    Ok(server_builder
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Node.js server: {e}"))?)
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load ./.env first so standalone runs pick up cwd secrets exactly
-    // like `juicebox` supervision does. Explicit env always wins.
+fn main() {
     juiceutils::config::load_dotenv();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
-    tracing::info!("juicefront (Astro) starting");
-
-    let config = load_file_config();
-
-    // Initialize Sentry before the Node child spawns so crashes are captured.
-    // DSN stays env-only: SENTRY_DSN_JUICEFRONT, then SENTRY_DSN. The
-    // environment comes from the TOML [sentry] section.
+    let config = config::Config::load();
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEFRONT")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
             let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
                 .ok()
                 .and_then(|value| value.parse::<f32>().ok())
-                .map(|rate| rate.clamp(0.0, 1.0))
-                .unwrap_or(0.05);
+                .map_or(0.05, |rate| rate.clamp(0.0, 1.0));
             sentry::init((
                 dsn.as_str(),
                 sentry::ClientOptions::default()
                     .maybe_release(sentry::release_name!())
-                    .environment(config.sentry.environment.clone())
+                    .environment(config.sentry_environment.clone())
                     .traces_sample_rate(traces_sample_rate)
                     .send_default_pii(false),
             ))
         });
 
-    // Serve a prebuilt (staged) UI build directly. Used by JuiceFetch / systemd
-    // deployments where the source tree isn't present: skip install & build.
-    let staged = config
-        .ui
-        .dir
-        .as_ref()
-        .filter(|dir| !dir.trim().is_empty())
-        .filter(|dir| Path::new(dir.trim()).join("server.mjs").is_file())
-        .cloned();
-
-    let ui_port = config.ui.port;
-    let ui_host = config.ui.host.clone();
-
-    if let Some(staged) = staged {
-        tracing::info!("serving staged UI from {}", staged);
-        let mut server = spawn_node_server(&staged, &ui_port.to_string(), &ui_host)?;
-        let status = server.wait().await?;
-        if !status.success() {
-            tracing::error!("juicefront exited with error: {:?}", status.code());
-        }
-        return Ok(());
-    }
-
-    let ui_dir = if let Some(dir) = &config.ui.dir {
-        let dir = dir.trim();
-        if dir.is_empty() {
-            infer_ui_dir()?
-        } else if Path::new(dir).join("server.mjs").exists() {
-            dir.to_string()
-        } else {
-            return Err(format!("ui dir '{dir}' has no server.mjs").into());
-        }
-    } else {
-        infer_ui_dir()?
-    };
-
-    tracing::info!("Using UI directory: {}", ui_dir);
-
-    sync_version(&ui_dir);
-
-    let cmd = match Command::new("bun")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(mut child) => {
-            let _ = child.wait().await;
-            "bun"
-        }
-        Err(_) => {
-            tracing::warn!("'bun' not found, falling back to 'npm'");
-            "npm"
-        }
-    };
-
-    let mut install = Command::new(cmd);
-    install
-        .arg("install")
-        .current_dir(&ui_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    let mut install_status = install
-        .spawn()
-        .map_err(|e| format!("Failed to spawn '{cmd} install' in {ui_dir}: {e}"))?;
-    let install_status = install_status.wait().await?;
-    if !install_status.success() {
-        return Err(format!("dependency install failed: exit {install_status}").into());
-    }
-
-    if cfg!(debug_assertions) {
-        tracing::info!("Starting Astro dev server...");
-        let mut cmd_builder = Command::new(cmd);
-        cmd_builder
-            .arg("run")
-            .arg("dev")
-            .current_dir(&ui_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        // SAFETY: prctl is always safe to call; pre_exec requires unsafe.
-        unsafe {
-            cmd_builder.pre_exec(|| {
-                watch_parent();
-                Ok(())
-            })
-        };
-        let mut child = cmd_builder
-            .spawn()
-            .map_err(|e| format!("Failed to spawn '{cmd} run dev' in {ui_dir}: {e}"))?;
-
-        let status = child.wait().await?;
-
-        if !status.success() {
-            tracing::error!("juicefront exited with error: {:?}", status.code());
-        }
-    } else {
-        tracing::info!("Building Astro for production...");
-        let mut build_builder = Command::new(cmd);
-        build_builder
-            .arg("run")
-            .arg("build")
-            .current_dir(&ui_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        unsafe {
-            build_builder.pre_exec(|| {
-                watch_parent();
-                Ok(())
-            })
-        };
-        let mut build = build_builder
-            .spawn()
-            .map_err(|e| format!("Failed to spawn '{cmd} run build' in {ui_dir}: {e}"))?;
-        let build_status = build.wait().await?;
-        if !build_status.success() {
-            return Err(format!("Astro build failed: exit {build_status}").into());
-        }
-
-        tracing::info!("Starting production server on {}:{}...", ui_host, ui_port);
-        let mut server = spawn_node_server(&ui_dir, &ui_port.to_string(), &ui_host)?;
-
-        let status = server.wait().await?;
-        if !status.success() {
-            tracing::error!("juicefront exited with error: {:?}", status.code());
-        }
-    }
-
-    Ok(())
-}
-
-fn infer_ui_dir() -> Result<String, Box<dyn std::error::Error>> {
-    if Path::new("juicefront/ui").exists() {
-        Ok("juicefront/ui".to_string())
-    } else if Path::new("crates/juicefront/ui").exists() {
-        Ok("crates/juicefront/ui".to_string())
-    } else if Path::new("ui").exists() {
-        Ok("ui".to_string())
-    } else {
-        Err(
-            "Could not find the 'ui' directory. Please ensure you are running from the workspace root or the juicefront directory."
-                .into(),
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
+        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
+        .with(sentry_tracing::layer())
+        .init();
+
+    tracing::info!("juicefront v{} starting", env!("CARGO_PKG_VERSION"));
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    runtime.block_on(async {
+        let rustdoc_exists = static_base().is_some_and(|base| base.join("public/rustdoc").is_dir());
+        let live_reload = live::live_reload_enabled();
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let state = Arc::new(state::AppState {
+            http: proxy::build_client(),
+            config,
+            host_cache: HashMap::new().into(),
+            announcement_cache: HashMap::new().into(),
+            github_cache: Mutex::new((None, String::new())),
+            rustdoc_exists,
+            live_reload,
+            boot_id: uuid::Uuid::new_v4().to_string(),
+            shutdown: Arc::clone(&shutdown),
+        });
+        tracing::info!(
+            "proxy: juiceback={} juicehost={}",
+            state.config.juiceback_url,
+            state.config.juicehost_url
+        );
+
+        crate::ssr::host::prewarm_known_providers(Arc::clone(&state));
+
+        if live_reload {
+            tracing::info!("live reload enabled (GET /__live)");
+        }
+
+        let compression = CompressionLayer::new()
+            .gzip(true)
+            .br(true)
+            .zstd(true)
+            .compress_when(
+                DefaultPredicate::new()
+                    .and(NotForContentType::new("video/"))
+                    .and(NotForContentType::new("audio/"))
+                    .and(NotForContentType::new("font/"))
+                    .and(NotForContentType::new("application/octet-stream"))
+                    .and(NotForContentType::new("application/zip"))
+                    .and(NotForContentType::new("application/gzip"))
+                    .and(NotForContentType::new("application/offset+octet-stream")),
+            );
+
+        let mut pages = Router::new();
+        if live_reload {
+            pages = pages.route("/__live", get(live::live_handler));
+        }
+        pages = pages
+            .route("/", any(handlers::index))
+            .route("/{locale}", any(handlers::index))
+            .route("/{locale}/", any(handlers::index))
+            .route("/files", get(handlers::files_page))
+            .route("/files/", get(handlers::files_page))
+            .route("/{locale}/files", get(handlers::files_page))
+            .route("/{locale}/files/", get(handlers::files_page))
+            .route("/download", get(handlers::download_page))
+            .route("/download/", get(handlers::download_page))
+            .route("/{locale}/download", get(handlers::download_page))
+            .route("/{locale}/download/", get(handlers::download_page))
+            .route("/banned", get(handlers::banned_page))
+            .route("/banned/", get(handlers::banned_page))
+            .route("/{locale}/banned", get(handlers::banned_page))
+            .route("/{locale}/banned/", get(handlers::banned_page))
+            .route("/report", get(handlers::report_page))
+            .route("/report/", get(handlers::report_page))
+            .route("/{locale}/report", get(handlers::report_page))
+            .route("/{locale}/report/", get(handlers::report_page))
+            .route("/feedback", get(handlers::feedback_page))
+            .route("/feedback/", get(handlers::feedback_page))
+            .route("/{locale}/feedback", get(handlers::feedback_page))
+            .route("/{locale}/feedback/", get(handlers::feedback_page))
+            .route("/faq", get(handlers::faq_page))
+            .route("/faq/", get(handlers::faq_page))
+            .route("/{locale}/faq", get(handlers::faq_page))
+            .route("/{locale}/faq/", get(handlers::faq_page))
+            .route("/docs", get(handlers::docs_page))
+            .route("/docs/", get(handlers::docs_page))
+            .route("/{locale}/docs", get(handlers::docs_page))
+            .route("/{locale}/docs/", get(handlers::docs_page))
+            .route("/terms", get(handlers::terms_page))
+            .route("/terms/", get(handlers::terms_page))
+            .route("/{locale}/terms", get(handlers::terms_page))
+            .route("/{locale}/terms/", get(handlers::terms_page))
+            .route("/privacy", get(handlers::privacy_page))
+            .route("/privacy/", get(handlers::privacy_page))
+            .route("/{locale}/privacy", get(handlers::privacy_page))
+            .route("/{locale}/privacy/", get(handlers::privacy_page))
+            .route("/admin", get(handlers::admin_index))
+            .route("/admin/login", get(handlers::admin_login))
+            .route("/admin/files", get(handlers::admin_files))
+            .route("/admin/bans", get(handlers::admin_bans))
+            .route("/admin/reports", get(handlers::admin_reports))
+            .route("/admin/feedback", get(handlers::admin_feedback))
+            .route("/admin/announcement", get(handlers::admin_announcement))
+            .route("/static/bundle.css", get(handlers::css_bundle));
+
+        if let Some(base) = static_base() {
+            let cache_policy = if live_reload { "no-store" } else { "no-cache" };
+            let revalidate = || {
+                tower::ServiceBuilder::new().layer(SetResponseHeaderLayer::overriding(
+                    axum::http::header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static(cache_policy),
+                ))
+            };
+            pages = pages
+                .nest_service(
+                    "/static/styles",
+                    revalidate().service(ServeDir::new(base.join("styles"))),
+                )
+                .nest_service("/static/assets", ServeDir::new(base.join("assets")))
+                .nest_service(
+                    "/static/js",
+                    revalidate().service(ServeDir::new(base.join("js"))),
+                )
+                .route_service(
+                    "/static/speculation.json",
+                    ServeFile::new(base.join("speculation.json")),
+                );
+            if rustdoc_exists {
+                pages = pages.nest_service("/rustdoc", ServeDir::new(base.join("public/rustdoc")));
+            }
+        } else {
+            tracing::warn!("static asset directory not found, pages will render without styling");
+        }
+
+        pages = pages.layer(compression);
+
+        let app = Router::new()
+            .merge(pages)
+            .route("/api/device/ws", any(ws::device_ws_proxy))
+            .fallback(any(proxy::proxy_handler));
+
+        let app = app
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                admin::admin_guard,
+            ))
+            .layer(middleware::from_fn(juiceutils::add_security_headers))
+            .layer(TraceLayer::new_for_http())
+            .layer(NewSentryLayer::<Request<Body>>::new_from_top())
+            .with_state(state.clone());
+
+        let addr = format!("{}:{}", state.config.ui_host, state.config.ui_port);
+        let socket = TcpSocket::new_v4().expect("Failed to create TCP socket");
+        socket
+            .set_reuseaddr(true)
+            .expect("Failed to set SO_REUSEADDR");
+        socket
+            .bind(addr.parse().expect("Invalid bind address"))
+            .expect("Failed to bind to address");
+        let listener = socket.listen(1024).expect("Failed to listen");
+        tracing::info!("Listening on http://{addr}");
+        {
+            let shutdown = Arc::clone(&shutdown);
+            tokio::spawn(async move {
+                shutdown_signal().await;
+                shutdown.notify_waiters();
+            });
+        }
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move { shutdown.notified().await })
+        .await
+        .expect("Server failed");
+    });
+
+    if let Some(client) = sentry::Hub::current().client() {
+        client.close(Some(Duration::from_secs(2)));
     }
 }

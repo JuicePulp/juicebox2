@@ -1,0 +1,10 @@
+{% if banner.show %}
+<div class="announcement-banner announcement-banner--{{ banner.mode }}" role="status" data-announcement-mode="{{ banner.mode }}">
+{% if banner.mode != "status" %}<div class="announcement-banner__stripes" aria-hidden="true"></div>{% endif %}
+<div class="announcement-banner__body">
+{{ cx.icon("warning", 20)|safe }}
+<p class="announcement-banner__message">{{ banner.message }}</p>
+{% if banner.link_url != "" %}<a class="announcement-banner__link" href="{{ banner.link_url }}"{% if external %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ banner.learn_more }}</a>{% endif %}
+</div>
+</div>
+{% endif %}

@@ -2,10 +2,21 @@
 host = "0.0.0.0"
 port = 6400
 
-# UI working directory override. Defaults to auto-detect.
-# Config-file only.
-# dir = "crates/juicefront/ui"
+[proxy]
+# Upstream services. Env overrides: JUICEBACK_URL, JUICEHOST_URL.
+juiceback_url = "http://127.0.0.1:6401"
+juicehost_url = "http://127.0.0.1:6402"
+# Internal base for the /admin/* session check. Env: API_INTERNAL_URL.
+api_internal_url = "http://127.0.0.1:6401"
+# Proxies whose X-Forwarded-For we believe (comma-separated IPs/CIDRs).
+# Same format as the backends' TRUSTED_PROXY_CIDRS. Empty = ignore
+# forwarding headers. Env: TRUSTED_PROXY_CIDRS.
+trusted_proxy_cidrs = ""
 
 [sentry]
-# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_UI / SENTRY_DSN_JUICEFRONT).
+# DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEFRONT for this service).
 environment = "production"
+
+# Live reload for development. Env-only: JUICEFRONT_LIVE.
+# Unset = on for debug builds (`cargo run`), off for release builds.
+# Set 1/true to force on, 0/false to force off.

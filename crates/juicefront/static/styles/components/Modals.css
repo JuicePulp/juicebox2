@@ -1,0 +1,40 @@
+.chord-indicator {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-start;
+    padding: 0 1.75rem 1.75rem;
+    background: none;
+    box-shadow: inset 120px -100px 120px -60px rgba(0, 0, 0, 0.5);
+    font-family: "Secondary", "Unifont", monospace;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .chord-indicator[hidden] {
+    display: flex;
+    opacity: 0;
+  }
+  .chord-indicator--active {
+    opacity: 1;
+  }
+  .chord-indicator__keys {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .chord-indicator__keys span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 9rem;
+    height: 4rem;
+    font-size: 2.25rem;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--clr-text, #555) 45%, transparent);
+  }

@@ -1,0 +1,85 @@
+<div id="host-selector-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-selector-title" data-str-online="{{ cx.t("hostsel.online") }}" data-str-offline="{{ cx.t("hostsel.offline") }}" data-str-checking="{{ cx.t("hostsel.checking") }}" data-str-ping="{{ cx.t("hostsel.ping") }}" data-str-pinging="{{ cx.t("hostsel.pinging") }}" data-str-select="{{ cx.t("hostsel.select") }}" data-str-selected="{{ cx.t("hostsel.selected") }}" data-str-applied="{{ cx.t("hostsel.applied") }}">
+<a href="#!" class="mdl-target__backdrop" aria-label="{{ cx.t("modal.close") }}"></a>
+<div class="mdlcontent mdlcontent--wide hostsel">
+<div class="mdlheader">
+<h2 id="host-selector-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("settings", 24)|safe }}</span>{{ cx.t("hostsel.title") }}</h2>
+<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+</div>
+<div class="mdlbody hostsel__body">
+<p class="hostsel__hint">{{ cx.t("hostsel.hint") }}</p>
+<div class="hostsel-filters" role="search">
+<div class="form-field hostsel-filters__search">
+<label class="form-label" for="hostsel-search">{{ cx.t("hostsel.search_label") }}</label>
+<input id="hostsel-search" type="search" class="form-input" data-hostsel-search="" placeholder="{{ cx.t("hostsel.search_ph") }}" autocomplete="off">
+</div>
+<div class="hostsel-filters__row">
+<label class="select-option select-option--toggle hostsel-filters__toggle">
+<input type="checkbox" data-hostsel-online-only="" aria-label="{{ cx.t("hostsel.online_only") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("hostsel.online_only") }}</span></span>
+</label>
+<label class="hostsel-filters__sort">
+<span class="form-label">{{ cx.t("hostsel.sort_label") }}</span>
+<select class="form-input" data-hostsel-sort="">
+<option value="latency">{{ cx.t("hostsel.sort_latency") }}</option>
+<option value="name">{{ cx.t("hostsel.sort_name") }}</option>
+</select>
+</label>
+<button type="button" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">{{ cx.t("hostsel.ping_all") }}</button>
+</div>
+</div>
+<p class="hostsel-statusline" role="status" data-hostsel-statusline=""></p>
+<section aria-labelledby="hostsel-official-title" data-hostsel-section="">
+<h3 id="hostsel-official-title" class="hostsel__group-title">{{ cx.t("hostsel.official") }}</h3>
+<ul class="hostsel-list" data-hostsel-list="">
+{% for n in official %}<li class="hostsel-row" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-official="true"{% if n.selected %} data-selected=""{% endif %}>
+<span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span>
+<div class="hostsel-meta">
+<span class="hostsel-name">{{ n.name }}<span class="hostsel-current" data-hostsel-current=""{% if !n.selected %} hidden{% endif %}> · {{ cx.t("hostsel.selected") }}</span></span>
+<span class="hostsel-url">{{ n.url }}{% if n.region != "" %} · {{ n.region }}{% endif %}</span>
+<span class="hostsel-badges" data-hostsel-badges=""></span>
+</div>
+<span class="hostsel-latency" data-hostsel-latency="">—</span>
+<span class="hostsel-status" data-hostsel-status=""></span>
+<span class="hostsel-actions">
+<button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
+<button type="button" class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
+</span>
+</li>
+{% endfor %}</ul>
+<p class="hostsel-empty" data-hostsel-empty="" hidden>{{ cx.t("hostsel.empty") }}</p>
+<noscript><p class="hostsel-noscript">{{ cx.t("hostsel.checking") }}</p></noscript>
+</section>
+<section aria-labelledby="hostsel-unofficial-title" data-hostsel-section="">
+<h3 id="hostsel-unofficial-title" class="hostsel__group-title">{{ cx.t("hostsel.unofficial") }}</h3>
+{% if unofficial.is_empty() %}
+<ul class="hostsel-list" data-hostsel-list=""></ul>
+<p class="hostsel-empty" data-hostsel-empty="">{{ cx.t("hostsel.empty_unofficial") }}</p>
+{% else %}
+<ul class="hostsel-list" data-hostsel-list="">
+{% for n in unofficial %}<li class="hostsel-row" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-official="false"{% if n.selected %} data-selected=""{% endif %}>
+<span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span>
+<div class="hostsel-meta">
+<span class="hostsel-name">{{ n.name }}<span class="hostsel-current" data-hostsel-current=""{% if !n.selected %} hidden{% endif %}> · {{ cx.t("hostsel.selected") }}</span></span>
+<span class="hostsel-url">{{ n.url }}{% if n.region != "" %} · {{ n.region }}{% endif %}</span>
+<span class="hostsel-badges" data-hostsel-badges=""></span>
+</div>
+<span class="hostsel-latency" data-hostsel-latency="">—</span>
+<span class="hostsel-status" data-hostsel-status=""></span>
+<span class="hostsel-actions">
+<button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
+<button type="button" class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
+</span>
+</li>
+{% endfor %}</ul>
+<p class="hostsel-empty" data-hostsel-empty="" hidden>{{ cx.t("hostsel.empty") }}</p>
+{% endif %}
+</section>
+<div class="hostsel-add">
+<div class="hostsel-add__text"><strong>{{ cx.t("hostsel.add_title") }}</strong><span>{{ cx.t("hostsel.add_desc") }}</span></div>
+<a href="{{ cx.lp("/feedback") }}" class="mdlbtn mdlbtn--primary">{{ cx.t("hostsel.add_btn") }}</a>
+</div>
+</div>
+<div class="mdlfooter"><a href="#!" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a></div>
+</div>
+</div>

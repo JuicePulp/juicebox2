@@ -1,0 +1,65 @@
+{{ flags_html|safe }}
+<main id="main-content">
+<div id="report-card" class="upload-card report-card" style="view-transition-name: main-card;" data-report-card="" data-component="report-card" aria-labelledby="report-card-header">
+<header id="report-card-header" class="upload-header upload-header--centered">
+<h1 class="upload-header__title"><img src="/static/assets/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high">{{ title }}</h1>
+<p class="upload-header__subtitle">{{ subtitle }}</p>
+</header>
+<section class="rpfcontainer" data-report-form="">
+<div class="rpfcontent">
+{% if submitted %}<div class="report-success-banner" role="alert"><p><strong>{{ shell.cx.t("report.success") }}</strong></p></div>{% endif %}
+<form class="report-form" method="POST" action="/api/report" data-astro-reload="">
+<div class="form-field">
+<label class="form-label" for="report-card-url">{{ shell.cx.t("report.url_label") }}<span class="required">*</span></label>
+<input id="report-card-url" class="form-input" type="url" name="file_url" required placeholder="https://example.com/f/abc123">
+<p class="form-help-text">{{ shell.cx.t("report.url_hint") }}</p>
+</div>
+<div class="form-field">
+<label class="form-label" for="report-card-reason">{{ shell.cx.t("report.reason_label") }}<span class="required">*</span></label>
+<select id="report-card-reason" class="form-select" name="reason" required>
+<option value="" disabled selected>{{ shell.cx.t("report.reason_placeholder") }}</option>
+<option value="malware">{{ shell.cx.t("report.reason_malware") }}</option>
+<option value="illegal">{{ shell.cx.t("report.reason_illegal") }}</option>
+<option value="copyright">{{ shell.cx.t("report.reason_copyright") }}</option>
+<option value="spam">{{ shell.cx.t("report.reason_spam") }}</option>
+<option value="inappropriate">{{ shell.cx.t("report.reason_inappropriate") }}</option>
+<option value="other">{{ shell.cx.t("report.reason_other") }}</option>
+</select>
+</div>
+<div class="form-field">
+<label class="form-label" for="report-card-details">{{ shell.cx.t("report.details_label") }}</label>
+<textarea id="report-card-details" class="form-textarea" name="details" rows="4" maxlength="500" placeholder="{{ shell.cx.t("report.details_placeholder") }}"></textarea>
+<p class="form-help-text">{{ shell.cx.t("report.details_max") }}</p>
+</div>
+<div class="form-field">
+<label class="form-label" for="report-card-email">{{ shell.cx.t("report.email") }}</label>
+<input id="report-card-email" class="form-input" type="email" name="email">
+<p class="form-help-text">{{ shell.cx.t("report.email_hint") }}</p>
+</div>
+<div class="rpfactions">
+<button type="submit" class="report-btn report-btn--primary">{{ shell.cx.t("report.submit") }}</button>
+<div class="rpffooter"><p class="report-footer-text">{{ shell.cx.t("report.warning") }}</p></div>
+</div>
+</form>
+</div>
+</section>
+<span id="actions-area" tabindex="-1" style="position:absolute"></span>
+<nav id="report-card-actions" class="act" aria-label="{{ shell.cx.t("actions.report_actions") }}" data-act="">
+{% for a in actions %}{% if a.id == "more" %}<details class="select-details" data-select-details="">
+<summary class="action-btn" aria-haspopup="menu" aria-label="{{ a.aria }}" aria-describedby="report-card-actions-more-desc" title="{{ a.aria }}"><span class="action-btn__icon">{{ shell.cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></summary>
+<span id="report-card-actions-more-desc" class="sr-only">{{ shell.cx.t("sr.more_menu_sr") }}</span>
+<summary class="select-backdrop" data-select-backdrop=""></summary>
+<summary class="select-close-btn nojs-only">{{ shell.cx.t("sr.close_btn") }}</summary>
+<div class="select-menu select-menu--details" role="menu" aria-label="{{ shell.cx.t("sr.more_options") }}" aria-describedby="report-card-actions-more-desc">
+<div class="select-options-list">
+{% for entry in shell.cx.menu() %}{% if let Some(item) = entry.item %}<a class="select-option{% if item.js_only %} js-only{% endif %}" role="menuitem" href="{{ item.href }}"><span class="select-option__icon">{{ shell.cx.icon(item.icon.as_str(), 24)|safe }}</span><span class="select-option__label">{{ item.label }}</span></a>{% else %}<div class="select-option--divider"></div>{% endif %}{% endfor %}
+</div>
+</div>
+</details>{% else %}<a class="action-btn" href="{{ a.href }}" aria-label="{{ a.aria }}" title="{{ a.aria }}" data-action-id="{{ a.id }}"><span class="action-btn__icon">{{ shell.cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></a>{% endif %}
+{% endfor %}</nav>
+<footer class="footr footr--divd" data-footr="">
+<div class="footr__primary">{% if footer_message != "" %}<p class="footr__message">{{ footer_message }}</p>{% endif %}<a class="footr__commit footr__link" href="{{ footer_repo }}" target="_blank" rel="noopener noreferrer">{{ footer_commit }}</a></div>
+</footer>
+</div>
+</main>
+{% include "_tail.html" %}

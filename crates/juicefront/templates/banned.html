@@ -1,0 +1,15 @@
+{{ flags_html|safe }}
+<main id="main-content">
+<div class="upload-card content-card" style="view-transition-name: main-card;">
+<header class="upload-header upload-header--centered">
+<h1 class="upload-header__title">{{ shell.cx.t("banned.heading") }}</h1>
+<p class="upload-header__subtitle">{{ shell.cx.t("banned.description") }}</p>
+</header>
+<section class="content-body">
+{% if reason != "" %}<p>{{ shell.cx.t("banned.reason_label") }} {{ reason }}</p>{% else %}<p>{{ shell.cx.t("banned.no_reason") }}</p>{% endif %}
+{% if contact != "" %}<p>{{ shell.cx.t("banned.contact_with_email") }} <a href="mailto:{{ contact }}">{{ contact }}</a></p>{% else %}<p>{{ shell.cx.t("banned.contact_no_email") }}</p>{% endif %}
+<p><a href="{{ shell.cx.lp("/") }}">{{ shell.cx.t("banned.return") }}</a></p>
+</section>
+</div>
+</main>
+{% include "_tail.html" %}

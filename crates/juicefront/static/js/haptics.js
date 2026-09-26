@@ -1,0 +1,59 @@
+const KEY = "jb_haptics_v1";
+const PATTERNS = {
+  tick: 8,
+  tap: 16,
+  send: [12, 30, 16],
+  success: [14, 60, 14],
+  error: [26, 70, 26, 70, 40]
+};
+export function hapticsSupported() {
+  return typeof navigator !== "undefined" && "vibrate" in navigator;
+}
+export function hapticsEnabled() {
+  try {
+    return localStorage.getItem(KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+export function haptic(name) {
+  if (!hapticsEnabled() || !hapticsSupported())
+    return;
+  try {
+    navigator.vibrate(PATTERNS[name]);
+  } catch {}
+}
+export function initHaptics() {
+  if (!hapticsSupported() || window.__jbBuzz)
+    return;
+  window.__jbBuzz = true;
+  const INTERACTIVE = 'button:not(:disabled),a[href],[role="button"],summary,label,input[type="checkbox"],input[type="radio"],select';
+  document.addEventListener("pointerdown", (e) => {
+    if (!(e.target instanceof Element))
+      return;
+    const t = e.target.closest(INTERACTIVE);
+    if (!t || t.hasAttribute("data-no-buzz"))
+      return;
+    haptic(t.matches("a[href]") ? "tick" : "tap");
+  }, { capture: true, passive: true });
+  const seen = new Map;
+  window.addEventListener("jb-net-sample", (ev) => {
+    const detail = ev.detail;
+    for (const it of detail?.items ?? []) {
+      if (!it.id || !it.s)
+        continue;
+      const prev = seen.get(it.id);
+      if (prev !== it.s) {
+        if (it.s === "done")
+          haptic("success");
+        else if (it.s === "error")
+          haptic("error");
+        else if (!prev && it.s === "uploading")
+          haptic("send");
+        seen.set(it.id, it.s);
+      }
+    }
+    if (seen.size > 200)
+      seen.clear();
+  });
+}

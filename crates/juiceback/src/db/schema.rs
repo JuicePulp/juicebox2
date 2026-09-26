@@ -23,11 +23,10 @@ pub fn schema_version(conn: &Connection) -> Result<u32> {
         )",
         [],
     )?;
-    let max: Option<u32> = conn.query_row(
-        "SELECT MAX(version) FROM schema_migrations",
-        [],
-        |row| row.get(0),
-    )?;
+    let max: Option<u32> =
+        conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })?;
     Ok(max.unwrap_or(0))
 }
 

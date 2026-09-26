@@ -275,6 +275,9 @@ pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests
         tokio::net::TcpSocket::new_v6()
     }
     .expect("Failed to create TCP socket");
+    socket
+        .set_reuseaddr(true)
+        .expect("Failed to set SO_REUSEADDR");
     socket.set_nodelay(true).expect("Failed to set TCP_NODELAY");
     socket.bind(addr).expect("Failed to bind server");
     let listener = socket.listen(1024).expect("Failed to listen");
