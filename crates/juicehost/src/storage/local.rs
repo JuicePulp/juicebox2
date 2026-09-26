@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::atomic::Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::Ordering,
+};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -563,19 +566,7 @@ impl StorageBackend for LocalBackend {
             .path_for(new_id, &ext)
             .ok_or_else(|| StorageError::Io("invalid storage path".into()))?;
 
-        tokio::fs::hard_link(&old_path, &new_path)
-            .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    StorageError::Conflict
-                } else {
-                    StorageError::Io(format!("rename link failed: {e}"))
-                }
-            })?;
-        if let Err(e) = tokio::fs::remove_file(&old_path).await {
-            let _ = tokio::fs::remove_file(&new_path).await;
-            return Err(StorageError::Io(format!("rename cleanup failed: {e}")));
-        }
+        link_or_rename(&old_path, &new_path).await?;
 
         self.extensions.remove(old_id);
         self.extensions.insert(new_id.to_string(), ext);
@@ -695,21 +686,43 @@ impl LocalBackend {
     }
 }
 
-async fn publish_new_file(temp: &PathBuf, target: &PathBuf) -> Result<(), StorageError> {
-    tokio::fs::hard_link(temp, target).await.map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            StorageError::Conflict
-        } else {
-            StorageError::Io(format!("publish failed: {e}"))
+/// Move `src` onto `dst` without ever overwriting an existing `dst`.
+///
+/// A hard link is tried first: it is atomic and reports `AlreadyExists`,
+/// so concurrent writers can never clobber each other. Not every
+/// filesystem allows hard links though -- Android app-private storage
+/// rejects them with `EPERM` (so every upload failed on Termux), and
+/// overlay/`EXDEV` layouts fail too. When linking is unavailable we fall
+/// back to `rename`, which is still atomic because `src` and `dst` live
+/// in the same directory. That fallback has to check existence itself,
+/// since `rename` silently replaces the destination.
+pub(super) async fn link_or_rename(src: &Path, dst: &Path) -> Result<(), StorageError> {
+    match tokio::fs::hard_link(src, dst).await {
+        Ok(()) => {
+            if let Err(e) = tokio::fs::remove_file(src).await {
+                let _ = tokio::fs::remove_file(dst).await;
+                return Err(StorageError::Io(format!("link cleanup failed: {e}")));
+            }
+            Ok(())
         }
-    })?;
-    if let Err(e) = tokio::fs::remove_file(temp).await {
-        tracing::warn!(
-            "failed to remove published temp file {}: {e}",
-            temp.display(),
-        );
+        Err(link_err) if link_err.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(StorageError::Conflict)
+        }
+        Err(link_err) => {
+            if tokio::fs::try_exists(dst).await.unwrap_or(false) {
+                return Err(StorageError::Conflict);
+            }
+            tokio::fs::rename(src, dst).await.map_err(|e| {
+                StorageError::Io(format!(
+                    "publish failed: hard link unavailable ({link_err}) and rename failed ({e})"
+                ))
+            })
+        }
     }
-    Ok(())
+}
+
+async fn publish_new_file(temp: &PathBuf, target: &PathBuf) -> Result<(), StorageError> {
+    link_or_rename(temp, target).await
 }
 
 fn etag_from_metadata(meta: &std::fs::Metadata) -> String {
