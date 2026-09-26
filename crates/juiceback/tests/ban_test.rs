@@ -58,8 +58,7 @@ async fn banned_ip_can_still_check_ban_status() {
         .expect("ban_ip should succeed");
 
     let app = build_router(state);
-    // The /banned page depends on /api/ban-status, so it must stay reachable
-    // even for banned IPs (other endpoints still 403).
+
     let resp = app
         .oneshot(common::with_connect_info(
             Request::builder()
@@ -84,7 +83,6 @@ async fn ban_snapshot_requires_api_key_and_returns_hashes() {
 
     let app = build_router(state);
 
-    // No API key -> 401 (unauthenticated).
     let resp = app
         .clone()
         .oneshot(common::with_connect_info(
@@ -97,7 +95,6 @@ async fn ban_snapshot_requires_api_key_and_returns_hashes() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    // Valid API key -> pepper + hashes.
     let resp = app
         .oneshot(common::with_connect_info(
             Request::builder()

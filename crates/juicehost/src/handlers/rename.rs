@@ -14,8 +14,6 @@ pub struct RenameRequest {
     new_id: String,
 }
 
-/// Rename a file (new ID). body: {"`new_id"`: "..."}. local = rename, s3 =
-/// copy+delete.
 #[utoipa::path(
     post,
     path = "/internal/file/{id}/rename",

@@ -1,54 +1,45 @@
-//! Shared state used by request handlers.
-
 use std::{sync::Arc, time::Duration};
 
 use crate::{config::Config, storage::StorageBackend};
 
-/// Shared state injected into every axum handler.
-///
-/// Created once at startup and shared (via `Arc`) across all request handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Pluggable storage backend (local disk or S3-compatible).
     pub storage: Arc<dyn StorageBackend>,
-    /// Shared secret for authenticating internal API calls from juiceback.
+
     pub api_key: String,
-    /// When true, an empty `api_key` is an explicit opt-out and internal
-    /// endpoints stay open. When false (default), empty key = reject all.
+
     pub allow_no_auth: bool,
-    /// Allowed values for the `X-Juiceback-Origin` header. Empty means allow
-    /// all.
+
     pub allowed_origins: Vec<String>,
-    /// Minimum free disk space (bytes) before rejecting writes.
+
     pub min_free_space_bytes: u64,
-    /// Maximum allowed file size in bytes.
+
     pub max_file_size_bytes: u64,
-    /// juiceback URL (used to check upload status on storage miss).
+
     pub backend_url: Option<String>,
-    /// juicefront URL that the index page redirects to (empty disables the
-    /// redirect).
+
     pub frontend_url: Option<String>,
-    /// File type danger level: none, low, medium, high.
+
     pub danger_level: juiceutils::file_validation::ProtectionLevel,
-    /// Default TTL in hours for file retention.
+
     pub default_ttl_hours: f64,
-    /// Exact list of allowed TTL values in hours.
+
     pub allowed_ttl_hours: Vec<f64>,
-    /// Quick Link two-phase uploads enabled.
+
     pub quick_link: bool,
-    /// Custom file ID slugs enabled.
+
     pub custom_id: bool,
     pub file_cache_enabled: bool,
     pub file_cache_max_age_secs: u64,
-    /// JWT signing secret for validating upload tickets.
+
     pub ticket_jwt_secret: String,
-    /// Optional IP ban list shared with the middleware.
+
     pub ban_list: Arc<juiceutils::ban::BanList>,
-    /// Path to the optional local ban list JSON file.
+
     pub ban_list_file: Option<std::path::PathBuf>,
-    /// Optional juiceback URL to sync the ban list from.
+
     pub ban_sync_url: Option<String>,
-    /// Seconds between ban list file reloads / backend syncs.
+
     pub ban_sync_interval: u64,
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
     pub max_range_response_bytes: u64,
@@ -57,11 +48,12 @@ pub struct AppState {
     pub tcp_request_total: std::time::Duration,
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
     pub download_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Reused client for bounded juiceback status, alias, and health probes.
+
     pub backend_client: reqwest::Client,
 }
 
 impl AppState {
+    #[must_use]
     pub fn new(config: &Config, storage: Arc<dyn StorageBackend>) -> Self {
         Self {
             storage,

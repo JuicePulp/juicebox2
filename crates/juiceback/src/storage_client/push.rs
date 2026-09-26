@@ -1,23 +1,8 @@
 use std::sync::Arc;
 
-use super::{
-    errors::format_error_response,
-    target::{require_juicehost_url, resolve_juicehost_target},
-};
+use super::{errors::format_error_response, target::require_juicehost_url};
 use crate::{state::AppState, upload_mode::UploadMode};
 
-/// Bounded replay buffer for the QUIC→HTTP fallback path.
-///
-/// Retains stream chunks as refcounted `Bytes` (cheap clones, no memcpy) up
-/// to `QUIC_SPILL_THRESHOLD_BYTES`, then spills to a temp file and drops the
-/// retained chunks. The QUIC happy path therefore pins at most ~8 MiB no
-/// matter the file size; only a QUIC failure pays for disk-backed replay.
-/// The temp file deletes itself on drop, so no cleanup path can leak it.
-///
-/// Spill writes are synchronous page-cache writes of network-sized chunks
-/// (no fsync, no large copies): same class as the blocking `statvfs`/`fs`
-/// calls already on juicehost's hot paths, far below the executor's
-/// blocking tolerance.
 pub struct QuicFallbackBuffer {
     ram: Vec<bytes::Bytes>,
     ram_bytes: usize,
@@ -70,9 +55,6 @@ impl QuicFallbackBuffer {
         Ok(())
     }
 
-    /// Concatenate everything for the HTTP fallback POST. Only runs when
-    /// QUIC already failed, so the copy here replaces the failure path's
-    /// cost instead of adding to the happy path.
     pub fn materialize(mut self) -> Result<Vec<bytes::Bytes>, String> {
         if let Some(spill) = self.spill.take() {
             let data =
@@ -83,8 +65,6 @@ impl QuicFallbackBuffer {
     }
 }
 
-/// Stream a file to juicehost over HTTP or QUIC. channel-based, no full
-/// buffering. Close the sender = EOF. QUIC falls back to TCP.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -101,17 +81,13 @@ pub async fn push_file_streaming(
     capability: Option<&str>,
 ) -> Result<(), String> {
     let custom_host = host.as_deref().map(str::trim).filter(|h| !h.is_empty());
-    let target = resolve_juicehost_target(state, custom_host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = super::client::StorageClient::resolve(state, custom_host).await?;
+    let target_base = client.base_url().to_string();
 
     if *mode == UploadMode::Quic
         && custom_host.is_none()
         && !state.config.juicehost_api_key.is_empty()
     {
-        // QUIC is internal-only!!
-        // always use the direct juicehost URL and never the public-facing host override
-        // (which may point to Cloudflare/Nginx)
         require_juicehost_url(&state.config.juicehost_url).map_err(|e| e.to_string())?;
 
         let mut fallback = QuicFallbackBuffer::new();
@@ -132,8 +108,6 @@ pub async fn push_file_streaming(
                 return Ok(());
             }
             Err(e) => {
-                // If juicehost itself returned a non-2xx (e.g. 507 disk full),
-                // return that error directly as we kinda have no point retrying over TCP.
                 if e.contains("(status=") {
                     return Err(e);
                 }
@@ -141,7 +115,6 @@ pub async fn push_file_streaming(
             }
         }
 
-        // QUIC failed partway.. drain leftovers into the bounded buffer.
         while let Some(chunk) = rx.recv().await {
             if let Ok(data) = chunk {
                 fallback.push(&data)?;
@@ -167,19 +140,16 @@ pub async fn push_file_streaming(
     let encoded_fn =
         percent_encoding::utf8_percent_encode(filename, percent_encoding::NON_ALPHANUMERIC)
             .to_string();
-    let url = format!(
-        "{}/internal/file/stream/{}/{}",
-        target.base_url, id, encoded_fn
-    );
+    let url = format!("{}/internal/file/stream/{}/{}", target_base, id, encoded_fn);
     let stream = tokio_stream::wrappers::ReceiverStream::new(chunk_rx);
     let body = reqwest::Body::wrap_stream(stream);
 
     let req_start = std::time::Instant::now();
-    let mut request = target
-        .client
+    let mut request = client
+        .http()
         .post(&url)
         .header("x-mime-type", mime_type)
-        .headers(target.headers);
+        .headers(client.headers_with(None)?);
     if let Some(capability) = capability {
         request = request.header("x-juicehost-file-capability", capability);
     }
@@ -215,7 +185,6 @@ pub async fn push_file_streaming(
     }
 }
 
-/// Push pre-buffered chunks to juicehost over HTTP.
 async fn push_buffered_to_http(
     state: &Arc<AppState>,
     id: &str,
@@ -238,7 +207,6 @@ async fn push_buffered_to_http(
     push_file_to_juicehost(state, id, filename, mime_type, data, host, capability).await
 }
 
-/// Push raw bytes to juicehost and it will stay on juicehost's disk
 #[tracing::instrument(skip_all)]
 pub async fn push_file_to_juicehost(
     state: &Arc<AppState>,
@@ -249,9 +217,7 @@ pub async fn push_file_to_juicehost(
     host: Option<&str>,
     capability: Option<&str>,
 ) -> Result<(), String> {
-    let target = resolve_juicehost_target(state, host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = super::client::StorageClient::resolve(state, host).await?;
 
     let build_start = std::time::Instant::now();
     let file_part = reqwest::multipart::Part::bytes(data)
@@ -266,8 +232,8 @@ pub async fn push_file_to_juicehost(
     let build_time = build_start.elapsed();
 
     let send_start = std::time::Instant::now();
-    let url = format!("{}/internal/file", target.base_url);
-    let mut request = target.client.post(&url).headers(target.headers);
+    let url = format!("{}/internal/file", client.base_url());
+    let mut request = client.http().post(&url).headers(client.headers_with(None)?);
     if let Some(capability) = capability {
         request = request.header("x-juicehost-file-capability", capability);
     }
@@ -329,7 +295,7 @@ mod tests {
     #[test]
     fn fallback_buffer_spills_and_replays() {
         let mut buf = QuicFallbackBuffer::new();
-        // 10 MiB in 64 KiB pieces forces a spill past the 8 MiB threshold.
+
         let piece = bytes::Bytes::from(vec![0xABu8; 64 * 1024]);
         for _ in 0..160 {
             buf.push(&piece).unwrap();

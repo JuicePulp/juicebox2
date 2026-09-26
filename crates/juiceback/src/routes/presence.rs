@@ -61,11 +61,10 @@ pub struct DeviceListResponse {
 #[derive(Serialize, ToSchema)]
 pub struct PresenceDevice {
     pub device_id: String,
+
     pub device_name: String,
 }
 
-/// Snapshot a user's connected devices for API responses. Devices whose
-/// lock is held are skipped rather than blocking the listing task.
 fn snapshot_device_list(state: &AppState, user_id: &str) -> Vec<PresenceDevice> {
     let guard = state.connected_devices.get(user_id);
     guard
@@ -83,9 +82,6 @@ fn snapshot_device_list(state: &AppState, user_id: &str) -> Vec<PresenceDevice> 
         .unwrap_or_default()
 }
 
-// Device WebSocket endpoint
-
-/// GET /api/device/ws where juicebox-plus connects, auth via Bearer.
 pub async fn device_ws_handler(
     State(state): State<Arc<AppState>>,
     DeviceAuth(claims): DeviceAuth,
@@ -189,13 +185,12 @@ async fn handle_device_socket(
 
     let mut last_heartbeat = Instant::now();
     let stale_threshold = Duration::from_secs(90);
-    // `last_seen_at` rewrites are coalesced: heartbeats still ack every
-    // message, but the DB write happens at most once per interval.
+
     let mut last_seen_write = Instant::now();
 
     loop {
         tokio::select! {
-            // Incoming message from juicebox-plus
+
             msg = socket.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -249,7 +244,6 @@ async fn handle_device_socket(
                 }
             }
 
-            // Outgoing messages (e.g., upload_request from juiceback)
             outgoing = device_rx.recv() => {
                 if let Some(text) = outgoing {
                     if socket.send(Message::Text(text.into())).await.is_err() {
@@ -258,7 +252,6 @@ async fn handle_device_socket(
                 }
             }
 
-            // Stale connection check
             _ = tokio::time::sleep(Duration::from_secs(10)) => {
                 let did = device_id.clone();
                 let uid = user_id.clone();
@@ -270,7 +263,10 @@ async fn handle_device_socket(
                     break;
                 }
                 if last_heartbeat.elapsed() > stale_threshold {
-                    tracing::warn!("Device {} timed out (no heartbeat for {:?})", device_id, last_heartbeat.elapsed());
+                    let elapsed = last_heartbeat.elapsed();
+                    tracing::warn!(
+                        "Device {device_id} timed out (no heartbeat for {elapsed:?})"
+                    );
                     break;
                 }
             }
@@ -283,11 +279,10 @@ async fn handle_device_socket(
 
     if let Some(mut devices) = state.connected_devices.get_mut(&user_id) {
         devices.retain(|d| {
-            if let Ok(inner) = d.try_lock() {
-                inner.device_id != device_id
-            } else {
-                true
-            }
+            let Ok(inner) = d.try_lock() else {
+                return true;
+            };
+            inner.device_id != device_id
         });
         if devices.is_empty() {
             drop(devices);
@@ -305,8 +300,6 @@ async fn handle_device_socket(
     tracing::info!("Device {device_id} disconnected");
 }
 
-// Device pairing status check (used by juicebox-plus handshake)
-
 #[utoipa::path(
     get,
     path = "/api/device/status",
@@ -319,14 +312,11 @@ async fn handle_device_socket(
     ),
     tag = "Devices",
 )]
-/// GET /api/device/status returns 200 if still paired and 401 if not
 pub async fn device_status_handler(
     DeviceAuth(_claims): DeviceAuth,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(serde_json::json!({ "paired": true })))
 }
-
-// SSE presence stream (for website)
 
 #[utoipa::path(
     get,
@@ -336,7 +326,6 @@ pub async fn device_status_handler(
     ),
     tag = "Devices",
 )]
-/// `GET /api/presence` - SSE stream of device connect/disconnect events.
 pub async fn presence_sse_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -418,8 +407,6 @@ pub async fn presence_sse_handler(
     ))
 }
 
-// Ping device
-
 #[utoipa::path(
     post,
     path = "/api/device/ping",
@@ -447,17 +434,16 @@ pub async fn ping_device_handler(
     let ping_msg = serde_json::json!({"type": "ping"}).to_string();
     let mut sent = 0;
     for device in &devices {
-        if let Ok(inner) = device.try_lock() {
-            if inner.sender.send(ping_msg.clone()).await.is_ok() {
-                sent += 1;
-            }
+        let Ok(inner) = device.try_lock() else {
+            continue;
+        };
+        if inner.sender.send(ping_msg.clone()).await.is_ok() {
+            sent += 1;
         }
     }
 
     Ok(Json(serde_json::json!({"ok": true, "sent": sent})))
 }
-
-// Device list REST endpoint
 
 #[utoipa::path(
     get,

@@ -1,6 +1,3 @@
-//! juiceback, the entire backend of juicebox
-// "Well, well, well. Welcome to MY LAIR!" - Wheatley from Portal 2
-
 use std::{sync::Arc, time::Duration};
 
 use mimalloc::MiMalloc;
@@ -40,8 +37,6 @@ async fn shutdown_signal() {
 }
 
 fn main() {
-    // Load ./.env first so standalone runs pick up cwd secrets exactly
-    // like `juicebox` supervision does. Explicit env always wins.
     juiceutils::config::load_dotenv();
 
     let args: Vec<String> = std::env::args().collect();
@@ -59,9 +54,6 @@ fn main() {
         return;
     }
 
-    // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
-    // Uses SENTRY_DSN_JUICEBACK if set, otherwise falls back to SENTRY_DSN.
-    // The environment comes from the TOML [sentry] section.
     let config = Config::try_load().expect("Failed to load configuration");
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEBACK")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
@@ -147,7 +139,6 @@ fn main() {
             );
         }
 
-        // Fetch juicehost config with startup retries (degraded mode if all fail).
         let mut jh_config: Option<juiceback::storage_client::JuicehostConfig> = None;
         {
             let mut last_err = String::new();
@@ -188,7 +179,6 @@ fn main() {
 
         let state = AppState::new(pool, config.clone(), http.clone(), juicehost_headers.clone(), jh_config);
 
-        // bg refresh
         {
             let refresh_state = Arc::clone(&state);
             let refresh_http = http.clone();
@@ -243,7 +233,9 @@ fn main() {
 
         let app = juiceback::routes::build_router(Arc::clone(&state));
 
-        let addr = format!("{}:{}", state.config.host, state.config.port);
+        let host = &state.config.host;
+        let port = state.config.port;
+        let addr = format!("{host}:{port}");
         let listener = TcpListener::bind(&addr)
             .await
             .expect("Failed to bind to address");
@@ -253,7 +245,8 @@ fn main() {
             let shutdown = Arc::new(Notify::new());
             let quic_shutdown = Arc::clone(&shutdown);
 
-            let quic_listen: std::net::SocketAddr = format!("{}:{}", state.config.host, state.config.quic_port)
+            let quic_port = state.config.quic_port;
+            let quic_listen: std::net::SocketAddr = format!("{host}:{quic_port}")
                 .parse()
                 .expect("Invalid QUIC address");
 
@@ -294,7 +287,6 @@ fn main() {
         }
     });
 
-    // Flush any remaining Sentry events before exit
     if let Some(client) = sentry::Hub::current().client() {
         client.close(Some(Duration::from_secs(2)));
     }

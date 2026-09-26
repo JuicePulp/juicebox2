@@ -62,12 +62,17 @@ fn load_file_config() -> FileConfig {
 }
 
 /// Set `PR_SET_PDEATHSIG` so we die with our parent.
+///
+/// # Safety
+///
+/// Calls the `prctl` syscall with fixed valid arguments; always safe.
 unsafe fn watch_parent() {
     unsafe extern "C" {
         fn prctl(option: i32, ...) -> i32;
     }
     const PR_SET_PDEATHSIG: i32 = 1;
     const SIGTERM: i32 = 15;
+    // SAFETY: fixed valid prctl arguments; return value intentionally ignored.
     unsafe {
         prctl(PR_SET_PDEATHSIG, SIGTERM);
     }
@@ -103,22 +108,18 @@ fn patch_json_version(path: &std::path::Path, new_version: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
-    let full_start = match text.find("\"version\"") {
-        Some(i) => i,
-        None => return false,
+    let Some(full_start) = text.find("\"version\"") else {
+        return false;
     };
     let after = &text[full_start..];
-    let colon = match after.find(':') {
-        Some(i) => i,
-        None => return false,
+    let Some(colon) = after.find(':') else {
+        return false;
     };
-    let val_start = match after[colon..].find('"') {
-        Some(i) => colon + i + 1,
-        None => return false,
+    let Some(val_start) = after[colon..].find('"').map(|i| colon + i + 1) else {
+        return false;
     };
-    let val_end = match after[val_start..].find('"') {
-        Some(i) => val_start + i,
-        None => return false,
+    let Some(val_end) = after[val_start..].find('"').map(|i| val_start + i) else {
+        return false;
     };
     if val_end <= val_start {
         return false;
@@ -162,6 +163,7 @@ fn spawn_node_server(
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    // SAFETY: prctl is always safe to call; pre_exec requires unsafe.
     unsafe {
         server_builder.pre_exec(|| {
             watch_parent();
@@ -181,8 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -318,6 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
+        // SAFETY: prctl is always safe to call; pre_exec requires unsafe.
         unsafe {
             build_builder.pre_exec(|| {
                 watch_parent();

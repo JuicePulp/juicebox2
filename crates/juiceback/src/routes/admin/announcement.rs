@@ -10,21 +10,30 @@ use crate::{db, error::AppError, state::AppState};
 #[derive(Serialize, ToSchema)]
 pub struct AnnouncementResponse {
     pub id: i64,
+
     pub message: String,
+
     pub link_url: String,
+
     pub mode: String,
+
     pub is_active: bool,
+
     pub created_at: i64,
+
     pub updated_at: i64,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct AnnouncementRequest {
     pub message: String,
+
     #[serde(default)]
     pub link_url: String,
+
     #[serde(default = "default_warning")]
     pub mode: String,
+
     #[serde(default = "default_true")]
     pub is_active: bool,
 }
@@ -118,11 +127,9 @@ pub async fn put_announcement_handler(
         })
         .await?;
 
-    tracing::info!(
-        "admin updated announcement: id={} active={}",
-        announcement.id,
-        announcement.is_active
-    );
+    let announcement_id = announcement.id;
+    let announcement_active = announcement.is_active;
+    tracing::info!("admin updated announcement: id={announcement_id} active={announcement_active}");
 
     crate::cloudflare::purge_urls(
         Arc::clone(&state.config),

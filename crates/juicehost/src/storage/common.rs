@@ -8,14 +8,17 @@ pub fn extract_extension(filename: &str) -> &str {
         .unwrap_or("bin")
 }
 
+#[must_use]
 pub fn valid_component(value: &str) -> bool {
     juiceutils::ids::is_valid_id_component(value)
 }
 
+#[must_use]
 pub fn capability_hash(capability: &str) -> String {
     hex::encode(Sha256::digest(capability.as_bytes()))
 }
 
+#[must_use]
 pub fn safe_extension(filename: &str) -> String {
     let ext = extract_extension(filename);
     if valid_component(ext) {
@@ -25,7 +28,6 @@ pub fn safe_extension(filename: &str) -> String {
     }
 }
 
-/// Guess the MIME type from a file extension.
 #[must_use]
 pub fn guess_mime(ext: &str) -> String {
     let mime = mime_guess::from_path(format!("file.{ext}")).first_or_octet_stream();

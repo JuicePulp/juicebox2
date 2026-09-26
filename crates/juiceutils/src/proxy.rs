@@ -1,5 +1,3 @@
-//! Trusted-proxy configuration and client address resolution.
-
 use std::{net::IpAddr, str::FromStr};
 
 use axum::http::HeaderMap;
@@ -72,9 +70,6 @@ pub fn is_trusted(ip: IpAddr, trusted: &[IpCidr]) -> bool {
     trusted.iter().any(|cidr| cidr.contains(ip))
 }
 
-/// Resolve a client address only when the immediate peer is trusted. The
-/// forwarding chain is walked from right to left, stopping at the first
-/// untrusted hop, which is the closest address controlled by the client.
 #[must_use]
 pub fn client_ip(headers: &HeaderMap, peer: IpAddr, trusted: &[IpCidr]) -> IpAddr {
     if !is_trusted(peer, trusted) {

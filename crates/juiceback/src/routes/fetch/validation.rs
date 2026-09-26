@@ -1,10 +1,5 @@
 use crate::{cobalt, error::AppError, state::AppState};
 
-/// Validate a user-supplied source URL before handing it to cobalt.
-/// Blocks non-http(s) schemes, credentials, local/metadata hosts, and
-/// private IP literals so cobalt can't be pointed at internal networks.
-/// DNS hostnames are resolved and rejected unless every resolved address
-/// is publicly routable, unless `allow_private` is set (tests/dev only).
 pub(crate) async fn validate_source_url(
     raw: &str,
     allow_private: bool,
@@ -43,7 +38,6 @@ pub(crate) async fn validate_source_url(
             .trim_end_matches(']')
             .parse::<std::net::IpAddr>()
         {
-            // IPv6 url hosts arrive bracketed; strip before parsing.
             if !crate::storage_client::is_public_ip(ip) {
                 return Err(AppError::BadRequest(format!(
                     "refusing to fetch from non-public address: {ip}"
@@ -69,7 +63,6 @@ pub(crate) fn require_cobalt_enabled(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Human-readable domain for a cobalt service name (e.g. "twitter" -> "x.com").
 #[must_use]
 pub(crate) fn service_domain(name: &str) -> String {
     match name {
@@ -99,12 +92,6 @@ pub(crate) fn service_domain(name: &str) -> String {
     .to_string()
 }
 
-/// Sanitize cobalt's suggested filename and make sure it has an extension.
-/// Takes a basename (`../evil.mp4` becomes `evil.mp4`) and appends a
-/// fallback extension when missing.
-/// NOTE: intentionally different from `upload::common::sanitize_filename`,
-/// which strips separators inline to preserve user naming. Keep the two
-/// contracts separate.
 #[must_use]
 pub(crate) fn sanitize_filename(name: Option<&str>, audio_only: bool) -> String {
     let fallback = if audio_only { "audio.mp3" } else { "video.mp4" };
@@ -127,8 +114,6 @@ pub(crate) fn sanitize_filename(name: Option<&str>, audio_only: bool) -> String 
     name
 }
 
-/// Empty stream payload: for `YouTube` links this is the platform blocking
-/// the streaming token. The message names that cause.
 #[must_use]
 pub(crate) fn empty_stream_message(source_url: &str) -> String {
     if cobalt::is_youtube_link(source_url) {

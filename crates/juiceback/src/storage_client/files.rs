@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::target::resolve_juicehost_target;
+use super::client::StorageClient;
 use crate::state::AppState;
 
 pub async fn rename_file_on_juicehost(
@@ -14,26 +14,18 @@ pub async fn rename_file_on_juicehost(
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
         return Ok(());
     }
-    let target = resolve_juicehost_target(state, custom_host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = StorageClient::resolve(state, custom_host).await?;
 
     let body = serde_json::json!({ "new_id": new_id });
 
-    let mut headers = target.headers.clone();
-    if let Some(cap) = capability {
-        headers.insert(
-            "x-juicehost-file-capability",
-            cap.parse::<reqwest::header::HeaderValue>()
-                .map_err(|_| "invalid file capability".to_string())?,
-        );
-    }
+    let headers = client.headers_with(capability)?;
 
-    let resp = target
-        .client
+    let resp = client
+        .http()
         .post(format!(
             "{}/internal/file/{}/rename",
-            target.base_url, old_id
+            client.base_url(),
+            old_id
         ))
         .headers(headers)
         .json(&body)
@@ -69,22 +61,13 @@ pub async fn delete_file_on_juicehost(
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
         return Ok(());
     }
-    let target = resolve_juicehost_target(state, custom_host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = StorageClient::resolve(state, custom_host).await?;
 
-    let mut headers = target.headers.clone();
-    if let Some(cap) = capability {
-        headers.insert(
-            "x-juicehost-file-capability",
-            cap.parse::<reqwest::header::HeaderValue>()
-                .map_err(|_| "invalid file capability".to_string())?,
-        );
-    }
+    let headers = client.headers_with(capability)?;
 
-    let resp = target
-        .client
-        .delete(format!("{}/internal/file/{}", target.base_url, id))
+    let resp = client
+        .http()
+        .delete(format!("{}/internal/file/{}", client.base_url(), id))
         .headers(headers)
         .send()
         .await
@@ -105,8 +88,6 @@ pub async fn delete_file_on_juicehost(
     }
 }
 
-/// Concatenate multiple part files on juicehost into a single target file.
-/// Used by parallel TUS uploads to assemble split files.
 pub async fn concat_files(
     state: &Arc<AppState>,
     target_id: &str,
@@ -115,9 +96,7 @@ pub async fn concat_files(
     host: Option<&str>,
     capability: Option<&str>,
 ) -> Result<(), String> {
-    let target = resolve_juicehost_target(state, host)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = StorageClient::resolve(state, host).await?;
 
     let body = serde_json::json!({
         "target_id": target_id,
@@ -125,18 +104,11 @@ pub async fn concat_files(
         "parts": part_ids,
     });
 
-    let mut headers = target.headers.clone();
-    if let Some(cap) = capability {
-        headers.insert(
-            "x-juicehost-file-capability",
-            cap.parse::<reqwest::header::HeaderValue>()
-                .map_err(|_| "invalid file capability".to_string())?,
-        );
-    }
+    let headers = client.headers_with(capability)?;
 
-    let resp = target
-        .client
-        .post(format!("{}/internal/file/concat", target.base_url))
+    let resp = client
+        .http()
+        .post(format!("{}/internal/file/concat", client.base_url()))
         .headers(headers)
         .json(&body)
         .send()

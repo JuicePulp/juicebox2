@@ -1,3 +1,4 @@
+pub(crate) mod client;
 pub mod config;
 pub mod errors;
 pub mod files;

@@ -109,7 +109,6 @@ pub fn replace_client_files(
     Ok(records.len())
 }
 
-/// Fetch a client's stored upload records, newest first.
 pub fn list_client_files(conn: &Connection, client_key: &str) -> Result<Vec<ClientFileRecord>> {
     let mut stmt = conn.prepare(
         "SELECT file_id, delete_token, filename, mime_type, size_bytes, uploaded_at, expires_at
@@ -129,11 +128,6 @@ pub fn list_client_files(conn: &Connection, client_key: &str) -> Result<Vec<Clie
     rows.collect()
 }
 
-/// Swap a client's registered file ID after a server-side rename.
-///
-/// Renames keep the delete token and metadata, so only `file_id` changes. Any
-/// row already under `new_id` is removed first so the primary key can't clash.
-/// Returns true when a row was actually renamed.
 pub fn update_client_file_id(
     conn: &Connection,
     client_key: &str,
@@ -146,8 +140,6 @@ pub fn update_client_file_id(
     Ok(renamed)
 }
 
-/// Core of [`update_client_file_id`] that joins an existing transaction
-/// instead of opening its own (SQLite has no nested `BEGIN`).
 pub fn update_client_file_id_in_tx(
     tx: &Transaction,
     client_key: &str,

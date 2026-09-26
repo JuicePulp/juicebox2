@@ -56,9 +56,6 @@ pub fn finish_fetch_job(
     Ok(affected == 1)
 }
 
-/// Record live progress for a running fetch job. Best-effort by design:
-/// callers ignore the result, since losing a progress tick must never fail
-/// the transfer itself.
 pub fn update_fetch_job_progress(
     conn: &Connection,
     id: &str,

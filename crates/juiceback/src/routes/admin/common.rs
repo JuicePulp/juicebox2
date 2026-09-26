@@ -8,7 +8,6 @@ use serde::Deserialize;
 
 use crate::{auth, db, error::AppError, state::AppState};
 
-/// Typed extractor that verifies the admin JWT from the cookie.
 #[derive(Clone)]
 pub struct AdminUser {
     pub claims: auth::AdminClaims,
@@ -50,12 +49,16 @@ where
 pub struct ListParams {
     #[serde(default)]
     pub q: String,
+
     #[serde(default = "default_sort")]
     pub sort: String,
+
     #[serde(default = "default_dir")]
     pub dir: String,
+
     #[serde(default = "default_offset")]
     pub offset: i64,
+
     #[serde(default = "default_limit")]
     pub limit: i64,
 }
@@ -73,6 +76,7 @@ const fn default_limit() -> i64 {
     50
 }
 
+#[must_use]
 fn extract_jwt(headers: &HeaderMap) -> Option<String> {
     let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
     for pair in cookie.split(';') {

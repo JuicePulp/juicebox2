@@ -1,5 +1,3 @@
-//! orchestrator
-
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -14,14 +12,12 @@ use tokio::{
 
 const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
-/// A child that lived less than this long counts as a crash, not a clean run.
 const MIN_HEALTHY_SECS: u64 = 10;
-/// Stop restarting a service after this many consecutive crashes.
+
 const MAX_CONSECUTIVE_CRASHES: u32 = 5;
-/// Upper bound for the restart backoff.
+
 const MAX_BACKOFF_SECS: u64 = 30;
 
-/// Seconds to wait before respawning after `crashes` consecutive crashes.
 fn restart_backoff_secs(crashes: u32) -> u64 {
     (1u64 << crashes.min(5)).min(MAX_BACKOFF_SECS)
 }
@@ -33,8 +29,6 @@ fn sibling_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Load `./.env` (repo root in dev) for vars not already set. Explicit
-/// environment always wins; missing file is fine.
 fn load_dotenv() {
     juiceutils::config::load_dotenv();
 }
@@ -48,12 +42,10 @@ fn spawn(name: &str) -> std::io::Result<Child> {
     Ok(child)
 }
 
-/// Restart on crash unless JUICERESTART_<NAME>=0 set
 fn restart_enabled(name: &str) -> bool {
     std::env::var(format!("JUICERESTART_{}", name.to_uppercase())).map_or(true, |v| v != "0")
 }
 
-/// SIGTERM the child, then wait up to 10s for it to exit.
 async fn graceful_stop(child: &mut Child) {
     #[cfg(unix)]
     unsafe {
@@ -109,17 +101,10 @@ fn check_juicehost_config() -> Result<(), String> {
     Ok(())
 }
 
-const fn check_juicefront_config() -> Result<(), String> {
-    Ok(())
-}
-
-/// Minimal startup-blocking config check, before spawning anything.
-/// Catches missing secrets that would otherwise crash-loop the services.
 fn check_service_config(name: &str) -> Result<(), String> {
     match name {
         "juiceback" => check_juiceback_config(),
         "juicehost" => check_juicehost_config(),
-        "juicefront" => check_juicefront_config(),
         _ => Ok(()),
     }
 }
@@ -128,8 +113,7 @@ fn check_service_config(name: &str) -> Result<(), String> {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -342,6 +326,7 @@ mod tests {
     #[test]
     fn juiceback_requires_secrets() {
         let (_lock, _guard) = EnvGuard::lock(VARS);
+
         unsafe {
             std::env::remove_var("JWT_SECRET");
             std::env::remove_var("IP_ENCRYPTION_KEY");
@@ -367,6 +352,7 @@ mod tests {
     #[test]
     fn juiceback_rejects_bad_encryption_key() {
         let (_lock, _guard) = EnvGuard::lock(VARS);
+
         unsafe {
             std::env::set_var("JWT_SECRET", "test-secret");
             std::env::set_var("IP_ENCRYPTION_KEY", "not-hex");
@@ -378,6 +364,7 @@ mod tests {
     #[test]
     fn juicehost_requires_api_key_or_override() {
         let (_lock, _guard) = EnvGuard::lock(VARS);
+
         unsafe {
             std::env::remove_var("JUICEHOST_API_KEY");
             std::env::remove_var("JUICEHOST_ALLOW_NO_AUTH");

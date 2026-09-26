@@ -14,6 +14,7 @@ use crate::{db, error::AppError, state::AppState};
 #[derive(Serialize, ToSchema)]
 pub struct AdminHostersResponse {
     pub items: Vec<db::HosterRecord>,
+
     pub total: i64,
 }
 
@@ -96,25 +97,22 @@ pub async fn ban_hoster_handler(
         payload.reason.trim().to_string()
     };
     let banned_by = admin.claims.sub.clone();
-    let host_value = host.clone();
-    let reason_value = reason.clone();
-    let banned_by_value = banned_by.clone();
 
     let updated = state
-        .db_call("update_hoster_banned", move |db| {
-            db::update_hoster_banned(db, &host_value, true, &reason_value, &banned_by_value)
+        .db_call("update_hoster_banned", {
+            let host_for_db = host.clone();
+            let reason_for_db = reason.clone();
+            let banned_by_for_db = banned_by.clone();
+            move |db| {
+                db::update_hoster_banned(db, &host_for_db, true, &reason_for_db, &banned_by_for_db)
+            }
         })
         .await?;
     if !updated {
         return Err(AppError::NotFound);
     }
 
-    tracing::info!(
-        "admin banned host={} reason={} by={}",
-        host,
-        reason,
-        banned_by
-    );
+    tracing::info!("admin banned host={host} reason={reason} by={banned_by}");
 
     Ok(StatusCode::CREATED)
 }
@@ -144,11 +142,10 @@ pub async fn unban_hoster_handler(
         return Err(AppError::BadRequest("host is required".into()));
     }
 
-    let host_value = host.clone();
-
     let updated = state
-        .db_call("update_hoster_banned", move |db| {
-            db::update_hoster_banned(db, &host_value, false, "", "")
+        .db_call("update_hoster_banned", {
+            let host_for_db = host.clone();
+            move |db| db::update_hoster_banned(db, &host_for_db, false, "", "")
         })
         .await?;
     if !updated {

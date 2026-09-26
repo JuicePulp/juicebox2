@@ -34,6 +34,7 @@ pub(crate) fn parse_parallel_number(value: Option<&str>) -> Result<Option<usize>
         .transpose()
 }
 
+#[must_use = "a rejected offset must stop the PATCH"]
 pub(crate) fn checked_upload_offset(
     offset: u64,
     chunk_len: u64,
@@ -48,31 +49,34 @@ pub(crate) fn checked_upload_offset(
     Ok(new_offset)
 }
 
+#[must_use]
 pub(crate) fn parse_tus_metadata(
     header: Option<&axum::http::HeaderValue>,
 ) -> Vec<(String, String)> {
-    let raw = match header.and_then(|v| v.to_str().ok()) {
-        Some(v) => v,
-        None => return vec![],
+    let Some(raw) = header.and_then(|v| v.to_str().ok()) else {
+        return vec![];
     };
     let mut pairs = Vec::new();
     for pair in raw.split(',') {
         let pair = pair.trim();
-        if let Some(eq) = pair.find(' ') {
-            let key = pair[..eq].to_string();
-            let value_b64 = pair[eq + 1..].trim();
-            if let Ok(decoded) =
-                base64::engine::general_purpose::STANDARD.decode(value_b64.as_bytes())
-            {
-                if let Ok(value) = String::from_utf8(decoded) {
-                    pairs.push((key, value));
-                }
-            }
-        }
+        let Some(eq) = pair.find(' ') else {
+            continue;
+        };
+        let key = pair[..eq].to_string();
+        let value_b64 = pair[eq + 1..].trim();
+        let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value_b64.as_bytes())
+        else {
+            continue;
+        };
+        let Ok(value) = String::from_utf8(decoded) else {
+            continue;
+        };
+        pairs.push((key, value));
     }
     pairs
 }
 
+#[must_use]
 pub(crate) fn find_meta<'a>(metadata: &'a [(String, String)], key: &str) -> Option<&'a str> {
     metadata
         .iter()

@@ -14,6 +14,7 @@ use crate::{db, error::AppError, state::AppState};
 #[derive(Serialize, ToSchema)]
 pub struct AdminBansResponse {
     pub items: Vec<db::BanRecord>,
+
     pub total: i64,
 }
 
@@ -59,42 +60,45 @@ pub async fn list_bans_handler(
 
 #[derive(Deserialize, ToSchema)]
 pub struct BanIpRequest {
-    /// Pre-computed HMAC hash from click-to-ban if you have one
     #[serde(default)]
     pub hash: Option<String>,
-    /// Raw IP address that gets hashed server-side before storage if hash isn't
-    /// provided
+
     #[serde(default)]
     pub ip: Option<String>,
+
     #[serde(default)]
     pub reason: String,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct BanExportEntry {
-    /// Pre-computed HMAC hash (this is what the DB stores, never a raw IP)
     pub hash: String,
+
     pub reason: String,
+
     pub banned_by: String,
+
     pub banned_at: i64,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct BanExportResponse {
     pub entries: Vec<BanExportEntry>,
+
     pub count: usize,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct BanImportEntry {
-    /// Pre-computed HMAC hash; stored as-is
     #[serde(default)]
     pub hash: Option<String>,
-    /// Raw IP address; hashed server-side before storage
+
     #[serde(default)]
     pub ip: Option<String>,
+
     #[serde(default)]
     pub reason: String,
+
     #[serde(default)]
     pub banned_by: Option<String>,
 }
@@ -107,6 +111,7 @@ pub struct BanImportRequest {
 #[derive(Serialize, ToSchema)]
 pub struct BanImportResponse {
     pub imported: usize,
+
     #[serde(default)]
     pub errors: Vec<String>,
 }
@@ -128,9 +133,9 @@ pub async fn ban_ip_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<BanIpRequest>,
 ) -> Result<StatusCode, AppError> {
-    let ban_hash = if let Some(ref hash) = payload.hash {
+    let ban_hash = if let Some(hash) = payload.hash.as_deref() {
         hash.trim().to_string()
-    } else if let Some(ref ip) = payload.ip {
+    } else if let Some(ip) = payload.ip.as_deref() {
         crate::utils::hash_ip_for_ban(ip.trim(), &state.config.ip_pepper)
     } else {
         return Err(AppError::BadRequest("either hash or ip is required".into()));
@@ -148,12 +153,9 @@ pub async fn ban_ip_handler(
 
     state.ban_ip(&ban_hash, &reason, &admin.claims.sub).await?;
 
-    tracing::info!(
-        "admin banned hash={} reason={} by={}",
-        crate::utils::truncate_hash(&ban_hash),
-        reason,
-        admin.claims.sub
-    );
+    let hash_preview = crate::utils::truncate_hash(&ban_hash);
+    let banned_by = &admin.claims.sub;
+    tracing::info!("admin banned hash={hash_preview} reason={reason} by={banned_by}");
 
     Ok(StatusCode::CREATED)
 }
@@ -183,7 +185,8 @@ pub async fn unban_ip_handler(
         return Err(AppError::NotFound);
     }
 
-    tracing::info!("admin unbanned hash={}", crate::utils::truncate_hash(&ip));
+    let hash_preview = crate::utils::truncate_hash(&ip);
+    tracing::info!("admin unbanned hash={hash_preview}");
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -249,17 +252,18 @@ pub async fn import_bans_handler(
     let mut errors = Vec::new();
 
     for (idx, entry) in payload.entries.into_iter().enumerate() {
-        let ban_hash = if let Some(ref hash) = entry.hash {
+        let entry_no = idx + 1;
+        let ban_hash = if let Some(hash) = entry.hash.as_deref() {
             hash.trim().to_string()
-        } else if let Some(ref ip) = entry.ip {
+        } else if let Some(ip) = entry.ip.as_deref() {
             crate::utils::hash_ip_for_ban(ip.trim(), &state.config.ip_pepper)
         } else {
-            errors.push(format!("entry {}: missing hash or ip", idx + 1));
+            errors.push(format!("entry {entry_no}: missing hash or ip"));
             continue;
         };
 
         if ban_hash.is_empty() {
-            errors.push(format!("entry {}: empty hash or ip", idx + 1));
+            errors.push(format!("entry {entry_no}: empty hash or ip"));
             continue;
         }
 
@@ -287,7 +291,8 @@ pub async fn import_bans_handler(
         let suffix = if errors.is_empty() {
             String::new()
         } else {
-            format!(": {}", errors.join("; "))
+            let joined = errors.join("; ");
+            format!(": {joined}")
         };
         return Err(AppError::BadRequest(format!(
             "no valid entries to import{suffix}"
@@ -296,12 +301,9 @@ pub async fn import_bans_handler(
 
     let imported = state.import_bans(bans).await?;
 
-    tracing::info!(
-        "admin imported {} bans ({} errors) by {}",
-        imported,
-        errors.len(),
-        admin.claims.sub
-    );
+    let error_count = errors.len();
+    let imported_by = &admin.claims.sub;
+    tracing::info!("admin imported {imported} bans ({error_count} errors) by {imported_by}");
 
     Ok((
         StatusCode::CREATED,

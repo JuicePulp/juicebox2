@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use crate::config::DirectoryFile;
 
-/// Local directory and peer URL settings.
 #[derive(Debug)]
 pub struct DirectorySettings {
     files_dir: PathBuf,
@@ -11,18 +10,22 @@ pub struct DirectorySettings {
 }
 
 impl DirectorySettings {
+    #[must_use]
     pub const fn files_dir(&self) -> &PathBuf {
         &self.files_dir
     }
 
-    pub const fn backend_url(&self) -> Option<&String> {
-        self.backend_url.as_ref()
+    #[must_use]
+    pub fn backend_url(&self) -> Option<&str> {
+        self.backend_url.as_deref()
     }
 
-    pub const fn frontend_url(&self) -> Option<&String> {
-        self.frontend_url.as_ref()
+    #[must_use]
+    pub fn frontend_url(&self) -> Option<&str> {
+        self.frontend_url.as_deref()
     }
 
+    #[must_use]
     pub fn load(file: &DirectoryFile) -> Self {
         let files_dir = file.files_dir.clone();
         let backend_url = file

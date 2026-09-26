@@ -51,7 +51,6 @@ pub(crate) fn require_juicehost_url(url: &str) -> Result<(), HostError> {
     }
 }
 
-/// A request target with credentials for juicehost.
 pub(crate) struct JuicehostTarget {
     pub base_url: String,
     pub client: reqwest::Client,
@@ -127,7 +126,6 @@ pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarge
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none());
     if name.parse::<std::net::IpAddr>().is_err() {
-        // murder dns.
         builder = builder.resolve_to_addrs(&name, &resolved);
     }
     let client = builder
@@ -141,7 +139,6 @@ pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarge
     })
 }
 
-/// Only publicly routable addresses are valid custom-host destinations.
 pub(crate) fn is_public_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => is_public_ipv4(v4.octets()),
@@ -310,7 +307,6 @@ pub(crate) async fn check_storage_host(
     Ok(trimmed)
 }
 
-/// Resolve the juicehost base URL to push/delete against.
 pub(crate) async fn resolve_juicehost_target(
     state: &Arc<AppState>,
     host: Option<&str>,
@@ -328,7 +324,6 @@ pub(crate) async fn resolve_juicehost_target(
     }
 }
 
-/// Return the pre-built authentication and origin headers sent to juicehost.
 pub(crate) fn juicehost_headers(state: &Arc<AppState>) -> reqwest::header::HeaderMap {
     state.juicehost_headers.clone()
 }

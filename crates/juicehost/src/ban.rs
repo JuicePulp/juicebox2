@@ -1,4 +1,3 @@
-//! Optional IP banning for juicehost. The ban list lives in an in-memory
 use std::{sync::Arc, time::Duration};
 
 use thiserror::Error;
@@ -20,10 +19,10 @@ enum BanSyncError {
 }
 
 pub async fn refresh_ban_list(state: &Arc<AppState>) {
-    if let Some(ref url) = state.ban_sync_url {
-        if let Err(e) = sync_from_backend(state, url).await {
-            tracing::warn!("ban list sync from {url} failed: {e}");
-        }
+    if let Some(ref url) = state.ban_sync_url
+        && let Err(e) = sync_from_backend(state, url).await
+    {
+        tracing::warn!("ban list sync from {url} failed: {e}");
     }
     let pepper = state.ban_list.pepper();
     if let Some(ref path) = state.ban_list_file {
@@ -31,7 +30,6 @@ pub async fn refresh_ban_list(state: &Arc<AppState>) {
     }
 }
 
-/// Pull the latest ban hashes + pepper from a juiceback backend.
 async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSyncError> {
     if state.api_key.is_empty() {
         return Err(BanSyncError::MissingApiKey);
@@ -41,8 +39,6 @@ async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSy
         .backend_client
         .get(format!("{url}/internal/ban-snapshot"))
         .header("x-juicehost-api-key", &state.api_key)
-        // The shared client defaults to a 2s TTL-probe timeout; the snapshot
-        // download gets its own budget via per-request override (pooled).
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -74,14 +70,13 @@ async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSy
     }
 
     state.ban_list.set_snapshot(&pepper, hashes);
-    tracing::info!("synced {} bans from {}", state.ban_list.len(), url);
+    tracing::info!("synced {} bans from {url}", state.ban_list.len());
     Ok(())
 }
 
 pub async fn ban_refresh_loop(state: Arc<AppState>) {
     let interval = state.ban_sync_interval.max(5);
 
-    // Populate immediately so bans are enforced from the first request.
     refresh_ban_list(&state).await;
 
     let mut ticker = tokio::time::interval(Duration::from_secs(interval));

@@ -1,6 +1,5 @@
 use crate::config::{ConfigError, FeaturesFile};
 
-/// Feature toggle and TTL settings.
 #[derive(Debug)]
 pub struct FeatureSettings {
     quick_link: bool,
@@ -12,26 +11,32 @@ pub struct FeatureSettings {
 }
 
 impl FeatureSettings {
+    #[must_use]
     pub const fn quick_link(&self) -> bool {
         self.quick_link
     }
 
+    #[must_use]
     pub const fn custom_id(&self) -> bool {
         self.custom_id
     }
 
+    #[must_use]
     pub const fn file_cache_enabled(&self) -> bool {
         self.file_cache_enabled
     }
 
+    #[must_use]
     pub const fn file_cache_max_age_secs(&self) -> u64 {
         self.file_cache_max_age_secs
     }
 
+    #[must_use]
     pub const fn default_ttl_hours(&self) -> f64 {
         self.default_ttl_hours
     }
 
+    #[must_use]
     pub fn allowed_ttl_hours(&self) -> &[f64] {
         &self.allowed_ttl_hours
     }

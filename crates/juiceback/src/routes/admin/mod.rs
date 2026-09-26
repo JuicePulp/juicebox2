@@ -1,5 +1,3 @@
-//! Admin panel: login, sessions, files, bans.
-
 use std::sync::Arc;
 
 use axum::Router;
@@ -40,6 +38,7 @@ pub use reports::{
     AdminReportEntry, AdminReportsResponse, delete_report_handler, list_reports_handler,
 };
 
+#[must_use]
 pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router<Arc<AppState>> {
     let conf = {
         let mut builder = GovernorConfigBuilder::default();
@@ -54,13 +53,13 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
                     trusted_proxy_cidrs.to_vec(),
                 ))
                 .finish()
-                .unwrap(),
+                .expect("admin rate-limiter config must build"),
         )
     };
     let login_limiter = Router::new()
         .route("/api/admin/login", axum::routing::post(login_handler))
         .layer(GovernorLayer::new(Arc::clone(&conf)));
-    // Reap brute-force per-IP buckets (see build_router for rationale).
+
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(120));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

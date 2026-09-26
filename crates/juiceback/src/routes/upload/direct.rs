@@ -5,11 +5,17 @@ use axum::{
     extract::{ConnectInfo, State},
     http::HeaderMap,
 };
-use jsonwebtoken::{EncodingKey, Header, encode};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::common::{UploadResponse, dte_ticket_ttl_secs, enforce_mint_limit, region_host};
+use super::{
+    common::UploadResponse,
+    ticket::{
+        check_mint_limit, clamp_ttl_seconds, device_connected, encrypted_client_ip,
+        insert_owned_pending, mint_ticket, notify_device, pinned_region_host, public_url_for,
+        reject_blocked_filename, ticket_ttl_secs,
+    },
+};
 use crate::{
     db::{self, FileRecord},
     error::AppError,
@@ -33,6 +39,9 @@ pub struct DirectUploadReserveRequest {
     pub file_size: u64,
     pub ttl_hours: Option<f64>,
     pub host: Option<String>,
+
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -73,12 +82,19 @@ pub async fn direct_upload_reserve_handler(
     if body.file_size == 0 || body.file_size > max_file_size {
         return Err(AppError::PayloadTooLarge);
     }
-    if danger != crate::file_validation::ProtectionLevel::None {
-        if let crate::file_validation::FileValidation::BlockedExtension { tier, .. } =
-            crate::file_validation::validate_filename(&body.filename, danger)
-        {
-            return Err(AppError::BlockedFileType(
-                crate::file_validation::friendly_block_reason(tier),
+    reject_blocked_filename(&body.filename, danger)?;
+
+    let requested_device_id = body
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    if let Some(ref wanted) = requested_device_id {
+        if !device_connected(&state, &user_id, wanted) {
+            return Err(AppError::BadRequest(
+                "Unknown device. Pair juicebox-plus first.".into(),
             ));
         }
     }
@@ -88,33 +104,36 @@ pub async fn direct_upload_reserve_handler(
         .as_deref()
         .map(str::trim)
         .filter(|host| !host.is_empty());
-    if selected_host.is_some() {
+    if selected_host.is_some() && requested_device_id.is_none() {
         return Err(AppError::BadRequest(
             "direct browser upload does not support custom hosts yet".into(),
         ));
     }
 
-    enforce_mint_limit(&state, &headers, addr)?;
+    let selected_host = if requested_device_id.is_some() {
+        match selected_host {
+            Some(h) => Some(
+                crate::storage_client::check_storage_host(h, state.config.allow_private_fetch)
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?,
+            ),
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    check_mint_limit(&state, &headers, addr)?;
 
     let now = chrono::Utc::now().timestamp();
-    let ticket_ttl_secs = if state.config.dte_enabled {
-        dte_ticket_ttl_secs(&state, body.file_size)
-    } else {
-        900
-    };
-    let ttl_seconds = body
-        .ttl_hours
-        .map(|hours| crate::constants::clamp_to_nearest(hours, &allowed_ttl))
-        .map(|hours| (hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64)
-        .unwrap_or_else(|| (default_ttl * crate::constants::SECONDS_PER_HOUR_F64).round() as i64);
+    let ttl_secs = ticket_ttl_secs(&state, body.file_size, 900);
+    let ttl_seconds = clamp_ttl_seconds(&allowed_ttl, default_ttl, body.ttl_hours);
     let file_id = nanoid::nanoid!(8);
     let delete_token = uuid::Uuid::new_v4().to_string();
-    let encrypted_ip = {
-        let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
-        crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key)
-    };
+    let encrypted_ip = encrypted_client_ip(&state, &headers, addr);
 
-    let region_juicehost = region_host(&state, &headers, addr);
+    let region_juicehost = pinned_region_host(&state, &headers, addr);
+    let storage_host = selected_host.clone().or(region_juicehost.clone());
     let record = FileRecord::new(
         file_id.clone(),
         body.filename.clone(),
@@ -124,42 +143,43 @@ pub async fn direct_upload_reserve_handler(
         now,
         now + ttl_seconds,
         encrypted_ip,
-        region_juicehost.clone(),
+        storage_host,
     );
-    let record = db::insert_pending_file(&state, record).await?;
-    let owned_record = record.clone();
-    let owner = user_id.clone();
-    state
-        .db_call("own_direct_upload", move |db| {
-            db::add_client_file(db, &owner, &owned_record)
-        })
-        .await?;
+    let record = insert_owned_pending(&state, &user_id, record, "own_direct_upload").await?;
 
-    let ticket_claims = serde_json::json!({
-        "sub": "browser",
-        "user_id": user_id,
-        "iss": "juiceback-ticket",
-        "file_id": file_id,
-        "filename": body.filename,
-        "mime_type": body.mime_type,
-        "file_size": body.file_size,
-        "file_capability": delete_token,
-        "iat": now as usize,
-        "exp": (now + ticket_ttl_secs) as usize,
-    });
-    let ticket = encode(
-        &Header::default(),
-        &ticket_claims,
-        &EncodingKey::from_secret(state.config.ticket_jwt_secret.as_bytes()),
-    )
-    .map_err(|e| AppError::Internal(format!("JWT encoding failed: {e}")))?;
-
-    let public_url = crate::utils::public_url(
-        &state.config.public_base_url,
-        &record.storage_host,
+    let ticket_sub = requested_device_id
+        .clone()
+        .unwrap_or_else(|| "browser".to_string());
+    let ticket = mint_ticket(
+        &state,
+        &ticket_sub,
+        &user_id,
         &file_id,
-        &record.filename,
-    );
+        &body.filename,
+        &body.mime_type,
+        body.file_size,
+        &delete_token,
+        now,
+        ttl_secs,
+    )?;
+
+    if let Some(ref wanted) = requested_device_id {
+        let download_url = public_url_for(&state, &record);
+        notify_device(
+            &state,
+            &user_id,
+            wanted,
+            &file_id,
+            &body.filename,
+            &body.mime_type,
+            body.file_size,
+            &ticket,
+            &download_url,
+        )
+        .await;
+    }
+
+    let public_url = public_url_for(&state, &record);
     let upload_url = format!(
         "{}/internal/file/upload/{}",
         region_juicehost
@@ -282,12 +302,7 @@ pub async fn direct_upload_complete_handler(
         }
     }
 
-    let public_url = crate::utils::public_url(
-        &state.config.public_base_url,
-        &file.storage_host,
-        &file_id,
-        &file.filename,
-    );
+    let public_url = public_url_for(&state, &file);
     Ok(Json(UploadResponse {
         id: file_id,
         url: public_url,

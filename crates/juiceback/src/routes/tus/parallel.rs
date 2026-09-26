@@ -7,8 +7,6 @@ use crate::{
     state::AppState,
 };
 
-/// Check if all parallel parts are complete, and if so, collect ordered part
-/// IDs.
 pub(crate) fn try_collect_finalized_parts(
     state: &Arc<AppState>,
     session_id: &str,
@@ -20,16 +18,8 @@ pub(crate) fn try_collect_finalized_parts(
         session.completed.fetch_add(1, Ordering::SeqCst) + 1
     };
 
-    tracing::info!(
-        "parallel part {}/{} complete for session {}",
-        completed,
-        total,
-        session_id
-    );
+    tracing::info!("parallel part {completed}/{total} complete for session {session_id}");
 
-    // Only the exact winner finalizes: duplicate completion signals
-    // (completed > total) must not proceed, and the session may have been
-    // reaped between the counter bump and this lookup.
     if completed != total {
         return None;
     }
@@ -49,6 +39,7 @@ pub(crate) fn try_collect_finalized_parts(
     Some((part_ids, full_size))
 }
 
+#[must_use]
 pub(crate) fn collect_ordered_parts(
     session: &crate::tus::PartSession,
     total: usize,
@@ -69,7 +60,6 @@ pub(crate) fn collect_ordered_parts(
     Some((part_ids, full_size))
 }
 
-/// Concat parts on juicehost and create the merged DB record.
 pub(crate) async fn finalize_concat(
     state: &Arc<AppState>,
     meta: &TusUploadMeta,
@@ -98,14 +88,12 @@ pub(crate) async fn finalize_concat(
         AppError::Internal(format!("concat failed: {e}"))
     })?;
 
-    let record = if let Some(ref reserve_id) = meta.reserve_id {
-        // This was a pre-reserved upload (Quick Link). Update the existing record.
-        let rid = reserve_id.clone();
+    let record = if let Some(reserve_id) = meta.reserve_id.as_deref() {
         let reservation_token = meta
             .reservation_token
             .clone()
             .ok_or_else(|| AppError::Forbidden("reservation delete token required".into()))?;
-        let update_id = rid;
+        let update_id = reserve_id.to_string();
         let fname = meta.filename.clone();
         let mtype = meta.mime_type.clone();
         let size = full_size as i64;
@@ -137,10 +125,10 @@ pub(crate) async fn finalize_concat(
                 ));
             }
         };
+        let completed_id = &completed.id;
+        let completed_size = completed.size_bytes;
         tracing::info!(
-            "reserved parallel TUS upload completed: id={} size={}",
-            completed.id,
-            completed.size_bytes
+            "reserved parallel TUS upload completed: id={completed_id} size={completed_size}"
         );
         completed
     } else {
@@ -167,7 +155,7 @@ pub(crate) async fn finalize_concat(
 
     let public_url = crate::utils::public_url(
         &state.config.public_base_url,
-        &record.storage_host,
+        record.storage_host.as_deref(),
         &record.id,
         &record.filename,
     );
@@ -185,7 +173,6 @@ pub(crate) async fn finalize_concat(
     .unwrap_or_default())
 }
 
-/// Complete a parallel upload session: await push, register part, maybe concat.
 pub(crate) async fn complete_parallel_part(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
@@ -201,7 +188,10 @@ pub(crate) async fn complete_parallel_part(
     })?;
     let total = session.total_parts;
     {
-        let mut expected = session.completion_reserve_id.lock().unwrap();
+        let mut expected = session
+            .completion_reserve_id
+            .lock()
+            .expect("part session completion lock poisoned");
         match expected.as_ref() {
             Some(reserve_id) if reserve_id != &meta.reserve_id => {
                 return Err(AppError::BadRequest(
@@ -214,8 +204,6 @@ pub(crate) async fn complete_parallel_part(
     }
     drop(session);
 
-    // Single-part uploads have nothing to concat: the streamed file already
-    // IS the final file. Skip the parallel bookkeeping and finalize directly.
     if total <= 1 {
         state.part_sessions.remove(session_id);
         return finish_tus_upload(state, meta).await;

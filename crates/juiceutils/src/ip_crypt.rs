@@ -1,16 +1,8 @@
-//! AES-256-GCM encryption of client IP addresses for privacy-preserving logs.
-//!
-//! Ciphertexts are `"nonce_hex:ciphertext_hex"` where the ciphertext includes
-//! the 16-byte auth tag.
-
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
 };
 
-/// Encrypt an IP address with AES-256-GCM using a random 12-byte nonce.
-/// Returns `"nonce_hex:ciphertext_hex"` where ciphertext includes the 16-byte
-/// auth tag.
 #[must_use]
 pub fn encrypt_ip(ip: &str, key_hex: &str) -> Option<String> {
     let key_bytes = hex::decode(key_hex).ok()?;
@@ -25,7 +17,6 @@ pub fn encrypt_ip(ip: &str, key_hex: &str) -> Option<String> {
     ))
 }
 
-/// Decrypt an IP address that was encrypted with [`encrypt_ip`].
 #[must_use]
 pub fn decrypt_ip(encrypted: &str, key_hex: &str) -> Option<String> {
     let (nonce_hex, ct_hex) = encrypted.split_once(':')?;

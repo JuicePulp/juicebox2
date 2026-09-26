@@ -3,6 +3,7 @@ use futures::StreamExt;
 
 use crate::{error::JuicehostError, state::AppState};
 
+#[must_use]
 pub(crate) fn optional_file_capability(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-juicehost-file-capability")

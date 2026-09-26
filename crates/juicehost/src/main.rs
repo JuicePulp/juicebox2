@@ -1,8 +1,3 @@
-//! juicehost: the file storage side of juicebox.
-//! files get pushed here by juiceback, stored on disk (or S3), served with
-//! `ETags`, and cleaned up when they expire. also has an optional QUIC/HTTP/3
-//! port over QUIC/HTTP/3.
-
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use juicehost::{
@@ -20,13 +15,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::Subsc
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
-    // Load ./.env first so standalone runs pick up cwd secrets exactly
-    // like `juicebox` supervision does. Explicit env always wins.
     juiceutils::config::load_dotenv();
 
-    // Initialize Sentry before the tokio runtime so all threads inherit the Hub.
-    // DSN stays env-only: SENTRY_DSN_JUICEHOST, then SENTRY_DSN. The
-    // environment comes from the TOML [sentry] section.
     let config = Config::try_load().expect("Failed to load configuration");
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
@@ -54,10 +44,6 @@ fn main() {
         .with(sentry_tracing::layer())
         .init();
 
-    // Refuse to boot an unauthenticated instance by accident. Internal
-    // endpoints can store, overwrite, and delete files - open-by-default
-    // is a footgun. Set JUICEHOST_API_KEY, or JUICEHOST_ALLOW_NO_AUTH=true
-    // to explicitly accept the risk (dev/loopback only).
     if config.api_key.is_empty() && !config.allow_no_auth {
         tracing::error!(
             "JUICEHOST_API_KEY is not set - refusing to start with unauthenticated internal endpoints. Configure a key or set JUICEHOST_ALLOW_NO_AUTH=true to override."
@@ -98,7 +84,10 @@ fn main() {
             if !config.files_dir.exists() {
                 std::fs::create_dir_all(&config.files_dir)
                     .expect("failed to create files directory");
-                tracing::info!("created files directory at: {:?}", config.files_dir);
+                tracing::info!(
+                    "created files directory at: {dir:?}",
+                    dir = config.files_dir
+                );
             }
 
             let backend = LocalBackend::new(config.files_dir.clone(), config.min_free_space_bytes)

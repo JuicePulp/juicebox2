@@ -14,19 +14,28 @@ use crate::{db, error::AppError, state::AppState};
 #[derive(Serialize, ToSchema)]
 pub struct AdminFileEntry {
     pub id: String,
+
     pub filename: String,
+
     pub mime_type: String,
+
     pub size_bytes: i64,
+
     pub uploaded_at: i64,
+
     pub expires_at: i64,
+
     pub uploader_ip_hash: Option<String>,
+
     pub url: String,
+
     pub storage_host: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminFilesResponse {
     pub items: Vec<AdminFileEntry>,
+
     pub total: i64,
 }
 
@@ -69,12 +78,11 @@ pub async fn list_files_handler(
         .map(|r| {
             let url = crate::utils::public_url(
                 &state.config.public_base_url,
-                &r.storage_host,
+                r.storage_host.as_deref(),
                 &r.id,
                 &r.filename,
             );
-            // Raw IPs are never exposed: decrypt transiently only to derive
-            // the truncated abuse hash, which is all the dashboard needs.
+
             let ip_hash = r
                 .uploader_ip
                 .as_ref()
@@ -122,9 +130,9 @@ pub async fn delete_file_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    let id2 = id.clone();
+    let id_for_get = id.clone();
     let record = state
-        .db_call("get_file", move |db| db::get_file(db, &id2))
+        .db_call("get_file", move |db| db::get_file(db, &id_for_get))
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -138,12 +146,17 @@ pub async fn delete_file_handler(
     .await
     .map_err(AppError::from_juicehost_error)?;
 
-    let id3 = id.clone();
+    let id_for_delete = id.clone();
     state
-        .db_call("delete_file", move |db| db::delete_file(db, &id3))
+        .db_call("delete_file", move |db| db::delete_file(db, &id_for_delete))
         .await?;
 
-    crate::cloudflare::purge_file(&state.config, &id, &record.filename, &record.storage_host);
+    crate::cloudflare::purge_file(
+        &state.config,
+        &id,
+        &record.filename,
+        record.storage_host.as_deref(),
+    );
 
     tracing::info!("admin delete: id={id}");
 

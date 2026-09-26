@@ -20,29 +20,24 @@ pub fn get_active_announcement(conn: &Connection) -> Result<Option<Announcement>
          FROM announcements WHERE is_active = 1 LIMIT 1",
     )?;
     let mut rows = stmt.query([])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some(row_to_announcement(row)?))
-    } else {
-        Ok(None)
-    }
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(row_to_announcement(row)?))
 }
 
-/// Get any announcement
 pub fn get_latest_announcement(conn: &Connection) -> Result<Option<Announcement>> {
     let mut stmt = conn.prepare(
         "SELECT id, message, link_url, mode, is_active, created_at, updated_at \
          FROM announcements ORDER BY is_active DESC, updated_at DESC LIMIT 1",
     )?;
     let mut rows = stmt.query([])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some(row_to_announcement(row)?))
-    } else {
-        Ok(None)
-    }
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(row_to_announcement(row)?))
 }
 
-/// Upsert the site announcement by deactivating all others then inserting or
-/// updating
 pub fn upsert_announcement(
     conn: &Connection,
     message: &str,

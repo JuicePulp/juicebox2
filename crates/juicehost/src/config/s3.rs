@@ -1,6 +1,5 @@
 use crate::config::{ConfigError, S3File};
 
-/// S3-compatible backend settings.
 #[derive(Debug)]
 pub struct S3Settings {
     bucket: Option<String>,
@@ -12,28 +11,34 @@ pub struct S3Settings {
 }
 
 impl S3Settings {
-    pub const fn bucket(&self) -> Option<&String> {
-        self.bucket.as_ref()
+    #[must_use]
+    pub fn bucket(&self) -> Option<&str> {
+        self.bucket.as_deref()
     }
 
-    pub const fn region(&self) -> Option<&String> {
-        self.region.as_ref()
+    #[must_use]
+    pub fn region(&self) -> Option<&str> {
+        self.region.as_deref()
     }
 
-    pub const fn endpoint(&self) -> Option<&String> {
-        self.endpoint.as_ref()
+    #[must_use]
+    pub fn endpoint(&self) -> Option<&str> {
+        self.endpoint.as_deref()
     }
 
+    #[must_use]
     pub const fn allow_http(&self) -> bool {
         self.allow_http
     }
 
-    pub const fn access_key(&self) -> Option<&String> {
-        self.access_key.as_ref()
+    #[must_use]
+    pub fn access_key(&self) -> Option<&str> {
+        self.access_key.as_deref()
     }
 
-    pub const fn secret_key(&self) -> Option<&String> {
-        self.secret_key.as_ref()
+    #[must_use]
+    pub fn secret_key(&self) -> Option<&str> {
+        self.secret_key.as_deref()
     }
 }
 

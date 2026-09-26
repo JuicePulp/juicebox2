@@ -1,7 +1,5 @@
 use super::target::require_juicehost_url;
 
-/// This is the single source of truth for upload limits, TTL, danger level,
-/// etc idc.
 #[derive(Debug, Clone)]
 pub struct JuicehostConfig {
     pub max_file_size_bytes: u64,

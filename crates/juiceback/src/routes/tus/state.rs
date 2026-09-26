@@ -9,10 +9,8 @@ pub(crate) async fn await_storage_push(
     state: &Arc<AppState>,
     upload_id: &str,
 ) -> Result<(), AppError> {
-    let (_, handle) = match state.push_handles.remove(upload_id) {
-        Some(pair) => pair,
-        // Push never spawned (no chunk ever arrived); session is gone either way.
-        None => return Err(AppError::TusSessionNotFound),
+    let Some((_, handle)) = state.push_handles.remove(upload_id) else {
+        return Err(AppError::TusSessionNotFound);
     };
     handle
         .await
@@ -20,7 +18,6 @@ pub(crate) async fn await_storage_push(
         .map_err(AppError::from_juicehost_error)
 }
 
-/// Spawn the streaming push for an upload once its first chunk arrives.
 pub(crate) fn spawn_push_task(
     state: &Arc<AppState>,
     id: &str,
@@ -56,8 +53,7 @@ pub(crate) fn spawn_push_task(
         .await;
         if let Err(ref e) = result {
             tracing::warn!("tus push failed for {push_id}: {e}");
-            // Free the part slot so the client can rebuild this session cleanly
-            // instead of hitting "part index already exists" forever.
+
             release_parallel_slot(&push_state, &push_id, sid.as_deref(), pi, total_len);
         }
         result
@@ -65,7 +61,6 @@ pub(crate) fn spawn_push_task(
     state.push_handles.insert(handle_id, handle);
 }
 
-/// Remove a dead upload and, for parallel parts, release its reserved slot.
 pub(crate) fn release_parallel_slot(
     state: &Arc<AppState>,
     id: &str,

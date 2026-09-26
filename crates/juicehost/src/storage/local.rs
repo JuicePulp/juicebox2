@@ -7,20 +7,18 @@ use tokio::io::AsyncWriteExt;
 
 use super::{
     ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
-    common::{capability_hash, safe_extension, valid_component},
+    capability::{self, CapStore},
+    common::{safe_extension, valid_component},
 };
 use crate::error::StorageError;
 
-/// Local disk backend.
 pub struct LocalBackend {
-    /// Root directory where files are stored.
     files_dir: PathBuf,
-    /// Maps file ID -> extension for MIME type detection.
+
     pub(crate) extensions: DashMap<String, String>,
-    /// Metadata cache (`ETag`, size) to avoid repeated `stat()` syscalls on hot
-    /// files.
+
     meta_cache: DashMap<String, FileMetadata>,
-    /// Minimum free disk space required before rejecting writes.
+
     min_free_space_bytes: u64,
 }
 
@@ -41,7 +39,6 @@ impl LocalBackend {
         })
     }
 
-    /// Scan the files directory and populate the extension cache.
     pub async fn init_cache(&self) -> Result<(), std::io::Error> {
         let mut entries = tokio::fs::read_dir(&self.files_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
@@ -94,7 +91,6 @@ impl LocalBackend {
         Ok(())
     }
 
-    /// Resolve the filesystem path for a file ID using the extension cache.
     fn resolve_path(&self, id: &str) -> Option<PathBuf> {
         if !valid_component(id) {
             return None;
@@ -103,7 +99,6 @@ impl LocalBackend {
         self.path_for(id, &ext)
     }
 
-    /// Stat a file using the cache when available without reading its contents.
     async fn stat_cached(&self, id: &str) -> Result<FileMetadata, StorageError> {
         if let Some(cached) = self.meta_cache.get(id) {
             return Ok(cached.clone());
@@ -159,8 +154,11 @@ impl LocalBackend {
     fn capability_path(&self, id: &str) -> Option<PathBuf> {
         valid_component(id).then(|| self.files_dir.join(format!(".cap.{id}")))
     }
+}
 
-    async fn create_capability(&self, id: &str, capability: &str) -> Result<(), StorageError> {
+#[async_trait::async_trait]
+impl CapStore for LocalBackend {
+    async fn cap_write(&self, id: &str, hash: &str) -> Result<(), StorageError> {
         let path = self
             .capability_path(id)
             .ok_or_else(|| StorageError::Io("invalid logical ID".into()))?;
@@ -176,7 +174,7 @@ impl LocalBackend {
                     StorageError::Io(format!("create capability failed: {e}"))
                 }
             })?;
-        file.write_all(capability_hash(capability).as_bytes())
+        file.write_all(hash.as_bytes())
             .await
             .map_err(|e| StorageError::Io(format!("write capability failed: {e}")))?;
         file.flush()
@@ -184,24 +182,21 @@ impl LocalBackend {
             .map_err(|e| StorageError::Io(format!("flush capability failed: {e}")))
     }
 
-    async fn verify_capability(&self, id: &str, capability: &str) -> Result<(), StorageError> {
+    async fn cap_read(&self, id: &str) -> Result<String, StorageError> {
         let path = self.capability_path(id).ok_or(StorageError::Forbidden)?;
-        let expected = tokio::fs::read_to_string(path)
+        tokio::fs::read_to_string(path)
             .await
-            .map_err(|_| StorageError::Forbidden)?;
-        if juiceutils::constant_time_eq(expected.trim(), &capability_hash(capability)) {
-            Ok(())
-        } else {
-            Err(StorageError::Forbidden)
-        }
+            .map_err(|_| StorageError::Forbidden)
     }
 
-    async fn remove_capability(&self, id: &str) {
+    async fn cap_delete(&self, id: &str) {
         if let Some(path) = self.capability_path(id) {
             let _ = tokio::fs::remove_file(path).await;
         }
     }
+}
 
+impl LocalBackend {
     async fn write_bytes(&self, id: &str, filename: &str, data: Bytes) -> Result<(), StorageError> {
         let ext = safe_extension(filename);
         let path = self
@@ -412,14 +407,10 @@ impl StorageBackend for LocalBackend {
         data: Bytes,
         capability: Option<&str>,
     ) -> Result<(), StorageError> {
-        if let Some(capability) = capability {
-            self.create_capability(id, capability).await?;
-        }
-        let result = self.write_bytes(id, filename, data).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(id).await;
-        }
-        result
+        capability::run_minted(self, id, capability, || async {
+            self.write_bytes(id, filename, data).await
+        })
+        .await
     }
 
     async fn put_stream(
@@ -429,14 +420,10 @@ impl StorageBackend for LocalBackend {
         data: ByteStream,
         capability: Option<&str>,
     ) -> Result<u64, StorageError> {
-        if let Some(capability) = capability {
-            self.create_capability(id, capability).await?;
-        }
-        let result = self.write_stream(id, filename, data).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(id).await;
-        }
-        result
+        capability::run_minted(self, id, capability, || async {
+            self.write_stream(id, filename, data).await
+        })
+        .await
     }
 
     async fn get(&self, id: &str) -> Result<FileData, StorageError> {
@@ -525,10 +512,6 @@ impl StorageBackend for LocalBackend {
     }
 
     async fn delete(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError> {
-        // If the blob is already gone there is nothing to protect, so report it
-        // as not-found rather than failing on a missing/stale capability file.
-        // This lets cleanup purge orphaned rows without weakening auth for
-        // files that still exist on disk (those still require a valid capability).
         let ext = {
             let Some(e) = self.extensions.get(id) else {
                 return Ok(false);
@@ -536,14 +519,14 @@ impl StorageBackend for LocalBackend {
             e.value().clone()
         };
         if let Some(capability) = capability {
-            self.verify_capability(id, capability).await?;
+            capability::verify(self, id, capability).await?;
         }
         let path = self.files_dir.join(format!("{id}.{ext}"));
         match tokio::fs::remove_file(&path).await {
             Ok(()) => {
                 self.extensions.remove(id);
                 self.meta_cache.remove(id);
-                self.remove_capability(id).await;
+                capability::remove(self, id).await;
                 Ok(true)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -558,7 +541,7 @@ impl StorageBackend for LocalBackend {
         capability: Option<&str>,
     ) -> Result<(), StorageError> {
         if let Some(capability) = capability {
-            self.verify_capability(old_id, capability).await?;
+            capability::verify(self, old_id, capability).await?;
         }
         let _reservation = self.reserve_id(new_id).await?;
         let ext = self
@@ -599,12 +582,11 @@ impl StorageBackend for LocalBackend {
         self.meta_cache.remove(old_id);
         self.meta_cache.remove(new_id);
         if let (Some(old), Some(new)) = (self.capability_path(old_id), self.capability_path(new_id))
+            && tokio::fs::try_exists(&old).await.unwrap_or(false)
         {
-            if tokio::fs::try_exists(&old).await.unwrap_or(false) {
-                tokio::fs::rename(old, new)
-                    .await
-                    .map_err(|e| StorageError::Io(format!("rename capability failed: {e}")))?;
-            }
+            tokio::fs::rename(old, new)
+                .await
+                .map_err(|e| StorageError::Io(format!("rename capability failed: {e}")))?;
         }
         Ok(())
     }
@@ -631,15 +613,13 @@ impl StorageBackend for LocalBackend {
     ) -> Result<(), StorageError> {
         if let Some(capability) = capability {
             for part_id in part_ids {
-                self.verify_capability(part_id, capability).await?;
+                capability::verify(self, part_id, capability).await?;
             }
-            self.create_capability(target_id, capability).await?;
         }
-        let result = self.concat_objects(target_id, filename, part_ids).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(target_id).await;
-        }
-        result
+        capability::run_minted(self, target_id, capability, || async {
+            self.concat_objects(target_id, filename, part_ids).await
+        })
+        .await
     }
 
     async fn get_stream(&self, id: &str) -> Result<ByteStream, StorageError> {
@@ -725,9 +705,8 @@ async fn publish_new_file(temp: &PathBuf, target: &PathBuf) -> Result<(), Storag
     })?;
     if let Err(e) = tokio::fs::remove_file(temp).await {
         tracing::warn!(
-            "failed to remove published temp file {}: {}",
+            "failed to remove published temp file {}: {e}",
             temp.display(),
-            e
         );
     }
     Ok(())

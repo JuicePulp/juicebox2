@@ -11,9 +11,6 @@ use crate::{
     state::AppState,
 };
 
-/// Background task driving one fetch job end-to-end:
-/// cobalt API -> tunnel stream -> juicehost -> normal file record.
-
 pub(crate) async fn run_fetch_job(
     state: Arc<AppState>,
     job_id: String,
@@ -64,15 +61,11 @@ pub(crate) async fn run_fetch_job_inner(
     opts: &FetchOptions,
     encrypted_ip: Option<String>,
 ) -> FetchResult {
-    // Storage limits come from juicehost, same as regular uploads.
     let (max_size, default_ttl_hours) = {
         let jh = state.juicehost_config().map_err(|e| format!("{e:?}"))?;
         (jh.max_file_size_bytes, jh.default_ttl_hours)
     };
 
-    // Enforcement windows flap open and closed on YouTube's side; keep
-    // cycling the full ladder until the budget runs out or something
-    // non-rescuable fails. Leave a margin for the final status write.
     let budget = std::time::Duration::from_secs(
         crate::constants::FETCH_JOB_TIMEOUT_SECS.saturating_sub(180),
     );
@@ -85,7 +78,6 @@ pub(crate) async fn run_fetch_job_inner(
         })
         .await;
 
-    // Primary first: it serves the vast majority of links.
     let mut primary_result = fetch_via(
         state,
         job_id,
@@ -100,15 +92,10 @@ pub(crate) async fn run_fetch_job_inner(
     )
     .await;
 
-    // Enforcement windows flap open/closed server-side. Cycle primary,
-    // session, then yt-dlp every `retry_delay` seconds
-    // until something sticks or the budget runs out. Each cycle surfaces a
-    // user-visible stage ("retry-N") so the UI isn't a dead spinner.
     let is_rescue = |r: &FetchResult| {
         matches!(r, Err(e) if youtube_needs_rescue(e)) && cobalt::is_youtube_link(source_url)
     };
 
-    // Secondary server rescues FIRST, with no waiting.
     if is_rescue(&primary_result) {
         if let (Some(su0), Some(sk0)) = (
             &state.config.cobalt_session_api_url,
@@ -154,14 +141,9 @@ pub(crate) async fn run_fetch_job_inner(
         if !matches!(last, Err(ref e) if is_rescue_err(e)) {
             return last;
         }
-        let rescuable = matches!(&last, Err(e) if is_rescue_err(e));
-        if !rescuable {
-            return last;
-        }
         pass += 1;
         let budget_left = budget.saturating_sub(started.elapsed());
-        // Hard caps keep worst-case latency bounded; delay==0 disables the
-        // rescue loop entirely (used by tests).
+
         if state.config.fetch_empty_retry_delay_secs == 0
             || pass >= crate::constants::FETCH_RESCUE_MAX_PASSES
             || budget_left
@@ -169,11 +151,8 @@ pub(crate) async fn run_fetch_job_inner(
         {
             return last;
         }
-        tracing::info!(
-            "youtube rescue pass {} failed; retrying in {}s",
-            pass,
-            state.config.fetch_empty_retry_delay_secs
-        );
+        let retry_delay = state.config.fetch_empty_retry_delay_secs;
+        tracing::info!("youtube rescue pass {pass} failed; retrying in {retry_delay}s");
         let _ = state
             .db_call("update_fetch_job_progress", {
                 let job_id = job_id.to_string();
@@ -186,8 +165,6 @@ pub(crate) async fn run_fetch_job_inner(
         ))
         .await;
 
-        // Tier 2: session-enabled instance when present; otherwise re-hit
-        // the primary (transient googlevideo blocks clear within minutes).
         let (Some(session_url), Some(session_key)) = (
             &state.config.cobalt_session_api_url,
             &state.config.cobalt_session_api_key,
@@ -211,26 +188,33 @@ pub(crate) async fn run_fetch_job_inner(
             }
             continue;
         };
-        if true {
-            let _ = state
-                .db_call("update_fetch_job_progress", {
-                    let job_id = job_id.to_string();
-                    move |db| {
-                        db::update_fetch_job_progress(
-                            db,
-                            &job_id,
-                            "session-fallback",
-                            "processing",
-                            0,
-                        )
-                    }
-                })
-                .await;
-            let session_result = fetch_via(
+        let _ = state
+            .db_call("update_fetch_job_progress", {
+                let job_id = job_id.to_string();
+                move |db| {
+                    db::update_fetch_job_progress(db, &job_id, "session-fallback", "processing", 0)
+                }
+            })
+            .await;
+        let session_result = fetch_via(
+            state,
+            job_id,
+            session_url,
+            session_key,
+            user_id,
+            source_url,
+            opts,
+            max_size,
+            default_ttl_hours,
+            encrypted_ip.clone(),
+        )
+        .await;
+
+        if matches!(&session_result, Err(e) if is_rescue_err(e)) && ytdlp_enabled() {
+            tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
+            match run_ytdlp_tier(
                 state,
                 job_id,
-                session_url,
-                session_key,
                 user_id,
                 source_url,
                 opts,
@@ -238,32 +222,15 @@ pub(crate) async fn run_fetch_job_inner(
                 default_ttl_hours,
                 encrypted_ip.clone(),
             )
-            .await;
-
-            // Tier 3: yt-dlp + bgutil PO provider via WARP egress.
-            if matches!(&session_result, Err(e) if is_rescue_err(e)) && ytdlp_enabled() {
-                tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
-                match run_ytdlp_tier(
-                    state,
-                    job_id,
-                    user_id,
-                    source_url,
-                    opts,
-                    max_size,
-                    default_ttl_hours,
-                    encrypted_ip.clone(),
-                )
-                .await
-                {
-                    Ok(r) => return Ok(r),
-                    Err(e3) => last = Err(e3),
-                }
-            } else {
-                last = session_result;
+            .await
+            {
+                Ok(r) => return Ok(r),
+                Err(e3) => last = Err(e3),
             }
+        } else {
+            last = session_result;
         }
 
-        // Non-youtube links never improve across passes.
         if !cobalt::is_youtube_link(source_url) {
             return last;
         }
@@ -284,8 +251,6 @@ pub(crate) async fn fetch_via(
 ) -> FetchResult {
     let response = cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
 
-    // A session-enabled instance can still refuse at client level; that
-    // refusal ends this attempt, return the mapped error.
     if response.is_client_refused() {
         return Err(cobalt::friendly_error(
             "error.api.content.video.unavailable",
@@ -330,15 +295,12 @@ fn is_rescue_err(err: &str) -> bool {
     youtube_needs_rescue(err)
 }
 
-/// Internal marker check for the empty-stream failure class, which may be
-/// retried against the session-enabled cobalt instance.
+#[must_use]
 pub(crate) fn is_empty_stream_error(err: &str) -> bool {
     err.contains("returned no data") || err.contains("blocked extraction")
 }
 
-/// `YouTube` failures worth retrying elsewhere: client refusals
-/// (private/age/region), login walls, and empty streams. The session
-/// instance or yt-dlp tier can serve these when the primary cannot.
+#[must_use]
 pub(crate) fn youtube_needs_rescue(err: &str) -> bool {
     err.contains("unavailable") || err.contains("login") || is_empty_stream_error(err)
 }
