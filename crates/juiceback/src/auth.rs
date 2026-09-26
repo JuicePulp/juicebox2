@@ -15,22 +15,20 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode}
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-/// Issuer strings to prevent cross-JWT confusion attacks.
 pub const ISS_ADMIN: &str = "juiceback-admin";
+
 pub const ISS_DEVICE: &str = "juiceback-device";
 
-/// JWT claims payload for an admin session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminClaims {
     pub sub: String,
     pub iss: String,
-    /// Token expiry as a UNIX timestamp
+
     pub exp: usize,
-    /// Token issue time as a UNIX timestamp
+
     pub iat: usize,
 }
 
-/// Hash plaintext password using Argon2id with a random salt
 pub fn hash_password(password: &str) -> Result<String, String> {
     Argon2::default()
         .hash_password(password.as_bytes())
@@ -38,7 +36,6 @@ pub fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|e| format!("hashing failed: {e}"))
 }
 
-/// Verify a plaintext password against an Argon2id hash
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     let parsed = PasswordHash::new(hash).map_err(|e| format!("invalid hash format: {e}"))?;
     Ok(Argon2::default()
@@ -46,7 +43,6 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
         .is_ok())
 }
 
-/// Create a signed JWT for the given username, valid for 24 hours.
 pub fn create_jwt(username: &str, secret: &str) -> Result<String, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -68,7 +64,6 @@ pub fn create_jwt(username: &str, secret: &str) -> Result<String, String> {
     .map_err(|e| format!("jwt encoding failed: {e}"))
 }
 
-/// Verify a JWT and return its claims
 pub fn verify_jwt(token: &str, secret: &str) -> Result<AdminClaims, String> {
     let mut validation = Validation::default();
     validation.set_issuer(&[ISS_ADMIN]);
@@ -81,7 +76,6 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<AdminClaims, String> {
     Ok(token_data.claims)
 }
 
-/// Verify a device JWT and return its claims (sub = `device_id`, `user_id`).
 pub fn verify_device_jwt(token: &str, secret: &str) -> Result<DeviceClaims, String> {
     let mut validation = Validation::default();
     validation.set_issuer(&[ISS_DEVICE]);
@@ -94,18 +88,15 @@ pub fn verify_device_jwt(token: &str, secret: &str) -> Result<DeviceClaims, Stri
     Ok(token_data.claims)
 }
 
-/// Device JWT claims (issued during pairing, used for WS auth + upload
-/// tickets).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceClaims {
-    /// Device UUID
     pub sub: String,
-    /// User who owns this device
+
     pub user_id: String,
     pub iss: String,
     pub iat: usize,
     pub exp: usize,
-    /// Extra fields embedded in ultrafast upload tickets
+
     #[serde(default)]
     pub file_id: Option<String>,
     #[serde(default)]
@@ -147,30 +138,25 @@ where
     }
 }
 
-// User identity sessions
-
 pub const SESSION_COOKIE_NAME: &str = "jb_session";
+
 pub const LEGACY_USER_COOKIE_NAME: &str = "jb_uid";
 
-/// Cookie max-age: 90 days.
 pub const SESSION_MAX_AGE_SECS: i64 = 90 * 24 * 60 * 60;
 
-/// JWT claims for a user identity cookie.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserClaims {
-    /// Random UUID identifying the user.
     pub sub: String,
     pub iat: usize,
     pub exp: usize,
 }
 
-/// Create a signed Set-Cookie header value for a user identity.
 #[must_use]
 pub fn create_session_cookie(token: &str, secure: bool) -> String {
     let secure_attribute = if secure { "; Secure" } else { "" };
     format!(
         "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE_SECS}{secure_attribute}"
-    ) // is there a cookie crate?
+    )
 }
 
 #[must_use]
@@ -181,6 +167,7 @@ pub fn clear_legacy_user_cookie(secure: bool) -> String {
     )
 }
 
+#[must_use]
 pub fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
     cookie_header

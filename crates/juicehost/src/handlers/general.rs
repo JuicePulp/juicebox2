@@ -16,12 +16,8 @@ use crate::{
     storage::valid_component as is_valid_id,
 };
 
-/// Header sent on peer health probes. The receiving side skips probing back so
-/// juiceback and juicehost don't recurse into each other's /api/health forever.
 const HEALTH_PROBE_HEADER: &str = "x-health-probe";
 
-/// Serve the index page. Redirects to the configured juicefront URL, or 404s
-/// when no frontend is configured.
 #[utoipa::path(
     get,
     path = "/",
@@ -53,16 +49,14 @@ pub async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
         "juicehost": "ok",
     });
 
-    // Skip the peer probe when this request was itself a health probe.
-    if !headers.contains_key(HEALTH_PROBE_HEADER) {
-        if let Some(ref backend_url) = state.backend_url {
-            body["juiceback"] =
-                serde_json::json!(if check_backend_health(&state, backend_url).await {
-                    "ok"
-                } else {
-                    "unreachable"
-                });
-        }
+    if !headers.contains_key(HEALTH_PROBE_HEADER)
+        && let Some(ref backend_url) = state.backend_url
+    {
+        body["juiceback"] = serde_json::json!(if check_backend_health(&state, backend_url).await {
+            "ok"
+        } else {
+            "unreachable"
+        });
     }
 
     let mut resp = Response::new(Body::from(serde_json::to_string(&body).unwrap_or_default()));
@@ -74,7 +68,6 @@ pub async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> R
     resp
 }
 
-/// Probes the juiceback health endpoint if it is configured
 async fn check_backend_health(state: &AppState, backend_url: &str) -> bool {
     let url = format!("{}/api/health", backend_url.trim_end_matches('/'));
     let Ok(resp) = backend_request(state, url)
@@ -126,7 +119,6 @@ pub async fn storage_handler(State(state): State<Arc<AppState>>) -> Json<storage
     Json(state.storage.storage_metrics(state.min_free_space_bytes))
 }
 
-/// Return the instance's upload configuration as JSON.
 #[utoipa::path(
     get,
     path = "/api/config",
@@ -150,7 +142,6 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
     }))
 }
 
-/// Report whether a file exists in the configured storage backend and its size.
 #[utoipa::path(
     get,
     path = "/internal/file/{id}/stat",

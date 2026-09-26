@@ -1,5 +1,3 @@
-//! In-memory state for TUS resumable uploads.
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -8,7 +6,6 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::upload_mode::UploadMode;
 
-/// TUS session whose chunks are streamed to juicehost without disk buffering.
 #[derive(Debug)]
 pub struct TusUpload {
     pub id: String,
@@ -19,31 +16,27 @@ pub struct TusUpload {
     pub ttl_hours: f64,
     pub created_at: i64,
     pub delete_token: String,
-    /// HMAC-SHA256 hash of the uploader's IP so we can count sessions per-IP in
-    /// memory
+
     pub hashed_ip: String,
-    /// AES-256-GCM encrypted IP, for storage in the database.
+
     pub encrypted_ip: String,
     pub storage_host: Option<String>,
-    /// If this upload is part of a parallel session, which session.
+
     pub session_id: Option<String>,
-    /// Part index within the session (0-based).
+
     pub part_index: Option<usize>,
-    /// Quick Link reservation ID: if set, update this existing record on
-    /// completion.
+
     pub reserve_id: Option<String>,
-    /// Capability for the reservation, supplied as `delete_token` metadata.
+
     pub reservation_token: Option<String>,
-    /// Shared per-file capability used for all parts and the final concat.
+
     pub capability: String,
-    /// Locks offset check, stream, and write per upload so PATCH
-    /// requests cannot race.
+
     pub patch_lock: Arc<Mutex<()>>,
     pub user_id: String,
-    /// Transport used for the storage push (from upload metadata).
+
     pub upload_mode: UploadMode,
-    /// Chunk receiver handed to the storage push task when the first chunk
-    /// arrives; `None` once the push has been spawned.
+
     pub push_rx: Option<mpsc::Receiver<Result<Bytes, String>>>,
 }
 
@@ -54,7 +47,6 @@ pub fn new_tus_state() -> TusMap {
     Arc::new(DashMap::new())
 }
 
-/// Per-upload mpsc sender for streaming chunks to the push task.
 pub type TusSenderMap = Arc<DashMap<String, mpsc::Sender<Result<Bytes, String>>>>;
 
 #[must_use]
@@ -62,7 +54,6 @@ pub fn new_tus_sender_map() -> TusSenderMap {
     Arc::new(DashMap::new())
 }
 
-/// Tracks independent TUS parts that are concatenated after all pushes succeed.
 pub struct PartSession {
     pub session_id: String,
     pub total_parts: usize,
@@ -78,7 +69,7 @@ pub struct PartSession {
     pub upload_mode: UploadMode,
     pub declared_size: std::sync::atomic::AtomicU64,
     pub completed: std::sync::atomic::AtomicUsize,
-    /// Maps part indices to juicehost file IDs and their declared lengths.
+
     pub part_ids: DashMap<usize, String>,
     pub part_lengths: DashMap<usize, u64>,
     pub completion_reserve_id: std::sync::Mutex<Option<Option<String>>>,

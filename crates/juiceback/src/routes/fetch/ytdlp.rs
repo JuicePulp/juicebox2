@@ -10,8 +10,7 @@ use crate::{
     state::AppState,
 };
 
-/// Tier-3 fallback gate: yt-dlp + bgutil PO provider, routed through the
-/// same residential egress as cobalt. Enabled via `YTDLP_FALLBACK=1`.
+#[must_use]
 pub(crate) fn ytdlp_enabled() -> bool {
     std::env::var("YTDLP_FALLBACK").as_deref() == Ok("1")
 }
@@ -28,8 +27,6 @@ fn ytdlp_pot_base_url() -> String {
     std::env::var("YTDLP_POT_BASE_URL").unwrap_or_default()
 }
 
-/// Secondary egress tried first by the yt-dlp tier when set (e.g. the
-/// home-relay tinyproxy); WARP remains as `YTDLP_PROXY` fallback.
 fn ytdlp_proxy_secondary() -> String {
     std::env::var("YTDLP_PROXY_SECONDARY").unwrap_or_default()
 }
@@ -38,7 +35,6 @@ fn ytdlp_tmpdir() -> String {
     std::env::var("YTDLP_TMPDIR").unwrap_or_else(|_| "/var/lib/juicebox/ytdlp-tmp".into())
 }
 
-/// yt-dlp's extractor needs a JS runtime (EJS); deno preferred, node ok.
 fn ytdlp_cookies_path() -> String {
     std::env::var("YTDLP_COOKIES").unwrap_or_default()
 }
@@ -47,7 +43,6 @@ fn ytdlp_js_runtime() -> String {
     std::env::var("YTDLP_JS_RUNTIME").unwrap_or_else(|_| "deno".into())
 }
 
-/// Pure arg builder for the yt-dlp fallback invocation.
 #[must_use]
 pub fn build_ytdlp_args_for_test(
     proxy: &str,
@@ -94,8 +89,6 @@ fn build_ytdlp_args(
     args
 }
 
-/// Tier-3: run yt-dlp through the residential egress + bgutil PO provider,
-/// then store the produced file exactly like a tunnel download.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -122,19 +115,16 @@ pub(crate) async fn run_ytdlp_tier(
         .await
         .map_err(|e| format!("yt-dlp tmpdir unavailable: {e}"))?;
 
-    // Egress candidates, in order: secondary server (home relay) first,
-    // then the Cloudflare WARP namespace as fallback.
     let mut proxies: Vec<String> = Vec::new();
-    for p in [ytdlp_proxy_secondary(), ytdlp_proxy()] {
-        if !p.is_empty() && !proxies.contains(&p) {
-            proxies.push(p);
+    for proxy in [ytdlp_proxy_secondary(), ytdlp_proxy()] {
+        if !proxy.is_empty() && !proxies.contains(&proxy) {
+            proxies.push(proxy);
         }
     }
     if proxies.is_empty() {
         return Err("yt-dlp fallback has no proxy configured".into());
     }
 
-    // Output template is id-based; locate the produced artifact per attempt.
     let video_id = cobalt::parse_youtube_video_id(source_url)
         .ok_or("could not determine youtube video id for yt-dlp fallback")?;
 
@@ -151,8 +141,6 @@ pub(crate) async fn run_ytdlp_tier(
             })
             .await;
 
-        // Clear stale artifacts for this video before each attempt so a
-        // previous proxy's failure can't masquerade as success.
         let mut rd = match tokio::fs::read_dir(&out_dir).await {
             Ok(rd) => rd,
             Err(e) => return Err(format!("yt-dlp tmpdir unreadable: {e}")),
@@ -173,13 +161,9 @@ pub(crate) async fn run_ytdlp_tier(
             &out_dir,
         );
 
-        tracing::info!(
-            "tier-3 pass {} via {} ({}): running {}",
-            idx + 1,
-            proxy,
-            stage_tag,
-            ytdlp_bin()
-        );
+        let pass_no = idx + 1;
+        let bin = ytdlp_bin();
+        tracing::info!("tier-3 pass {pass_no} via {proxy} ({stage_tag}): running {bin}");
         let output = match tokio::time::timeout(
             std::time::Duration::from_secs(crate::constants::FETCH_JOB_TIMEOUT_SECS),
             tokio::process::Command::new(ytdlp_bin())
@@ -192,7 +176,10 @@ pub(crate) async fn run_ytdlp_tier(
         )
         .await
         {
-            Ok(r) => r.map_err(|e| format!("failed to spawn {}: {}", ytdlp_bin(), e))?,
+            Ok(r) => r.map_err(|e| {
+                let bin = ytdlp_bin();
+                format!("failed to spawn {bin}: {e}")
+            })?,
             Err(_) => {
                 last_err = Some("yt-dlp fallback timed out".into());
                 continue;
@@ -268,7 +255,6 @@ pub(crate) async fn run_ytdlp_tier(
     )
     .await;
 
-    // Temp artifact is either stored or failed; either way it must not linger.
     let _ = tokio::fs::remove_file(&path).await;
     result
 }

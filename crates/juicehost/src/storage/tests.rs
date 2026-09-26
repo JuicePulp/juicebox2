@@ -296,7 +296,7 @@ async fn local_capability_failed_put_rolls_back() {
             .await,
         Err(StorageError::Conflict)
     ));
-    // The minted capability was removed with the failed put.
+
     assert!(matches!(
         backend.delete("f1", Some("cap")).await,
         Err(StorageError::Forbidden)

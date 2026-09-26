@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use crate::config::{ConfigError, QuicFile, public::PublicSettings};
 
-/// QUIC/HTTP/3 listener and limit settings.
 #[derive(Debug)]
 pub struct QuicSettings {
     host: String,
@@ -16,34 +15,42 @@ pub struct QuicSettings {
 }
 
 impl QuicSettings {
+    #[must_use]
     pub fn host(&self) -> &str {
         &self.host
     }
 
+    #[must_use]
     pub const fn port(&self) -> u16 {
         self.port
     }
 
+    #[must_use]
     pub const fn cert_path(&self) -> &PathBuf {
         &self.cert_path
     }
 
+    #[must_use]
     pub const fn max_connections(&self) -> usize {
         self.max_connections
     }
 
+    #[must_use]
     pub const fn max_requests(&self) -> usize {
         self.max_requests
     }
 
+    #[must_use]
     pub const fn handshake_seconds(&self) -> u64 {
         self.handshake_seconds
     }
 
+    #[must_use]
     pub const fn idle_seconds(&self) -> u64 {
         self.idle_seconds
     }
 
+    #[must_use]
     pub const fn request_total_seconds(&self) -> u64 {
         self.request_total_seconds
     }

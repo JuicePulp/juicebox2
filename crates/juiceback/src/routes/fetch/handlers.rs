@@ -58,12 +58,12 @@ pub async fn fetch_start_handler(
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
 
     let job_id = nanoid::nanoid!(12);
-    let job_id_clone = job_id.clone();
-    let source_url_for_db = source_url.clone();
-    let user_id_for_db = user_id.clone();
     state
-        .db_call("insert_fetch_job", move |db| {
-            db::insert_fetch_job(db, &job_id_clone, &user_id_for_db, &source_url_for_db)
+        .db_call("insert_fetch_job", {
+            let job_id_for_db = job_id.clone();
+            let source_url_for_db = source_url.clone();
+            let user_id_for_db = user_id.clone();
+            move |db| db::insert_fetch_job(db, &job_id_for_db, &user_id_for_db, &source_url_for_db)
         })
         .await?;
 
@@ -115,19 +115,17 @@ pub async fn fetch_services_handler(
     let url = format!("{}/", state.config.cobalt_api_url.trim_end_matches('/'));
     let mut request = state.http.get(&url);
     if !state.config.cobalt_api_key.is_empty() {
-        request = request.header(
-            "Authorization",
-            format!("Api-Key {}", state.config.cobalt_api_key),
-        );
+        let api_key = &state.config.cobalt_api_key;
+        request = request.header("Authorization", format!("Api-Key {api_key}"));
     }
     let response = request
         .send()
         .await
         .map_err(|_| AppError::ServiceUnavailable("cobalt instance unreachable".into()))?;
     if !response.status().is_success() {
+        let status = response.status();
         return Err(AppError::ServiceUnavailable(format!(
-            "cobalt returned {}",
-            response.status()
+            "cobalt returned {status}"
         )));
     }
     let body: serde_json::Value = response
@@ -155,7 +153,6 @@ pub async fn fetch_services_handler(
     }))
 }
 
-/// `GET /api/fetch/:id` polls a fetch job. Only the owner can see it.
 #[utoipa::path(
     get,
     path = "/api/fetch/{job_id}",
@@ -171,10 +168,10 @@ pub async fn fetch_status_handler(
     UserId(user_id): UserId,
     Path(job_id): Path<String>,
 ) -> Result<Json<FetchStatusResponse>, AppError> {
-    let job_id_clone = job_id.clone();
     let job: Option<FetchJob> = state
-        .db_call("get_fetch_job", move |db| {
-            db::get_fetch_job(db, &job_id_clone)
+        .db_call("get_fetch_job", {
+            let job_id_for_db = job_id.clone();
+            move |db| db::get_fetch_job(db, &job_id_for_db)
         })
         .await?;
 
@@ -210,7 +207,7 @@ pub async fn fetch_status_handler(
         if let Some(record) = record {
             let url = crate::utils::public_url(
                 &state.config.public_base_url,
-                &record.storage_host,
+                record.storage_host.as_deref(),
                 &record.id,
                 &record.filename,
             );

@@ -1,10 +1,3 @@
-//! Shared ID validation: storage-safe components and user-facing custom IDs.
-//!
-//! `is_valid_id_component` is the ASCII-only path-safety check used by
-//! storage backends; `is_valid_custom_id` is the length-bounded,
-//! Unicode-alphanumeric check for user-chosen file IDs.
-
-/// Check a storage path component: non-empty, ASCII alphanumeric/`-`/`_`.
 #[must_use]
 pub fn is_valid_id_component(value: &str) -> bool {
     !value.is_empty()
@@ -13,7 +6,6 @@ pub fn is_valid_id_component(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Check a user-supplied custom file ID within `min_len..=max_len`.
 #[must_use]
 pub fn is_valid_custom_id(id: &str, min_len: usize, max_len: usize) -> bool {
     !id.is_empty()
@@ -24,7 +16,6 @@ pub fn is_valid_custom_id(id: &str, min_len: usize, max_len: usize) -> bool {
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Normalize a custom ID: trim whitespace and convert to lowercase.
 #[must_use]
 pub fn normalize_custom_id(id: &str) -> String {
     id.trim().to_lowercase()

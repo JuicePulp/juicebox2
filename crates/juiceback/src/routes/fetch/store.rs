@@ -57,7 +57,6 @@ pub(crate) async fn download_and_store(
         None,
     );
 
-    // Reserve the row as 'uploading' so nothing serves it mid-transfer.
     if let Err(e) = db::insert_pending_file(state, record.clone()).await {
         return Err(format!("failed to reserve file slot: {e:?}"));
     }
@@ -82,22 +81,18 @@ pub(crate) async fn download_and_store(
     )
     .await;
 
-    match result {
-        Ok(size_bytes) => {
-            cleanup.active = false;
-            finalize_stored_file(
-                state,
-                user_id,
-                file_id,
-                filename,
-                mime_type,
-                size_bytes,
-                delete_token,
-            )
-            .await
-        }
-        Err(msg) => Err(msg),
-    }
+    let size_bytes = result?;
+    cleanup.active = false;
+    finalize_stored_file(
+        state,
+        user_id,
+        file_id,
+        filename,
+        mime_type,
+        size_bytes,
+        delete_token,
+    )
+    .await
 }
 
 struct CleanupOnDrop {
@@ -127,10 +122,6 @@ impl Drop for CleanupOnDrop {
     }
 }
 
-/// GET a cobalt tunnel URL, following up to 5 redirects with every hop
-/// re-validated against the SSRF policy. Redirect targets supplied by the
-/// source service commonly bounce across hosts, and an unchecked client
-/// would follow a hop to an internal address.
 async fn fetch_tunnel_response(
     client: &reqwest::Client,
     initial_url: &str,
@@ -173,8 +164,6 @@ async fn fetch_tunnel_response(
     Err("media redirect limit exceeded".into())
 }
 
-/// Stream the tunnel bytes into juicehost while enforcing the size cap.
-/// Reports live progress (`downloading` + byte count) back to the job row.
 async fn transfer_to_juicehost(
     state: &Arc<AppState>,
     job_id: &str,
@@ -192,9 +181,6 @@ async fn transfer_to_juicehost(
         Option<u64>,
     ) = match &byte_source {
         ByteSource::Tunnel(url) => {
-            // Reuse the shared client: it already disables redirects (callers
-            // follow them manually for per-hop SSRF re-validation), and its
-            // connection pool survives across fetch jobs.
             let client = state.http.clone();
             let resp =
                 fetch_tunnel_response(&client, url, state.config.allow_private_fetch).await?;
@@ -273,7 +259,7 @@ async fn transfer_to_juicehost(
         if total > max_size {
             return Err("file exceeds this server's maximum file size".into());
         }
-        // Throttled live progress; losing a tick must never fail the transfer.
+
         if last_progress.elapsed() >= std::time::Duration::from_millis(750) {
             last_progress = std::time::Instant::now();
             let job_id_owned = job_id.to_string();
@@ -294,7 +280,6 @@ async fn transfer_to_juicehost(
         }
     }
 
-    // Final accurate byte count before completion flips the status.
     {
         let job_id_owned = job_id.to_string();
         let _ = state
@@ -310,8 +295,6 @@ async fn transfer_to_juicehost(
             .await;
     }
 
-    // The source can answer 200 with zero bytes (some youtube videos do this
-    // with certain quality/codec picks). Don't hand an empty file to juicehost.
     if total == 0 {
         push_task.abort();
         return Err(empty_stream_message(source_url));
@@ -325,7 +308,6 @@ async fn transfer_to_juicehost(
     Ok(total)
 }
 
-/// Mark the reserved file ready, mirror ownership, hand back the final file id.
 async fn finalize_stored_file(
     state: &Arc<AppState>,
     user_id: &str,
@@ -360,7 +342,7 @@ async fn finalize_stored_file(
                 })
                 .await
             {
-                tracing::warn!("fetch: could not register ownership: {:?}", e);
+                tracing::warn!("fetch: could not register ownership: {e:?}");
             }
             Ok(record.id)
         }

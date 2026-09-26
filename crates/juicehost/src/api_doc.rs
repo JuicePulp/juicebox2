@@ -1,5 +1,3 @@
-//! `OpenAPI` specification for the juicehost API.
-
 use utoipa::OpenApi;
 
 use crate::{error::ErrorResponse, storage::StorageMetrics};

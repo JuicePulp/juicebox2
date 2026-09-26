@@ -2,20 +2,18 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-/// User-selectable options for a fetch job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchOptions {
-    /// Audio only (downloadMode: "audio") vs video+audio (auto).
     pub audio_only: bool,
-    /// Video quality cap: max/2160/1440/1080/720/480/360/240/144.
+
     pub video_quality: String,
-    /// Video container preference (YouTube): auto/mp4/webm/mkv.
+
     pub youtube_video_container: String,
-    /// Audio format for audio-only fetches: best/mp3/ogg/wav/opus.
+
     pub audio_format: String,
-    /// Ask cobalt to hunt for the highest available audio quality (`YouTube`).
+
     pub youtube_better_audio: bool,
-    /// `YouTube` video codec: h264/av1/vp9.
+
     pub youtube_video_codec: String,
 }
 
@@ -33,7 +31,6 @@ impl Default for FetchOptions {
 }
 
 impl FetchOptions {
-    /// Sanitize untrusted option strings into values cobalt accepts.
     #[must_use]
     pub fn sanitized(
         audio_only: bool,
@@ -43,22 +40,36 @@ impl FetchOptions {
         youtube_better_audio: bool,
         youtube_video_codec: Option<&str>,
     ) -> Self {
-        let video_quality = match video_quality.unwrap_or("") {
-            "max" | "4320" | "2160" | "1440" | "1080" | "720" | "480" | "360" | "240" | "144" => {
-                video_quality.unwrap_or("1080").to_string()
+        let video_quality = match video_quality {
+            Some(q)
+                if matches!(
+                    q,
+                    "max"
+                        | "4320"
+                        | "2160"
+                        | "1440"
+                        | "1080"
+                        | "720"
+                        | "480"
+                        | "360"
+                        | "240"
+                        | "144"
+                ) =>
+            {
+                q.to_string()
             }
             _ => "1080".to_string(),
         };
-        let youtube_video_container = match video_container.unwrap_or("") {
-            "auto" | "mp4" | "webm" | "mkv" => video_container.unwrap_or("auto").to_string(),
+        let youtube_video_container = match video_container {
+            Some(c) if matches!(c, "auto" | "mp4" | "webm" | "mkv") => c.to_string(),
             _ => "auto".to_string(),
         };
-        let audio_format = match audio_format.unwrap_or("") {
-            "best" | "mp3" | "ogg" | "wav" | "opus" => audio_format.unwrap_or("mp3").to_string(),
+        let audio_format = match audio_format {
+            Some(f) if matches!(f, "best" | "mp3" | "ogg" | "wav" | "opus") => f.to_string(),
             _ => "mp3".to_string(),
         };
-        let youtube_video_codec = match youtube_video_codec.unwrap_or("") {
-            "h264" | "av1" | "vp9" => youtube_video_codec.unwrap_or("h264").to_string(),
+        let youtube_video_codec = match youtube_video_codec {
+            Some(c) if matches!(c, "h264" | "av1" | "vp9") => c.to_string(),
             _ => "h264".to_string(),
         };
         Self {
@@ -72,7 +83,6 @@ impl FetchOptions {
     }
 }
 
-/// Build the cobalt `POST /` request body. Pure function so it is testable.
 #[must_use]
 pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
     serde_json::json!({
@@ -88,7 +98,6 @@ pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
     })
 }
 
-/// A single item in a picker response (e.g. tiktok slideshow entries).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct CobaltPickerItem {
     #[serde(default)]
@@ -98,33 +107,32 @@ pub struct CobaltPickerItem {
     pub thumb: Option<String>,
 }
 
-/// Parsed cobalt response. Only the statuses we act on are structured;
-/// anything unexpected becomes `Unsupported`.
 #[derive(Debug, Clone)]
 pub enum CobaltResponse {
-    /// cobalt is proxying/remuxing; fetch `tunnel_url` to get the file bytes.
     Tunnel {
         tunnel_url: String,
         filename: Option<String>,
     },
-    /// cobalt redirects straight to the source service URL.
+
     Redirect {
         url: String,
         filename: Option<String>,
     },
-    /// Multiple media items were found; user should pick one (not yet
-    /// supported).
-    Picker { items: Vec<CobaltPickerItem> },
-    /// cobalt wants us to merge streams locally (needs ffmpeg); not supported.
-    LocalProcessing { service: String },
-    /// cobalt refused the request; `code` is its machine-readable error code.
-    Error { code: String },
+
+    Picker {
+        items: Vec<CobaltPickerItem>,
+    },
+
+    LocalProcessing {
+        service: String,
+    },
+
+    Error {
+        code: String,
+    },
 }
 
 impl CobaltResponse {
-    /// True when cobalt refused the link at client level (private,
-    /// age-restricted or region-locked). A session-enabled instance
-    /// can sometimes still serve these.
     #[must_use]
     pub fn is_client_refused(&self) -> bool {
         matches!(
@@ -134,6 +142,7 @@ impl CobaltResponse {
         )
     }
 
+    #[must_use]
     pub fn from_json(value: serde_json::Value) -> Self {
         let status = value
             .get("status")
@@ -215,8 +224,6 @@ impl CobaltResponse {
     }
 }
 
-/// Ask cobalt to process a URL. Returns the parsed response, or an error
-/// string describing transport-level failures (unreachable, bad status...).
 pub async fn process(
     client: &reqwest::Client,
     api_url: &str,
@@ -242,7 +249,7 @@ pub async fn process(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        // Try to surface cobalt's structured error even on non-2xx.
+
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
             return Ok(CobaltResponse::from_json(v));
         }
@@ -256,7 +263,6 @@ pub async fn process(
     Ok(CobaltResponse::from_json(value))
 }
 
-/// Extract the youtube video id from common link shapes (watch?v=, youtu.be/).
 #[must_use]
 pub fn parse_youtube_video_id(url: &str) -> Option<String> {
     let rest = url.split_once("://")?.1;
@@ -276,23 +282,20 @@ pub fn parse_youtube_video_id(url: &str) -> Option<String> {
     None
 }
 
-/// Best-effort `YouTube` link detection for session-instance fallback.
 #[must_use]
 pub fn is_youtube_link(url: &str) -> bool {
-    let rest = match url.split_once("://") {
-        Some((_, r)) => r,
-        None => return false,
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
     };
     let mut host = rest.split('/').next().unwrap_or("");
     if let Some((_user, h)) = host.rsplit_once('@') {
-        host = h; // strip userinfo
+        host = h;
     }
-    let host = host.split(':').next().unwrap_or(host); // strip port
+    let host = host.split(':').next().unwrap_or(host);
     let host = host.to_ascii_lowercase();
     host == "youtube.com" || host == "youtu.be" || host.ends_with(".youtube.com")
 }
 
-/// Map a cobalt error code to a short error string.
 #[must_use]
 pub fn friendly_error(code: &str) -> String {
     match code {
@@ -379,8 +382,8 @@ mod tests {
             ),
         );
         assert_eq!(body["downloadMode"], "audio");
-        assert_eq!(body["videoQuality"], "1080"); // bogus quality sanitized
-        assert_eq!(body["youtubeVideoContainer"], "webm"); // kept; cobalt ignores it in audio mode
+        assert_eq!(body["videoQuality"], "1080");
+        assert_eq!(body["youtubeVideoContainer"], "webm");
         assert_eq!(body["audioFormat"], "opus");
         assert_eq!(body["youtubeBetterAudio"], true);
         assert_eq!(body["youtubeVideoCodec"], "av1");

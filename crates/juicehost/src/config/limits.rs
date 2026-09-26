@@ -1,6 +1,5 @@
 use crate::config::{ConfigError, LimitsFile};
 
-/// Concurrency and timeout limit settings.
 #[derive(Debug)]
 pub struct LimitsSettings {
     min_free_space_bytes: u64,
@@ -15,38 +14,47 @@ pub struct LimitsSettings {
 }
 
 impl LimitsSettings {
+    #[must_use]
     pub const fn min_free_space_bytes(&self) -> u64 {
         self.min_free_space_bytes
     }
 
+    #[must_use]
     pub const fn max_file_size_bytes(&self) -> u64 {
         self.max_file_size_bytes
     }
 
+    #[must_use]
     pub const fn max_range_response_bytes(&self) -> u64 {
         self.max_range_response_bytes
     }
 
+    #[must_use]
     pub const fn max_concurrent_uploads(&self) -> usize {
         self.max_concurrent_uploads
     }
 
+    #[must_use]
     pub const fn max_concurrent_downloads(&self) -> usize {
         self.max_concurrent_downloads
     }
 
+    #[must_use]
     pub const fn max_concat_parts(&self) -> usize {
         self.max_concat_parts
     }
 
+    #[must_use]
     pub const fn tcp_body_inactivity_seconds(&self) -> u64 {
         self.tcp_body_inactivity_seconds
     }
 
+    #[must_use]
     pub const fn tcp_request_total_seconds(&self) -> u64 {
         self.tcp_request_total_seconds
     }
 
+    #[must_use]
     pub const fn tcp_max_concurrent_requests(&self) -> usize {
         self.tcp_max_concurrent_requests
     }

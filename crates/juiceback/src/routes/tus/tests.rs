@@ -144,7 +144,6 @@ async fn bounded_body_rejects_over_cap_before_buffering_all() {
 
     use super::patch::collect_bounded_body;
 
-    // 4 x 512 B frames with a 1024 B cap: must abort on the third frame.
     let frames = vec![
         axum::body::Bytes::from(vec![0_u8; 512]),
         axum::body::Bytes::from(vec![0_u8; 512]),
@@ -179,7 +178,6 @@ fn gzip_decode_rejects_zip_bomb() {
 
     use super::patch::decode_gzip_bounded;
 
-    // 1 MiB of zeros compresses to ~1 KiB; a 1 KiB decoded cap must abort.
     let original = vec![0_u8; 1024 * 1024];
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(&original).unwrap();

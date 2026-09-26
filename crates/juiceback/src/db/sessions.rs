@@ -14,21 +14,18 @@ pub fn resolve_session(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some((user_id, last_seen)) = row {
-        // Coalesce the touch write: the row is already warm in cache and the
-        // value only drives expiry sweeps, so rewriting it per request just
-        // contends on the single writer.
-        if now - last_seen >= crate::constants::SESSION_TOUCH_INTERVAL_SECS {
-            conn.execute(
-                "UPDATE sessions SET last_seen_at = ?2 WHERE token_hash = ?1",
-                params![token_hash, now],
-            )?;
-            Ok(Some((user_id, now)))
-        } else {
-            Ok(Some((user_id, last_seen)))
-        }
+    let Some((user_id, last_seen)) = row else {
+        return Ok(None);
+    };
+
+    if now - last_seen >= crate::constants::SESSION_TOUCH_INTERVAL_SECS {
+        conn.execute(
+            "UPDATE sessions SET last_seen_at = ?2 WHERE token_hash = ?1",
+            params![token_hash, now],
+        )?;
+        Ok(Some((user_id, now)))
     } else {
-        Ok(None)
+        Ok(Some((user_id, last_seen)))
     }
 }
 

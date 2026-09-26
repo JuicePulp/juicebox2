@@ -22,8 +22,6 @@ fn test_state(cobalt_api_url: String) -> Arc<AppState> {
     common::state_from_config(test_config(cobalt_api_url))
 }
 
-/// Extract the anon-session cookie pair from a response's Set-Cookie header
-/// so follow-up requests keep the same identity (like a browser would).
 fn session_cookie(resp: &axum::http::Response<axum::body::Body>) -> Option<String> {
     let header = resp.headers().get("set-cookie")?.to_str().ok()?;
     Some(header.split(';').next()?.to_string())
@@ -73,7 +71,6 @@ async fn get_fetch(app: &axum::Router, job_id: &str, cookie: Option<&str>) -> (S
     (status, json)
 }
 
-/// Poll until the job leaves 'pending', asserting ownership along the way.
 async fn wait_for_completion(app: &axum::Router, job_id: &str, cookie: &str) -> Value {
     for _ in 0..400 {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -135,7 +132,7 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
     assert_eq!(result["status"], "done", "job failed: {result}");
     let file = &result["file"];
     assert_eq!(file["mime_type"], "video/mp4");
-    assert_eq!(file["size_bytes"], 14); // len("fake-mp4-bytes")
+    assert_eq!(file["size_bytes"], 14);
     assert!(
         file["url"]
             .as_str()
@@ -191,7 +188,7 @@ async fn audio_only_request_uses_audio_mode_and_mime() {
             "audio_only": true,
             "audio_format": "opus",
             "video_quality": "720",
-            "youtube_video_codec": "not-a-codec", // sanitized away
+            "youtube_video_codec": "not-a-codec",
         }),
         None,
     )
@@ -293,10 +290,6 @@ async fn disabled_feature_returns_not_found() {
 
 #[tokio::test]
 async fn unsafe_urls_are_rejected_up_front() {
-    // Fresh router per URL so the 3/min governor never interferes.
-    // Network-private URLs are covered by the unit tests with the SSRF
-    // policy enforced; the test config permits loopback (wiremock), so
-    // only scheme/credential/shape rejections are asserted here.
     for url in [
         "ftp://example.com/f",
         "javascript:alert(1)",
@@ -324,7 +317,6 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         .mount(&server)
         .await;
 
-    // 200 OK with zero bytes happens on some YouTube quality/codec picks.
     Mock::given(method("GET"))
         .and(path("/empty-media"))
         .respond_with(
@@ -335,7 +327,6 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         .mount(&server)
         .await;
 
-    // The push endpoint must never be called with an empty body.
     Mock::given(method("POST"))
         .and(path_regex(r"^/internal/file/stream/"))
         .respond_with(ResponseTemplate::new(200))
@@ -361,7 +352,7 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
 
 #[tokio::test]
 async fn fetch_start_is_rate_limited_to_three_per_minute() {
-    let app = common::mock_router(test_state("http://127.0.0.1:1".into())); // cobalt unreachable; fine
+    let app = common::mock_router(test_state("http://127.0.0.1:1".into()));
 
     let mut last = None;
     for i in 0..5 {
@@ -379,9 +370,6 @@ async fn fetch_start_is_rate_limited_to_three_per_minute() {
     assert_eq!(last, Some(StatusCode::TOO_MANY_REQUESTS));
 }
 
-/// When the primary (sessionless) cobalt instance refuses a `YouTube` link at
-/// client level, juiceback must retry against the configured session-enabled
-/// instance and serve its tunnel result.
 #[tokio::test]
 async fn unavailable_from_primary_retries_session_instance() {
     let primary = MockServer::start().await;
@@ -414,7 +402,6 @@ async fn unavailable_from_primary_retries_session_instance() {
         .mount(&session)
         .await;
 
-    // juicehost stream endpoint lives on the primary mock server here.
     Mock::given(method("POST"))
         .and(path_regex(
             r"^/internal/file/stream/[A-Za-z0-9_-]+/rare%20video%2Emp4$",
@@ -440,10 +427,9 @@ async fn unavailable_from_primary_retries_session_instance() {
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
     assert_eq!(result["status"], "done", "job failed: {result}");
-    assert_eq!(result["file"]["size_bytes"], 13); // len("session-bytes")
+    assert_eq!(result["file"]["size_bytes"], 13);
 }
 
-/// Without a session instance configured the refusal surfaces as-is.
 #[tokio::test]
 async fn unavailable_without_session_config_fails_friendly() {
     let server = MockServer::start().await;
@@ -468,7 +454,6 @@ async fn unavailable_without_session_config_fails_friendly() {
     assert!(result["error"].as_str().unwrap().contains("unavailable"));
 }
 
-/// Non-YouTube links must never hit the session fallback.
 #[tokio::test]
 async fn non_youtube_unavailable_does_not_retry_session_instance() {
     let primary = MockServer::start().await;
@@ -510,8 +495,6 @@ async fn non_youtube_unavailable_does_not_retry_session_instance() {
     assert_eq!(result["status"], "failed");
 }
 
-/// Empty stream from primary (content-bound enforcement) must trigger the
-/// session-instance retry and serve the file from there.
 #[tokio::test]
 async fn empty_stream_from_primary_retries_session_instance() {
     let primary = MockServer::start().await;
@@ -555,7 +538,6 @@ async fn empty_stream_from_primary_retries_session_instance() {
         .mount(&session)
         .await;
 
-    // juicehost lives on the primary mock server in these tests.
     Mock::given(method("POST"))
         .and(path_regex(
             r"^/internal/file/stream/[A-Za-z0-9_-]+/enforced%20video%2Emp4$",
@@ -581,11 +563,9 @@ async fn empty_stream_from_primary_retries_session_instance() {
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
     assert_eq!(result["status"], "done", "job failed: {result}");
-    assert_eq!(result["file"]["size_bytes"], 15); // len("real-bytes-here")
+    assert_eq!(result["file"]["size_bytes"], 15);
 }
 
-/// Job progress lifecycle: pending -> processing -> downloading (with byte
-/// counts) -> done, including the widened completion guard.
 #[tokio::test]
 async fn fetch_job_progress_lifecycle() {
     let manager = r2d2_sqlite::SqliteConnectionManager::memory();
@@ -619,8 +599,6 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.status, "downloading");
     assert_eq!(job.bytes_received, 4096);
 
-    // completion must be possible from a non-pending intermediate state,
-    // and must record the final byte total via a last progress write.
     juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 8192)
         .unwrap();
     let updated = juiceback::db::finish_fetch_job(&conn, "job1", "done", "", "file1").unwrap();
@@ -636,12 +614,9 @@ async fn fetch_job_progress_lifecycle() {
         .unwrap()
         .unwrap();
     assert_eq!(job.status, "done");
-    assert_eq!(job.stage, "transfer"); // untouched by the late write
+    assert_eq!(job.stage, "transfer");
 }
 
-/// Transient googlevideo blocks clear within minutes: the second primary
-/// attempt (after the retry delay) must succeed with no session instance
-/// configured at all.
 #[tokio::test]
 async fn empty_stream_retries_primary_after_delay() {
     let server = MockServer::start().await;
@@ -709,11 +684,9 @@ async fn empty_stream_retries_primary_after_delay() {
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
     assert_eq!(result["status"], "done", "job failed: {result}");
-    assert_eq!(result["file"]["size_bytes"], 15); // len("recovered-bytes")
+    assert_eq!(result["file"]["size_bytes"], 15);
 }
 
-/// The yt-dlp fallback invocation must carry proxy + PO provider wiring and
-/// keep the source URL last (positional).
 #[test]
 fn ytdlp_args_are_wired_correctly() {
     let args = juiceback::routes::fetch::build_ytdlp_args_for_test(

@@ -1,16 +1,12 @@
-//! Shared TOML config loading plus Sentry settings used by every service.
-
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// Sentry settings shared by all Juicebox services.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SentrySettings {
-    /// Sentry DSN. Falls back to `SENTRY_DSN` when unset.
     #[serde(default)]
     pub dsn: Option<String>,
-    /// Environment reported to Sentry.
+
     #[serde(default = "default_sentry_env")]
     pub environment: String,
 }
@@ -29,7 +25,6 @@ fn default_sentry_env() -> String {
 }
 
 impl SentrySettings {
-    /// Load Sentry settings from the environment with TOML values as defaults.
     #[must_use]
     pub fn from_env_or(file: &Self) -> Self {
         let dsn = std::env::var("SENTRY_DSN")
@@ -44,7 +39,6 @@ impl SentrySettings {
     }
 }
 
-/// Load a TOML config file into `T`, warning and using defaults when missing.
 pub fn load_toml_or_default<T>(path: &Path) -> T
 where
     T: Default + for<'de> Deserialize<'de>,
@@ -65,9 +59,6 @@ where
     }
 }
 
-/// Load `./.env` (repo root / service cwd in dev) for vars not already set.
-/// Explicit environment always wins; a missing file is fine. Every binary
-/// calls this first so standalone runs behave like `juicebox` supervision.
 pub fn load_dotenv() {
     let Ok(text) = std::fs::read_to_string(".env") else {
         return;
@@ -85,6 +76,7 @@ pub fn load_dotenv() {
             continue;
         }
         let value = value.trim().trim_matches('"').trim_matches('\'');
+
         unsafe {
             std::env::set_var(key, value);
         }
@@ -112,10 +104,6 @@ pub fn optional_secret(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// Whether a secret value is empty or one of the documented placeholder
-/// values shipped in `.env.example`. Services refuse to start with these.
-/// Matches by prefix (`change_me`, `change_this`) so every documented
-/// placeholder shape is rejected, not just two exact strings.
 #[must_use]
 pub fn is_placeholder_secret(value: &str) -> bool {
     let trimmed = value.trim();

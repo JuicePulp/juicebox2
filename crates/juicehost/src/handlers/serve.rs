@@ -18,6 +18,7 @@ use crate::{
 
 const FILE_CACHE_CONTROL: &str = "no-store";
 
+#[must_use]
 pub(crate) fn file_cache_control_value(
     state: &AppState,
     ttl_remaining_secs: Option<u64>,
@@ -60,7 +61,6 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
     response
 }
 
-/// Serve `/f/*path`; the optional extension is ignored for lookup.
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_wildcard(
     State(state): State<Arc<AppState>>,
@@ -83,28 +83,26 @@ async fn serve_file_inner(
     let file_meta = match state.storage.stat(&id).await {
         Ok(meta) => meta,
         Err(StorageError::NotFound) => {
-            // File not on disk. Check juiceback to see if it's still uploading.
             if let Some(ref backend_url) = state.backend_url {
                 let status_url = format!("{backend_url}/internal/file/{id}/status");
                 match backend_request(&state, status_url).send().await {
                     Ok(resp) if resp.status().is_success() => {
-                        if let Ok(body) = resp.json::<serde_json::Value>().await {
-                            if body.get("status").and_then(|s| s.as_str()) == Some("uploading") {
-                                let filename = body
-                                    .get("filename")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("upload");
-                                return Ok(prevent_file_caching(
-                                    teapot_html(filename, "", "").into_response(),
-                                ));
-                            }
+                        if let Ok(body) = resp.json::<serde_json::Value>().await
+                            && body.get("status").and_then(|s| s.as_str()) == Some("uploading")
+                        {
+                            let filename = body
+                                .get("filename")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("upload");
+                            return Ok(prevent_file_caching(
+                                teapot_html(filename, "", "").into_response(),
+                            ));
                         }
                     }
-                    _ => {} // Fall through to alias check
+                    _ => {}
                 }
             }
 
-            // Check whether this is an old ID that was renamed.
             if let Some(ref backend_url) = state.backend_url {
                 let alias_url = format!("{backend_url}/internal/alias/{id}");
                 if let Ok(resp) = backend_request(&state, alias_url).send().await
@@ -112,9 +110,6 @@ async fn serve_file_inner(
                     && let Ok(body) = resp.json::<serde_json::Value>().await
                     && let Some(new_url) = body.get("url").and_then(|u| u.as_str())
                 {
-                    // Only follow http(s) targets from the alias
-                    // record; anything else (e.g. a poisoned
-                    // storage_host row) is treated as missing.
                     let valid = new_url
                         .parse::<url::Url>()
                         .is_ok_and(|u| u.scheme() == "http" || u.scheme() == "https");
@@ -132,8 +127,7 @@ async fn serve_file_inner(
 
             return Ok(prevent_file_caching(not_found_html().into_response()));
         }
-        // Surface real backend failures with their own status (403/500/507)
-        // instead of masking them as 404.
+
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
@@ -148,9 +142,7 @@ async fn serve_file_inner(
     };
     let with_cache_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, &cache_control);
-        // Served files are untrusted user content: block MIME sniffing and
-        // prevent any embedded script from executing while keeping inline
-        // display and downloads working.
+
         builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
         builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
         if let Some(tag) = &cache_tag {
@@ -245,15 +237,16 @@ async fn serve_file_inner(
     .map_err(|_| JuicehostError::Internal)
 }
 
-/// Parse a `Range: bytes=START-END` header.
-/// Returns (start, end) where both are inclusive byte offsets.
 #[derive(Debug, PartialEq)]
 pub(crate) enum RangeResult {
     Satisfiable(u64, u64),
+
     Unsatisfiable,
+
     Ignore,
 }
 
+#[must_use]
 pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> RangeResult {
     let range_val = range_val.trim();
     let Some(range_val) = range_val.strip_prefix("bytes=") else {

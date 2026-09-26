@@ -6,13 +6,12 @@ use object_store::ObjectStoreExt;
 
 use super::{
     ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
-    common::{capability_hash, safe_extension, valid_component},
+    capability::{self, CapStore},
+    common::{safe_extension, valid_component},
 };
 use crate::error::StorageError;
 
-/// S3-compatible backend. Objects are stored under `files/{id}.{ext}`.
 pub struct S3Backend {
-    /// The S3 object store client.
     client: Arc<dyn object_store::ObjectStore>,
 }
 
@@ -53,9 +52,6 @@ impl S3Backend {
         object_store::path::Path::from(format!("files/{id}.{ext}"))
     }
 
-    /// Resolve `id` to its stored object with a single LIST. Shared by
-    /// `stat`/`get_stream`/`get_range_stream` so no path pays for the lookup
-    /// twice.
     async fn find_object(&self, id: &str) -> Result<object_store::ObjectMeta, StorageError> {
         use futures::StreamExt;
 
@@ -84,12 +80,15 @@ impl S3Backend {
     fn capability_key(id: &str) -> object_store::path::Path {
         object_store::path::Path::from(format!("files/.capabilities/{id}"))
     }
+}
 
-    async fn create_capability(&self, id: &str, capability: &str) -> Result<(), StorageError> {
+#[async_trait::async_trait]
+impl CapStore for S3Backend {
+    async fn cap_write(&self, id: &str, hash: &str) -> Result<(), StorageError> {
         self.client
             .put_opts(
                 &Self::capability_key(id),
-                object_store::PutPayload::from(Bytes::from(capability_hash(capability))),
+                object_store::PutPayload::from(Bytes::from(hash.to_string())),
                 object_store::PutOptions {
                     mode: object_store::PutMode::Create,
                     ..Default::default()
@@ -100,7 +99,7 @@ impl S3Backend {
             .map_err(Into::into)
     }
 
-    async fn verify_capability(&self, id: &str, capability: &str) -> Result<(), StorageError> {
+    async fn cap_read(&self, id: &str) -> Result<String, StorageError> {
         let data = self
             .client
             .get(&Self::capability_key(id))
@@ -109,20 +108,15 @@ impl S3Backend {
             .bytes()
             .await
             .map_err(|_| StorageError::Forbidden)?;
-        if juiceutils::constant_time_eq(
-            std::str::from_utf8(&data).unwrap_or_default(),
-            &capability_hash(capability),
-        ) {
-            Ok(())
-        } else {
-            Err(StorageError::Forbidden)
-        }
+        Ok(std::str::from_utf8(&data).unwrap_or_default().to_string())
     }
 
-    async fn remove_capability(&self, id: &str) {
+    async fn cap_delete(&self, id: &str) {
         let _ = self.client.delete(&Self::capability_key(id)).await;
     }
+}
 
+impl S3Backend {
     async fn reserve_id(&self, id: &str) -> Result<object_store::path::Path, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
@@ -189,10 +183,7 @@ impl S3Backend {
             self.release_id(&reservation).await;
             return Err(error.into());
         }
-        // The reservation is held across the delete so no concurrent writer
-        // can claim the target; on delete failure the copy is rolled back,
-        // leaving the source intact (a crash between copy and delete can
-        // still duplicate (S3 has no atomic rename).
+
         if let Err(e) = self.delete(old_id, None).await {
             let _ = self.client.delete(&target).await;
             self.release_id(&reservation).await;
@@ -363,14 +354,10 @@ impl StorageBackend for S3Backend {
         data: Bytes,
         capability: Option<&str>,
     ) -> Result<(), StorageError> {
-        if let Some(capability) = capability {
-            self.create_capability(id, capability).await?;
-        }
-        let result = self.write_bytes(id, filename, data).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(id).await;
-        }
-        result
+        capability::run_minted(self, id, capability, || async {
+            self.write_bytes(id, filename, data).await
+        })
+        .await
     }
 
     async fn put_stream(
@@ -380,14 +367,10 @@ impl StorageBackend for S3Backend {
         data: ByteStream,
         capability: Option<&str>,
     ) -> Result<u64, StorageError> {
-        if let Some(capability) = capability {
-            self.create_capability(id, capability).await?;
-        }
-        let result = self.write_stream(id, filename, data).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(id).await;
-        }
-        result
+        capability::run_minted(self, id, capability, || async {
+            self.write_stream(id, filename, data).await
+        })
+        .await
     }
 
     async fn get(&self, id: &str) -> Result<FileData, StorageError> {
@@ -442,17 +425,12 @@ impl StorageBackend for S3Backend {
         let prefix = object_store::path::Path::from(format!("files/{id}."));
         let mut list = self.client.list(Some(&prefix));
 
-        // If the blob is already gone there is nothing to protect, so the
-        // not-found report below runs before any capability check. This lets
-        // cleanup purge orphaned rows without weakening auth for files that
-        // still exist (those still require a valid capability). A list *error*
-        // still goes through verification first, matching the old twin.
         let head = list.next().await;
         if head.is_none() {
             return Ok(false);
         }
         if let Some(capability) = capability {
-            self.verify_capability(id, capability).await?;
+            capability::verify(self, id, capability).await?;
         }
         let obj: object_store::ObjectMeta = match head {
             Some(Ok(obj)) => obj,
@@ -464,7 +442,7 @@ impl StorageBackend for S3Backend {
             .await
             .map_err(|e| StorageError::Io(format!("S3 delete failed: {e}")))?;
 
-        self.remove_capability(id).await;
+        capability::remove(self, id).await;
         Ok(true)
     }
 
@@ -475,14 +453,12 @@ impl StorageBackend for S3Backend {
         capability: Option<&str>,
     ) -> Result<(), StorageError> {
         if let Some(capability) = capability {
-            self.verify_capability(old_id, capability).await?;
-            self.create_capability(new_id, capability).await?;
+            capability::verify(self, old_id, capability).await?;
         }
-        let result = self.rename_object(old_id, new_id).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(new_id).await;
-        }
-        result
+        capability::run_minted(self, new_id, capability, || async {
+            self.rename_object(old_id, new_id).await
+        })
+        .await
     }
 
     async fn stat(&self, id: &str) -> Result<FileMetadata, StorageError> {
@@ -514,8 +490,6 @@ impl StorageBackend for S3Backend {
     ) -> Result<ByteStream, StorageError> {
         use futures::StreamExt;
 
-        // No separate stat() here: find_object is the single LIST, and the
-        // caller already statted for headers before choosing range vs full.
         let obj = self.find_object(id).await?;
 
         let result = self
@@ -547,12 +521,12 @@ impl StorageBackend for S3Backend {
         Ok(Box::pin(stream))
     }
 
-    fn storage_metrics(&self, _min_free_bytes: u64) -> StorageMetrics {
+    fn storage_metrics(&self, min_free_bytes: u64) -> StorageMetrics {
         StorageMetrics {
             total_bytes: 0,
             used_bytes: 0,
             free_bytes: u64::MAX,
-            min_free_bytes: _min_free_bytes,
+            min_free_bytes,
             out_of_space: false,
         }
     }
@@ -566,15 +540,13 @@ impl StorageBackend for S3Backend {
     ) -> Result<(), StorageError> {
         if let Some(capability) = capability {
             for part_id in part_ids {
-                self.verify_capability(part_id, capability).await?;
+                capability::verify(self, part_id, capability).await?;
             }
-            self.create_capability(target_id, capability).await?;
         }
-        let result = self.concat_objects(target_id, filename, part_ids).await;
-        if result.is_err() && capability.is_some() {
-            self.remove_capability(target_id).await;
-        }
-        result
+        capability::run_minted(self, target_id, capability, || async {
+            self.concat_objects(target_id, filename, part_ids).await
+        })
+        .await
     }
 }
 

@@ -31,15 +31,13 @@ fn session_touch_is_coalesced_within_interval() {
     init_db(&conn).unwrap();
     let token = crate::auth::new_session_token();
     let hash = crate::auth::session_token_hash(&token);
-    // last_seen_at = 1000
+
     create_session(&conn, &hash, "user-1", 1000, 10_000).unwrap();
 
-    // Rapid re-resolve
     let (user_id, last_seen) = resolve_session(&conn, &hash, 1010).unwrap().unwrap();
     assert_eq!(user_id, "user-1");
     assert_eq!(last_seen, 1000);
 
-    // Just below the touch interval
     let (_, last_seen) = resolve_session(
         &conn,
         &hash,
@@ -49,7 +47,6 @@ fn session_touch_is_coalesced_within_interval() {
     .unwrap();
     assert_eq!(last_seen, 1000);
 
-    // Past the touch interval
     let (_, last_seen) = resolve_session(
         &conn,
         &hash,
@@ -493,8 +490,7 @@ fn expired_batch_paginates_with_cursor_and_skips_deleted() {
             None,
             None,
         );
-        // Every 10th row stays live so pages contain gaps like a real sweep
-        // where juicehost deletes already purged some rows.
+
         if i % 10 == 0 {
             record.expires_at = 9_999_999_999;
         }
@@ -517,7 +513,7 @@ fn expired_batch_paginates_with_cursor_and_skips_deleted() {
         cursor = batch.last().unwrap().id.clone();
         seen.extend(batch.into_iter().map(|r| r.id));
     }
-    // 1200 rows - 120 live - 90 expired purged = 990 expired swept, no duplicates.
+
     assert_eq!(seen.len(), 990);
     let mut sorted = seen.clone();
     sorted.sort();
@@ -764,7 +760,7 @@ fn test_update_client_file_id_swaps_key() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].id, "new_id");
     assert_eq!(files[0].token, "tok");
-    // A rename that doesn't exist for this client is a no-op.
+
     assert!(!update_client_file_id(&conn, "client-1", "missing", "x").unwrap());
 }
 
@@ -813,7 +809,7 @@ fn migrate_twice_is_stable() {
 #[test]
 fn legacy_files_table_gains_new_columns() {
     let conn = Connection::open_in_memory().unwrap();
-    // Pre-storage_host/status schema, as shipped before those migrations.
+
     conn.execute_batch(
         "CREATE TABLE files (
             id            TEXT PRIMARY KEY,
@@ -845,13 +841,13 @@ fn legacy_files_table_gains_new_columns() {
 fn renew_ids_are_atomic_in_transaction() {
     let conn = Connection::open_in_memory().unwrap();
     init_db(&conn).unwrap();
-    // Seed a file row.
+
     conn.execute(
         "INSERT INTO files (id, filename, mime_type, size_bytes, storage_path, delete_token, uploaded_at, expires_at) VALUES ('old', 'a.txt', 'text/plain', 10, 'remote-old', 'tok', 1000, 2000)",
         [],
     )
     .unwrap();
-    // Successful transaction commits alias + rename together.
+
     conn.unchecked_transaction()
         .map(|tx| {
             insert_alias(&tx, "old", "new").unwrap();
@@ -860,7 +856,7 @@ fn renew_ids_are_atomic_in_transaction() {
         })
         .unwrap();
     assert_eq!(resolve_alias(&conn, "old").unwrap().as_deref(), Some("new"));
-    // Failed transaction rolls everything back including the alias.
+
     let tx = conn.unchecked_transaction().unwrap();
     insert_alias(&tx, "new", "newer").unwrap();
     tx.execute("INSERT INTO files (id) VALUES (NULL)", [])

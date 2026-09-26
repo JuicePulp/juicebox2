@@ -1,7 +1,3 @@
-//! `JuiceBox` x Cobalt.Tools: paste a link (`YouTube`, tiktok, ...), juiceback
-//! asks a self-hosted cobalt instance to process it, streams the result into
-//! juicehost and hands the user a normal /f/ file like any other upload.
-
 pub mod handlers;
 pub mod job;
 pub mod store;

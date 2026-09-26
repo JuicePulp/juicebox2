@@ -1,6 +1,3 @@
-//! juicebox-plus pairing, where the website generates codes that devices
-//! exchange for JWTs.
-
 use std::sync::Arc;
 
 use axum::{
@@ -23,34 +20,33 @@ pub struct GenerateCodeRequest {
 
 #[derive(Serialize, ToSchema)]
 pub struct GenerateCodeResponse {
-    /// One-time pairing code in XXXX-XXXX format (expires in 300 seconds)
     pub code: String,
+
     pub expires_in: u64,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct VerifyCodeRequest {
-    /// The 9-character pairing code obtained from the website
     pub code: String,
+
     pub device_name: String,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct VerifyCodeResponse {
-    /// UUID of the paired device
     pub device_id: String,
-    /// 30-day JWT used to authenticate this device
+
     pub token: String,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct PairingDevice {
-    /// UUID of the paired device
     pub device_id: String,
+
     pub device_name: String,
-    /// Unix timestamp when the device was paired
+
     pub paired_at: i64,
-    /// Unix timestamp of the last heartbeat from the device
+
     pub last_seen_at: i64,
 }
 
@@ -63,7 +59,7 @@ pub struct PairingDevice {
     ),
     tag = "Pairing",
 )]
-/// POST /api/pair/generate returns a blake3-hashed code once and then it's gone
+
 pub async fn generate_code_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -128,7 +124,7 @@ pub async fn generate_code_handler(
     ),
     tag = "Pairing",
 )]
-/// POST /api/pair/verify exchanges a pairing code for a device JWT
+
 pub async fn verify_code_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyCodeRequest>,
@@ -175,7 +171,7 @@ pub async fn verify_code_handler(
     ),
     tag = "Pairing",
 )]
-/// `GET /api/device` - list paired devices for the authenticated user.
+
 pub async fn list_devices_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -212,7 +208,7 @@ pub async fn list_devices_handler(
     ),
     tag = "Pairing",
 )]
-/// DELETE /api/device/:id removes it from the db and broadcasts a disconnect
+
 pub async fn unpair_device_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -229,16 +225,13 @@ pub async fn unpair_device_handler(
         .await?;
 
     if deleted {
-        // Remove from in-memory connected devices and close WS if connected.
         if let Some(mut devices) = state.connected_devices.get_mut(&user_id) {
             devices.retain(|d| {
-                if let Ok(inner) = d.try_lock() {
-                    if inner.device_id == device_id {
-                        // Dropping the sender closes the WS from the device side.
-                        false
-                    } else {
-                        true
-                    }
+                let Ok(inner) = d.try_lock() else {
+                    return true;
+                };
+                if inner.device_id == device_id {
+                    false
                 } else {
                     true
                 }
@@ -249,7 +242,6 @@ pub async fn unpair_device_handler(
             }
         }
 
-        // Broadcast disconnect so SSE listeners update.
         if let Some(tx) = state.presence_listeners.get(&user_id) {
             let _ = tx.send(crate::state::PresenceEvent::DeviceDisconnected {
                 device_id: device_id.clone(),
@@ -286,9 +278,8 @@ fn claim_pairing_code(
         )
         .optional()?;
 
-    let (user_id, expires_at, used) = match record {
-        Some(record) => record,
-        None => return Ok(PairingClaim::NotFound),
+    let Some((user_id, expires_at, used)) = record else {
+        return Ok(PairingClaim::NotFound);
     };
     if now > expires_at {
         return Ok(PairingClaim::Expired);
@@ -311,7 +302,6 @@ fn claim_pairing_code(
     Ok(PairingClaim::Claimed(user_id))
 }
 
-/// Generate a 9-character pairing code without visually ambiguous characters.
 fn generate_pairing_code() -> String {
     let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".chars().collect();
     (0..9)
@@ -325,23 +315,15 @@ fn generate_pairing_code() -> String {
         .collect()
 }
 
-/// Validate that a code matches the `XXXX-XXXX` alphanumeric format (9 chars).
 #[must_use]
 pub fn is_valid_pairing_code(code: &str) -> bool {
     let bytes = code.as_bytes();
     bytes.len() == 9
-        && bytes[0].is_ascii_alphanumeric()
-        && bytes[1].is_ascii_alphanumeric()
-        && bytes[2].is_ascii_alphanumeric()
-        && bytes[3].is_ascii_alphanumeric()
+        && bytes[..4].iter().all(|b| b.is_ascii_alphanumeric())
         && bytes[4] == b'-'
-        && bytes[5].is_ascii_alphanumeric()
-        && bytes[6].is_ascii_alphanumeric()
-        && bytes[7].is_ascii_alphanumeric()
-        && bytes[8].is_ascii_alphanumeric()
+        && bytes[5..].iter().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// Create a JWT for a paired device (30-day expiry).
 fn create_device_jwt(device_id: &str, user_id: &str, secret: &str) -> Result<String, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -367,9 +349,13 @@ fn create_device_jwt(device_id: &str, user_id: &str, secret: &str) -> Result<Str
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceClaims {
     pub sub: String,
+
     pub user_id: String,
+
     pub iss: String,
+
     pub iat: usize,
+
     pub exp: usize,
 }
 
@@ -389,7 +375,7 @@ mod tests {
     fn code_validation_rejects_bad_lengths() {
         assert!(!is_valid_pairing_code("ABC"));
         assert!(!is_valid_pairing_code("ABCDEFGHJKLMNP23456789"));
-        assert!(!is_valid_pairing_code("ABCDEFGH")); // 8 chars but no dash
+        assert!(!is_valid_pairing_code("ABCDEFGH"));
     }
 
     #[test]
@@ -401,7 +387,7 @@ mod tests {
     fn code_is_uppercase_alphanumeric() {
         let code = generate_pairing_code();
         let chars: Vec<char> = code.chars().collect();
-        // No lowercase, no I/1/O/0
+
         for (i, c) in chars.iter().enumerate() {
             if i == 4 {
                 assert_eq!(*c, '-');

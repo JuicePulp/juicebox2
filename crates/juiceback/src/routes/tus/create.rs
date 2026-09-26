@@ -70,11 +70,9 @@ pub async fn create_upload_handler(
         .filter(|entry| entry.hashed_ip == hashed_ip)
         .count();
     if ip_sessions >= crate::constants::MAX_TUS_PER_IP {
-        tracing::warn!(
-            "tus: ip={} hit per-IP session limit ({})",
-            crate::utils::truncate_hash(&hashed_ip),
-            crate::constants::MAX_TUS_PER_IP
-        );
+        let ip_preview = crate::utils::truncate_hash(&hashed_ip);
+        let per_ip_cap = crate::constants::MAX_TUS_PER_IP;
+        tracing::warn!("tus: ip={ip_preview} hit per-IP session limit ({per_ip_cap})");
         return Err(AppError::RateLimited);
     }
 
@@ -104,13 +102,11 @@ pub async fn create_upload_handler(
         .map(UploadMode::from)
         .unwrap_or(UploadMode::Standard);
 
-    // Parallel upload session metadata (optional).
     let session_id = find_meta(&metadata, "session_id").map(ToString::to_string);
     let part_index = parse_parallel_number(find_meta(&metadata, "part_index"))?;
     let total_parts = parse_parallel_number(find_meta(&metadata, "total_parts"))?;
     let parallel = validate_parallel_metadata(session_id.as_deref(), part_index, total_parts)?;
 
-    // Quick Link reservation ID (optional).
     let reserve_id = find_meta(&metadata, "reserve_id")
         .filter(|v| !v.is_empty())
         .map(|value| {
@@ -189,11 +185,6 @@ pub async fn create_upload_handler(
             || session.reservation_token != reservation_token
             || session.upload_mode != storage_upload_mode
         {
-            // NB: client IP and user_id are deliberately NOT compared - the
-            // client can flap IPv4<->IPv6 between requests and cookieless
-            // origins mint a fresh anonymous user per request, so identity
-            // fields churn mid-upload while the structural fields above
-            // uniquely define the session.
             return Err(AppError::BadRequest(
                 "parallel upload session metadata mismatch".into(),
             ));
@@ -225,18 +216,10 @@ pub async fn create_upload_handler(
             return Err(AppError::PayloadTooLarge);
         }
         session.part_lengths.insert(pi, total_length);
-        tracing::debug!(
-            "parallel part registered: session={} part={}/{} id={}",
-            sid,
-            pi + 1,
-            tp,
-            id
-        );
+        let part_no = pi + 1;
+        tracing::debug!("parallel part registered: session={sid} part={part_no}/{tp} id={id}");
     }
 
-    // Chunks flow from PATCH handlers into the storage task without disk buffering.
-    // The push task itself is spawned lazily on the first chunk so a session
-    // that is slow to start never trips juicehost's body inactivity deadline.
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 

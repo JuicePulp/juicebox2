@@ -15,7 +15,6 @@ pub fn upsert_hoster(conn: &Connection, host: &str, status: &str, error: &str) -
     Ok(())
 }
 
-/// Fetch a single hoster record by host.
 pub fn get_hoster(conn: &Connection, host: &str) -> Result<Option<HosterRecord>> {
     conn.query_row(
         "SELECT host, first_seen_at, last_seen_at, last_status, last_error, \
@@ -38,7 +37,6 @@ pub fn get_hoster(conn: &Connection, host: &str) -> Result<Option<HosterRecord>>
     .optional()
 }
 
-/// Ban or unban a hoster. Returns true if a row was updated.
 pub fn update_hoster_banned(
     conn: &Connection,
     host: &str,
@@ -54,7 +52,6 @@ pub fn update_hoster_banned(
     Ok(affected > 0)
 }
 
-/// Whitelist of allowed sort columns for hosters.
 fn hoster_sort_column(sort: &str) -> &str {
     match sort {
         "host" => "host",
@@ -65,7 +62,6 @@ fn hoster_sort_column(sort: &str) -> &str {
     }
 }
 
-/// Paginated hosters with search, sort, offset, limit.
 pub fn list_hosters_paginated(
     conn: &Connection,
     search: &str,

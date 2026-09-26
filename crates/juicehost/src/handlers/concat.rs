@@ -8,17 +8,16 @@ use crate::{error::JuicehostError, state::AppState, storage::valid_component as 
 #[derive(serde::Deserialize)]
 pub struct ConcatRequest {
     target_id: String,
+
     #[serde(default = "default_concat_filename")]
     filename: String,
+
     parts: Vec<String>,
 }
 
 fn default_concat_filename() -> String {
     "upload.bin".into()
 }
-
-/// Concatenate multiple part files into a single target file, then delete the
-/// parts.
 
 #[utoipa::path(
     post,
@@ -78,7 +77,7 @@ pub async fn concat_files(
         .await
         .map_err(JuicehostError::from)?;
 
-    tracing::info!("concat: {} <- {:?} ({})", target_id, parts, filename);
+    tracing::info!("concat: {target_id} <- {parts:?} ({filename})");
 
     Ok(Json(serde_json::json!({"status": "ok", "id": target_id})))
 }

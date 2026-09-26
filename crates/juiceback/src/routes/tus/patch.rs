@@ -79,11 +79,6 @@ pub async fn patch_upload_handler(
     res
 }
 
-/// Stream a request body into memory with a hard cap, aborting with
-/// `PayloadTooLarge` as soon as the cap is exceeded instead of buffering an
-/// unbounded body. A mid-stream client disconnect surfaces as `BadRequest`;
-/// the stored upload offset is never bumped, so the client can retry the
-/// same offset.
 pub(super) async fn collect_bounded_body(body: Body, cap: usize) -> Result<Vec<u8>, AppError> {
     let mut buf = Vec::new();
     let mut stream = body.into_data_stream();
@@ -97,9 +92,6 @@ pub(super) async fn collect_bounded_body(body: Body, cap: usize) -> Result<Vec<u
     Ok(buf)
 }
 
-/// Blocking gzip decode for `spawn_blocking`: decodes one self-contained gzip
-/// member with a running output cap (zip-bomb guard). Pure function so unit
-/// tests can cover it without a runtime.
 pub(super) fn decode_gzip_bounded(raw: Vec<u8>, cap: usize) -> Result<Bytes, AppError> {
     use std::io::Read as _;
     let mut decoder = flate2::read::GzDecoder::new(raw.as_slice());
@@ -133,14 +125,8 @@ async fn patch_upload_handler_impl(
         .and_then(|v| v.parse::<u64>().ok())
         .ok_or_else(|| AppError::TusMissingOffset)?;
 
-    // Stream the PATCH body with a hard per-request cap instead of buffering
-    // an unbounded `Bytes`: memory per PATCH stays under TUS_PATCH_MAX_BYTES
-    // no matter how large the client claims the chunk is.
     let raw = collect_bounded_body(body, crate::constants::TUS_PATCH_MAX_BYTES).await?;
 
-    // Chunks may arrive gzip-compressed (X-File-Encoding: gzip, one
-    // self-contained gzip member per PATCH). Decode up front so first-chunk
-    // magic validation sniffs real content and offsets stay logical.
     let body_bytes = if headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip")
         && !raw.is_empty()
     {
@@ -240,9 +226,6 @@ async fn patch_upload_handler_impl(
         }
     }
 
-    // First chunk for this session: hand the receiver to a freshly spawned
-    // storage push. Sessions that never reach this point hold no juicehost
-    // connection and cannot starve its inactivity deadline.
     {
         let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
         if let Some(rx) = upload.push_rx.take() {
@@ -263,11 +246,8 @@ async fn patch_upload_handler_impl(
         await_storage_push(&state, &id).await?;
         return Err(AppError::TusSessionNotFound);
     }
-    tracing::debug!(
-        "tus patch: chunk_stream took {:?} ({} bytes)",
-        send_start.elapsed(),
-        chunk_len
-    );
+    let stream_elapsed = send_start.elapsed();
+    tracing::debug!("tus patch: chunk_stream took {stream_elapsed:?} ({chunk_len} bytes)");
     drop(sender);
 
     let (is_complete, completed_meta) = {
@@ -297,10 +277,7 @@ async fn patch_upload_handler_impl(
             (false, None)
         }
     };
-    // Release the per-upload lock before the slow completion (push drain +
-    // concat + DB): offset validation, send, and bump above are done, and a
-    // concurrent PATCH now fails fast on the removed session instead of
-    // stalling behind the whole completion.
+
     drop(_patch_guard);
 
     if is_complete {

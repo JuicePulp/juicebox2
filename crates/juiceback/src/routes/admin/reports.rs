@@ -14,17 +14,24 @@ use crate::{db, error::AppError, state::AppState};
 #[derive(Serialize, ToSchema)]
 pub struct AdminReportEntry {
     pub id: i64,
+
     pub file_url: String,
+
     pub reason: String,
+
     pub details: String,
+
     pub reporter_ip_hash: Option<String>,
+
     pub email: Option<String>,
+
     pub created_at: i64,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminReportsResponse {
     pub items: Vec<AdminReportEntry>,
+
     pub total: i64,
 }
 
@@ -65,8 +72,6 @@ pub async fn list_reports_handler(
     let reports: Vec<AdminReportEntry> = records
         .into_iter()
         .map(|r| {
-            // Raw IPs are never exposed: decrypt transiently only to derive
-            // the truncated abuse hash, which is all the dashboard needs.
             let ip_hash = r
                 .reporter_ip
                 .as_ref()

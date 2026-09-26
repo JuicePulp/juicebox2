@@ -17,7 +17,6 @@ pub fn insert_report(
     Ok(conn.last_insert_rowid())
 }
 
-/// List all reports, newest first.
 pub fn list_reports(conn: &Connection) -> Result<Vec<ReportRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, file_url, reason, details, reporter_ip, email, created_at FROM reports ORDER BY created_at DESC",
@@ -36,7 +35,6 @@ pub fn list_reports(conn: &Connection) -> Result<Vec<ReportRecord>> {
     rows.collect()
 }
 
-/// Delete a report by ID and return true if anything was actually removed
 pub fn delete_report(conn: &Connection, id: i64) -> Result<bool> {
     let affected = conn.execute("DELETE FROM reports WHERE id = ?1", params![id])?;
     Ok(affected > 0)

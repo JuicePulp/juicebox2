@@ -84,12 +84,6 @@ pub(crate) fn region_host(
     state.config.region_public_juicehosts.get(&region).cloned()
 }
 
-/// Sanitize a user-supplied upload filename: trim, drop control characters
-/// and path separators inline (so `path/to/file.txt` becomes
-/// `pathtofile.txt`), strip `..`, and fall back to `"upload"`.
-/// NOTE: intentionally different from `fetch::validation::sanitize_filename`,
-/// which takes a basename and guarantees an extension for remote suggestions.
-/// Keep the two contracts separate.
 pub(crate) fn sanitize_filename(name: &str) -> String {
     let name = name.trim();
     if name.is_empty() {

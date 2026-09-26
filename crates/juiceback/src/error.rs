@@ -1,5 +1,3 @@
-//! Error types mapped to HTTP status codes and JSON response bodies.
-
 use axum::{
     Json,
     http::StatusCode,
@@ -7,45 +5,41 @@ use axum::{
 };
 use serde_json::json;
 
-/// Application errors exposed through the HTTP API.
 #[derive(Debug)]
 pub enum AppError {
     NotFound,
     Gone,
     Forbidden(String),
-    /// Resource already exists (e.g. custom file ID taken)
+
     Conflict(String),
 
-    /// Upload body claims gzip but decompression failed
     GzipDecodeFailed,
 
-    /// Upload-Length header missing or unparseable
     TusMissingLength,
-    /// Upload-Offset header missing or unparseable
+
     TusMissingOffset,
-    /// Client-supplied offset does not match server state
+
     TusOffsetMismatch,
-    /// TUS upload session not found
+
     TusSessionNotFound,
 
     PayloadTooLarge,
     RateLimited,
-    /// Account temporarily locked due to too many failed login attempts
+
     TooManyRequests(String),
-    /// File type is blocked (dangerous executable, script, etc.)
+
     BlockedFileType(String),
 
-    /// Cannot reach juicehost at all (connection refused / dns)
     JuicehostUnreachable(String),
-    /// juicehost returned a non-2xx status
+
     JuicehostRejected(String),
-    /// juicehost returned 507, disk is full
+
     InsufficientStorage(String),
     FilesystemError(std::io::Error),
     DatabaseError(rusqlite::Error),
-    /// Could not acquire a connection from the database pool
+
     DbPoolError(String),
-    /// A background task (`spawn_blocking`) panicked
+
     TaskPanicked(String),
     BadRequest(String),
     Unauthorized(String),
@@ -190,8 +184,6 @@ impl IntoResponse for AppError {
     }
 }
 
-/// Extract a clean message from errors formatted as `[CODE] message
-/// (status=N)`.
 fn extract_error_message(e: &str) -> &str {
     e.strip_prefix('[')
         .and_then(|s| s.find("] "))
@@ -214,8 +206,6 @@ impl From<rusqlite::Error> for AppError {
 }
 
 impl AppError {
-    /// Log the error at the appropriate level when creating the error,
-    /// not when converting it to an HTTP response.
     pub fn log_error(&self) {
         match self {
             Self::JuicehostUnreachable(e) => tracing::error!("juicehost unreachable: {e}"),

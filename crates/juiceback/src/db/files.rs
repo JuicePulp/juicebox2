@@ -148,22 +148,18 @@ pub fn get_file(conn: &Connection, id: &str) -> Result<Option<FileRecord>> {
 
     let mut rows = stmt.query(params![id])?;
 
-    if let Some(row) = rows.next()? {
-        Ok(Some(row_to_file_record(row)?))
-    } else {
-        Ok(None)
-    }
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(row_to_file_record(row)?))
 }
 
-/// Look up multiple file records by their IDs.
 pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRecord>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let placeholders: String = ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("?{}", i + 1))
+    let placeholders: String = (1..=ids.len())
+        .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(", ");
     let mut stmt = conn.prepare(&format!(
@@ -174,13 +170,11 @@ pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRec
     rows.collect()
 }
 
-/// Delete a file record by ID and return true if anything was actually removed
 pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     let affected = conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
     Ok(affected > 0)
 }
 
-/// List every file record, newest first.
 pub fn list_all_files(conn: &Connection) -> Result<Vec<FileRecord>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {FILE_COLUMNS} FROM files ORDER BY uploaded_at DESC"
@@ -189,8 +183,6 @@ pub fn list_all_files(conn: &Connection) -> Result<Vec<FileRecord>> {
     rows.collect()
 }
 
-/// Give a file a new ID and URL while keeping the `delete_token` filename and
-/// expiry the same
 pub fn renew_file_id(
     conn: &Connection,
     old_id: &str,
@@ -204,7 +196,6 @@ pub fn renew_file_id(
     Ok(affected > 0)
 }
 
-/// Record that `old_id` now redirects to `new_id`.
 pub fn insert_alias(conn: &Connection, old_id: &str, new_id: &str) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO aliases (old_id, new_id) VALUES (?1, ?2)",
@@ -213,15 +204,11 @@ pub fn insert_alias(conn: &Connection, old_id: &str, new_id: &str) -> Result<()>
     Ok(())
 }
 
-/// Remove a file alias by its `old_id`.
 pub fn delete_alias(conn: &Connection, old_id: &str) -> Result<bool> {
     let affected = conn.execute("DELETE FROM aliases WHERE old_id = ?1", params![old_id])?;
     Ok(affected > 0)
 }
 
-/// Resolve a previous file ID to its current ID.
-///
-/// Follows alias chains up to 10 hops to avoid infinite loops.
 pub fn resolve_alias(conn: &Connection, old_id: &str) -> Result<Option<String>> {
     let mut current = old_id.to_string();
     for _ in 0..10 {
@@ -234,8 +221,7 @@ pub fn resolve_alias(conn: &Connection, old_id: &str) -> Result<Option<String>> 
             .optional()?;
         match result {
             Some(next) if next != current => current = next,
-            // Chain end (or self-loop): only an alias if we moved. Callers
-            // that want identity fallback apply `.unwrap_or(id)` themselves.
+
             _ => {
                 return Ok(if current == old_id {
                     None
@@ -248,11 +234,6 @@ pub fn resolve_alias(conn: &Connection, old_id: &str) -> Result<Option<String>> 
     Ok(Some(current))
 }
 
-/// One bounded page of expired files for the cleanup loop. Keyset on `id`
-/// (rather than OFFSET) so concurrent deletes can't shift rows between pages;
-/// rows whose juicehost delete fails stay for the next cycle because the
-/// cursor advances past them. An empty result (or a short page) ends the
-/// sweep.
 pub fn list_expired_batch(
     conn: &Connection,
     after_id: &str,
@@ -265,9 +246,6 @@ pub fn list_expired_batch(
     rows.collect()
 }
 
-/// Bounded page of quick link uploads that were reserved but never completed
-/// so we know they're safe to delete. Same keyset contract as
-/// `list_expired_batch`; served by `idx_files_status_uploaded`.
 pub fn list_abandoned_uploads_batch(
     conn: &Connection,
     older_than_secs: i64,
@@ -284,15 +262,12 @@ pub fn list_abandoned_uploads_batch(
     rows.collect()
 }
 
-/// Bulk-delete file records by their IDs and return the number of removed rows.
 pub fn delete_files_by_ids(conn: &Connection, ids: &[String]) -> Result<usize> {
     if ids.is_empty() {
         return Ok(0);
     }
-    let placeholders: String = ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("?{}", i + 1))
+    let placeholders: String = (1..=ids.len())
+        .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!("DELETE FROM files WHERE id IN ({placeholders})");

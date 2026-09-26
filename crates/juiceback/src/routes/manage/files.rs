@@ -1,6 +1,3 @@
-//! endpoints for getting file info, deleting, renewing the ID, and looking up
-//! owned files.
-
 use std::sync::Arc;
 
 use axum::{
@@ -14,152 +11,19 @@ use utoipa::ToSchema;
 
 use crate::{
     db,
-    db::{ClientFileRecord, FileRecord},
+    db::FileRecord,
     error::AppError,
     routes::{UserId, noscript},
     state::AppState,
     utils::constant_time_eq,
 };
 
-/// Form fields for no-JS file rename.
 #[derive(Deserialize)]
 pub struct RenameForm {
     pub token: String,
     pub custom_id: String,
 }
 
-/// Request body for the owned-files bulk lookup endpoint.
-#[derive(Deserialize, ToSchema)]
-pub struct OwnedFilesRequest {
-    pub pairs: Vec<FilePair>,
-}
-
-/// An ID and delete-token pair to prove you own a file.
-#[derive(Deserialize, ToSchema)]
-pub struct FilePair {
-    pub id: String,
-    pub token: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct OwnedFilesResponse {
-    pub files: Vec<FileInfoResponse>,
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/owned-files",
-    request_body(content = OwnedFilesRequest, description = "List of file IDs and delete tokens you own"),
-    responses(
-        (status = 200, description = "List of files you own that havent expired yet", body = OwnedFilesResponse),
-    ),
-    tag = "Files",
-)]
-pub async fn owned_files_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<OwnedFilesRequest>,
-) -> Result<Json<OwnedFilesResponse>, AppError> {
-    let now = chrono::Utc::now().timestamp();
-
-    let ids: Vec<String> = payload.pairs.iter().map(|p| p.id.clone()).collect();
-    let token_map: std::collections::HashMap<String, &str> = payload
-        .pairs
-        .iter()
-        .map(|p| (p.id.clone(), p.token.as_str()))
-        .collect();
-
-    let records = state
-        .db_call("get_files_by_ids", move |db| db::get_files_by_ids(db, &ids))
-        .await?;
-
-    let files: Vec<FileInfoResponse> = records
-        .into_iter()
-        .filter(|r| {
-            r.expires_at >= now
-                && token_map
-                    .get(&r.id)
-                    .is_some_and(|t| constant_time_eq(&r.delete_token, t))
-        })
-        .map(|r| FileInfoResponse::from_record(r, &state.config.public_base_url))
-        .collect();
-
-    Ok(Json(OwnedFilesResponse { files }))
-}
-
-/// Body for the per-client file registry.
-#[derive(Deserialize, ToSchema)]
-pub struct ClientFilesRequest {
-    pub files: Vec<ClientFileRecord>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ClientFilesResponse {
-    pub files: Vec<ClientFileRecord>,
-}
-
-/// Maximum number of files one client can register (abuse guard).
-const CLIENT_FILES_MAX: usize = 500;
-
-/// One-release import of locally-verifiable legacy browser capabilities.
-///
-/// The browser holds the full list. The `jb_files` cookie is capped at
-/// ~4KB, but this registry has no size limit, so the full upload list (with
-/// metadata) survives for no-JS SSR even when the default juiceback can't
-/// resolve the ids (custom-host / other-backend files). The client is
-/// identified by the `jb_uid` cookie via the user-identity middleware.
-#[utoipa::path(
-    post,
-    path = "/api/client-files",
-    request_body(content = ClientFilesRequest, description = "The client's full upload list (id + delete token + display metadata)"),
-    responses(
-        (status = 200, description = "Registry replaced", body = ClientFilesResponse),
-        (status = 400, description = "Too many files"),
-    ),
-    tag = "Files",
-)]
-pub async fn put_client_files_handler(
-    State(state): State<Arc<AppState>>,
-    UserId(user_id): UserId,
-    Json(payload): Json<ClientFilesRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    if payload.files.len() > CLIENT_FILES_MAX {
-        return Err(AppError::BadRequest(format!(
-            "Too many files: {} (max {CLIENT_FILES_MAX})",
-            payload.files.len()
-        )));
-    }
-    let key = user_id;
-    let count = state
-        .db_call("import_verified_client_files", move |db| {
-            db::import_verified_client_files(db, &key, &payload.files)
-        })
-        .await?;
-    Ok(Json(serde_json::json!({ "count": count })))
-}
-
-/// Fetch the caller's registered file list (used by SSR /files).
-#[utoipa::path(
-    get,
-    path = "/api/client-files",
-    responses(
-        (status = 200, description = "The client's registered files", body = ClientFilesResponse),
-    ),
-    tag = "Files",
-)]
-pub async fn list_client_files_handler(
-    State(state): State<Arc<AppState>>,
-    UserId(user_id): UserId,
-) -> Result<Json<ClientFilesResponse>, AppError> {
-    let key = user_id.clone();
-    let files = state
-        .db_call("list_client_files", move |db| {
-            db::list_client_files(db, &key)
-        })
-        .await?;
-    Ok(Json(ClientFilesResponse { files }))
-}
-
-/// Public metadata returned by the file-info and owned-files endpoints.
 #[derive(Serialize, ToSchema)]
 pub struct FileInfoResponse {
     pub id: String,
@@ -174,12 +38,11 @@ pub struct FileInfoResponse {
 }
 
 impl FileInfoResponse {
-    /// Build a response from a database record, computing the public URL.
     #[must_use]
     pub fn from_record(record: FileRecord, public_base_url: &str) -> Self {
         let url = crate::utils::public_url(
             public_base_url,
-            &record.storage_host,
+            record.storage_host.as_deref(),
             &record.id,
             &record.filename,
         );
@@ -206,8 +69,6 @@ pub struct RenewResponse {
     pub custom: bool,
 }
 
-/// Request body for file-ID renewal where you can pass `custom_id` to set a URL
-/// slug
 #[derive(Deserialize, ToSchema, Default)]
 pub struct RenewRequest {
     pub custom_id: Option<String>,
@@ -231,9 +92,6 @@ pub async fn file_info_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<(HeaderMap, Json<FileInfoResponse>), AppError> {
-    // Follow aliases so stale entries (e.g. a pre-rename id left in a cookie)
-    // self-heal: info reports the file's current id and url. Both lookups run
-    // in one checkout instead of two sequential pool round trips.
     let id2 = id.clone();
     let record = state
         .db_call("resolve_file_info", move |db| {
@@ -262,7 +120,6 @@ pub async fn file_info_handler(
     ))
 }
 
-/// POST /file/:id/delete via a no-JS form that redirects to /files
 #[utoipa::path(
     post,
     path = "/file/{id}/delete",
@@ -337,7 +194,12 @@ async fn delete_file_inner(
         })
         .await?;
 
-    crate::cloudflare::purge_file(&state.config, id, &record.filename, &record.storage_host);
+    crate::cloudflare::purge_file(
+        &state.config,
+        id,
+        &record.filename,
+        record.storage_host.as_deref(),
+    );
 
     tracing::info!("delete: id={id}");
     Ok(())
@@ -370,8 +232,6 @@ pub async fn delete_file_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Rotate a file ID by proving ownership with the delete token, pass
-/// `custom_id` for a slug or leave it empty for a nanoid
 #[utoipa::path(
     post,
     path = "/file/{id}/renew",
@@ -426,82 +286,37 @@ pub async fn renew_file_id_handler(
 
     let custom_id_raw = body.and_then(|Json(r)| r.custom_id).unwrap_or_default();
 
-    let (new_id, is_custom) = if !custom_id_raw.is_empty() {
-        let normalized = crate::utils::normalize_custom_id(&custom_id_raw);
-        if !crate::utils::is_valid_id(&normalized) {
-            return Err(AppError::BadRequest(format!(
-                "invalid custom ID: must be {}-{} chars, alphanumeric, hyphens, or underscores",
-                crate::constants::MIN_CUSTOM_ID_LEN,
-                crate::constants::MAX_CUSTOM_ID_LEN,
-            )));
-        }
-        let new_id2 = normalized.clone();
-        let exists = state
-            .db_call("get_file", move |db| db::get_file(db, &new_id2))
-            .await?;
-        if exists.is_some() {
-            return Err(AppError::Conflict("custom ID is already taken".into()));
-        }
-        (normalized, true)
-    } else {
-        (nanoid::nanoid!(8), false)
-    };
+    let (new_id, is_custom) = super::lifecycle::pick_new_id(&state, &custom_id_raw).await?;
 
-    // Alias old ID before renaming, so old URLs still work. Alias, file
-    // rename, and client-registry re-key succeed or fail together in one
-    // transaction (the juicehost rename below stays outside: it cannot join
-    // a SQLite transaction and keeps its compensating rollback).
-    let alias_old = id.clone();
-    let alias_new = new_id.clone();
-    let old_id = id.clone();
-    let new_id2 = new_id.clone();
-    let storage_path = format!("remote-{new_id2}");
-    let owner = user_id;
-    let old_owned_id = id.clone();
-    let new_owned_id = new_id.clone();
-    let updated = state
-        .db_transaction("renew_file_ids", move |tx| {
-            // insert_alias is INSERT OR REPLACE: preserve the old fire-and-forget
-            // semantics by ignoring its result inside the transaction.
-            let _ = db::insert_alias(tx, &alias_old, &alias_new);
-            let updated = db::renew_file_id(tx, &old_id, &new_id2, &storage_path)?;
-            db::update_client_file_id_in_tx(tx, &owner, &old_owned_id, &new_owned_id)?;
-            Ok(updated)
-        })
-        .await?;
+    let updated = super::lifecycle::swap_ids_transactional(&state, &user_id, &id, &new_id).await?;
 
     if !updated {
         return Err(AppError::NotFound);
     }
 
-    // Tell juicehost to rename the file
     let host_opt = record.storage_host.as_deref();
-    if let Err(e) = crate::storage_client::rename_file_on_juicehost(
+    super::lifecycle::rename_on_host_with_rollback(
         &state,
         &id,
         &new_id,
         host_opt,
-        Some(&record.delete_token),
+        &record.delete_token,
     )
-    .await
-    {
-        tracing::error!(
-            "renew: juicehost rename failed for id={}, rolling back: {}",
-            id,
-            e
-        );
-        rollback_renew_file_id(&state, &new_id, &id).await;
-        return Err(AppError::JuicehostRejected(e));
-    }
+    .await?;
 
     let url = crate::utils::public_url(
         &state.config.public_base_url,
-        &record.storage_host,
+        record.storage_host.as_deref(),
         &new_id,
         &record.filename,
     );
 
-    crate::cloudflare::purge_file(&state.config, &id, &record.filename, &record.storage_host);
+    crate::cloudflare::purge_file(
+        &state.config,
+        &id,
+        &record.filename,
+        record.storage_host.as_deref(),
+    );
 
     tracing::info!(
         "renew: old_id={} new_id={} custom={}",
@@ -519,28 +334,6 @@ pub async fn renew_file_id_handler(
     }))
 }
 
-async fn rollback_renew_file_id(state: &Arc<AppState>, old_id: &str, new_id: &str) {
-    let old_id = old_id.to_string();
-    let new_id = new_id.to_string();
-    let alias_id = new_id.clone();
-    let storage_path = format!("remote-{new_id}");
-    let _ = state
-        .db_call("renew_file_id_rollback", move |db| {
-            db::renew_file_id(db, &old_id, &new_id, &storage_path)
-        })
-        .await;
-    // Clean up the stale alias so old URLs don't redirect to a non-existent ID.
-    let _ = state
-        .db_call("delete_alias", move |db| db::delete_alias(db, &alias_id))
-        .await;
-}
-
-/// POST /file/:id/rename via a no-JS form that redirects to /files
-/// Accepts a form with `token` and `custom_id` fields.
-///
-/// Keeps the client's list in sync: the `jb_files` cookie entry swaps its id
-/// and the `client_files` registry row is re-keyed, so no-JS /files still
-/// lists the file under its new URL.
 pub async fn rename_file_form_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -572,81 +365,26 @@ pub async fn rename_file_form_handler(
         ));
     }
 
-    let new_id = if form.custom_id.is_empty() {
-        nanoid::nanoid!(8)
-    } else {
-        let normalized = crate::utils::normalize_custom_id(&form.custom_id);
-        if !crate::utils::is_valid_id(&normalized) {
-            return Err(AppError::BadRequest(format!(
-                "invalid custom ID: must be {}-{} chars, alphanumeric, hyphens, or underscores",
-                crate::constants::MIN_CUSTOM_ID_LEN,
-                crate::constants::MAX_CUSTOM_ID_LEN,
-            )));
-        }
-        let new_id2 = normalized.clone();
-        let exists = state
-            .db_call("get_file", move |db| db::get_file(db, &new_id2))
-            .await?;
-        if exists.is_some() {
-            return Err(AppError::Conflict("custom ID is already taken".into()));
-        }
-        normalized
-    };
+    let (new_id, _) = super::lifecycle::pick_new_id(&state, &form.custom_id).await?;
 
-    let old_id = id.clone();
-    let new_id2 = new_id.clone();
-    let storage_path = format!("remote-{new_id2}");
-
-    let alias_old = id.clone();
-    let alias_new = new_id.clone();
-    let _ = state
-        .db_call("insert_alias", move |db| {
-            db::insert_alias(db, &alias_old, &alias_new)
-        })
-        .await;
-
-    let updated = state
-        .db_call("renew_file_id", move |db| {
-            db::renew_file_id(db, &old_id, &new_id2, &storage_path)
-        })
-        .await?;
+    let updated = super::lifecycle::swap_ids_transactional(&state, &user_id, &id, &new_id).await?;
 
     if !updated {
         return Err(AppError::NotFound);
     }
 
     let host_opt = record.storage_host.as_deref();
-    if let Err(e) = crate::storage_client::rename_file_on_juicehost(
+    super::lifecycle::rename_on_host_with_rollback(
         &state,
         &id,
         &new_id,
         host_opt,
-        Some(&record.delete_token),
+        &record.delete_token,
     )
-    .await
-    {
-        tracing::error!(
-            "rename form: juicehost rename failed for id={}, rolling back: {}",
-            id,
-            e
-        );
-        rollback_renew_file_id(&state, &new_id, &id).await;
-        return Err(AppError::JuicehostRejected(e));
-    }
+    .await?;
 
-    // Keep the client's file list consistent: swap old id -> new id in the
-    // jb_files cookie and the client_files registry, so no-JS /files renders
-    // the file under its new URL.
     let cookie_hdr =
         noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token);
-    let client_key = user_id.clone();
-    let old_id = id.clone();
-    let new_id2 = new_id.clone();
-    let _ = state
-        .db_call("update_client_file_id", move |db| {
-            db::update_client_file_id(db, &client_key, &old_id, &new_id2)
-        })
-        .await;
 
     tracing::info!("rename form: old_id={id} new_id={new_id}");
     let mut response = Redirect::to("/files.html?renamed=1").into_response();
@@ -656,8 +394,6 @@ pub async fn rename_file_form_handler(
     Ok(response)
 }
 
-/// GET /`internal/alias/:old_id` is what juicehost calls to resolve old file
-/// IDs
 pub async fn resolve_alias_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -687,7 +423,7 @@ pub async fn resolve_alias_handler(
             if let Some(rec) = record {
                 let url = crate::utils::public_url(
                     &state.config.public_base_url,
-                    &rec.storage_host,
+                    rec.storage_host.as_deref(),
                     &new_id,
                     &rec.filename,
                 );

@@ -18,6 +18,7 @@ const LOCKOUT_SECS: i64 = 600;
 #[derive(Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub username: String,
+
     pub password: String,
 }
 
@@ -29,6 +30,7 @@ pub struct LoginResponse {
 #[derive(Serialize, ToSchema)]
 pub struct CheckResponse {
     pub ok: bool,
+
     pub username: String,
 }
 
@@ -101,10 +103,7 @@ pub async fn login_handler(
 
     if failed_count >= MAX_FAILURES {
         tracing::warn!(
-            "admin login: account '{}' is locked out ({} failures in {}s)",
-            username,
-            failed_count,
-            LOCKOUT_SECS
+            "admin login: account '{username}' is locked out ({failed_count} failures in {LOCKOUT_SECS}s)"
         );
         return Err(AppError::TooManyRequests(
             "account temporarily locked due to too many failed attempts".into(),
@@ -124,11 +123,11 @@ pub async fn login_handler(
         })
         .await?;
     let Some(user) = user else {
-        let uname = username.clone();
-        let missing_user_ip_hash = ip_hash.clone();
         state
-            .db_call("insert_failed_login", move |db| {
-                db::insert_failed_login_for_ip(db, &uname, &missing_user_ip_hash)
+            .db_call("insert_failed_login", {
+                let uname = username.clone();
+                let missing_user_ip_hash = ip_hash.clone();
+                move |db| db::insert_failed_login_for_ip(db, &uname, &missing_user_ip_hash)
             })
             .await?;
         return Err(AppError::Unauthorized("invalid credentials".into()));
@@ -195,9 +194,9 @@ pub async fn login_handler(
     security(),
     tag = "Admin",
 )]
-pub async fn check_handler(_admin: AdminUser) -> Result<Json<CheckResponse>, AppError> {
+pub async fn check_handler(admin: AdminUser) -> Result<Json<CheckResponse>, AppError> {
     Ok(Json(CheckResponse {
         ok: true,
-        username: _admin.claims.sub,
+        username: admin.claims.sub,
     }))
 }

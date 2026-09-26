@@ -1,5 +1,3 @@
-//! The shared state every request handler can access
-
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -15,7 +13,6 @@ use crate::{
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-/// A connected device's WebSocket handle.
 pub struct ConnectedDevice {
     pub device_id: String,
     pub device_name: String,
@@ -24,7 +21,6 @@ pub struct ConnectedDevice {
     pub last_heartbeat: std::time::Instant,
 }
 
-/// Presence events broadcast to SSE listeners.
 #[derive(Clone, Debug)]
 pub enum PresenceEvent {
     DeviceConnected {
@@ -39,39 +35,35 @@ pub enum PresenceEvent {
     },
 }
 
-/// Shared state that every axum handler can access.
 #[derive(Clone)]
 pub struct AppState {
     pub db: DbPool,
     pub config: Arc<Config>,
     pub http: reqwest::Client,
     pub tus: TusMap,
-    /// Per-upload mpsc senders for TUS streaming (chunks flow directly to
-    /// juicehost).
+
     pub tus_senders: TusSenderMap,
-    /// Tracks multi-part parallel upload sessions.
+
     pub part_sessions: PartSessionMap,
-    /// TUS storage tasks, awaited before publishing uploads or concatenating
-    /// parts.
+
     pub push_handles: Arc<DashMap<String, tokio::task::JoinHandle<Result<(), String>>>>,
-    /// In-memory set of banned IPs for fast O(1) lookups in middleware.
+
     pub banned_ips: DashMap<String, ()>,
-    /// Pre-built juicehost authentication headers (built once at startup).
+
     pub juicehost_headers: reqwest::header::HeaderMap,
-    /// Semaphore limiting concurrent direct (non-TUS) uploads.
+
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Juicehost-provided config (file size limits, TTL, danger level, etc.).
-    /// `None` when juicehost is unreachable (degraded mode).
+
     pub jh_config: Arc<std::sync::RwLock<Option<Arc<JuicehostConfig>>>>,
-    /// Persistent QUIC client endpoint for connection reuse.
+
     #[cfg(feature = "quic")]
     pub quic_endpoint: std::sync::Arc<tokio::sync::OnceCell<h3_quinn::quinn::Endpoint>>,
-    /// Path to the QUIC TLS certificate for cert pinning.
+
     #[cfg(feature = "quic")]
     pub quic_cert_path: Option<std::path::PathBuf>,
-    /// Connected device WebSocket connections, keyed by `user_id`.
+
     pub connected_devices: DashMap<String, Vec<Arc<tokio::sync::Mutex<ConnectedDevice>>>>,
-    /// Broadcast senders for presence events, keyed by `user_id`.
+
     pub presence_listeners: DashMap<String, tokio::sync::broadcast::Sender<PresenceEvent>>,
     pub presence_semaphore: Arc<tokio::sync::Semaphore>,
     pub presence_by_ip: DashMap<std::net::IpAddr, usize>,
@@ -130,15 +122,6 @@ impl AppState {
         self.banned_ips.contains_key(ip)
     }
 
-    /// Clone the juicehost config out of the lock without holding the guard.
-    /// Maps lock poisoning to `Internal` and a missing config to the
-    /// degraded-mode `ServiceUnavailable` callers already return.
-    ///
-    /// # Errors
-    ///
-    /// Returns `AppError::Internal` when the lock is poisoned and
-    /// `AppError::ServiceUnavailable` when juicehost is unreachable
-    /// (degraded mode).
     pub fn juicehost_config(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         let cfg = self
             .jh_config
@@ -150,7 +133,6 @@ impl AppState {
         })
     }
 
-    /// Reload the banned IPs set from the database.
     pub fn reload_banned_ips(&self) {
         if let Ok(conn) = self.db.get()
             && let Ok(ips) = crate::db::load_banned_ips_set(&conn)
@@ -163,7 +145,6 @@ impl AppState {
         }
     }
 
-    /// Ban an IP: write to DB and update in-memory cache atomically.
     pub async fn ban_ip(
         self: &Arc<Self>,
         ip: &str,
@@ -181,7 +162,6 @@ impl AppState {
         Ok(())
     }
 
-    /// Unban an IP: remove from DB and update in-memory cache atomically.
     pub async fn unban_ip(self: &Arc<Self>, ip: &str) -> Result<bool, AppError> {
         let ip_c = ip.to_string();
         let deleted = self
@@ -193,8 +173,6 @@ impl AppState {
         Ok(deleted)
     }
 
-    /// Import many bans: write to DB in one transaction and update the
-    /// in-memory cache.
     pub async fn import_bans(
         self: &Arc<Self>,
         bans: Vec<crate::db::ImportBan>,
@@ -211,7 +189,6 @@ impl AppState {
         Ok(count)
     }
 
-    /// Run a database query on a background thread via r2d2 pool.
     pub async fn db_call<T, F>(self: &Arc<Self>, name: &'static str, f: F) -> Result<T, AppError>
     where
         F: FnOnce(&rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
@@ -228,11 +205,6 @@ impl AppState {
         .map_err(|_| AppError::TaskPanicked(format!("db task '{name}' panicked")))?
     }
 
-    /// Run several statements atomically on one pooled connection. The
-    /// closure receives a transaction: returning `Err` rolls everything back,
-    /// returning `Ok` commits. Prefer this over sequential [`db_call`]s when
-    /// the steps must succeed or fail together (each `db_call` otherwise
-    /// checks out its own connection, which cannot share a transaction).
     pub async fn db_transaction<T, F>(
         self: &Arc<Self>,
         name: &'static str,
@@ -249,8 +221,6 @@ impl AppState {
     }
 }
 
-/// Synchronous core of [`AppState::db_transaction`]: one pooled connection,
-/// one transaction, commit on `Ok`, rollback (via drop) on `Err`.
 fn run_db_transaction<T, F>(pool: &DbPool, f: F) -> Result<T, AppError>
 where
     F: FnOnce(&rusqlite::Transaction) -> Result<T, rusqlite::Error>,
@@ -305,7 +275,7 @@ mod tests {
         .unwrap();
         let failed: Result<(), AppError> = run_db_transaction(&pool, |tx| {
             tx.execute("INSERT INTO t (id) VALUES (2)", [])?;
-            // Primary-key clash: the whole transaction must roll back.
+
             tx.execute("INSERT INTO t (id) VALUES (2)", [])?;
             Ok(())
         });

@@ -1,6 +1,5 @@
 use crate::config::{ConfigError, security::SecuritySettings};
 
-/// Signing secrets and ban pepper settings.
 #[derive(Debug)]
 pub struct SecretSettings {
     ticket_jwt_secret: String,
@@ -8,10 +7,12 @@ pub struct SecretSettings {
 }
 
 impl SecretSettings {
+    #[must_use]
     pub fn ticket_jwt_secret(&self) -> &str {
         &self.ticket_jwt_secret
     }
 
+    #[must_use]
     pub fn ip_pepper(&self) -> &str {
         &self.ip_pepper
     }

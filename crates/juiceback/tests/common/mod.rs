@@ -11,19 +11,23 @@ use juiceback::{
     config::Config, routes::build_router, state::AppState, storage_client::JuicehostConfig,
 };
 
+#[must_use]
 pub fn mock_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 0))
 }
 
+#[must_use]
 pub fn with_connect_info(mut req: Request<Body>) -> Request<Body> {
     req.extensions_mut().insert(ConnectInfo(mock_addr()));
     req
 }
 
+#[must_use]
 pub fn mock_router(state: Arc<AppState>) -> axum::Router {
     build_router(state).layer(MockConnectInfo(mock_addr()))
 }
 
+#[must_use]
 pub fn test_config() -> Config {
     Config {
         host: "127.0.0.1".into(),
@@ -82,6 +86,7 @@ pub fn test_config() -> Config {
     }
 }
 
+#[must_use]
 pub fn test_config_with_proxies() -> Config {
     let mut config = test_config();
     config.trusted_proxy_cidrs =
@@ -89,6 +94,7 @@ pub fn test_config_with_proxies() -> Config {
     config
 }
 
+#[must_use]
 pub fn fetch_config_with_session(
     cobalt_api_url: String,
     session_api_url: Option<String>,
@@ -97,6 +103,7 @@ pub fn fetch_config_with_session(
     fetch_config_with_delay(cobalt_api_url, session_api_url, session_api_key, 1)
 }
 
+#[must_use]
 pub fn fetch_config_with_delay(
     cobalt_api_url: String,
     session_api_url: Option<String>,
@@ -115,7 +122,7 @@ pub fn fetch_config_with_delay(
         log_level: "info".into(),
         cleanup_interval_minutes: 30,
         juicehost_api_key: "test-key".into(),
-        // juicehost lives on the same mock server as cobalt here.
+
         juicehost_url: cobalt_api_url.clone(),
         public_juicehost_url: "http://localhost:6402".into(),
         juiceback_origin: "http://127.0.0.1:6401".into(),
@@ -161,6 +168,7 @@ pub fn fetch_config_with_delay(
     }
 }
 
+#[must_use]
 pub fn test_jh_config() -> JuicehostConfig {
     JuicehostConfig {
         max_file_size_bytes: 524_288_000,
@@ -173,10 +181,12 @@ pub fn test_jh_config() -> JuicehostConfig {
     }
 }
 
+#[must_use]
 pub fn state_from_config(config: Config) -> Arc<AppState> {
     state_from_config_with_jh(config, test_jh_config())
 }
 
+#[must_use]
 pub fn state_from_config_with_jh(config: Config, jh: JuicehostConfig) -> Arc<AppState> {
     let manager = r2d2_sqlite::SqliteConnectionManager::memory();
     let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
@@ -189,10 +199,12 @@ pub fn state_from_config_with_jh(config: Config, jh: JuicehostConfig) -> Arc<App
     AppState::new(pool, config, http, headers, Some(jh))
 }
 
+#[must_use]
 pub fn test_state() -> Arc<AppState> {
     state_from_config(test_config())
 }
 
+#[must_use]
 pub fn test_state_with_proxies() -> Arc<AppState> {
     state_from_config(test_config_with_proxies())
 }
