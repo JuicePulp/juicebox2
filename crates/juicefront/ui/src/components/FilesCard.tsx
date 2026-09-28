@@ -84,19 +84,28 @@ function SvgIcon(props: { name: string; size?: number; class?: string }) {
   );
 }
 
-function normalizeFile(f: any): any {
+/** Loose shape accepted by {@link normalizeFile}: localStorage JSON and
+ *  server payloads both land here, with legacy camelCase keys tolerated. */
+type RawFile = Partial<ServerFile> & {
+  name?: string;
+  size?: number;
+  expiresAt?: number;
+  uploadedAt?: number;
+};
+
+function normalizeFile(f: RawFile): ServerFile {
   let expires_at = f.expires_at;
-  if (expires_at == null) {
+  if (expires_at === null || expires_at === undefined) {
     const old = f.expiresAt;
     expires_at = old ? (old > 1e11 ? Math.floor(old / 1000) : old) : 0;
   }
   let uploaded_at = f.uploaded_at;
-  if (uploaded_at == null) {
+  if (uploaded_at === null || uploaded_at === undefined) {
     const old = f.uploadedAt;
     uploaded_at = old ? (old > 1e11 ? Math.floor(old / 1000) : old) : 0;
   }
   return {
-    id: f.id,
+    id: f.id ?? "",
     filename: f.filename ?? f.name ?? "",
     mime_type: f.mime_type ?? "",
     size_bytes: f.size_bytes ?? f.size ?? 0,
@@ -108,7 +117,7 @@ function normalizeFile(f: any): any {
   };
 }
 
-function getLocalFiles(): any[] {
+function getLocalFiles(): ServerFile[] {
   try {
     const raw = localStorage.getItem("juicebox_uploads");
     if (raw) {
@@ -119,7 +128,7 @@ function getLocalFiles(): any[] {
   return [];
 }
 
-function saveLocalFiles(files: any[]) {
+function saveLocalFiles(files: ServerFile[]) {
   try {
     localStorage.setItem("juicebox_uploads", JSON.stringify(files));
   } catch {}
@@ -191,7 +200,7 @@ export default function FilesCard(props: Props) {
 
   function makeConfirmDeleteHandler(
     el: HTMLElement,
-    f: any,
+    f: ServerFile,
   ): (e: MouseEvent) => Promise<void> {
     return async (e: MouseEvent) => {
       const btn = e.currentTarget as HTMLButtonElement;
@@ -245,7 +254,7 @@ export default function FilesCard(props: Props) {
     };
   }
 
-  function renderCard(f: any): HTMLElement {
+  function renderCard(f: ServerFile): HTMLElement {
     const el = document.createElement("div");
     el.className = "file-card";
     el.setAttribute("role", "listitem");
@@ -295,7 +304,7 @@ export default function FilesCard(props: Props) {
     return el;
   }
 
-  function enhanceExistingCard(el: HTMLElement, f: any) {
+  function enhanceExistingCard(el: HTMLElement, f: ServerFile) {
     if (el.querySelector(".copy-bar")) return;
     const storageHost =
       el.getAttribute("data-storage-host") || f.storage_host || "";
@@ -399,7 +408,7 @@ export default function FilesCard(props: Props) {
     }
   }
 
-  function makeRenameModalHtml(f: any): string {
+  function makeRenameModalHtml(f: ServerFile): string {
     const currentId = extractIdFromUrl(f.url, f.id || "");
     return `
       <div id="rename-${esc(f.id)}" class="mdloverlay mdl-target rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title-${esc(f.id)}">
@@ -430,7 +439,7 @@ export default function FilesCard(props: Props) {
       </div>`;
   }
 
-  function showRenameModal(f: any) {
+  function showRenameModal(f: ServerFile) {
     const existing = document.getElementById(`rename-${f.id}`);
     if (existing) {
       location.hash = `#rename-${f.id}`;
@@ -446,7 +455,7 @@ export default function FilesCard(props: Props) {
     }
   }
 
-  function wireRenameModal(modal: HTMLElement, f: any) {
+  function wireRenameModal(modal: HTMLElement, f: ServerFile) {
     const form = modal.querySelector(".rename-form") as HTMLFormElement;
     const input = modal.querySelector(".rename-input") as HTMLInputElement;
     const errorEl = modal.querySelector(".rename-error") as HTMLElement;
@@ -521,10 +530,10 @@ export default function FilesCard(props: Props) {
     });
   }
 
-  async function validateWithServer(localFiles: any[]) {
+  async function validateWithServer(localFiles: ServerFile[]) {
     const pairs = localFiles
-      .filter((f: any) => f.id && f.delete_token)
-      .map((f: any) => ({ id: f.id, token: f.delete_token }));
+      .filter((f) => f.id && f.delete_token)
+      .map((f) => ({ id: f.id, token: f.delete_token }));
     if (pairs.length === 0) return;
 
     try {
@@ -534,8 +543,8 @@ export default function FilesCard(props: Props) {
         body: JSON.stringify({ pairs }),
       });
       if (!res.ok) return;
-      const data = await res.json();
-      const validIds = new Set<string>((data.files ?? []).map((f: any) => f.id));
+      const data: { files?: { id: string }[] } = await res.json();
+      const validIds = new Set<string>((data.files ?? []).map((f) => f.id));
       const staleIds = pairs.filter((p) => !validIds.has(p.id)).map((p) => p.id);
       if (staleIds.length === 0) return;
 
@@ -544,7 +553,7 @@ export default function FilesCard(props: Props) {
         if (el) el.remove();
       });
 
-      const filtered = localFiles.filter((f: any) => !staleIds.includes(f.id));
+      const filtered = localFiles.filter((f) => !staleIds.includes(f.id));
       saveLocalFiles(filtered);
       updateEmptyState();
     } catch {}
@@ -568,8 +577,8 @@ export default function FilesCard(props: Props) {
 
     let cardIndex = gridRef.querySelectorAll(".file-card").length;
     [...localFiles]
-      .sort((a: any, b: any) => (b.uploaded_at ?? 0) - (a.uploaded_at ?? 0))
-      .forEach((f: any) => {
+      .sort((a, b) => (b.uploaded_at ?? 0) - (a.uploaded_at ?? 0))
+      .forEach((f) => {
         if (f.id && !seen.has(f.id) && f.expires_at * 1000 > Date.now()) {
           seen.add(f.id);
           const card = renderCard(f);
@@ -590,28 +599,22 @@ export default function FilesCard(props: Props) {
       gridRef.querySelectorAll(".file-card").forEach((el) => {
         const id = (el as HTMLElement).getAttribute("data-file-id");
         if (id) {
-          const match = localFiles.find((m: any) => m.id === id);
-          const elData: any = match || { id };
-          if (!match) {
-            const domToken = (el as HTMLElement).getAttribute(
-              "data-delete-token",
-            );
-            if (domToken) {
-              elData.delete_token = domToken;
-              elData.filename =
-                (el as HTMLElement).getAttribute("data-filename") || "";
-              elData.size_bytes =
-                Number((el as HTMLElement).getAttribute("data-size")) || 0;
-              elData.uploaded_at =
-                Number((el as HTMLElement).getAttribute("data-uploaded")) || 0;
-              elData.expires_at =
-                Number((el as HTMLElement).getAttribute("data-expires")) || 0;
-              elData.url = (el as HTMLElement).getAttribute("data-url") || "";
-              elData.storage_host =
-                (el as HTMLElement).getAttribute("data-storage-host") || "";
-            }
-          }
-          enhanceExistingCard(el as HTMLElement, elData);
+          // Prefer the localStorage record; otherwise rebuild from the
+          // server-rendered data-* attributes, then normalize so the shape
+          // matches ServerFile either way.
+          const match = localFiles.find((m) => m.id === id);
+          const node = el as HTMLElement;
+          const elData = match ?? normalizeFile({
+            id,
+            delete_token: node.getAttribute("data-delete-token") ?? "",
+            filename: node.getAttribute("data-filename") ?? "",
+            size_bytes: Number(node.getAttribute("data-size")) || 0,
+            uploaded_at: Number(node.getAttribute("data-uploaded")) || 0,
+            expires_at: Number(node.getAttribute("data-expires")) || 0,
+            url: node.getAttribute("data-url") ?? "",
+            storage_host: node.getAttribute("data-storage-host") ?? "",
+          });
+          enhanceExistingCard(node, elData);
         }
       });
     }

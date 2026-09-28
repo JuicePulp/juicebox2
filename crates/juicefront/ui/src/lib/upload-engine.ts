@@ -45,6 +45,16 @@ export interface UploadOptions {
   quickLink: boolean;
 }
 
+/** Upload-completion payload returned by both the direct and TUS paths.
+ *  Every field is optional: a chunk that only ACKs (202) carries none, and
+ *  reserve fallbacks are filled in client-side when the server omits them. */
+interface UploadResultData {
+  id?: string;
+  url?: string;
+  delete_token?: string;
+  expires_at?: number | string;
+}
+
 /** Live tuner telemetry attached by the TUS orchestrator (debug overlay). */
 export interface TunerDbg {
   w: number; // active workers
@@ -350,9 +360,9 @@ function startDirectUpload(
       };
       xhr.onload = () => {
         if (xhr!.status >= 200 && xhr!.status < 300) {
-          let res: any = {};
+          let res: UploadResultData = {};
           try {
-            res = JSON.parse(xhr!.responseText);
+            res = JSON.parse(xhr!.responseText) as UploadResultData;
           } catch {}
           if (reserveUrl && !res.url) res.url = reserveUrl;
           if (reserveDeleteToken && !res.delete_token) res.delete_token = reserveDeleteToken;
@@ -621,7 +631,7 @@ async function uploadTusPart(
   controls: UploadControls,
   netTier: NetTier,
   probeShared: { done: boolean; use: boolean },
-): Promise<{ status: number; data?: any }> {
+): Promise<{ status: number; data?: UploadResultData }> {
   const partSize = Math.ceil(file.size / totalParts);
   const start = partIndex * partSize;
   const end = Math.min(start + partSize, file.size);
@@ -650,7 +660,10 @@ async function uploadTusPart(
   const metadata = encodeTusMeta(meta);
 
   /** One full create + chunk-loop lifecycle for this part. */
-  const runSession = async (): Promise<{ status: number; data?: any }> => {
+  const runSession = async (): Promise<{
+    status: number;
+    data?: UploadResultData;
+  }> => {
     // Local kill switch for this session attempt: when one chunk fails hard,
     // pipelined siblings get aborted so they stop burning bandwidth. Kept
     // distinct from the user-cancel signal so internal aborts never read
@@ -860,9 +873,9 @@ async function uploadTusPart(
           const pending = [...inflight.values()];
           inflight.clear();
           await Promise.allSettled(pending.map((s) => s.p));
-          let data: any;
+          let data: UploadResultData | undefined;
           try {
-            data = JSON.parse(r.text);
+            data = JSON.parse(r.text) as UploadResultData;
           } catch {}
           return { status: 200, data };
         } else {
@@ -896,7 +909,7 @@ async function uploadTusPart(
       partCtrl.abort();
       // Swallow sibling rejections so an aborted pipeline never surfaces as
       // an unhandled rejection; the real error (or success) is already in flight.
-      for (const s of inflight.values()) s.p.catch(() => {});
+      for (const s of inflight.values()) s.p.catch(() => undefined);
     }
   };
 
@@ -1025,9 +1038,8 @@ function startTusUpload(
     // Workers claim the next unstarted part index; the tuner promotes spare
     // parts to live workers while aggregate ACKED throughput is still
     // climbing, and lets surplus workers exit when the link backs off.
-    const results: ({ status: number; data?: any } | undefined)[] = new Array(
-      numParts,
-    );
+    const results: ({ status: number; data?: UploadResultData } | undefined)[] =
+      new Array(numParts);
     let cursor = 0;
     const runCounts = new Array<number>(numParts).fill(0);
     const retryQueue: number[] = [];
@@ -1308,7 +1320,9 @@ function startTusUpload(
     progress.destroy();
     if (workerError && !signal.aborted) throw workerError;
 
-    const settled = results.filter((r): r is { status: number; data?: any } => !!r);
+    const settled = results.filter(
+      (r): r is { status: number; data?: UploadResultData } => !!r,
+    );
 
     // Learn: persist aggregate ACKED rate so the next upload starts with a
     // near-optimal stream count (wire bytes would bake in buffer bursts).

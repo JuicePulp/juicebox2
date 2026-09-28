@@ -22,6 +22,7 @@ import {
 } from "../lib/enhance-host";
 import { isAppMode } from "../lib/device-ws";
 import { validateFileClient, type ProtectionLevel } from "../lib/file-validation";
+import type { ServerFile } from "../lib/types";
 import { createDeleteButton } from "../lib/delete-button";
 import {
   enqueueUpload,
@@ -43,7 +44,10 @@ function autoCopyUrl(url: string, copyBar?: HTMLElement | null) {
         setTimeout(() => copyBar.classList.remove("copy-bar--copied"), 2000);
       }
     },
-    () => {},
+    // Clipboard writes can reject (no permission, non-secure context). The
+    // upload already succeeded, so there is nothing to recover - the URL is
+    // still selectable by hand from the card.
+    () => undefined,
   );
 }
 
@@ -599,8 +603,10 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
           }
 
           try {
-            const stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-            const idx = stored.findIndex((e: any) => e.id === fileId);
+            const stored: Partial<ServerFile>[] = JSON.parse(
+              localStorage.getItem("juicebox_uploads") || "[]",
+            );
+            const idx = stored.findIndex((e) => e.id === fileId);
             if (idx >= 0) {
               stored[idx].filename = realName;
               stored[idx].mime_type = realMime;
