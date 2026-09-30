@@ -40,7 +40,11 @@ pub struct CardAction {
     pub href: String,
 }
 
-fn hreflang_links(stripped: &str) -> Vec<Hreflang> {
+fn hreflang_links_absolute(headers: &HeaderMap, stripped: &str) -> Vec<Hreflang> {
+    hreflang_links_absolute_inner(stripped, &|href| absolute_url(headers, &href))
+}
+
+fn hreflang_links_absolute_inner(stripped: &str, resolve: &dyn Fn(String) -> String) -> Vec<Hreflang> {
     i18n::LOCALES
         .iter()
         .map(|(code, _)| {
@@ -58,7 +62,7 @@ fn hreflang_links(stripped: &str) -> Vec<Hreflang> {
                     "es" => "es",
                     _ => "en",
                 },
-                href,
+                href: resolve(href),
             }
         })
         .collect()
@@ -412,6 +416,8 @@ struct HeadCtx {
     description: String,
     canonical: String,
     og_image: String,
+    og_image_alt: String,
+    og_locale: &'static str,
     body_class: &'static str,
     commit_label: String,
     structured_data: String,
@@ -426,26 +432,39 @@ struct HeadTpl {
     head: HeadCtx,
 }
 
+fn og_locale_for(locale: &'static str) -> &'static str {
+    match locale {
+        "fr" => "fr_FR",
+        "ru" => "ru_RU",
+        "es" => "es_ES",
+        _ => "en_US",
+    }
+}
+
 fn head_ctx(
     locale: &'static str,
     title: String,
     description: String,
     body_class: &'static str,
     stripped_path: &str,
+    full_path: &str,
+    headers: &HeaderMap,
     live_reload: bool,
 ) -> HeadCtx {
     HeadCtx {
         cx: Cx::new(locale),
         lang: locale,
+        og_image_alt: title.clone(),
+        og_locale: og_locale_for(locale),
         title,
         description,
-        canonical: metadata::REPO_URL.to_owned(),
-        og_image: "/static/assets/og-image.png".to_owned(),
+        canonical: absolute_url(headers, full_path),
+        og_image: absolute_url(headers, "/static/assets/og-image.png"),
         body_class,
         commit_label: metadata::commit_label(),
         structured_data: metadata::structured_data_json(),
-        current_path: stripped_path.to_owned(),
-        hreflang: hreflang_links(stripped_path),
+        current_path: absolute_url(headers, stripped_path),
+        hreflang: hreflang_links_absolute(headers, stripped_path),
         live_reload,
     }
 }
@@ -675,6 +694,8 @@ pub async fn index(
             cx.t("site.description_short"),
             "upload-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -965,6 +986,8 @@ pub async fn files_page(
             cx.t("files.subtitle"),
             "files-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1202,6 +1225,8 @@ pub async fn download_page(
             cx.t("download.description"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1209,8 +1234,10 @@ pub async fn download_page(
     .unwrap_or_default();
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
-        let (shell, data) = content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path).await;
-    let tag = latest_tag(&state).await;
+        let ((shell, data), tag) = tokio::join!(
+        content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path),
+        latest_tag(&state),
+    );
     let version = tag.strip_prefix('v').unwrap_or(&tag);
     let releases = "https://github.com/juiceboxdev/juicebox-plus/releases";
     let body_html = DownloadBodyTpl {
@@ -1295,6 +1322,8 @@ pub async fn banned_page(
             cx.t("banned.description"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1371,6 +1400,8 @@ pub async fn report_page(
             cx.t("report.subtitle"),
             "report-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1429,6 +1460,8 @@ pub async fn feedback_page(
             cx.t("feedback.subtitle"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1498,6 +1531,8 @@ pub async fn faq_page(
             cx.t("faq.subtitle"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1568,6 +1603,8 @@ pub async fn docs_page(
             cx.t("docs.description"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1664,6 +1701,8 @@ pub async fn terms_page(
             cx.t("terms.subtitle"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1708,6 +1747,8 @@ pub async fn privacy_page(
             cx.t("privacy.subtitle"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }
@@ -1755,6 +1796,8 @@ pub async fn not_found_page(
             cx.t("not_found.description"),
             "content-page",
             &stripped,
+            &uri_path,
+            &headers,
             state.live_reload,
         ),
     }

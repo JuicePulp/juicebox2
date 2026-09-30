@@ -14,18 +14,25 @@
 <link rel="preload" as="image" href="/static/assets/logo_big.webp?v=2" type="image/webp">
 {% for link in head.hreflang %}<link rel="alternate" hreflang="{{ link.code }}" href="{{ link.href }}">
 {% endfor %}<link rel="alternate" hreflang="x-default" href="{{ head.current_path }}">
+<link rel="canonical" href="{{ head.canonical }}">
 <meta property="og:type" content="website">
+<meta property="og:locale" content="{{ head.og_locale }}">
 <meta property="og:title" content="{{ head.title }}">
 <meta property="og:description" content="{{ head.description }}">
 <meta property="og:url" content="{{ head.canonical }}">
 <meta property="og:site_name" content="Juicebox">
 <meta property="og:image" content="{{ head.og_image }}">
+<meta property="og:image:secure_url" content="{{ head.og_image }}">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{{ head.og_image_alt }}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ head.title }}">
 <meta name="twitter:description" content="{{ head.description }}">
 <meta name="twitter:image" content="{{ head.og_image }}">
+<meta name="twitter:image:alt" content="{{ head.og_image_alt }}">
+<meta name="twitter:url" content="{{ head.canonical }}">
 <script type="application/ld+json">{{ head.structured_data|safe }}</script>
 <link rel="stylesheet" href="/static/bundle.css">
 <script src="/static/js/boot.js"></script>
