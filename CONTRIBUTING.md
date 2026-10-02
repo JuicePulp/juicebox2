@@ -13,17 +13,15 @@ then run the checks for whatever you touch:
 
 ## Frontend development (juicefront)
 The frontend is Rust (Axum + Askama templates + vanilla JS in
-`crates/juicefront/static/js/`). There is no Node/bundler step.
+`crates/juicefront/static/js/`). There is no Node/bundler step anymore. 
 
-Live reload while developing:
+You can do a very rough live reload system while developing:
 
   cargo watch -w crates/juicefront -x 'run -p juicefront'
 
-Saving any `.rs` file, template, `static/` asset, or `i18n/` dict rebuilds
-and restarts the server, and the browser reloads automatically via the
-dev-only `GET /__live` event stream. Live reload is on by default for
-`cargo run` and off for release builds; override with `JUICEFRONT_LIVE=1`
-(force on) or `JUICEFRONT_LIVE=0` (force off).
+Saving any `.rs` file, template, `static/` asset, or `i18n/` dict rebuilds and restarts the server + browser reloads automatically;
+
+Live reload is on by default for dev build, you can override it by toggling (0/1) the `JUICEFRONT_LIVE=1` env var. 
 
 ## Pull requests
 
