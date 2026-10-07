@@ -182,6 +182,22 @@ pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     Ok(affected > 0)
 }
 
+/// Record password-gate and encryption metadata for a completed upload.
+/// Passing `password_hash = None` marks the file public.
+pub fn set_protection(
+    conn: &Connection,
+    id: &str,
+    password_hash: Option<&str>,
+    is_encrypted: bool,
+    enc_header: Option<&str>,
+) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE files SET password_hash = ?1, is_encrypted = ?2, enc_header = ?3 WHERE id = ?4",
+        params![password_hash, i64::from(is_encrypted), enc_header, id],
+    )?;
+    Ok(affected > 0)
+}
+
 pub fn list_all_files(conn: &Connection) -> Result<Vec<FileRecord>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {FILE_COLUMNS} FROM files ORDER BY uploaded_at DESC"

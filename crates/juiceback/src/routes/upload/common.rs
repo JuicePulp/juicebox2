@@ -16,6 +16,10 @@ pub struct UploadResponse {
     pub expires_at: i64,
     pub delete_token: String,
     pub status: String,
+    #[serde(default)]
+    pub protected: bool,
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 pub(crate) fn compute_ticket_ttl_secs(

@@ -23,6 +23,9 @@ pub struct ReserveUploadRequest {
     pub mime_type: Option<String>,
     pub ttl_hours: Option<f64>,
     pub host: Option<String>,
+    /// Optional password gate. Relay-only: complete via `POST /upload`,
+    /// never via direct/ticket PUT.
+    pub password: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -31,6 +34,8 @@ pub struct ReserveResponse {
     pub url: String,
     pub delete_token: String,
     pub status: String,
+    pub protected: bool,
+    pub is_encrypted: bool,
 }
 
 #[utoipa::path(
@@ -81,7 +86,9 @@ pub async fn reserve_upload_handler(
 
     let encrypted_ip = super::ticket::encrypted_client_ip(&state, &headers, addr);
 
-    let record = FileRecord::new(
+    let password_hash = super::protected::hash_upload_password(&state, body.password).await?;
+
+    let mut record = FileRecord::new(
         file_id.clone(),
         filename,
         mime_type,
@@ -92,6 +99,10 @@ pub async fn reserve_upload_handler(
         encrypted_ip,
         selected_host.clone(),
     );
+    if let Some(ref hash) = password_hash {
+        record.password_hash = Some(hash.clone());
+        record.is_encrypted = true;
+    }
 
     let record =
         super::ticket::insert_owned_pending(&state, &user_id, record, "own_reserved_file").await?;
@@ -107,6 +118,8 @@ pub async fn reserve_upload_handler(
             url: public_url,
             delete_token,
             status: "uploading".to_string(),
+            protected: record.is_protected(),
+            is_encrypted: record.is_encrypted,
         }),
     ))
 }
@@ -148,6 +161,8 @@ fn build_upload_response(
         expires_at: record.expires_at,
         delete_token: record.delete_token.clone(),
         status: record.status.clone(),
+        protected: record.is_protected(),
+        is_encrypted: record.is_encrypted,
     })
     .into_response();
 
@@ -194,17 +209,32 @@ pub async fn upload_handler(
         .get("x-delete-token")
         .and_then(|value| value.to_str().ok());
     let fresh_capability = uuid::Uuid::new_v4().to_string();
-    let params = parse_multipart(
+    // The multipart state machine is large; keep it on the heap so debug
+    // builds (2 MiB worker stacks) don't overflow while polling it.
+    let params = Box::pin(parse_multipart(
         &mut multipart,
         &state,
         is_gzip,
         reservation_token,
         fresh_capability,
-    )
+    ))
     .await?;
     tracing::debug!("multipart parse total took {:?}", parse_start.elapsed());
 
     let now = chrono::Utc::now().timestamp();
+
+    // A protected reservation carries its verifier; otherwise the completion
+    // form may attach one. The reservation's hash wins when both exist.
+    let form_hash = super::protected::hash_upload_password(&state, params.password).await?;
+    let effective_hash: Option<String> = params
+        .reservation
+        .as_ref()
+        .and_then(|r| r.password_hash.clone())
+        .or(form_hash);
+    let protected = effective_hash.is_some();
+    if protected && params.enc_header.is_none() {
+        return Err(AppError::Internal("protected upload missing ciphertext".into()));
+    }
 
     let record = if let Some(ref existing) = params.reservation {
         let update_id = existing.id.clone();
@@ -245,9 +275,25 @@ pub async fn upload_handler(
             existing.id,
             params.total_bytes
         );
+        let mut completed = completed;
+        if protected {
+            let header = params.enc_header.ok_or_else(|| {
+                AppError::Internal("protected upload missing ciphertext".into())
+            })?;
+            let header_hex = super::protected::mark_protected(
+                &state,
+                &completed.id,
+                effective_hash.as_deref(),
+                &header,
+            )
+            .await?;
+            completed.password_hash = effective_hash.clone();
+            completed.is_encrypted = true;
+            completed.enc_header = Some(header_hex);
+        }
         completed
     } else {
-        let record = FileRecord::new(
+        let mut record = FileRecord::new(
             params.file_id.clone(),
             params.filename.clone(),
             params.mime_type.clone(),
@@ -258,6 +304,14 @@ pub async fn upload_handler(
             encrypted_ip.clone(),
             params.selected_host.clone(),
         );
+        if protected {
+            let header = params.enc_header.ok_or_else(|| {
+                AppError::Internal("protected upload missing ciphertext".into())
+            })?;
+            record.password_hash = effective_hash;
+            record.is_encrypted = true;
+            record.enc_header = Some(hex::encode(header));
+        }
 
         let db_start = std::time::Instant::now();
         let record = db::insert_new_file(&state, record).await?;

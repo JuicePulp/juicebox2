@@ -101,6 +101,8 @@ pub(crate) async fn finish_tus_upload(
         &record.id,
         &record.filename,
     );
+    let protected = record.is_protected();
+    let is_encrypted = record.is_encrypted;
 
     Ok(serde_json::to_value(crate::routes::upload::UploadResponse {
         id: record.id,
@@ -111,6 +113,8 @@ pub(crate) async fn finish_tus_upload(
         expires_at: record.expires_at,
         delete_token: record.delete_token,
         status: record.status,
+        protected,
+        is_encrypted,
     })
     .unwrap_or_default())
 }

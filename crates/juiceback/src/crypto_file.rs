@@ -137,9 +137,17 @@ const fn stored_chunk_len(plain_len: usize) -> usize {
 }
 
 fn write_header(out: &mut Vec<u8>, plain_len: u64) {
-    out.extend_from_slice(MAGIC);
-    out.push(CHUNK_SHIFT);
-    out.extend_from_slice(&plain_len.to_le_bytes());
+    out.extend_from_slice(&encode_header(plain_len));
+}
+
+/// The 13-byte container header for `plain_len` plaintext bytes.
+#[must_use]
+pub const fn encode_header(plain_len: u64) -> [u8; 13] {
+    let size = plain_len.to_le_bytes();
+    [
+        MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], CHUNK_SHIFT, size[0], size[1], size[2], size[3],
+        size[4], size[5], size[6], size[7],
+    ]
 }
 
 /// Parse and validate the 13-byte header, returning the original plaintext size.
