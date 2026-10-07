@@ -1,4 +1,5 @@
 import { UPLOAD_URL } from "./upload-config.js";
+import { playSound } from "./sounds.js";
 import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api.js";
 let countdownInterval = null;
 let pollInterval = null;
@@ -65,6 +66,7 @@ function handleCopyCode() {
   if (!code || code === "----")
     return;
   navigator.clipboard.writeText(code).then(() => {
+    playSound("success", { emphasis: "subtle" });
     codeWrap.classList.add("pair-code--copied");
     setTimeout(() => codeWrap.classList.remove("pair-code--copied"), 2000);
   });

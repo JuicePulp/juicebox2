@@ -1,4 +1,5 @@
 import { initPairModal } from "./pair.js";
+import { playSound } from "./sounds.js";
 
 (function () {
   var cfg = document.querySelector("[data-i18n-config]");
@@ -147,6 +148,7 @@ import { initPairModal } from "./pair.js";
       btn.addEventListener("click", function () {
         if (!navigator.clipboard || !navigator.clipboard.writeText) return;
         navigator.clipboard.writeText(location.href).then(function () {
+          playSound("success", { emphasis: "subtle" });
           var span = btn.querySelector("span");
           if (span) {
             var orig = span.textContent;
@@ -264,6 +266,7 @@ import { initPairModal } from "./pair.js";
           e.preventDefault();
           if (!navigator.clipboard || !navigator.clipboard.writeText) return;
           navigator.clipboard.writeText(fileUrl || location.href).then(function () {
+            playSound("success", { emphasis: "subtle" });
             if (fileUrl) {
               var copyBar = lastUrlEl.closest(".copy-bar");
               if (copyBar) {

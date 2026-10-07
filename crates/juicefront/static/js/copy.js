@@ -1,5 +1,6 @@
 import { announce } from "./util.js";
 import { t } from "./i18n.js";
+import { playSound } from "./sounds.js";
 
 var iconCache = null;
 var iconCounter = 0;
@@ -100,6 +101,7 @@ export function makeCopyBar(url, strings) {
       navigator.clipboard.writeText(currentUrl).then(function () {
         btn.classList.add("copy-bar--copied");
         announce(strings.announceMsg || "Link copied to clipboard");
+        playSound("success", { emphasis: "subtle" });
         setTimeout(function () {
           btn.classList.remove("copy-bar--copied");
         }, 2000);
@@ -129,6 +131,7 @@ export function createDeleteButton(opts) {
             var item = btn.closest(".file-item, .file-card");
             if (item) opts.onDeleted(item);
             announce("File deleted");
+            playSound("close");
           }
         })
         .catch(function (err) {
