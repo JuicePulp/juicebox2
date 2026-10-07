@@ -319,6 +319,147 @@ pub async fn stream_gzip_upload_to_juicehost(
     Ok((total_bytes, read_time, push_wait))
 }
 
+/// Relay a password-protected upload: validate plaintext, spool to disk,
+/// encrypt, then push ciphertext to juicehost. Returns plaintext bytes and
+/// the container header for the `enc_header` column.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
+)]
+pub async fn stream_protected_upload_to_juicehost(
+    mut field: axum::extract::multipart::Field<'_>,
+    state: &Arc<AppState>,
+    file_id: &str,
+    filename: &str,
+    mime_type: &str,
+    host: Option<&str>,
+    max_size: i64,
+    capability: &str,
+    upload_mode: UploadMode,
+) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
+    let first_chunk = field
+        .chunk()
+        .await
+        .map_err(|e| {
+            tracing::warn!("protected upload chunk read error: {:?}", e);
+            AppError::InvalidMultipart
+        })?
+        .unwrap_or_default();
+
+    if !first_chunk.is_empty() {
+        let level = state
+            .jh_config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map_or(crate::file_validation::ProtectionLevel::High, |c| {
+                c.danger_level
+            });
+        if let Some(err) = crate::file_validation::blocked_file_error(
+            crate::file_validation::validate_file(filename, &first_chunk, level),
+        ) {
+            return Err(err);
+        }
+    }
+
+    let (spool_tx, spool_handle) =
+        crate::routes::upload::protected::spawn_spool_task(max_size);
+    if spool_tx.send(Ok(first_chunk)).await.is_err() {
+        return Err(AppError::TaskPanicked("spool task gone".into()));
+    }
+    while let Some(chunk) = field.chunk().await.map_err(|e| {
+        tracing::warn!("protected upload chunk read error: {:?}", e);
+        AppError::InvalidMultipart
+    })? {
+        if spool_tx.send(Ok(chunk)).await.is_err() {
+            break;
+        }
+    }
+    drop(spool_tx);
+    let (spool_file, total) = spool_handle
+        .await
+        .map_err(|_| AppError::TaskPanicked("spool task panicked".into()))??;
+
+    let header = crate::routes::upload::protected::push_encrypted_file(
+        state,
+        file_id,
+        filename,
+        mime_type,
+        host,
+        capability,
+        spool_file.path(),
+        total,
+        upload_mode,
+    )
+    .await?;
+    let total_bytes =
+        i64::try_from(total).map_err(|_| AppError::Internal("file too large".into()))?;
+    Ok((total_bytes, header))
+}
+
+/// Gzip variant of [`stream_protected_upload_to_juicehost`]: gunzip-decode
+/// the wire bytes, spool the plaintext, then encrypt and push.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
+)]
+pub async fn stream_protected_gzip_upload_to_juicehost(
+    field: axum::extract::multipart::Field<'_>,
+    state: &Arc<AppState>,
+    file_id: &str,
+    filename: &str,
+    mime_type: &str,
+    host: Option<&str>,
+    max_size: i64,
+    capability: &str,
+    upload_mode: UploadMode,
+    danger: crate::file_validation::ProtectionLevel,
+) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
+    let (spool_tx, spool_handle) =
+        crate::routes::upload::protected::spawn_spool_task(max_size);
+    let wire_cap = max_size;
+    let chunk_stream = futures::stream::unfold((field, 0_i64), |(mut f, mut total)| async move {
+        match f.chunk().await {
+            Ok(Some(chunk)) => {
+                total += chunk.len() as i64;
+                if total > wire_cap {
+                    let err =
+                        std::io::Error::new(std::io::ErrorKind::Other, "wire size limit exceeded");
+                    return Some((Err(err), (f, total)));
+                }
+                Some((Ok(chunk), (f, total)))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                let err = std::io::Error::new(std::io::ErrorKind::Other, e.body_text());
+                Some((Err(err), (f, total)))
+            }
+        }
+    });
+
+    pipe_gunzip_to_sender(Box::pin(chunk_stream), &spool_tx, filename, danger, max_size).await?;
+    drop(spool_tx);
+    let (spool_file, total) = spool_handle
+        .await
+        .map_err(|_| AppError::TaskPanicked("spool task panicked".into()))??;
+
+    let header = crate::routes::upload::protected::push_encrypted_file(
+        state,
+        file_id,
+        filename,
+        mime_type,
+        host,
+        capability,
+        spool_file.path(),
+        total,
+        upload_mode,
+    )
+    .await?;
+    let total_bytes =
+        i64::try_from(total).map_err(|_| AppError::Internal("file too large".into()))?;
+    Ok((total_bytes, header))
+}
+
 #[cfg(test)]
 mod tests {
     use futures::stream;

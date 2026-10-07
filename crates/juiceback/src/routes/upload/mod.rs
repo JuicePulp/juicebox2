@@ -3,6 +3,7 @@ pub mod direct;
 pub mod internal;
 pub mod multipart;
 pub mod parse;
+pub mod protected;
 pub mod stream;
 pub mod ticket;
 

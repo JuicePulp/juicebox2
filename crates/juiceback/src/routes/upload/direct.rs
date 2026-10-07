@@ -42,6 +42,11 @@ pub struct DirectUploadReserveRequest {
 
     #[serde(default)]
     pub device_id: Option<String>,
+
+    /// Rejected: password-protected uploads must relay through juiceback
+    /// (`POST /upload`), which encrypts before pushing to juicehost.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -81,6 +86,9 @@ pub async fn direct_upload_reserve_handler(
 
     if body.file_size == 0 || body.file_size > max_file_size {
         return Err(AppError::PayloadTooLarge);
+    }
+    if body.password.as_deref().is_some_and(|p| !p.is_empty()) {
+        return Err(super::protected::relay_required());
     }
     reject_blocked_filename(&body.filename, danger)?;
 
@@ -254,6 +262,11 @@ pub async fn direct_upload_complete_handler(
     if file.status != "uploading" {
         return Err(AppError::Conflict("upload is already complete".into()));
     }
+    // Defense in depth: tickets are never issued for protected files, but a
+    // reservation that somehow gained a verifier must not complete direct.
+    if file.is_protected() {
+        return Err(super::protected::relay_required());
+    }
 
     let stored_size = crate::storage_client::stat_file_on_juicehost(
         &state,
@@ -303,6 +316,8 @@ pub async fn direct_upload_complete_handler(
     }
 
     let public_url = public_url_for(&state, &file);
+    let protected = file.is_protected();
+    let is_encrypted = file.is_encrypted;
     Ok(Json(UploadResponse {
         id: file_id,
         url: public_url,
@@ -312,5 +327,7 @@ pub async fn direct_upload_complete_handler(
         expires_at: file.expires_at,
         delete_token: String::new(),
         status: "ready".into(),
+        protected,
+        is_encrypted,
     }))
 }
