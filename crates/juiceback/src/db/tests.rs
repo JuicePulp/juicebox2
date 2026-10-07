@@ -834,7 +834,55 @@ fn legacy_files_table_gains_new_columns() {
         .unwrap();
     assert!(cols.contains(&"storage_host".to_string()));
     assert!(cols.contains(&"status".to_string()));
+    assert!(cols.contains(&"password_hash".to_string()));
+    assert!(cols.contains(&"is_encrypted".to_string()));
+    assert!(cols.contains(&"enc_header".to_string()));
     assert_eq!(schema_version(&conn).unwrap(), migration_count());
+}
+
+#[test]
+fn protected_record_roundtrips_with_defaults_for_plain() {
+    let conn = setup_db();
+
+    let mut shielded = FileRecord::new(
+        "locked".into(),
+        "secret.bin".into(),
+        "application/octet-stream".into(),
+        41,
+        "tok-lock".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    shielded.password_hash = Some("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$hash".into());
+    shielded.is_encrypted = true;
+    shielded.enc_header = Some("4a424331100000000000000000".into());
+    insert_file(&conn, &shielded).unwrap();
+
+    let got = get_file(&conn, "locked").unwrap().unwrap();
+    assert!(got.is_protected());
+    assert!(got.is_encrypted);
+    assert_eq!(got.password_hash.as_deref(), shielded.password_hash.as_deref());
+    assert_eq!(got.enc_header.as_deref(), Some("4a424331100000000000000000"));
+
+    let plain = FileRecord::new(
+        "open".into(),
+        "file.txt".into(),
+        "text/plain".into(),
+        100,
+        "tok-open".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    insert_file(&conn, &plain).unwrap();
+    let got = get_file(&conn, "open").unwrap().unwrap();
+    assert!(!got.is_protected());
+    assert!(!got.is_encrypted);
+    assert_eq!(got.password_hash, None);
+    assert_eq!(got.enc_header, None);
 }
 
 #[test]

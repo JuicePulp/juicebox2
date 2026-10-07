@@ -36,6 +36,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("pairing_codes.ip_hash", m06_pairing_codes_ip_hash),
     ("fetch_jobs.progress", m07_fetch_jobs_progress),
     ("client_files.legacy_index", m08_client_files_legacy_index),
+    ("files.protected_links", m09_files_protected_links),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -143,6 +144,28 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
 
 fn m08_client_files_legacy_index(conn: &Connection) -> Result<()> {
     conn.execute("DROP INDEX IF EXISTS idx_client_files_client", [])?;
+    Ok(())
+}
+
+fn m09_files_protected_links(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "password_hash")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN password_hash TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "is_encrypted")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "enc_header")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN enc_header TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
     Ok(())
 }
 

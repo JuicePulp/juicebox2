@@ -95,6 +95,16 @@ pub struct FileRecord {
     pub storage_host: Option<String>,
 
     pub status: String,
+
+    /// Argon2id verifier for password-gated links (`None` = public).
+    pub password_hash: Option<String>,
+
+    /// Ciphertext-only on juicehost; juiceback holds the key.
+    pub is_encrypted: bool,
+
+    /// Hex-encoded 13-byte container header (lets juiceback serve Ranges
+    /// without fetching ciphertext first).
+    pub enc_header: Option<String>,
 }
 
 impl FileRecord {
@@ -126,7 +136,16 @@ impl FileRecord {
             uploader_ip,
             storage_host,
             status: "ready".to_string(),
+            password_hash: None,
+            is_encrypted: false,
+            enc_header: None,
         }
+    }
+
+    /// Whether downloads of this file require a password.
+    #[must_use]
+    pub fn is_protected(&self) -> bool {
+        self.password_hash.is_some()
     }
 
     #[expect(
