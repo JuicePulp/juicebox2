@@ -1960,6 +1960,7 @@ dependencies = [
 name = "juiceback"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "argon2",
  "async-compression",
  "async-stream",
@@ -2008,6 +2009,7 @@ dependencies = [
  "utoipa",
  "uuid",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]
