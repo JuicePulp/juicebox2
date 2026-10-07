@@ -10,6 +10,7 @@ import {
 import { iconSvgHtml } from "../lib/icons";
 import { publicFileRenew } from "../lib/api";
 import { vanityMsg } from "../lib/errors";
+import { playSound } from "../lib/sounds";
 import type { UploadState } from "../lib/upload-engine";
 import { extractServerId } from "../lib/upload-engine";
 
@@ -120,6 +121,7 @@ export default function FileCard(props: FileCardProps) {
     btn.classList.add("copy-bar--copied");
     setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
     announce(t(locale(), "upload.copy_bar_announce"));
+      playSound("success", { emphasis: "subtle" });
   };
 
   const action = () => {
@@ -168,8 +170,10 @@ export default function FileCard(props: FileCardProps) {
       props.onRename?.({ id: data.id, url: data.url });
       setRenameOpen(false);
       announce(t(locale(), "files.rename_success"));
+        playSound("success", { emphasis: "subtle" });
     } catch {
       setRenameError(t(locale(), "files.rename_invalid"));
+        playSound("error", { emphasis: "subtle" });
     } finally {
       setRenaming(false);
     }
@@ -269,7 +273,7 @@ export default function FileCard(props: FileCardProps) {
           </a>
           <a
             href={`#rename-${props.id}`}
-            class="copy-bar-edit"
+            data-cuelume-open data-cuelume-emphasis="subtle" class="copy-bar-edit"
             title={t(locale(), "files.rename")}
             aria-label={t(locale(), "files.rename_aria")}
           >
@@ -310,7 +314,7 @@ export default function FileCard(props: FileCardProps) {
           <Show when={canRename()}>
             <button
               type="button"
-              class="copy-bar-edit"
+              data-cuelume-open data-cuelume-emphasis="subtle" class="copy-bar-edit"
               title={t(locale(), "files.rename")}
               aria-label={t(locale(), "files.rename_aria")}
               onClick={openRename}
@@ -420,7 +424,7 @@ export default function FileCard(props: FileCardProps) {
                 <input type="hidden" name="token" value={props.deleteToken} />
                 <button
                   type="submit"
-                  class="file-action-btn file-action-btn--danger"
+                  data-cuelume-close data-cuelume-emphasis="strong" class="file-action-btn file-action-btn--danger"
                   aria-label={`${t(locale(), "files.delete")} file`}
                 >
                   <span

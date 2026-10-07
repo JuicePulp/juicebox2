@@ -53,7 +53,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
     <p class="upload-header__subtitle">{t(locale, "upload.subtitle")}</p>
   </header>
 
-  <a href="#host-modal" data-host-btn="" class="host-btn host-btn--card" title={t(locale, "upload.settings_aria")} aria-label={t(locale, "upload.settings_aria")}>
+  <a href="#host-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--card" title={t(locale, "upload.settings_aria")} aria-label={t(locale, "upload.settings_aria")}>
     <span set:html={iconSvgHtml("settings", 24)} />
   </a>
 
@@ -68,7 +68,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
       <fieldset class="rtt-options">
         <legend class="sr-only">{t(locale, "upload.retention_hint")}</legend>
         {RETENTION_OPTIONS.map((opt, i) => (
-          <label class="rtt-option">
+          <label class="rtt-option" data-cuelume-select>
             <input type="radio" name="ttl_hours" value={opt.hours} checked={i === RETENTION_DEFAULT_INDEX} />
             <span>{opt.label}</span>
           </label>
@@ -83,19 +83,19 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
     )}
 
     <div class="upload-tabs nojs-only">
-      <label for="mode-file" class="upload-tab">{t(locale, "upload.tab_file")}</label>
-      <label for="mode-text" class="upload-tab">{t(locale, "upload.tab_text")}</label>
+      <label for="mode-file" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_file")}</label>
+      <label for="mode-text" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_text")}</label>
       {cobaltEnabled && (
-        <label for="mode-cobalt" class="upload-tab">{t(locale, "upload.tab_cobalt")}</label>
+        <label for="mode-cobalt" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_cobalt")}</label>
       )}
     </div>
 
     <div class="upload-tabs upload-tabs--mobile">
-      <label for="mode-file" class="upload-tab">{t(locale, "upload.tab_file")}</label>
+      <label for="mode-file" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_file")}</label>
       {cobaltEnabled && (
-        <label for="mode-cobalt" class="upload-tab">{t(locale, "upload.tab_video")}</label>
+        <label for="mode-cobalt" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_video")}</label>
       )}
-      <label for="mode-text" class="upload-tab">{t(locale, "upload.tab_text")}</label>
+      <label for="mode-text" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_text")}</label>
     </div>
 
     <div class="upload-mode-wrapper" data-mode-wrapper="">
@@ -118,7 +118,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
           </div>
           <input id="dropzone-input" class="drop-zone__input" type="file" name="file" multiple required />
         </label>
-        <button type="submit" class="report-btn report-btn--primary upload-submit" data-upload-submit="">
+        <button type="submit" data-cuelume-tap class="report-btn report-btn--primary upload-submit" data-upload-submit="">
           <div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
           <span style="position:relative;z-index:1">{t(locale, "upload.button")}</span>
         </button>
@@ -127,10 +127,10 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
       <div class="upload-mode-text" data-mode-text="">
         <div class="text-editor" data-text-editor="">
           <div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
-          <textarea class="text-editor-textarea" data-text-textarea="" name="paste_text" placeholder={t(locale, "upload.text_placeholder")} aria-label={t(locale, "upload.text_placeholder")}></textarea>
+          <textarea data-cuelume-type class="text-editor-textarea" data-text-textarea="" name="paste_text" placeholder={t(locale, "upload.text_placeholder")} aria-label={t(locale, "upload.text_placeholder")}></textarea>
           <div class="text-editor-actions">
-            <button type="button" class="text-editor-cancel js-only" data-text-cancel="">{t(locale, "upload.text_cancel")}</button>
-            <button type="button" class="text-editor-upload js-only" data-text-upload="">{t(locale, "upload.text_upload")}</button>
+            <button type="button" data-cuelume-close data-cuelume-emphasis="subtle" class="text-editor-cancel js-only" data-text-cancel="">{t(locale, "upload.text_cancel")}</button>
+            <button type="button" data-cuelume-tap class="text-editor-upload js-only" data-text-upload="">{t(locale, "upload.text_upload")}</button>
             <noscript>
               <button type="submit" class="text-editor-submit" formnovalidate="">{t(locale, "upload.text_submit")}</button>
             </noscript>
@@ -164,10 +164,10 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </div>
               </div>
             </details>
-            <textarea class="text-editor-textarea" data-cobalt-textarea="" name="cobalt_url" placeholder={t(locale, "upload.cobalt_placeholder")} aria-label={t(locale, "upload.cobalt_placeholder")} spellcheck="false"></textarea>
+            <textarea data-cuelume-type class="text-editor-textarea" data-cobalt-textarea="" name="cobalt_url" placeholder={t(locale, "upload.cobalt_placeholder")} aria-label={t(locale, "upload.cobalt_placeholder")} spellcheck="false"></textarea>
             <div class="cobalt-bottom">
               <div class="cobalt-settings js-only" data-cobalt-settings="">
-                <label class="cobalt-option select-option--toggle" title={t(locale, "upload.cobalt_audio_only")}>
+                <label class="cobalt-option select-option--toggle" data-cuelume-toggle title={t(locale, "upload.cobalt_audio_only")}>
                   <input
                     type="checkbox"
                     data-cobalt-audio-only=""
@@ -181,7 +181,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </label>
                 <label class="cobalt-option" data-cobalt-quality-row="">
                   <span>{t(locale, "upload.cobalt_quality")}</span>
-                  <select data-cobalt-quality="">
+                  <select data-cuelume-select data-cobalt-quality="">
                     <option value="max" selected>Max</option>
                     <option value="2160">2160p</option>
                     <option value="1440">1440p</option>
@@ -193,7 +193,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </label>
                 <label class="cobalt-option" data-cobalt-container-row="">
                   <span>{t(locale, "upload.cobalt_container")}</span>
-                  <select data-cobalt-container="">
+                  <select data-cuelume-select data-cobalt-container="">
                     <option value="auto" selected>Auto</option>
                     <option value="mp4">MP4</option>
                     <option value="webm">WebM</option>
@@ -202,7 +202,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </label>
                 <label class="cobalt-option" data-cobalt-format-row="" hidden>
                   <span>{t(locale, "upload.cobalt_format")}</span>
-                  <select data-cobalt-format="">
+                  <select data-cuelume-select data-cobalt-format="">
                     <option value="best" selected>Best</option>
                     <option value="mp3">MP3</option>
                     <option value="opus">Opus</option>
@@ -212,15 +212,15 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </label>
                 <label class="cobalt-option" data-cobalt-better-audio-row="" hidden>
                   <span>{t(locale, "upload.cobalt_better_audio")}</span>
-                  <select data-cobalt-better-audio-mode="">
+                  <select data-cuelume-select data-cobalt-better-audio-mode="">
                     <option value="standard" selected>Standard</option>
                     <option value="enhanced">Enhanced</option>
                   </select>
                 </label>
               </div>
               <div class="text-editor-actions">
-                <button type="button" class="text-editor-cancel js-only" data-cobalt-cancel="">{t(locale, "upload.text_cancel")}</button>
-                <button type="button" class="text-editor-upload js-only" data-cobalt-fetch="">
+                <button type="button" data-cuelume-close data-cuelume-emphasis="subtle" class="text-editor-cancel js-only" data-cobalt-cancel="">{t(locale, "upload.text_cancel")}</button>
+                <button type="button" data-cuelume-tap class="text-editor-upload js-only" data-cobalt-fetch="">
                   <span style="position:relative;z-index:1">{t(locale, "upload.cobalt_fetch")}</span>
                 </button>
               </div>

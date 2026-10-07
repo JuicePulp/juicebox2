@@ -16,6 +16,7 @@ import { apiOwnedFiles, publicFile, publicFileRenew } from "../lib/api";
 import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
 import { lp } from "../lib/locale-prefix";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "../lib/file-events";
+import { playSound } from "../lib/sounds";
 import type { ServerFile } from "../lib/types";
 import FileCard, { remainingLabel } from "./FileCard";
 
@@ -228,6 +229,7 @@ export default function FilesCard(props: Props) {
         }
         el.classList.add("exiting");
         announce(t(locale, "sr.file_deleted"));
+        playSound("close");
         setTimeout(() => {
           const container = el.parentElement;
           if (container) flipRemainingCards(el, container);
