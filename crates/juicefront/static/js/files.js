@@ -1,4 +1,5 @@
 import { announce, esc, formatSize } from "./util.js";
+import { playSound } from "./sounds.js";
 import { iconHTML, iconForMime } from "./copy.js";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
@@ -158,6 +159,7 @@ function makeCopyBar(url, locale) {
     btn.classList.add("copy-bar--copied");
     setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
     announce(t(locale, "upload.copy_bar_announce"));
+    playSound("success", { emphasis: "subtle" });
   });
   return btn;
 }
@@ -232,6 +234,7 @@ function makeDeleteBtn(card, el, f, locale) {
       }
       el.classList.add("exiting");
       announce(t(locale, "sr.file_deleted"));
+      playSound("close");
       setTimeout(() => flipRemove(el, card), 300);
     } catch {
       btn.dataset.confirming = "";
@@ -296,9 +299,11 @@ function wireRenameModal(card, modal, f, locale) {
       modal.remove();
       if (location.hash.startsWith("#rename-")) history.replaceState(null, "", location.pathname + location.search);
       announce(t(locale, "files.rename_success"));
+      playSound("success", { emphasis: "subtle" });
     } catch {
       errorEl.textContent = t(locale, "files.rename_invalid");
       errorEl.hidden = false;
+      playSound("error", { emphasis: "subtle" });
     }
   });
 }

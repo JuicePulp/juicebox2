@@ -64,21 +64,21 @@ const shortcuts = [
 <div id="server-config" hidden data-quick-link={serverQuickLink ? "true" : "false"} data-quic={serverQuic ? "true" : "false"} data-custom-id={serverCustomId ? "true" : "false"} data-ultrafast={serverUltrafast ? "true" : "false"} data-cobalt={serverCobalt ? "true" : "false"} data-upload-mode={uploadMode} data-danger-level={dangerLevel} data-max-file-size-bytes={maxFileSizeBytes} data-allowed-ttl-hours={allowedTtlHours} data-default-ttl-hours={defaultTtlHours} data-public-base-url={publicBaseUrl}></div>
 
 <div id="share-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
-  <a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
   <div class="mdlcontent">
     <div class="mdlheader">
       <h2 id="share-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("share", 24)} class="mdltitle-icon" />
         {t(currentLocale, "share.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
     <div class="mdlbody">
-      <div class="share-grid">
+      <div class="share-grid" data-cuelume-emphasis="subtle">
         <a
-          class="share-grid__btn share-grid__btn--bluesky"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--bluesky"
           href={`https://bsky.app/intent/compose?text=${encodedUrl}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -87,7 +87,7 @@ const shortcuts = [
           <span>Bluesky</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--twitter"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--twitter"
            href={`https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodeURIComponent(t(currentLocale, "share.check_out", { url: "" }))}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -96,7 +96,7 @@ const shortcuts = [
           <span>Twitter</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--reddit"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--reddit"
           href={`https://reddit.com/submit?url=${encodedUrl}&title=Juicebox`}
           target="_blank"
           rel="noopener noreferrer"
@@ -105,7 +105,7 @@ const shortcuts = [
           <span>Reddit</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--mastodon"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--mastodon"
           href={`https://mastodon.social/share?text=${encodedText}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -114,7 +114,7 @@ const shortcuts = [
           <span>Mastodon</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--linkedin"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--linkedin"
           href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -123,7 +123,7 @@ const shortcuts = [
           <span>LinkedIn</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--telegram"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--telegram"
            href={`https://t.me/share/url?url=${encodedUrl}&text=${encodeURIComponent(t(currentLocale, "share.check_out", { url: "" }))}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -132,7 +132,7 @@ const shortcuts = [
           <span>Telegram</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--whatsapp"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--whatsapp"
           href={`https://api.whatsapp.com/send?text=${encodedText}`}
           target="_blank"
           rel="noopener noreferrer"
@@ -141,7 +141,7 @@ const shortcuts = [
           <span>WhatsApp</span>
         </a>
         <a
-          class="share-grid__btn share-grid__btn--email"
+          data-cuelume-tap class="share-grid__btn share-grid__btn--email"
           href={`mailto:?subject=Juicebox&body=${encodedText}`}
         >
           <span set:html={iconSvgHtml("email", 20)} aria-hidden="true" />
@@ -161,20 +161,20 @@ const shortcuts = [
       </div>
     </div>
     <div class="mdlfooter">
-      <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
 
 <div id="shortcuts-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
-  <a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
   <div class="mdlcontent">
     <div class="mdlheader">
       <h2 id="shortcuts-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("command", 24)} class="mdltitle-icon" />
         {t(currentLocale, "shortcuts.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
@@ -191,20 +191,20 @@ const shortcuts = [
       </ul>
     </div>
     <div class="mdlfooter">
-      <a href="#!" class="mdlbtn mdlbtn--primary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--primary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
 
 <div id="language-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="language-modal-title">
-  <a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
   <div class="mdlcontent language-modal">
     <div class="mdlheader">
       <h2 id="language-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("globe", 24)} class="mdltitle-icon" />
         {t(currentLocale, "language.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
@@ -216,7 +216,7 @@ const shortcuts = [
           return (
             <li>
               <a
-                class={`language-option${l.code === currentLocale ? " language-option--active" : ""}`}
+                data-cuelume-select class={`language-option${l.code === currentLocale ? " language-option--active" : ""}`}
                 href={href}
                 data-lang-link={l.code}
               >
@@ -229,27 +229,27 @@ const shortcuts = [
       </ul>
     </div>
     <div class="mdlfooter">
-      <a href="#!" class="mdlbtn mdlbtn--primary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--primary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
 
 <div id="pair-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="pair-modal-title">
-  <a href="#!" class="mdl-target__backdrop" aria-label={t(currentLocale, "modal.close")}></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label={t(currentLocale, "modal.close")}></a>
   <div class="mdlcontent">
     <div class="mdlheader">
       <h2 id="pair-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("smartphone", 24)} class="mdltitle-icon" />
         {t(currentLocale, "pair.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
     <div class="mdlbody">
       <div id="pair-not-paired" class="pair-section">
         <p class="pair-hint">{t(currentLocale, "pair.not_paired")}</p>
-        <button type="button" id="pair-generate-btn" class="mdlbtn mdlbtn--primary">
+        <button type="button" data-cuelume-tap id="pair-generate-btn" class="mdlbtn mdlbtn--primary">
           {t(currentLocale, "pair.generate_code")}
         </button>
         <div id="pair-code-display" class="pair-code-display" hidden>
@@ -271,7 +271,7 @@ const shortcuts = [
         <div id="pair-device-status" class="pair-device-status">
           <span id="pair-status-label" class="pair-status-label">Not Connected</span>
         </div>
-        <button type="button" id="pair-unpair-btn" class="mdlbtn mdlbtn--danger">
+        <button type="button" data-cuelume-close data-cuelume-emphasis="strong" id="pair-unpair-btn" class="mdlbtn mdlbtn--danger">
           {t(currentLocale, "pair.unpair")}
         </button>
       </div>
@@ -279,23 +279,23 @@ const shortcuts = [
       <div id="pair-status" class="pair-status" hidden></div>
     </div>
     <div class="mdlfooter">
-      <a href="/download" class="pair-download-link" target="_blank" rel="noopener">
+      <a href="/download" data-cuelume-navigate data-cuelume-emphasis="subtle" class="pair-download-link" target="_blank" rel="noopener">
         Download juicebox-plus
       </a>
-      <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
 
 <div id="host-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-modal-title">
-  <a href="#!" class="mdl-target__backdrop" aria-label="Close modal"></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
   <div class="mdlcontent host-modal">
     <div class="mdlheader">
       <h2 id="host-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("settings", 24)} class="mdltitle-icon" />
         {t(currentLocale, "host.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
@@ -303,17 +303,17 @@ const shortcuts = [
       <p class="host-modal__hint">{t(currentLocale, "host.hint")}</p>
       <div class="form-field">
         <label class="form-label" for="host-input">{t(currentLocale, "host.label")}</label>
-        <input id="host-input" type="text" class="form-input host-input" data-host-input="" placeholder="f.juicey.dev" />
+        <input id="host-input" data-cuelume-type type="text" class="form-input host-input" data-host-input="" placeholder="f.juicey.dev" />
         <div class="host-modal-actions js-only">
-          <button type="button" class="mdlbtn mdlbtn--secondary host-check-btn" data-host-check="">{t(currentLocale, "host.check")}</button>
-          <button type="button" class="mdlbtn mdlbtn--primary host-apply-btn" data-host-apply="">{t(currentLocale, "host.apply")}</button>
+          <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--secondary host-check-btn" data-host-check="">{t(currentLocale, "host.check")}</button>
+          <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--primary host-apply-btn" data-host-apply="">{t(currentLocale, "host.apply")}</button>
           <span class="host-status" data-host-status=""></span>
         </div>
       </div>
       <div class="host-options-group">
         <label class="form-label">{t(currentLocale, "host.options")}</label>
         <div class="form-field">
-          <label class="select-option select-option--toggle">
+          <label class="select-option select-option--toggle" data-cuelume-toggle>
             <input
               type="checkbox"
               data-quic-toggle=""
@@ -330,7 +330,7 @@ const shortcuts = [
           </label>
         </div>
         <div class="form-field">
-          <label class="select-option select-option--toggle">
+          <label class="select-option select-option--toggle" data-cuelume-toggle>
             <input
               type="checkbox"
               data-quick-link-toggle=""
@@ -347,7 +347,7 @@ const shortcuts = [
           </label>
         </div>
         <div class="form-field">
-          <label class="select-option select-option--toggle">
+          <label class="select-option select-option--toggle" data-cuelume-toggle>
             <input
               type="checkbox"
               data-ultrafast-toggle=""
@@ -372,8 +372,8 @@ const shortcuts = [
       </div>
     </div>
     <div class="mdlfooter">
-      <a href={selectorHref} class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
-      <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+      <a href={selectorHref} data-cuelume-navigate class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
@@ -562,6 +562,7 @@ const shortcuts = [
     document.querySelectorAll("[data-share-copy]").forEach(function(btn) {
       btn.addEventListener("click", function() {
         navigator.clipboard.writeText(location.href).then(function() {
+          try { window.JuiceSounds && window.JuiceSounds.play("success", { emphasis: "subtle" }); } catch {}
           var span = btn.querySelector("span");
           if (span) {
             var orig = span.textContent;
@@ -678,6 +679,7 @@ const shortcuts = [
           var fileUrl = lastUrlEl ? lastUrlEl.textContent : null;
           e.preventDefault();
           navigator.clipboard.writeText(fileUrl || location.href).then(function() {
+            try { window.JuiceSounds && window.JuiceSounds.play("success", { emphasis: "subtle" }); } catch {}
             if (fileUrl) {
               var copyBar = lastUrlEl.closest(".copy-bar");
               if (copyBar) {

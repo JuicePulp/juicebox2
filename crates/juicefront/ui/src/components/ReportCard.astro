@@ -85,7 +85,7 @@ const reportReasons = [
                         {t(locale, "report.url_label")} <span class="required">*</span>
                     </label>
                     <input
-                        id={`${cardId}-url`}
+                        data-cuelume-type id={`${cardId}-url`}
                         type="url"
                         name="file_url"
                         class="form-input"
@@ -102,7 +102,7 @@ const reportReasons = [
                         {t(locale, "report.reason_label")} <span class="required">*</span>
                     </label>
                     <select
-                        id={`${cardId}-reason`}
+                        data-cuelume-select id={`${cardId}-reason`}
                         name="reason"
                         class="form-select"
                         required
@@ -123,7 +123,7 @@ const reportReasons = [
                         {t(locale, "report.details_label")}
                     </label>
                     <textarea
-                        id={`${cardId}-details`}
+                        data-cuelume-type id={`${cardId}-details`}
                         name="details"
                         class="form-textarea"
                         rows="4"
@@ -138,7 +138,7 @@ const reportReasons = [
                         {t(locale, "report.email")}
                     </label>
                     <input
-                        id={`${cardId}-email`}
+                        data-cuelume-type id={`${cardId}-email`}
                         type="email"
                         name="email"
                         class="form-input"
@@ -151,7 +151,7 @@ const reportReasons = [
 
                 <div class="rpfactions">
                     <button
-                        type="submit"
+                        data-cuelume-tap type="submit"
                         class="report-btn report-btn--primary"
                     >
                         {t(locale, "report.submit")}

@@ -4,6 +4,7 @@
  */
 
 import { iconSvgHtml } from "./icons";
+import { playSound } from "./sounds";
 
 let _announcer: HTMLElement | null = null;
 
@@ -116,6 +117,7 @@ export function makeCopyBar(url: string, strings?: CopyBarStrings): HTMLButtonEl
       await navigator.clipboard.writeText(currentUrl);
       btn.classList.add("copy-bar--copied");
       announce(strings?.announceMsg ?? "Link copied to clipboard");
+      playSound("success", { emphasis: "subtle" });
       setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
     } catch {}
   });

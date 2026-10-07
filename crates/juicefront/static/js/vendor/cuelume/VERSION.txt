@@ -1,0 +1,4 @@
+cuelume 0.2.4 (MIT) — interaction sounds, synthesized live with Web Audio.
+Source: https://www.npmjs.com/package/cuelume
+Update: download the tarball from the npm registry and replace this directory.
+The app imports it from ../../sounds.js as a plain ESM file (no bundler on this frontend).

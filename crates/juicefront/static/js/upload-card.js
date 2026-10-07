@@ -1,5 +1,6 @@
 import { t } from "./i18n.js";
 import { announce, formatSize } from "./util.js";
+import { playSound } from "./sounds.js";
 import {
   iconHTML,
   iconForMime,
@@ -136,6 +137,7 @@ function failItem(item, pill, fill, status, errorCode, rawMessage) {
   var msg = vanityMsg(LOCALE, errorCode, rawMessage);
   status.textContent = msg;
   announce(t(LOCALE, "upload.announce_failed", { message: msg }));
+  playSound("error");
 }
 function animateRowOut(item) {
   item.classList.add("exiting");
@@ -232,6 +234,7 @@ function completeRow(item, row) {
   }
 
   announce(t(LOCALE, "upload.announce_complete", { filename: item.filename }));
+  playSound("success");
   autoCopyUrl(item.url || "", copyBar);
 
   var delBtn = row.querySelector(".delete-btn");
@@ -533,6 +536,7 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
             localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
           } catch {}
           announce(t(LOCALE, "upload.announce_complete", { filename: realName }));
+          playSound("success");
           autoCopyUrl(realUrl, copyBar);
           return;
         }
@@ -732,6 +736,7 @@ function completeCobaltRow(file, item, fill, status, pill) {
     localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
   } catch {}
   announce(t(LOCALE, "upload.announce_complete", { filename: file.filename }));
+  playSound("success");
   autoCopyUrl(file.url, copyBar);
 }
 
@@ -823,6 +828,7 @@ function startItem(file) {
   }
   item.setAttribute("data-upload-id", id);
   rowIds.set(id, item);
+  playSound("loading", { emphasis: "subtle" });
   status.textContent =
     file.size > TUS_THRESHOLD
       ? t(LOCALE, "upload.initializing_tus")

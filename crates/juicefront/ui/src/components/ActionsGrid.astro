@@ -45,9 +45,9 @@ const MORE_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
     {
         list.map((action) =>
             action.id === "more" ? (
-                    <details class="select-details" data-select-details>
+                    <details class="select-details" data-cuelume-emphasis="subtle" data-select-details>
                     <summary
-                        class="action-btn"
+                        data-cuelume-open class="action-btn"
                         aria-haspopup="menu"
                         aria-label={action.ariaLabel ?? action.label}
                         aria-describedby={`${id}-more-desc`}
@@ -75,7 +75,7 @@ const MORE_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                                                 ? "select-option js-only"
                                                 : "select-option"
                                         }
-                                        role="menuitem"
+                                        data-cuelume-navigate role="menuitem"
                                         href={item.href}
                                     >
                                         <span class="select-option__icon">
@@ -92,7 +92,7 @@ const MORE_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
                 </details>
             ) : (
                 <a
-                    class="action-btn"
+                    data-cuelume-navigate class="action-btn"
                     href={action.href ?? ROUTES[action.id ?? ""] ?? "/"}
                     aria-label={action.ariaLabel ?? action.label}
                     title={action.label}

@@ -76,7 +76,7 @@ const actionsGridId = `${cardId}-actions`;
                         {t(locale, "feedback.label")} <span class="required">*</span>
                     </label>
                     <textarea
-                        id={`${cardId}-message`}
+                        data-cuelume-type id={`${cardId}-message`}
                         class="form-textarea"
                         name="message"
                         rows="5"
@@ -92,7 +92,7 @@ const actionsGridId = `${cardId}-actions`;
                         {t(locale, "feedback.email")}
                     </label>
                     <input
-                        id={`${cardId}-email`}
+                        data-cuelume-type id={`${cardId}-email`}
                         type="email"
                         name="email"
                         class="form-input"
@@ -105,7 +105,7 @@ const actionsGridId = `${cardId}-actions`;
 
                 <div class="rpfactions">
                     <button
-                        type="submit"
+                        data-cuelume-tap type="submit"
                         class="report-btn report-btn--primary"
                     >
                         {t(locale, "feedback.submit")}

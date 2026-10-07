@@ -8,6 +8,7 @@ import {
   ULTRAFAST_RESERVE_URL,
 } from "../lib/upload-config";
 import { vanityMsg } from "../lib/errors";
+import { playSound } from "../lib/sounds";
 import { apiFetch, apiFetchJob, publicFileInfo } from "../lib/api";
 import { enhanceRetention, rebuildRetention } from "../lib/enhance-retention";
 import {
@@ -157,6 +158,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     const msg = vanityMsg(locale(), errorCode, rawMessage);
     status.textContent = msg;
     announce(t(locale(), "upload.announce_failed", { message: msg }));
+    playSound("error");
   }
 
   function animateRowOut(item: HTMLElement) {
@@ -262,6 +264,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }
 
     announce(t(locale(), "upload.announce_complete", { filename: item.filename }));
+    playSound("success");
     autoCopyUrl(item.url || "", copyBar);
 
     const delBtn = row.querySelector(".delete-btn") as HTMLButtonElement | null;
@@ -622,6 +625,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
           } catch {}
 
           announce(t(locale(), "upload.announce_complete", { filename: realName }));
+          playSound("success");
           autoCopyUrl(realUrl, copyBar);
           return;
         }
@@ -854,6 +858,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     announce(
       t(locale(), "upload.announce_complete", { filename: file.filename }),
     );
+    playSound("success");
     autoCopyUrl(file.url, copyBar);
   }
 
@@ -922,6 +927,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     });
     item.setAttribute("data-upload-id", id);
     rowIds.set(id, item);
+    playSound("loading", { emphasis: "subtle" });
     status.textContent =
       file.size > TUS_THRESHOLD
         ? t(locale(), "upload.initializing_tus")

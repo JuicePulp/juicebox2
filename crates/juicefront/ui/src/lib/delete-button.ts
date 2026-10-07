@@ -1,4 +1,5 @@
 import { iconHTML, announce } from "./format";
+import { playSound } from "./sounds";
 
 export interface DeleteButtonOpts {
     fileId: string;
@@ -40,6 +41,7 @@ export function createDeleteButton(opts: DeleteButtonOpts): HTMLButtonElement {
                     const item = btn.closest(".file-item, .file-card") as HTMLElement | null;
                     if (item) opts.onDeleted(item);
                     announce("File deleted");
+                    playSound("close");
                 }
             } catch (err) {
                     console.error("Failed to delete file:", err);

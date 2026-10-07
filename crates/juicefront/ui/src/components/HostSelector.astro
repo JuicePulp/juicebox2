@@ -33,14 +33,14 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
   data-str-selected={t(currentLocale, "hostsel.selected")}
   data-str-applied={t(currentLocale, "hostsel.applied")}
 >
-  <a href="#!" class="mdl-target__backdrop" aria-label={t(currentLocale, "modal.close")}></a>
+  <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label={t(currentLocale, "modal.close")}></a>
   <div class="mdlcontent mdlcontent--wide hostsel">
     <div class="mdlheader">
       <h2 id="host-selector-title" class="mdltitle">
         <span set:html={iconSvgHtml("settings", 24)} class="mdltitle-icon" />
         {t(currentLocale, "hostsel.title")}
       </h2>
-      <a href="#!" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
@@ -51,7 +51,7 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
         <div class="form-field hostsel-filters__search">
           <label class="form-label" for="hostsel-search">{t(currentLocale, "hostsel.search_label")}</label>
           <input
-            id="hostsel-search"
+            data-cuelume-type id="hostsel-search"
             type="search"
             class="form-input"
             data-hostsel-search=""
@@ -60,7 +60,7 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
           />
         </div>
         <div class="hostsel-filters__row">
-          <label class="select-option select-option--toggle hostsel-filters__toggle">
+          <label class="select-option select-option--toggle hostsel-filters__toggle" data-cuelume-toggle>
             <input type="checkbox" data-hostsel-online-only="" aria-label={t(currentLocale, "hostsel.online_only")} />
             <span class="select-option__icon select-option__check" aria-hidden="true">
               <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
@@ -72,12 +72,12 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
           </label>
           <label class="hostsel-filters__sort">
             <span class="form-label">{t(currentLocale, "hostsel.sort_label")}</span>
-            <select class="form-input" data-hostsel-sort="">
+            <select class="form-input" data-cuelume-select data-hostsel-sort="">
               <option value="latency">{t(currentLocale, "hostsel.sort_latency")}</option>
               <option value="name">{t(currentLocale, "hostsel.sort_name")}</option>
             </select>
           </label>
-          <button type="button" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">
+          <button type="button" data-cuelume-tap data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">
             {t(currentLocale, "hostsel.ping_all")}
           </button>
         </div>
@@ -112,13 +112,13 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
               <span class="hostsel-latency" data-hostsel-latency="">—</span>
               <span class="hostsel-status" data-hostsel-status=""></span>
               <span class="hostsel-actions">
-                <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping="">
+                <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-cuelume-tap data-cuelume-emphasis="subtle" data-hostsel-ping="">
                   <span data-hostsel-ping-label="">{t(currentLocale, "hostsel.ping")}</span>
                 </button>
                 <button
                   type="button"
                   class="mdlbtn mdlbtn--primary hostsel-btn"
-                  data-hostsel-use=""
+                  data-cuelume-select data-hostsel-use=""
                   disabled={n.url === savedHost}
                 >
                   <span data-hostsel-use-label="">{n.url === savedHost ? t(currentLocale, "hostsel.selected") : t(currentLocale, "hostsel.select")}</span>
@@ -159,13 +159,13 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
                 <span class="hostsel-latency" data-hostsel-latency="">—</span>
                 <span class="hostsel-status" data-hostsel-status=""></span>
                 <span class="hostsel-actions">
-                  <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping="">
+                  <button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-cuelume-tap data-cuelume-emphasis="subtle" data-hostsel-ping="">
                     <span data-hostsel-ping-label="">{t(currentLocale, "hostsel.ping")}</span>
                   </button>
                   <button
                     type="button"
                     class="mdlbtn mdlbtn--primary hostsel-btn"
-                    data-hostsel-use=""
+                    data-cuelume-select data-hostsel-use=""
                     disabled={n.url === savedHost}
                   >
                     <span data-hostsel-use-label="">{n.url === savedHost ? t(currentLocale, "hostsel.selected") : t(currentLocale, "hostsel.select")}</span>
@@ -186,11 +186,11 @@ const savedHost = readCookieHost(Astro.request.headers.get("cookie")) || "";
           <strong>{t(currentLocale, "hostsel.add_title")}</strong>
           <span>{t(currentLocale, "hostsel.add_desc")}</span>
         </div>
-        <a href={feedbackHref} class="mdlbtn mdlbtn--primary">{t(currentLocale, "hostsel.add_btn")}</a>
+        <a href={feedbackHref} data-cuelume-navigate class="mdlbtn mdlbtn--primary">{t(currentLocale, "hostsel.add_btn")}</a>
       </div>
     </div>
     <div class="mdlfooter">
-      <a href="#!" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>

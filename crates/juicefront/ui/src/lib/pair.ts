@@ -3,6 +3,7 @@
  * Drives the pair modal; all endpoints live under /api/pair and /api/device.
  */
 import { UPLOAD_URL } from "./upload-config";
+import { playSound } from "./sounds";
 import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
@@ -75,7 +76,8 @@ function handleCopyCode() {
   const code = codeWrap.querySelector(".pair-code__code")?.textContent?.trim();
   if (!code || code === "----") return;
   navigator.clipboard.writeText(code).then(() => {
-    codeWrap.classList.add("pair-code--copied");
+    playSound("success", { emphasis: "subtle" });
+  codeWrap.classList.add("pair-code--copied");
     setTimeout(() => codeWrap.classList.remove("pair-code--copied"), 2000);
   });
 }

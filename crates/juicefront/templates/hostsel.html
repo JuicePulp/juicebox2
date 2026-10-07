@@ -1,31 +1,31 @@
 <div id="host-selector-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-selector-title" data-str-online="{{ cx.t("hostsel.online") }}" data-str-offline="{{ cx.t("hostsel.offline") }}" data-str-checking="{{ cx.t("hostsel.checking") }}" data-str-ping="{{ cx.t("hostsel.ping") }}" data-str-pinging="{{ cx.t("hostsel.pinging") }}" data-str-select="{{ cx.t("hostsel.select") }}" data-str-selected="{{ cx.t("hostsel.selected") }}" data-str-applied="{{ cx.t("hostsel.applied") }}">
-<a href="#!" class="mdl-target__backdrop" aria-label="{{ cx.t("modal.close") }}"></a>
+<a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="{{ cx.t("modal.close") }}"></a>
 <div class="mdlcontent mdlcontent--wide hostsel">
 <div class="mdlheader">
 <h2 id="host-selector-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("settings", 24)|safe }}</span>{{ cx.t("hostsel.title") }}</h2>
-<a href="#!" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
+<a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
 </div>
 <div class="mdlbody hostsel__body">
 <p class="hostsel__hint">{{ cx.t("hostsel.hint") }}</p>
 <div class="hostsel-filters" role="search">
 <div class="form-field hostsel-filters__search">
 <label class="form-label" for="hostsel-search">{{ cx.t("hostsel.search_label") }}</label>
-<input id="hostsel-search" type="search" class="form-input" data-hostsel-search="" placeholder="{{ cx.t("hostsel.search_ph") }}" autocomplete="off">
+<input id="hostsel-search" data-cuelume-type type="search" class="form-input" data-hostsel-search="" placeholder="{{ cx.t("hostsel.search_ph") }}" autocomplete="off">
 </div>
 <div class="hostsel-filters__row">
-<label class="select-option select-option--toggle hostsel-filters__toggle">
+<label class="select-option select-option--toggle hostsel-filters__toggle" data-cuelume-toggle>
 <input type="checkbox" data-hostsel-online-only="" aria-label="{{ cx.t("hostsel.online_only") }}">
 <span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
 <span class="select-option__text"><span class="select-option__label">{{ cx.t("hostsel.online_only") }}</span></span>
 </label>
 <label class="hostsel-filters__sort">
 <span class="form-label">{{ cx.t("hostsel.sort_label") }}</span>
-<select class="form-input" data-hostsel-sort="">
+<select class="form-input" data-cuelume-select data-hostsel-sort="">
 <option value="latency">{{ cx.t("hostsel.sort_latency") }}</option>
 <option value="name">{{ cx.t("hostsel.sort_name") }}</option>
 </select>
 </label>
-<button type="button" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">{{ cx.t("hostsel.ping_all") }}</button>
+<button type="button" data-cuelume-tap data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary" data-hostsel-ping-all="">{{ cx.t("hostsel.ping_all") }}</button>
 </div>
 </div>
 <p class="hostsel-statusline" role="status" data-hostsel-statusline=""></p>
@@ -42,8 +42,8 @@
 <span class="hostsel-latency" data-hostsel-latency="">—</span>
 <span class="hostsel-status" data-hostsel-status=""></span>
 <span class="hostsel-actions">
-<button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
-<button type="button" class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
+<button type="button" data-cuelume-tap data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
+<button type="button" data-cuelume-select class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
 </span>
 </li>
 {% endfor %}</ul>
@@ -67,8 +67,8 @@
 <span class="hostsel-latency" data-hostsel-latency="">—</span>
 <span class="hostsel-status" data-hostsel-status=""></span>
 <span class="hostsel-actions">
-<button type="button" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
-<button type="button" class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
+<button type="button" data-cuelume-tap data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary hostsel-btn" data-hostsel-ping=""><span data-hostsel-ping-label="">{{ cx.t("hostsel.ping") }}</span></button>
+<button type="button" data-cuelume-select class="mdlbtn mdlbtn--primary hostsel-btn" data-hostsel-use=""{% if n.selected %} disabled{% endif %}><span data-hostsel-use-label="">{% if n.selected %}{{ cx.t("hostsel.selected") }}{% else %}{{ cx.t("hostsel.select") }}{% endif %}</span></button>
 </span>
 </li>
 {% endfor %}</ul>
@@ -77,9 +77,9 @@
 </section>
 <div class="hostsel-add">
 <div class="hostsel-add__text"><strong>{{ cx.t("hostsel.add_title") }}</strong><span>{{ cx.t("hostsel.add_desc") }}</span></div>
-<a href="{{ cx.lp("/feedback") }}" class="mdlbtn mdlbtn--primary">{{ cx.t("hostsel.add_btn") }}</a>
+<a href="{{ cx.lp("/feedback") }}" data-cuelume-navigate class="mdlbtn mdlbtn--primary">{{ cx.t("hostsel.add_btn") }}</a>
 </div>
 </div>
-<div class="mdlfooter"><a href="#!" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a></div>
+<div class="mdlfooter"><a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a></div>
 </div>
 </div>
