@@ -62,6 +62,12 @@ fn test_state() -> Arc<AppState> {
         ip_encryption_key: "0000000000000000000000000000000000000000000000000000000000000001"
             .into(),
         ip_pepper: "test_pepper".into(),
+        storage_encryption_key: "0000000000000000000000000000000000000000000000000000000000000001"
+            .into(),
+        password_min_len: 8,
+        password_try_limit: 10,
+        password_try_window_secs: 600,
+        encrypted_force_relay: true,
         trusted_proxy_cidrs: vec![],
         report_retention_days: 90,
         feedback_retention_days: 90,
