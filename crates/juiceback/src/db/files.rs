@@ -40,7 +40,8 @@ pub fn finish_reservation(
 }
 
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
-    delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status";
+    delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
+    password_hash, is_encrypted, enc_header";
 
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
@@ -61,13 +62,16 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
             Some(raw_host)
         },
         status,
+        password_hash: row.get(11)?,
+        is_encrypted: row.get::<_, i64>(12).unwrap_or(0) != 0,
+        enc_header: row.get(13)?,
     })
 }
 
 pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
         ),
         params![
             record.id,
@@ -81,6 +85,9 @@ pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
             record.uploader_ip,
             record.storage_host.as_deref().unwrap_or(""),
             record.status,
+            record.password_hash.as_deref(),
+            i64::from(record.is_encrypted),
+            record.enc_header.as_deref(),
         ],
     )?;
     Ok(())
