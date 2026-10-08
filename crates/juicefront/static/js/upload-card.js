@@ -136,6 +136,18 @@ function dismissRow(item) {
   if (id) removeUpload(id);
   removeItem(item);
 }
+// Key badge next to the filename for protected rows. Idempotent.
+function markRowProtected(row) {
+  if (!row || row.querySelector(".file-protected")) return;
+  var nameEl = row.querySelector(".file-name");
+  if (!nameEl) return;
+  var badge = document.createElement("span");
+  badge.className = "file-protected";
+  badge.title = t(LOCALE, "files.protected");
+  badge.setAttribute("aria-label", t(LOCALE, "files.protected"));
+  badge.innerHTML = iconHTML("key", 16);
+  nameEl.after(badge);
+}
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
   pill.classList.add("error");
@@ -206,6 +218,7 @@ function completeRow(item, row) {
   row.classList.add("complete");
   var actionArea = row.querySelector(".file-action-area");
   if (actionArea) actionArea.classList.add("complete");
+  if (item.protected) markRowProtected(row);
   status.textContent = t(LOCALE, "upload.complete");
   var spinner = pill.querySelector(".spinner");
   if (spinner) spinner.remove();
@@ -709,6 +722,7 @@ function completeCobaltRow(file, item, fill, status, pill) {
   if (progressDivider) progressDivider.setAttribute("aria-valuenow", "100");
   item.classList.add("complete");
   item.setAttribute("data-file-id", file.id);
+  if (file.protected) markRowProtected(item);
   var actionArea = item.querySelector(".file-action-area");
   if (actionArea) actionArea.classList.add("complete");
   status.textContent = t(LOCALE, "upload.complete");

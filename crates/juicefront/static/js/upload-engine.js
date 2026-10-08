@@ -303,6 +303,7 @@ function startDirectUpload(item, file, controls) {
             url: res.url || "",
             deleteToken: res.delete_token || "",
             expiresAt: res.expires_at ? Number(res.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+            protected: !!res.protected,
             state: "done",
             progress: 100
           });
@@ -512,6 +513,7 @@ function startDirectTicketUpload(item, file, controls) {
         url: data.url || shareUrl,
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100
       });
@@ -1119,6 +1121,7 @@ function startTusUpload(item, file, controls) {
         url: data.url,
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100
       });
