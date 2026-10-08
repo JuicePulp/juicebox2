@@ -39,7 +39,7 @@ pub const COBALT_FETCH_RATE_LIMIT_PER_MINUTE: u32 = 3;
 /// TUS budget (session creation, chunk PATCH, offset GET, session DELETE).
 /// A parallel upload fans out dozens of requests in seconds (session per
 /// part plus pipelined chunks) and sustains a dozen per second on fast
-/// links, which the 10-per-6s action budget cannot carry — uploads wedged
+/// links, which the 10-per-6s action budget cannot carry - uploads wedged
 /// behind 429 storms. Creation stays inside this budget (not the action
 /// one) because a single upload legitimately opens up to TUS_MAX_PARTS
 /// sessions at once; abandoned sessions expire via the cleanup job.

@@ -235,7 +235,7 @@ pub async fn upload_handler(
 
     // Protection was resolved while parsing (fresh setup from the form
     // password, or the reservation row's material). The reservation's
-    // verifier wins when both exist — never mix a form password in.
+    // verifier wins when both exist - never mix a form password in.
     let protection = params.protection;
     let protected = protection.is_some();
     if protected && params.enc_header.is_none() {

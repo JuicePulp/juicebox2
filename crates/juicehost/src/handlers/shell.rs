@@ -4,7 +4,7 @@
 //! juiceback, the host serves an unlock shell: a password form plus a
 //! self-contained decrypt app. The browser POSTs the password directly to
 //! the juiceback key-release gateway and decrypts `/c/` ciphertext locally
-//! — juicehost never sees passwords, keys, or plaintext.
+//! - juicehost never sees passwords, keys, or plaintext.
 
 use axum::{
     body::Body,
@@ -16,6 +16,9 @@ use super::common::backend_request;
 use crate::{error::not_found_html, state::AppState};
 
 const SHELL_TEMPLATE: &str = include_str!("../templates/unlock_shell.html");
+const SHELL_APP_JS: &str = include_str!("../templates/shell_app.js");
+const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
+const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
 /// Backend file-status probe outcome.
 pub(crate) enum BackendStatus {
@@ -98,7 +101,7 @@ impl ShellMode {
 /// Returns `Some(response)` when the request must not proceed to bytes: the
 /// unlock shell for protected files, or a 404 when protection cannot be
 /// ruled out (unreachable backend). Returns `None` when serving may
-/// proceed — including standalone hosts without a backend (nothing can be
+/// proceed - including standalone hosts without a backend (nothing can be
 /// protected there) and ids the backend does not know (legacy files).
 pub(crate) async fn protected_shell_response(
     state: &AppState,
@@ -165,6 +168,18 @@ fn render_shell(
         id
     );
     let html = SHELL_TEMPLATE
+        .replace("__HEAD_META__", juiceutils::web::HEAD_META.trim_end())
+        .replace(
+            "__FONT_FACE__",
+            &juiceutils::web::font_face_css(TITLE_FONT_DATA_URI.trim()),
+        )
+        .replace("__BASE_CSS__", juiceutils::web::BASE_CSS.trim_end())
+        .replace("__BRAND_CSS__", juiceutils::web::BRAND_CSS.trim_end())
+        .replace(
+            "__BRAND__",
+            &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
+        )
+        .replace("__APP_JS__", SHELL_APP_JS.trim_end())
         .replace("__FILE_ID__", &escape_html(id))
         .replace("__FILENAME__", &escape_html(filename))
         .replace("__GATEWAY_ORIGIN__", &escape_html(gateway_origin))

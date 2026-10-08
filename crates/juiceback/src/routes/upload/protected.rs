@@ -123,7 +123,7 @@ pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey,
 
 /// The encryption key plus row material for one protected upload.
 /// `Fresh` mints from a form password; `Reserved` reuses the reservation
-/// row (whose verifier and wraps already correspond to one password — a
+/// row (whose verifier and wraps already correspond to one password - a
 /// form password is never mixed in). Legacy reservation rows without key
 /// material fall back to the global storage key.
 pub enum UploadProtection {

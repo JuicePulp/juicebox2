@@ -54,7 +54,7 @@ export function bindSounds(): void {
 }
 
 // Warm up the shared AudioContext on the first pointer press, so the cue on
-// the very first click — very often a navigation link — starts instantly.
+// the very first click - very often a navigation link - starts instantly.
 // Silent and one-shot; navigation itself is never delayed.
 function warmUpAudio(): void {
   const warmup = (): void => {

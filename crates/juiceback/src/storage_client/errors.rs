@@ -34,7 +34,7 @@ fn scrub_body(body: &str) -> String {
     }
     let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() > MAX_CHARS {
-        format!("{}…", collapsed.chars().take(MAX_CHARS).collect::<String>())
+        format!("{}...", collapsed.chars().take(MAX_CHARS).collect::<String>())
     } else {
         collapsed
     }

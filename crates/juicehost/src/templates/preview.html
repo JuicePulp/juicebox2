@@ -4,73 +4,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex, nofollow">
+  __HEAD_META__
   <meta name="description" content="Juicebox file preview page (HTML preview, not the raw file). Raw bytes: __RAW_URL__">
-  <meta name="theme-color" content="#1a1613">
-  <meta name="color-scheme" content="dark">
   <title>__TITLE__</title>
 __OG_TAGS__
   <style>
-    @font-face {
-      font-family: "Title";
-      src: url("__FONT__") format("woff2");
-      font-weight: normal;
-      font-style: normal;
-      font-display: swap;
-    }
-    *{margin:0;padding:0;box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      background:#1a1613;
-      color:#e8ded4;
-      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-      display:flex;
-      flex-direction:column;
-      height:100dvh;
-      overflow:hidden;
-    }
-    .topbar{
-      display:flex;
-      align-items:center;
-      gap:.75rem;
-      padding:.6rem 1rem;
-      border-bottom:1px solid #2e2620;
-      flex:none;
-    }
-    .brand{
-      display:inline-flex;
-      align-items:center;
-      gap:.45rem;
-      font-family:"Title","Unifont",monospace;
-      text-transform:uppercase;
-      font-weight:400;
-      letter-spacing:.02em;
-      color:#f97316;
-      white-space:nowrap;
-      text-decoration:none;
-      font-size:1.05rem;
-      text-shadow:
-        2px 0 0 #000,
-        -2px 0 0 #000,
-        0 2px 0 #000,
-        0 -2px 0 #000;
-    }
-    .brand sup{font-size:.65em}
-    .brand-logo{
-      width:28px;
-      height:28px;
-      flex:none;
-      border-radius:.35rem;
-    }
-    .fname{
-      flex:1;
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-      color:#e8ded4;
-      font-size:.95rem;
-    }
+    __FONT_FACE__
+    __BASE_CSS__
+    __BRAND_CSS__
     .fsize{color:#a29188;font-size:.85rem;white-space:nowrap}
     .actions{display:flex;gap:.5rem;flex:none}
     .btn{
@@ -170,7 +111,7 @@ __OG_TAGS__
 </head>
 <body>
   <header class="topbar" id="topbar">
-    <a class="brand" href="/"><img class="brand-logo" src="__LOGO__" alt="" width="28" height="28">Juicebox<sup>2</sup></a>
+    __BRAND__
     <span class="fname" title="__FILENAME__">__FILENAME__</span>
     <span class="fsize">__SIZE__</span>
     <nav class="actions">
@@ -180,64 +121,7 @@ __OG_TAGS__
   </header>
   <main class="stage" id="stage">__STAGE__</main>
   <script>
-  (function () {
-    "use strict";
-    var textview = document.getElementById("textview");
-    if (textview) {
-      var raw = textview.getAttribute("data-raw") || "";
-      var stride = __TEXT_MAX__;
-      var loaded = 0;
-      var total = null;
-      var loading = false;
-      var done = false;
-      var decoder = new TextDecoder();
-      var sentinel = document.createElement("div");
-      sentinel.setAttribute("aria-hidden", "true");
-      textview.after(sentin);
-      function parseTotal(res) {
-        var cr = res.headers.get("Content-Range");
-        if (cr) {
-          var m = /\/(\d+)\s*$/.exec(cr);
-          if (m) total = parseInt(m[1], 10);
-        }
-      }
-      async function loadMore() {
-        if (loading || done) return;
-        if (total !== null && loaded >= total) { done = true; return; }
-        loading = true;
-        try {
-          var res = await fetch(raw, { headers: { "Range": "bytes=" + loaded + "-" + (loaded + stride - 1) } });
-          if (res.status === 416) { done = true; return; }
-          if (!res.ok && res.status !== 206) throw new Error("bad status");
-          parseTotal(res);
-          var buf = new Uint8Array(await res.arrayBuffer());
-          if (buf.length === 0) { done = true; return; }
-          var last = total !== null && loaded + buf.length >= total;
-          var text = decoder.decode(buf, last ? undefined : { stream: true });
-          if (loaded === 0) textview.textContent = "";
-          textview.appendChild(document.createTextNode(text));
-          loaded += buf.length;
-          if (last || (total !== null && loaded >= total)) done = true;
-        } catch (e) {
-          if (loaded === 0) textview.textContent = "Could not load a text preview.";
-          done = true;
-        } finally {
-          loading = false;
-        }
-      }
-      if ("IntersectionObserver" in window) {
-        new IntersectionObserver(function (entries) {
-          if (entries.some(function (en) { return en.isIntersecting; })) loadMore();
-        }, { rootMargin: "1200px" }).observe(sentinel);
-      } else {
-        var scroller = textview;
-        scroller.addEventListener("scroll", function () {
-          if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 1200) loadMore();
-        });
-      }
-      loadMore();
-    }
-  })();
+__APP_JS__
   </script>
 </body>
 </html>
