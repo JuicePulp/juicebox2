@@ -1090,16 +1090,6 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     form?.addEventListener("submit", (e) => e.preventDefault());
     enhanceServerFiles();
 
-    const pwInput = document.querySelector<HTMLInputElement>("[data-upload-password]");
-    const pwHint = document.querySelector("[data-upload-password-hint]");
-    if (pwInput && pwHint) {
-      const syncPwHint = () => {
-        pwHint.toggleAttribute("hidden", !pwInput.value.trim());
-      };
-      pwInput.addEventListener("input", syncPwHint);
-      syncPwHint();
-    }
-
     input?.addEventListener("change", () => {
       if (!input.files) return;
       Array.from(input.files).forEach(startItem);

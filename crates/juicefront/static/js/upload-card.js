@@ -1190,16 +1190,6 @@ export function initUploadCard() {
     });
   }
 
-  var pwInput = card.querySelector("[data-upload-password]");
-  var pwHint = card.querySelector("[data-upload-password-hint]");
-  if (pwInput && pwHint) {
-    var syncPwHint = function () {
-      pwHint.hidden = !((pwInput.value || "").trim());
-    };
-    pwInput.addEventListener("input", syncPwHint);
-    syncPwHint();
-  }
-
   document.addEventListener("paste", onPaste);
 }
 
