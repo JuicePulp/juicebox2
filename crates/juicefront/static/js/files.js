@@ -335,7 +335,7 @@ function enhanceCard(card, el, f, locale) {
     lock.className = "storage-host-tag storage-host-tag--locked";
     lock.title = t(locale, "files.protected");
     lock.setAttribute("aria-label", t(locale, "files.protected"));
-    lock.textContent = "🔒";
+    lock.innerHTML = iconHTML("key", 16);
     headerEl.append(lock);
   }
   const linkEl = el.querySelector(".file-card-link");
