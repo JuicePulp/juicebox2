@@ -121,7 +121,8 @@ export function enqueueUpload(input) {
         ttlHours: input.ttlHours,
         customHost: input.customHost,
         uploadMode: input.uploadMode,
-        quickLink: input.quickLink
+        quickLink: input.quickLink,
+        password: input.password || ""
       };
       p.postMessage({
         type: "enqueue",

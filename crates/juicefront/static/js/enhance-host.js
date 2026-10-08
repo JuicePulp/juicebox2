@@ -213,12 +213,13 @@ export function enhanceHostSelector(locale) {
   // without retyping. Clear the field to go back to public links.
   const pwInput = document.querySelector("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
+  var syncPwState = null;
   if (pwInput) {
     try {
       const savedPw = localStorage.getItem("juicebox_upload_password") || "";
       if (savedPw && !pwInput.value) pwInput.value = savedPw;
     } catch {}
-    var syncPwState = function () {
+    syncPwState = function () {
       const has = !!((pwInput.value || "").trim());
       try {
         if (has) localStorage.setItem("juicebox_upload_password", pwInput.value.trim());
@@ -398,6 +399,7 @@ export function enhanceHostSelector(locale) {
   applyBtn.addEventListener("click", async () => {
     applyBtn.disabled = true;
     try {
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (!cfg)
         return;
@@ -416,6 +418,7 @@ export function enhanceHostSelector(locale) {
   if (doneBtn) {
     doneBtn.addEventListener("click", async (e) => {
       e.preventDefault();
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (cfg) {
         saveHost();

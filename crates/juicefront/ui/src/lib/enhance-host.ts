@@ -297,12 +297,13 @@ export function enhanceHostSelector(locale?: string) {
   // without retyping. Clear the field to go back to public links.
   const pwInput = document.querySelector<HTMLInputElement>("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
+  let syncPwState: (() => void) | null = null;
   if (pwInput) {
     try {
       const savedPw = localStorage.getItem("juicebox_upload_password") || "";
       if (savedPw && !pwInput.value) pwInput.value = savedPw;
     } catch {}
-    const syncPwState = () => {
+    const syncPwStateFn = () => {
       const has = !!pwInput.value.trim();
       try {
         if (has) localStorage.setItem("juicebox_upload_password", pwInput.value.trim());
@@ -313,8 +314,9 @@ export function enhanceHostSelector(locale?: string) {
         .querySelectorAll("[data-upload-password-indicator]")
         .forEach((el) => el.toggleAttribute("hidden", !has));
     };
-    pwInput.addEventListener("input", syncPwState);
-    syncPwState();
+    pwInput.addEventListener("input", syncPwStateFn);
+    syncPwState = syncPwStateFn;
+    syncPwStateFn();
   }
 
   const ultrafastToggle = document.querySelector(
@@ -516,6 +518,7 @@ export function enhanceHostSelector(locale?: string) {
   applyBtn.addEventListener("click", async () => {
     applyBtn.disabled = true;
     try {
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (!cfg) return;
       saveHost();
@@ -533,6 +536,7 @@ export function enhanceHostSelector(locale?: string) {
   if (doneBtn) {
     doneBtn.addEventListener("click", async (e) => {
       e.preventDefault();
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (cfg) {
         saveHost();
