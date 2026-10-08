@@ -95,21 +95,30 @@ pub async fn add_security_headers(
     );
 
     if is_file_route {
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
-            ),
-        );
+        // Bytes AND unlock shells share this path. Shells set their own
+        // tight CSP in the handler (see below); anything else keeps the
+        // strict no-script policy so stored HTML/SVG uploads can't execute.
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+                ),
+            );
+        }
     } else if is_preview_route {
-        // The fullscreen preview page carries one inline script (media
-        // bootstrap + text preview); everything it loads is same-origin.
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
-            ),
-        );
+        // The preview page carries inline styles, one inline script, and
+        // an inlined brand font (data: URI) — everything else is same-origin.
+        // Unlock shells served here set their own CSP (cross-origin gateway
+        // fetch); keep it.
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
+                ),
+            );
+        }
     } else {
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(
