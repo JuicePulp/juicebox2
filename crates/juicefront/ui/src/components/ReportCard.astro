@@ -149,6 +149,23 @@ const reportReasons = [
                     </p>
                 </div>
 
+                <div class="form-field">
+                    <label for={`${cardId}-password`} class="form-label">
+                        {t(locale, "report.password_label")}
+                    </label>
+                    <input
+                        data-cuelume-type id={`${cardId}-password`}
+                        type="password"
+                        name="password"
+                        class="form-input"
+                        autocomplete="off"
+                        maxlength={256}
+                    />
+                    <p class="form-help-text">
+                        {t(locale, "report.password_hint")}
+                    </p>
+                </div>
+
                 <div class="rpfactions">
                     <button
                         data-cuelume-tap type="submit"

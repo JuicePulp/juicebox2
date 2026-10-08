@@ -9,4 +9,6 @@ export interface ServerFile {
   url: string;
   delete_token: string;
   storage_host?: string;
+  protected?: boolean;
+  is_encrypted?: boolean;
 }

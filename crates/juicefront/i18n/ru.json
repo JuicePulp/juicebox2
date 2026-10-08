@@ -318,6 +318,12 @@
   "actions.file_actions": "Настройки файлов",
   "actions.upload_actions": "Настройка загрузки",
   "actions.feedback_actions": "Фидбек",
-  "actions.report_actions": "Отчёт"
+  "actions.report_actions": "Отчёт",
+  "upload.password_label": "File password (optional)",
+  "upload.password_ph": "Leave empty for a public link",
+  "upload.password_relay": "Protected uploads use the secure relay and are slower.",
+  "files.protected": "Password-protected",
+  "report.password_label": "File password (if the file is protected)",
+  "report.password_hint": "Optional: lets moderators review protected files."
  }
 }

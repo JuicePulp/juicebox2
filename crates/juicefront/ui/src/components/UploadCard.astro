@@ -81,6 +81,11 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
     {cobaltEnabled && (
       <input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label={t(locale, "upload.tab_cobalt")} />
     )}
+    <div class="upload-password" data-upload-password-wrap="">
+      <label class="form-label" for="upload-password">{t(locale, "upload.password_label")}</label>
+      <input id="upload-password" class="form-input upload-password__input" type="password" data-upload-password="" data-cuelume-type placeholder={t(locale, "upload.password_ph")} autocomplete="new-password" minlength={8} maxlength={256} />
+      <p class="form-help-text" data-upload-password-hint="" hidden>{t(locale, "upload.password_relay")}</p>
+    </div>
 
     <div class="upload-tabs nojs-only">
       <label for="mode-file" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_file")}</label>

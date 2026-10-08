@@ -42,6 +42,12 @@ const ru = {
   "upload.drop_offline_desc":
     "В данный момент файл-сервер недоступен. Пожалуйста, попробуйте позже.",
   "upload.button": "Загрузить",
+  "upload.password_label": "File password (optional)",
+  "upload.password_ph": "Leave empty for a public link",
+  "upload.password_relay": "Protected uploads use the secure relay and are slower.",
+  "files.protected": "Password-protected",
+  "report.password_label": "File password (if the file is protected)",
+  "report.password_hint": "Optional: lets moderators review protected files.",
   "upload.text_placeholder": "Вставляй или пиши текст сюда...",
   "upload.text_cancel": "Отменить",
   "upload.text_upload": "Загрузить как .txt",
@@ -256,8 +262,7 @@ const ru = {
   "faq.a9":
     "Любые. Нет никаких ограничений на то, что вы грузите, главное вписаться в лимит размера.",
   "faq.q10": "В Juicebox есть сквозное шифрование?",
-  "faq.a10":
-    "Файлы передаются по HTTPS. Шифрование при хранении зависит от juicehost'а, к которому вы подключаетесь. Сам Juicebox не шифрует файлы в состоянии покоя.",
+  "faq.a10": "Files are transferred over HTTPS. You can also set a password when uploading: juiceback then encrypts the file before storage, so juicehost operators only ever see ciphertext. Unprotected files are stored as-is. This protects against the storage host, not against the juiceback operator.",
 
   "privacy.title": "Политика конфиденциальности",
   "privacy.subtitle": "Что мы собираем и почему",

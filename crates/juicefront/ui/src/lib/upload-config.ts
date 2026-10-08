@@ -44,6 +44,13 @@ export function readUploadMode(): string {
   );
 }
 
+export function readUploadPassword(): string {
+  if (typeof document === "undefined") return "";
+  return (
+    document.querySelector<HTMLInputElement>("[data-upload-password]")?.value.trim() ?? ""
+  );
+}
+
 /** Files above this size (in bytes) use TUS resumable upload. Kept well
  * under Cloudflare's 100 MB request body cap so direct uploads never hit it. */
 export const TUS_THRESHOLD = 30 * 1024 * 1024;

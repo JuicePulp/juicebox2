@@ -318,6 +318,12 @@
   "actions.file_actions": "Actions du fichier",
   "actions.upload_actions": "Actions d'envoi",
   "actions.feedback_actions": "Actions d'avis",
-  "actions.report_actions": "Actions de signalement"
+  "actions.report_actions": "Actions de signalement",
+  "upload.password_label": "File password (optional)",
+  "upload.password_ph": "Leave empty for a public link",
+  "upload.password_relay": "Protected uploads use the secure relay and are slower.",
+  "files.protected": "Password-protected",
+  "report.password_label": "File password (if the file is protected)",
+  "report.password_hint": "Optional: lets moderators review protected files."
  }
 }

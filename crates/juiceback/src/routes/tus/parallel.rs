@@ -168,11 +168,12 @@ pub(crate) async fn finalize_concat(
         })
         .await?;
 
-    let public_url = crate::utils::public_url(
+    let public_url = crate::utils::share_url(
         &state.config.public_base_url,
         record.storage_host.as_deref(),
         &record.id,
         &record.filename,
+        record.is_protected(),
     );
     let protected = record.is_protected();
     let is_encrypted = record.is_encrypted;

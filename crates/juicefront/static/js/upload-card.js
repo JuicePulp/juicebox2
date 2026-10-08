@@ -13,6 +13,7 @@ import {
 import {
   UPLOAD_URL,
   readMaxFileSize,
+  readUploadPassword,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
 } from "./upload-config.js";
@@ -593,6 +594,8 @@ function startCobaltFetch(url) {
   var betterAudio = betterEl ? betterEl.value === "enhanced" : false;
 
   var payload = { url: url, audio_only: audioOnly };
+  var _pw = readUploadPassword();
+  if (_pw) payload.password = _pw;
   if (audioOnly) {
     payload.audio_format = audioFormat;
     payload.better_audio = betterAudio;
@@ -809,7 +812,7 @@ function startItem(file) {
     );
     return;
   }
-  if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
+  if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported() && !readUploadPassword()) {
     ultrafastReserve(file, item, fill, status, pill);
     return;
   }
@@ -822,6 +825,7 @@ function startItem(file) {
       customHost: readSelectedHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
+      password: readUploadPassword(),
     });
   } finally {
     suppressAdopt--;
@@ -1184,6 +1188,16 @@ export function initUploadCard() {
       startCobaltFetch(url);
       if (cobaltTextarea) cobaltTextarea.value = "";
     });
+  }
+
+  var pwInput = card.querySelector("[data-upload-password]");
+  var pwHint = card.querySelector("[data-upload-password-hint]");
+  if (pwInput && pwHint) {
+    var syncPwHint = function () {
+      pwHint.hidden = !((pwInput.value || "").trim());
+    };
+    pwInput.addEventListener("input", syncPwHint);
+    syncPwHint();
   }
 
   document.addEventListener("paste", onPaste);

@@ -30,6 +30,28 @@ pub fn is_valid_id(id: &str) -> bool {
 
 pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
+/// Shareable URL for a file: the unlock prompt when protected (the `/f/`
+/// URL would only redirect there via the juicehost gate), else the public
+/// storage URL.
+#[must_use]
+pub fn share_url(
+    public_base_url: &str,
+    storage_host: Option<&str>,
+    id: &str,
+    filename: &str,
+    protected: bool,
+) -> String {
+    if protected {
+        format!(
+            "{}/file/{}/unlock",
+            public_base_url.trim_end_matches('/'),
+            id
+        )
+    } else {
+        public_url(public_base_url, storage_host, id, filename)
+    }
+}
+
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {
     let throughput = if total.as_secs_f64() > 0.0 {
         size as f64 / total.as_secs_f64() / crate::constants::BYTES_PER_MIB

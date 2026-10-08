@@ -764,6 +764,7 @@ export default function FilesCard(props: Props) {
                   deleteToken={f.delete_token}
                   storageHost={f.storage_host ?? ""}
                   defaultHost={props.defaultHost}
+                  protected={f.protected}
                   expiresAt={f.expires_at}
                   uploadedAt={f.uploaded_at}
                   staggerIndex={i()}
