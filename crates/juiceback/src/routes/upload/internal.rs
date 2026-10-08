@@ -44,14 +44,24 @@ pub async fn file_status_handler(
         .await;
 
     match file {
-        Ok(Some(record)) => Ok(Json(serde_json::json!({
-            "id": id,
-            "status": record.status,
-            "filename": record.filename,
-            "expires_at": record.expires_at,
-            "protected": record.is_protected(),
-            "is_encrypted": record.is_encrypted,
-        }))),
+        Ok(Some(record)) => {
+            let unlock_url = record.is_protected().then(|| {
+                format!(
+                    "{}/file/{}/unlock",
+                    state.config.public_base_url.trim_end_matches('/'),
+                    id
+                )
+            });
+            Ok(Json(serde_json::json!({
+                "id": id,
+                "status": record.status,
+                "filename": record.filename,
+                "expires_at": record.expires_at,
+                "protected": record.is_protected(),
+                "is_encrypted": record.is_encrypted,
+                "unlock_url": unlock_url,
+            })))
+        }
         Ok(None) => Err(AppError::NotFound),
         Err(e) => Err(e),
     }
