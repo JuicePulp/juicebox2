@@ -12,6 +12,10 @@ use tokio::{
 
 const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
+/// Local backend origin assumed when the orchestrator launches juicehost
+/// without an explicit `BACKEND_URL`. Matches the default backend port.
+const DEFAULT_LOCAL_BACKEND_URL: &str = "http://127.0.0.1:6401";
+
 const MIN_HEALTHY_SECS: u64 = 10;
 
 const MAX_CONSECUTIVE_CRASHES: u32 = 5;
@@ -101,8 +105,29 @@ fn load_dotenv() {
     juiceutils::config::load_dotenv();
 }
 
+/// Backend origin injected into the juicehost child when the operator did
+/// not set `BACKEND_URL` (unset or blank). `Some` means "apply the local
+/// default", `None` means "respect the explicit value".
+fn host_backend_default() -> Option<&'static str> {
+    if std::env::var("BACKEND_URL").is_ok_and(|v| !v.trim().is_empty()) {
+        None
+    } else {
+        Some(DEFAULT_LOCAL_BACKEND_URL)
+    }
+}
+
 fn spawn(name: &str) -> std::io::Result<Child> {
-    let child = Command::new(sibling_dir().join(name))
+    let mut cmd = Command::new(sibling_dir().join(name));
+    // The orchestrator always runs a local backend next to the host: point
+    // the host at it unless the operator set BACKEND_URL explicitly.
+    // Without this the host runs backendless and password gates never apply.
+    if name == "juicehost"
+        && let Some(default) = host_backend_default()
+    {
+        cmd.env("BACKEND_URL", default);
+        tracing::info!("juicehost: BACKEND_URL unset, defaulting to {default}");
+    }
+    let child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -383,6 +408,7 @@ mod tests {
         "COBALT_API_KEY",
         "JUICEHOST_API_KEY",
         "JUICEHOST_ALLOW_NO_AUTH",
+        "BACKEND_URL",
     ];
 
     #[test]
@@ -442,6 +468,32 @@ mod tests {
             std::env::remove_var("COBALT_ENABLED");
         }
         assert!(check_juiceback_config().is_err());
+    }
+
+    #[test]
+    fn host_backend_default_applies_local_origin() {
+        let (_lock, _guard) = EnvGuard::lock(VARS);
+
+        unsafe {
+            std::env::remove_var("BACKEND_URL");
+        }
+        assert_eq!(
+            host_backend_default(),
+            Some("http://127.0.0.1:6401")
+        );
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "   ");
+        }
+        assert_eq!(
+            host_backend_default(),
+            Some("http://127.0.0.1:6401")
+        );
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "https://back.example");
+        }
+        assert_eq!(host_backend_default(), None);
     }
 
     #[test]

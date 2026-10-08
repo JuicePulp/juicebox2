@@ -1724,9 +1724,33 @@ async fn preview_protected_shell_ignores_bot_redirect() {
     store_bytes(&app, "protbot01", b"ciphertext").await;
 
     // The gate runs first: bots get the shell, never a raw redirect.
-    let (status, _, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
+    let (status, headers, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
     assert_eq!(status, StatusCode::OK);
     assert!(String::from_utf8_lossy(&body).contains("password-protected"));
+    // The shell carries its own executable CSP (inline app + gateway fetch).
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("script-src 'unsafe-inline'"), "{csp}");
+    assert!(csp.contains("connect-src http"), "{csp}");
+}
+
+#[tokio::test]
+async fn preview_page_csp_allows_brand_font() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "font0001", "notes.txt", b"hi").await;
+
+    let (status, headers, _) = get_public(&app, "/v/font0001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("font-src"), "{csp}");
+    assert!(csp.contains("data:"), "{csp}");
 }
 
 #[tokio::test]

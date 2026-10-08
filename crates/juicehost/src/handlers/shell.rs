@@ -176,10 +176,18 @@ fn render_shell(
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))
         .replace("__MIME__", &escape_html(&mime));
+    // Own CSP: the shell is a self-contained app (inline script + styles,
+    // data:/blob: media, cross-origin gateway fetch). The middleware keeps
+    // handler-set policies, so byte responses stay scriptless while the
+    // shell can actually run.
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
         .body(Body::from(html))
         .unwrap_or_else(|_| not_found_html().into_response())
 }

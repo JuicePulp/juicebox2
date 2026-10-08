@@ -304,7 +304,9 @@ pub fn print_startup_banner(config: &Config) {
     if let Some(ref backend) = config.backend_url {
         tracing::info!("backend: {backend}");
     } else {
-        tracing::info!("backend: none (backendless mode)");
+        tracing::warn!(
+            "backend: none (backendless mode) — password gates are DISABLED and protected files serve as-is"
+        );
     }
     let min_gb = config.min_free_space_bytes / (1024 * 1024 * 1024);
     tracing::info!("min free space: {min_gb} GB");
