@@ -488,7 +488,7 @@ export function enhanceHostSelector(locale?: string) {
   const validateHost = async (): Promise<Record<string, unknown> | null> => {
     const host = input.value.trim();
     if (!host) {
-      status.textContent = "empty";
+      status.textContent = "No host entered — using default";
       return null;
     }
     status.textContent = "checking...";
@@ -526,6 +526,21 @@ export function enhanceHostSelector(locale?: string) {
       applyBtn.disabled = false;
     }
   });
+
+  // Done applies too, then closes the dialog. Same validation as Apply so
+  // leaving via Done never silently keeps a stale host.
+  const doneBtn = document.querySelector("[data-host-done]");
+  if (doneBtn) {
+    doneBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const cfg = await validateHost();
+      if (cfg) {
+        saveHost();
+        applyConfig(cfg);
+      }
+      window.location.hash = "!";
+    });
+  }
 
   // Live-gate Apply: only an actually-reachable host can be applied. Quiet
   // re-checks (no status text) run debounced while typing and once at open.

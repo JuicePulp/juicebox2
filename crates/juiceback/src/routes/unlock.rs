@@ -31,6 +31,11 @@ pub const UNLOCK_ISSUER: &str = "juiceback-unlock";
 const UNLOCK_TTL_SECS: usize = 300;
 const FORBIDDEN_BODY: &str = "invalid password";
 
+/// cuelume interaction sounds, bundled at compile time (the unlock page has
+/// no static-file server, so the bundle is inlined). Regenerate per
+/// `static/README.md` when upgrading cuelume.
+const CUELUME_BUNDLE: &str = include_str!("../../static/cuelume.bundle.js");
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnlockClaims {
     sub: String,
@@ -145,7 +150,7 @@ fn public_url_for(state: &Arc<AppState>, record: &db::FileRecord) -> String {
 
 fn unlock_page_html(id: &str, filename: &str) -> String {
     let safe_name = escape_html(filename);
-    format!(
+    let page = format!(
         r#"<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -156,13 +161,18 @@ fn unlock_page_html(id: &str, filename: &str) -> String {
 <p>Enter the password for <strong>{safe_name}</strong> to download it.</p>
 <form method="post" action="/file/{id}/unlock">
 <label for="password">Password</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">Unlock</button>
+<input id="password" name="password" type="password" data-cuelume-type autocomplete="current-password" required>
+<button type="submit" data-cuelume-tap>Unlock</button>
 </form>
 <p>Fetching with curl? Append <code>?password=...</code> to
 <code>/file/{id}/content</code>, or send <code>X-File-Password</code>.</p>
 </main>
+<script>__CUELUME_BUNDLE__</script>
 <script>
+try {{ window.Cuelume && Cuelume.bind(); }} catch (e) {{}}
+function sfx(name, opts) {{
+  try {{ window.Cuelume && Cuelume.play(name, opts); }} catch (e) {{}}
+}}
 document.querySelector("form").addEventListener("submit", async (e) => {{
   e.preventDefault();
   const password = document.getElementById("password").value;
@@ -172,15 +182,18 @@ document.querySelector("form").addEventListener("submit", async (e) => {{
     body: JSON.stringify({{ password }}),
   }});
   if (res.ok) {{
+    sfx("success", {{ emphasis: "subtle" }});
     location.href = "/file/{id}/content";
   }} else {{
+    sfx("error", {{ emphasis: "subtle" }});
     alert("Invalid password");
   }}
 }});
 </script>
 </body>
 </html>"#
-    )
+    );
+    page.replace("__CUELUME_BUNDLE__", CUELUME_BUNDLE)
 }
 
 #[utoipa::path(
