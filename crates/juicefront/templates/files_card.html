@@ -14,7 +14,7 @@
 <div class="file-card-header">
 <div class="file-card-icon"><span style="width:24px;height:24px;display:inline-flex">{{ cx.icon(f.icon.as_str(), 24)|safe }}</span></div>
 <div class="file-card-info"><h3 class="file-card-name" title="{{ f.filename }}">{{ f.filename }}</h3><p class="file-card-meta">{{ f.meta }}</p></div>
-{% if f.protected %}<span class="storage-host-tag storage-host-tag--locked" title="{{ cx.t("files.protected") }}">{{ cx.icon("lock", 16)|safe }}</span>{% endif %}
+{% if f.protected %}<span class="storage-host-tag storage-host-tag--locked" title="{{ cx.t("files.protected") }}">{{ cx.icon("key", 16)|safe }}</span>{% endif %}
 {% if f.show_host %}<span class="storage-host-tag">{{ cx.tv("files.stored_on", "host", f.host_short.as_str()) }}</span>{% endif %}
 </div>
 {% if f.url != "" %}<div class="copy-bar-wrapper"><a href="{{ f.url }}" data-cuelume-navigate data-cuelume-emphasis="subtle" class="file-card-link" target="_blank" rel="noopener"><span class="file-card-link-text">{{ f.url }}</span></a>{% if f.can_rename %}<a href="#rename-{{ f.id }}" data-cuelume-open data-cuelume-emphasis="subtle" class="copy-bar-edit" title="{{ cx.t("files.rename") }}" aria-label="{{ cx.t("files.rename_aria") }}"><span>{{ cx.icon("edit", 24)|safe }}</span></a>{% endif %}</div>{% endif %}

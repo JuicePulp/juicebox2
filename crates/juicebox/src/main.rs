@@ -68,8 +68,14 @@ fn ensure_services_built() {
     };
     tracing::info!("building services");
     let mut cmd = std::process::Command::new("cargo");
-    cmd.arg("build")
-        .args(SERVICES.iter().flat_map(|name| ["-p", name]))
+    cmd.arg("build");
+    // The orchestrator spawns binaries next to itself, so the inner build
+    // must target the same profile: `cargo run --release` needs release
+    // service binaries, plain `cargo run` needs debug ones.
+    if !cfg!(debug_assertions) {
+        cmd.arg("--release");
+    }
+    cmd.args(SERVICES.iter().flat_map(|name| ["-p", name]))
         .current_dir(&root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())

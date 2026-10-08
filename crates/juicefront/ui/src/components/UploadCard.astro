@@ -123,7 +123,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
           <span style="position:relative;z-index:1">{t(locale, "upload.button")}</span>
         </button>
         <span class="upload-protected-indicator" data-upload-password-indicator="" hidden>
-          <span aria-hidden="true">🔒</span> {t(locale, "files.protected")}
+          <span aria-hidden="true" set:html={iconSvgHtml("key", 16)} /> {t(locale, "files.protected")}
         </span>
       </div>
 
