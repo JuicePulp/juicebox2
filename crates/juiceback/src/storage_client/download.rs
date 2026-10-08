@@ -18,6 +18,11 @@ use crate::state::AppState;
 /// Returns the byte stream plus whether juicehost honored the Range request
 /// (`true` = 206 with exactly the requested span; `false` = 200 full body,
 /// in which case callers skip locally).
+///
+/// # Errors
+///
+/// Returns a message when the backend URL is unset, authentication fails, or
+/// juicehost answers with an error status.
 pub async fn download_ciphertext(
     state: &Arc<AppState>,
     id: &str,

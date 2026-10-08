@@ -29,6 +29,11 @@ pub fn relay_required() -> AppError {
 /// Argon2id is CPU-bound (and deep-stacked in debug builds), so it must not
 /// run on async workers. The cleartext password is never logged; callers
 /// must keep it out of tracing fields.
+///
+/// # Errors
+///
+/// Returns [`AppError::BadRequest`] on policy violation and
+/// [`AppError::Internal`] when hashing fails.
 pub async fn hash_upload_password(
     state: &Arc<AppState>,
     password: Option<String>,
@@ -87,6 +92,11 @@ pub fn spawn_spool_task(
 /// Encrypt a spooled plaintext file and push the container (header + chunks)
 /// to juicehost through the standard relay channel. Returns the header bytes
 /// for the `enc_header` DB column.
+///
+/// # Errors
+///
+/// Returns an error when the storage key is unavailable, the spool cannot be
+/// read, encryption fails, or the juicehost push is rejected.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -162,6 +172,10 @@ pub async fn push_encrypted_file(
 
 /// Persist protection metadata after a relayed completion. Returns the
 /// hex-encoded header for responses.
+///
+/// # Errors
+///
+/// Returns [`AppError::NotFound`] when the row vanished mid-completion.
 pub async fn mark_protected(
     state: &Arc<AppState>,
     file_id: &str,

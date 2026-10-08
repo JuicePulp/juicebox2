@@ -489,7 +489,6 @@ pub async fn content_handler(
 
     let plain_len: u64 = u64::try_from(record.size_bytes.max(0))
         .map_err(|_| AppError::Internal("bad file size".into()))?;
-    let enc_header_hex = record.enc_header.clone().unwrap_or_default();
 
     let (start, end) = headers
         .get(header::RANGE)
@@ -498,6 +497,32 @@ pub async fn content_handler(
         .transpose()?
         .flatten()
         .unwrap_or((0, plain_len));
+
+    serve_protected_bytes(&state, &record, start, end, &method).await
+}
+
+/// Fetch ciphertext for `record`, decrypt the `[start, end)` plaintext span,
+/// and build the 200/206 response. Shared by the gated download and the
+/// admin decrypt preview (which bypasses the gate with the stored key).
+///
+/// # Errors
+///
+/// Returns [`AppError::RangeNotSatisfiable`] for out-of-bounds spans,
+/// [`AppError::JuicehostUnreachable`] when the backend fetch fails, and
+/// [`AppError::Internal`] when the storage key is unavailable.
+pub(crate) async fn serve_protected_bytes(
+    state: &Arc<AppState>,
+    record: &db::FileRecord,
+    start: u64,
+    end: u64,
+    method: &Method,
+) -> Result<Response, AppError> {
+    let plain_len: u64 = u64::try_from(record.size_bytes.max(0))
+        .map_err(|_| AppError::Internal("bad file size".into()))?;
+    if start > end || end > plain_len {
+        return Err(AppError::RangeNotSatisfiable("bad range".into()));
+    }
+    let enc_header_hex = record.enc_header.clone().unwrap_or_default();
     let partial = start != 0 || end != plain_len;
 
     let key = state

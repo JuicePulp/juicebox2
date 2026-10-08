@@ -37,6 +37,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("fetch_jobs.progress", m07_fetch_jobs_progress),
     ("client_files.legacy_index", m08_client_files_legacy_index),
     ("files.protected_links", m09_files_protected_links),
+    ("reports.password", m10_reports_password),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -163,6 +164,18 @@ fn m09_files_protected_links(conn: &Connection) -> Result<()> {
     if !has_column(conn, "files", "enc_header")? {
         conn.execute(
             "ALTER TABLE files ADD COLUMN enc_header TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m10_reports_password(conn: &Connection) -> Result<()> {
+    // Reporter-supplied file-gate password (not a user credential) so
+    // moderators can open protected reports. Never logged.
+    if !has_column(conn, "reports", "password")? {
+        conn.execute(
+            "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
             [],
         )?;
     }

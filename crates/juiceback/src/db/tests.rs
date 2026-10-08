@@ -614,6 +614,7 @@ fn test_insert_list_delete_report() {
         "details",
         Some("1.2.3.4"),
         Some("a@b.com"),
+        None,
     )
     .unwrap();
     assert!(id > 0);
@@ -883,6 +884,22 @@ fn protected_record_roundtrips_with_defaults_for_plain() {
     assert!(!got.is_encrypted);
     assert_eq!(got.password_hash, None);
     assert_eq!(got.enc_header, None);
+}
+
+#[test]
+fn file_id_from_report_urls() {
+    use super::reports::file_id_from_url;
+    assert_eq!(
+        file_id_from_url("https://box.example/f/Ab3dEf9Q.txt").as_deref(),
+        Some("Ab3dEf9Q")
+    );
+    assert_eq!(
+        file_id_from_url("https://box.example/f/Ab3dEf9Q").as_deref(),
+        Some("Ab3dEf9Q")
+    );
+    assert_eq!(file_id_from_url("https://box.example/f/"), None);
+    assert_eq!(file_id_from_url("not a url at all !!"), None);
+    assert_eq!(file_id_from_url(""), None);
 }
 
 #[test]

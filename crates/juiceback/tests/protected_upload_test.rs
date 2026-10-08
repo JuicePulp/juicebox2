@@ -972,3 +972,116 @@ async fn unlock_rate_limits_guessing() {
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }
+
+async fn seed_admin(state: &Arc<AppState>) -> String {
+    state
+        .db_call("seed_test_admin", move |db| {
+            db.execute(
+                "INSERT INTO admins (username, password_hash) VALUES ('testadmin', 'x')",
+                [],
+            )
+        })
+        .await
+        .unwrap();
+    juiceback::auth::create_jwt("testadmin", "test-secret").unwrap()
+}
+
+fn admin_cookie(token: &str) -> String {
+    format!("token={token}")
+}
+
+#[tokio::test]
+async fn report_password_enables_admin_preview() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "reportpreview1").await;
+    let file_url = format!("http://localhost:6402/f/{id}.txt");
+
+    // Report with the gate password.
+    let body = format!(
+        "file_url={}&reason=spam&details=test&password={}",
+        urlencode(&file_url),
+        urlencode(PASSWORD)
+    );
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/report")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    let reports = state
+        .db_call("list_reports", move |db| juiceback::db::list_reports(db))
+        .await
+        .unwrap();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].password.as_deref(), Some(PASSWORD));
+
+    // Admin list exposes availability, never the password.
+    let token = seed_admin(&state).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/admin/reports")
+                .header("cookie", admin_cookie(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let list: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(list["items"][0]["has_password"], true);
+    assert!(list["items"][0].get("password").is_none());
+
+    // Preview streams decrypted bytes using the stored password.
+    let report_id = reports[0].id;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/admin/report/{report_id}/preview"))
+                .header("cookie", admin_cookie(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), PLAINTEXT);
+
+    // Preview without auth is rejected.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/admin/report/{report_id}/preview"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}

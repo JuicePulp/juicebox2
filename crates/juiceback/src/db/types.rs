@@ -29,6 +29,9 @@ pub struct ReportRecord {
     pub reporter_ip: Option<String>,
     pub email: Option<String>,
     pub created_at: i64,
+    /// Reporter-supplied gate password for protected files (plaintext by
+    /// necessity: moderators need the actual value to open the file).
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
