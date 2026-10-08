@@ -526,4 +526,28 @@ export function enhanceHostSelector(locale?: string) {
       applyBtn.disabled = false;
     }
   });
+
+  // Live-gate Apply: only an actually-reachable host can be applied. Quiet
+  // re-checks (no status text) run debounced while typing and once at open.
+  let gateTimer = 0;
+  const refreshApplyGate = async (): Promise<void> => {
+    const host = input.value.trim();
+    if (!host) {
+      applyBtn.disabled = true;
+      return;
+    }
+    let ok = false;
+    try {
+      ok = (await fetchHostConfig(host)).ok;
+    } catch {
+      ok = false;
+    }
+    applyBtn.disabled = !ok;
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(gateTimer);
+    applyBtn.disabled = true;
+    gateTimer = window.setTimeout(() => void refreshApplyGate(), 450);
+  });
+  void refreshApplyGate();
 }

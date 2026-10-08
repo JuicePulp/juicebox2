@@ -143,6 +143,15 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }, 300);
   }
 
+  // Dismiss a queued/uploading/errored row boundedly: drop the DOM row AND
+  // purge the upload store, otherwise the subscribe loop re-adopts the row
+  // on the next store tick and deleted rows come back from the dead.
+  function dismissRow(item: HTMLElement) {
+    const id = item.getAttribute("data-upload-id");
+    if (id) removeUpload(id);
+    removeItem(item);
+  }
+
   function failItem(
     item: HTMLElement,
     pill: HTMLElement,
@@ -440,7 +449,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       </div>`;
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;
@@ -668,7 +677,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       url.length > 48 ? `${url.slice(0, 45)}...` : url;
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;
@@ -894,7 +903,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     item.querySelector(".file-size")!.textContent = formatSize(file.size);
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;

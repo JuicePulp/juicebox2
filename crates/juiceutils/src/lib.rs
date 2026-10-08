@@ -76,6 +76,7 @@ pub async fn add_security_headers(
     use axum::http::{HeaderValue, header};
 
     let is_file_route = req.uri().path().starts_with("/f/");
+    let is_preview_route = req.uri().path().starts_with("/v/");
 
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
@@ -100,12 +101,21 @@ pub async fn add_security_headers(
                 "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
             ),
         );
+    } else if is_preview_route {
+        // The fullscreen preview page carries one inline script (media
+        // bootstrap + text preview); everything it loads is same-origin.
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+            ),
+        );
     } else {
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:",
             ),
         );
     }
