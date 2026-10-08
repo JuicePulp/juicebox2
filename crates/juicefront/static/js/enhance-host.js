@@ -277,6 +277,10 @@ export function enhanceHostSelector(locale) {
       if (typeof cfg.ultrafast === "boolean") {
         localStorage.setItem("juicebox_ultrafast_supported", String(cfg.ultrafast));
       }
+      if (cfg.password_links === false) {
+        var pwWrap = document.querySelector("[data-upload-password-wrap]");
+        if (pwWrap) pwWrap.hidden = true;
+      }
       if (cfg.danger_level) {
         localStorage.setItem("juicebox_danger_level", cfg.danger_level);
         updateDangerLevelDisplay(cfg.danger_level, locale);

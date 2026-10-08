@@ -97,11 +97,12 @@ pub async fn insert_owned_pending(
 }
 
 pub fn public_url_for(state: &Arc<AppState>, record: &FileRecord) -> String {
-    crate::utils::public_url(
+    crate::utils::share_url(
         &state.config.public_base_url,
         record.storage_host.as_deref(),
         &record.id,
         &record.filename,
+        record.is_protected(),
     )
 }
 

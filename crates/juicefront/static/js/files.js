@@ -330,6 +330,14 @@ function enhanceCard(card, el, f, locale) {
     tag.textContent = t(locale, "files.stored_on", { host: stripHost(storageHost) });
     headerEl.append(tag);
   }
+  if (f.protected && headerEl && !headerEl.querySelector(".storage-host-tag--locked")) {
+    const lock = document.createElement("span");
+    lock.className = "storage-host-tag storage-host-tag--locked";
+    lock.title = t(locale, "files.protected");
+    lock.setAttribute("aria-label", t(locale, "files.protected"));
+    lock.textContent = "🔒";
+    headerEl.append(lock);
+  }
   const linkEl = el.querySelector(".file-card-link");
   const wrapper = el.querySelector(".copy-bar-wrapper");
   const copyBar = makeCopyBar(f.url || el.getAttribute("data-url") || "", locale);

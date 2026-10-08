@@ -4,6 +4,7 @@ import { formatSize, iconForMime, iconHTML, announce, makeCopyBar, type CopyBarS
 import {
   UPLOAD_URL,
   readMaxFileSize,
+  readUploadPassword,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
 } from "../lib/upload-config";
@@ -700,6 +701,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
         ...(audioOnly
           ? { audio_format: audioFormat, better_audio: betterAudio }
           : { video_quality: videoQuality, video_container: videoContainer }),
+        ...(readUploadPassword() ? { password: readUploadPassword() } : {}),
       }),
     })
       .then(async (res) => {
@@ -913,7 +915,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }
 
     // App mode: delegate to juicebox-plus via UltraFast reserve
-    if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
+    if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported() && !readUploadPassword()) {
       ultrafastReserve(file, item, fill, status, pill);
       return;
     }
@@ -924,6 +926,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       customHost: readSelectedHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
+      password: readUploadPassword(),
     });
     item.setAttribute("data-upload-id", id);
     rowIds.set(id, item);
@@ -1086,6 +1089,16 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
 
     form?.addEventListener("submit", (e) => e.preventDefault());
     enhanceServerFiles();
+
+    const pwInput = document.querySelector<HTMLInputElement>("[data-upload-password]");
+    const pwHint = document.querySelector("[data-upload-password-hint]");
+    if (pwInput && pwHint) {
+      const syncPwHint = () => {
+        pwHint.toggleAttribute("hidden", !pwInput.value.trim());
+      };
+      pwInput.addEventListener("input", syncPwHint);
+      syncPwHint();
+    }
 
     input?.addEventListener("change", () => {
       if (!input.files) return;

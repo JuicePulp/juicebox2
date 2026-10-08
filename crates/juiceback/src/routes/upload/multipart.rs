@@ -344,11 +344,12 @@ pub async fn upload_handler(
         );
     }
 
-    let public_url = crate::utils::public_url(
+    let public_url = crate::utils::share_url(
         &state.config.public_base_url,
         record.storage_host.as_deref(),
         &record.id,
         &record.filename,
+        record.is_protected(),
     );
 
     build_upload_response(

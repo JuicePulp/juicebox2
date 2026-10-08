@@ -36,6 +36,11 @@
 <input id="report-card-email" data-cuelume-type class="form-input" type="email" name="email">
 <p class="form-help-text">{{ shell.cx.t("report.email_hint") }}</p>
 </div>
+<div class="form-field">
+<label class="form-label" for="report-card-password">{{ shell.cx.t("report.password_label") }}</label>
+<input id="report-card-password" data-cuelume-type class="form-input" type="password" name="password" autocomplete="off" maxlength="256">
+<p class="form-help-text">{{ shell.cx.t("report.password_hint") }}</p>
+</div>
 <div class="rpfactions">
 <button type="submit" data-cuelume-tap class="report-btn report-btn--primary">{{ shell.cx.t("report.submit") }}</button>
 </div>

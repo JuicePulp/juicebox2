@@ -24,6 +24,8 @@ export interface HostConfig {
   upload_mode?: string;
   fetch_rate_limit_per_minute?: number;
   public_base_url?: string;
+  password_links?: boolean;
+  at_rest_via_juiceback?: boolean;
 }
 
 export interface EffectiveHostConfig {
@@ -126,6 +128,8 @@ function sanitizeConfig(raw: unknown): HostConfig | null {
   if (typeof o.ultrafast === "boolean") cfg.ultrafast = o.ultrafast;
   if (typeof o.quic === "boolean") cfg.quic = o.quic;
   if (typeof o.cobalt === "boolean") cfg.cobalt = o.cobalt;
+  if (typeof o.password_links === "boolean") cfg.password_links = o.password_links;
+  if (typeof o.at_rest_via_juiceback === "boolean") cfg.at_rest_via_juiceback = o.at_rest_via_juiceback;
   if (typeof o.public_base_url === "string") cfg.public_base_url = o.public_base_url;
 
   if (

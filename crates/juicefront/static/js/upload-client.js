@@ -110,6 +110,7 @@ export function enqueueUpload(input) {
     quickLink: input.quickLink,
     customHost: input.customHost,
     uploadMode: input.uploadMode,
+    password: input.password || "",
     createdAt: Date.now()
   };
   upsertItem({ ...item });

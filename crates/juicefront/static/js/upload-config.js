@@ -34,6 +34,12 @@ export function readUploadMode() {
     return "standard";
   return document.getElementById("server-config")?.getAttribute("data-upload-mode") || "standard";
 }
+export function readUploadPassword() {
+  if (typeof document === "undefined")
+    return "";
+  const val = document.querySelector("[data-upload-password]")?.value || "";
+  return val.trim();
+}
 export const TUS_THRESHOLD = 30 * 1024 * 1024;
 export const TUS_START_CHUNK = 16 * 1024 * 1024;
 export const TUS_MIN_CHUNK = 8 * 1024 * 1024;

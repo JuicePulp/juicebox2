@@ -859,6 +859,7 @@ struct FileRow {
     ttl_pct: u64,
     short_id: String,
     index: usize,
+    protected: bool,
 }
 
 fn extract_short_id(url: &str) -> String {
@@ -1039,6 +1040,7 @@ pub async fn files_page(
                 delete_token: file.delete_token,
                 storage_host: host,
                 index,
+                protected: file.protected,
             }
         })
         .collect();

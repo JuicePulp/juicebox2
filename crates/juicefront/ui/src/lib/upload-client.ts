@@ -65,6 +65,7 @@ export interface EnqueueInput {
   customHost: string;
   uploadMode: string;
   quickLink: boolean;
+  password?: string;
 }
 
 let port: MessagePort | null = null;
@@ -142,6 +143,7 @@ export function enqueueUpload(input: EnqueueInput): string {
     quickLink: input.quickLink,
     customHost: input.customHost,
     uploadMode: input.uploadMode,
+    password: input.password,
     createdAt: Date.now(),
   };
   upsertItem({ ...item });
@@ -154,6 +156,7 @@ export function enqueueUpload(input: EnqueueInput): string {
         customHost: input.customHost,
         uploadMode: input.uploadMode,
         quickLink: input.quickLink,
+        password: input.password,
       };
       p.postMessage({
         type: "enqueue",
