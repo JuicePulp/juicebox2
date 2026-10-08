@@ -1309,9 +1309,26 @@ async fn store_bytes(app: &axum::Router, id: &str, bytes: &[u8]) {
 }
 
 async fn get_public(app: &axum::Router, uri: &str, range: Option<&str>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    let mut builder = Request::builder().method("GET").uri(uri);
+    // Browser-like headers: bare requests are treated as bots on /v/.
+    let mut builder = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36")
+        .header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
     if let Some(range) = range {
         builder = builder.header("range", range);
+    }
+    let resp = app.clone().oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+    (status, headers, bytes)
+}
+
+async fn get_bare(app: &axum::Router, uri: &str, ua: Option<&str>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(ua) = ua {
+        builder = builder.header("user-agent", ua);
     }
     let resp = app.clone().oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
     let status = resp.status();
@@ -1625,6 +1642,91 @@ async fn preview_renders_by_media_kind() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("/d/zip00001.zip") && page.contains("Download"));
     assert!(!page.contains("card"));
+}
+
+#[tokio::test]
+async fn preview_bots_redirect_to_raw() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "bot00001", "notes.txt", b"hello bots").await;
+
+    // curl-style client: 302 to the raw bytes, never the preview page.
+    let (status, headers, body) = get_bare(&app, "/v/bot00001.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/f/bot00001.txt")
+    );
+    assert!(body.is_empty());
+
+    // Unfurlers also go raw.
+    let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
+    assert_eq!(status, StatusCode::FOUND);
+
+    // API-style Accept without text/html goes raw even with a neutral UA.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v/bot00001.txt")
+                .header("user-agent", "some-uploader/1.0")
+                .header("accept", "*/*")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FOUND);
+
+    // A real navigation (Sec-Fetch-Mode) keeps the HTML even with an odd UA.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v/bot00001.txt")
+                .header("user-agent", "curl/8.5.0")
+                .header("sec-fetch-mode", "navigate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Humans keep the page: logo, curler notice, no fullscreen, no truncation note.
+    let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("data:image/webp;base64,"));
+    assert!(page.contains("preview, NOT the raw file"));
+    assert!(!page.contains("fsbtn"));
+    assert!(!page.contains("requestFullscreen"));
+    assert!(!page.contains("Truncated preview"));
+    assert!(page.contains("IntersectionObserver"));
+}
+
+#[tokio::test]
+async fn preview_protected_shell_ignores_bot_redirect() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "protbot01", b"ciphertext").await;
+
+    // The gate runs first: bots get the shell, never a raw redirect.
+    let (status, _, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("password-protected"));
 }
 
 #[tokio::test]

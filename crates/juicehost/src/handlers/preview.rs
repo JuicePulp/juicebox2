@@ -90,6 +90,54 @@ fn escape_html(value: &str) -> String {
 }
 
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
+const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
+
+/// User-Agent fragments identifying non-interactive clients (curl-like
+/// tools, social unfurlers, crawlers). Matched case-insensitively against
+/// the whole header; real browsers never contain these tokens.
+const BOT_UA_TOKENS: &[&str] = &[
+    "curl", "wget", "httpie", "aria2", "axel", "python-urllib", "python-requests",
+    "go-http-client", "okhttp", "libwww-perl", "scrapy", "node-fetch", "undici",
+    "got", "axios", "httpclient", "perl", "ruby", "php", "powershell",
+    "discordbot", "telegram", "twitterbot", "facebookexternalhit", "facebookcatalog",
+    "slackbot", "linkedinbot", "whatsapp", "skypeuripreview", "mastodon", "misskey",
+    "pleroma", "pixelfed", "matrix", "signal", "line", "kakao", "viber", "pinterest",
+    "redditbot", "tumblr", "bitlybot", "embedly", "iframely", "microlink", "outbrain",
+    "quora", "mj12bot", "ahrefsbot", "semrushbot", "dotbot", "coccoc", "petalbot",
+    "bytespider", "gptbot", "claudebot", "ccbot", "anthropic-ai", "perplexitybot",
+    "applebot", "bingbot", "googlebot", "adsbot", "mediapartners-google", "slurp",
+    "duckduckbot", "bravebot", "mojeek", "yandex", "baidu", "sogou", "exabot",
+    "facebot", "ia_archiver", "bot", "crawl", "spider", "scrape", "archiver",
+];
+
+/// Layered bot check for the preview page (humans keep the HTML, anything
+/// else gets the raw bytes):
+/// 1. `Sec-Fetch-Mode: navigate` is only ever sent by browsers on page
+///    loads — always a user.
+/// 2. Known bot/crawler/curler User-Agent tokens.
+/// 3. `Accept` without `text/html` (curl `*/*`, API clients), or neither
+///    header at all (browsers navigating always send both).
+fn is_bot(headers: &HeaderMap) -> bool {
+    if headers
+        .get("sec-fetch-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("navigate"))
+    {
+        return false;
+    }
+    let ua = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if BOT_UA_TOKENS.iter().any(|token| ua.contains(token)) {
+        return true;
+    }
+    match headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()) {
+        Some(accept) => !accept.contains("text/html"),
+        None => ua.is_empty(),
+    }
+}
 
 struct PreviewPage {
     kind: PreviewKind,
@@ -155,7 +203,7 @@ fn stage_html(page: &PreviewPage) -> String {
             name = escape_html(&page.filename),
         ),
         PreviewKind::Text => format!(
-            "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview&hellip;</pre><p class=\"fallback-note\" data-truncated-note=\"\" hidden>Truncated preview &mdash; <a href=\"{raw}\">open the full file</a>.</p><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
+            "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview&hellip;</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
         ),
         PreviewKind::Download => format!(
             "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">&#8681;</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} &middot; {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
@@ -168,7 +216,14 @@ fn stage_html(page: &PreviewPage) -> String {
 }
 
 fn render_preview(page: &PreviewPage) -> String {
+    let notice = format!(
+        " Juicebox preview page for {} — this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
+        page.filename,
+        page.raw_url,
+    );
     PREVIEW_TEMPLATE
+        .replace("__CURL_NOTICE__", &notice)
+        .replace("__LOGO__", LOGO_DATA_URI.trim())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
         .replace("__OG_TAGS__", &og_tags(page))
@@ -206,7 +261,7 @@ pub async fn preview_file_wildcard(
 
 async fn preview_file_inner(
     state: Arc<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     id: &str,
     ext: &str,
 ) -> Result<Response<Body>, crate::error::JuicehostError> {
@@ -234,8 +289,18 @@ async fn preview_file_inner(
     } else {
         format!("{id}.{extension}")
     };
-    let mime = storage::guess_mime(&extension);
     let raw_url = format!("/f/{filename}");
+    // Non-interactive clients (curl, unfurlers, crawlers) get the raw bytes
+    // instead of the preview page. Humans keep the HTML.
+    if is_bot(&headers) {
+        return Response::builder()
+            .status(axum::http::StatusCode::FOUND)
+            .header(header::LOCATION, &raw_url)
+            .header(header::CACHE_CONTROL, NO_STORE)
+            .body(Body::empty())
+            .map_err(|_| JuicehostError::Internal);
+    }
+    let mime = storage::guess_mime(&extension);
     let title = format!("{filename} - Juicebox");
     let download_url = format!("/d/{filename}");
     let page = PreviewPage {
