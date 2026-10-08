@@ -1458,3 +1458,65 @@ async fn internal_ciphertext_endpoint_serves_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn download_forces_attachment_with_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "dlfile01", b"download me").await;
+
+    let (status, headers, body) = get_public(&app, "/d/dlfile01.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"download me");
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"dlfile01.txt\"")
+    );
+    // Same file inline has no disposition.
+    let (status, headers, _) = get_public(&app, "/f/dlfile01.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.get("content-disposition").is_none());
+}
+
+#[tokio::test]
+async fn download_supports_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "dlrange01", b"0123456789abcdef").await;
+
+    let (status, headers, body) =
+        get_public(&app, "/d/dlrange01.txt", Some("bytes=4-7")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"4567");
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"dlrange01.txt\"")
+    );
+}
+
+#[tokio::test]
+async fn download_respects_protected_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let unlock = "https://box.example/file/abc12345/unlock";
+    let backend = mock_backend(
+        200,
+        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
+
+    let (status, headers, _) = get_public(&app, "/d/abc12345.txt", None).await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some(unlock)
+    );
+}

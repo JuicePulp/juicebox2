@@ -93,6 +93,50 @@ async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
     }
 }
 
+/// Password-gate check for public byte routes (`/f/`, `/d/`, `/v/`).
+///
+/// Returns `Some(response)` when the request must not proceed to bytes: a
+/// 308 to the juiceback unlock page for protected files, or a 404 when
+/// protection cannot be ruled out (unreachable backend) or no unlock URL is
+/// known. Returns `None` when serving may proceed — including standalone
+/// hosts without a backend (nothing can be protected there) and ids the
+/// backend does not know (legacy direct files).
+pub(crate) async fn protected_gate_response(
+    state: &AppState,
+    id: &str,
+) -> Option<Response<Body>> {
+    if state.backend_url.is_none() {
+        return None;
+    }
+    match backend_file_status(state, id).await {
+        BackendStatus::Known(body)
+            if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
+        {
+            match body
+                .get("unlock_url")
+                .and_then(|v| v.as_str())
+                .filter(|u| !u.is_empty())
+            {
+                Some(unlock_url) => Response::builder()
+                    .status(StatusCode::PERMANENT_REDIRECT)
+                    .header(header::LOCATION, unlock_url)
+                    .header(header::CACHE_CONTROL, FILE_CACHE_CONTROL)
+                    .body(Body::from(
+                        crate::error::protected_redirect_html(unlock_url).0,
+                    ))
+                    .ok(),
+                None => Some(prevent_file_caching(not_found_html().into_response())),
+            }
+        }
+        BackendStatus::Known(_) | BackendStatus::Unknown => None,
+        // Fail closed: an unreachable backend must not leak bytes that
+        // might be ciphertext for a protected file.
+        BackendStatus::Unavailable => {
+            Some(prevent_file_caching(not_found_html().into_response()))
+        }
+    }
+}
+
 fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -108,13 +152,25 @@ pub async fn serve_file_wildcard(
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_file_inner(state, headers, id).await
+    serve_file_inner(state, headers, id, false).await
+}
+
+/// Same as `/f/`, but forces a download instead of inline viewing.
+#[tracing::instrument(skip_all)]
+pub async fn serve_file_download(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(path): Path<String>,
+) -> Result<Response<Body>, JuicehostError> {
+    let id = path.split('.').next().unwrap_or(&path).to_string();
+    serve_file_inner(state, headers, id, true).await
 }
 
 async fn serve_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
     id: String,
+    force_download: bool,
 ) -> Result<Response<Body>, JuicehostError> {
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -171,41 +227,10 @@ async fn serve_file_inner(
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
-    // Password-gated files store ciphertext only: never serve their bytes on
-    // public routes. Standalone hosts (no backend) cannot have protected
-    // files, so they serve as before.
-    if state.backend_url.is_some() {
-        match backend_file_status(&state, &id).await {
-            BackendStatus::Known(body)
-                if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
-            {
-                match body
-                    .get("unlock_url")
-                    .and_then(|v| v.as_str())
-                    .filter(|u| !u.is_empty())
-                {
-                    Some(unlock_url) => {
-                        let html =
-                            crate::error::protected_redirect_html(unlock_url);
-                        return Response::builder()
-                            .status(StatusCode::PERMANENT_REDIRECT)
-                            .header(header::LOCATION, unlock_url)
-                            .header(header::CACHE_CONTROL, FILE_CACHE_CONTROL)
-                            .body(Body::from(html.0))
-                            .map_err(|_| JuicehostError::Internal);
-                    }
-                    None => {
-                        return Ok(prevent_file_caching(not_found_html().into_response()));
-                    }
-                }
-            }
-            BackendStatus::Known(_) | BackendStatus::Unknown => {}
-            // Fail closed: an unreachable backend must not leak bytes that
-            // might be ciphertext for a protected file.
-            BackendStatus::Unavailable => {
-                return Ok(prevent_file_caching(not_found_html().into_response()));
-            }
-        }
+    // Password-gated files store ciphertext only: never serve their bytes
+    // on public routes.
+    if let Some(gated) = protected_gate_response(&state, &id).await {
+        return Ok(gated);
     }
 
     let etag = &file_meta.etag;
@@ -243,6 +268,16 @@ async fn serve_file_inner(
 
     let mime_str = storage::guess_mime(&file_meta.extension);
     let total_size = file_meta.size;
+    let download_name = format!("{}.{}", id, file_meta.extension);
+    let with_disposition = |mut builder: axum::http::response::Builder| {
+        if force_download {
+            builder = builder.header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{download_name}\""),
+            );
+        }
+        builder
+    };
 
     let permit = Arc::clone(&state.download_semaphore)
         .try_acquire_owned()
@@ -262,7 +297,7 @@ async fn serve_file_inner(
                     let _ = &permit;
                     item
                 });
-                return with_cache_headers(
+                return with_disposition(with_cache_headers(
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
                         .header(header::CONTENT_TYPE, &mime_str)
@@ -273,7 +308,7 @@ async fn serve_file_inner(
                         )
                         .header(header::ETAG, etag)
                         .header(header::ACCEPT_RANGES, "bytes"),
-                )
+                ))
                 .body(Body::from_stream(stream))
                 .map_err(|_| JuicehostError::Internal);
             }
@@ -302,14 +337,14 @@ async fn serve_file_inner(
     });
     let body = Body::from_stream(stream);
 
-    with_cache_headers(
+    with_disposition(with_cache_headers(
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, &mime_str)
             .header(header::CONTENT_LENGTH, total_size)
             .header(header::ETAG, etag)
             .header(header::ACCEPT_RANGES, "bytes"),
-    )
+    ))
     .body(body)
     .map_err(|_| JuicehostError::Internal)
 }
