@@ -1085,3 +1085,85 @@ async fn report_password_enables_admin_preview() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn deleting_protected_file_removes_ciphertext_and_row() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let deleted: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let deleted_clone = Arc::clone(&deleted);
+    Mock::given(method("DELETE"))
+        .and(path_regex("/internal/file/.*"))
+        .respond_with(move |req: &wiremock::Request| {
+            deleted_clone
+                .lock()
+                .unwrap()
+                .push(req.url.path().to_string());
+            ResponseTemplate::new(200)
+        })
+        .mount(&server)
+        .await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "deletecleanup1").await;
+
+    // The completion response already points at the unlock page.
+    let record = db_record(&state, &id).await;
+    assert!(record.is_protected());
+
+    // Info reports the unlock URL, not the raw storage URL.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/info"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let info: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(info["protected"], true);
+    assert!(
+        info["url"].as_str().unwrap_or_default().ends_with(&format!("/file/{id}/unlock")),
+        "unexpected url: {}",
+        info["url"]
+    );
+
+    let token = record.delete_token.clone();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/file/{id}"))
+                .header("x-delete-token", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    let lookup = id.clone();
+    let gone = state
+        .db_call("test_get_deleted", move |db| {
+            juiceback::db::get_file(db, &lookup)
+        })
+        .await
+        .unwrap();
+    assert!(gone.is_none());
+    let hits = deleted.lock().unwrap();
+    assert!(
+        hits.iter().any(|p| p.contains(&id)),
+        "host ciphertext was not deleted: {hits:?}"
+    );
+}
