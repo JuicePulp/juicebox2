@@ -43,13 +43,18 @@ pub struct FileInfoResponse {
 
 impl FileInfoResponse {
     #[must_use]
-    pub fn from_record(record: FileRecord, public_base_url: &str) -> Self {
+    pub fn from_record(
+        record: FileRecord,
+        public_base_url: &str,
+        juiceback_origin: &str,
+    ) -> Self {
         let url = crate::utils::share_url(
             public_base_url,
             record.storage_host.as_deref(),
             &record.id,
             &record.filename,
             record.is_protected(),
+            juiceback_origin,
         );
         let protected = record.is_protected();
         let is_encrypted = record.is_encrypted;
@@ -125,6 +130,7 @@ pub async fn file_info_handler(
         Json(FileInfoResponse::from_record(
             record,
             &state.config.public_base_url,
+            &state.config.juiceback_origin,
         )),
     ))
 }
@@ -319,6 +325,7 @@ pub async fn renew_file_id_handler(
         &new_id,
         &record.filename,
         record.is_protected(),
+        &state.config.juiceback_origin,
     );
 
     crate::cloudflare::purge_file(
@@ -437,6 +444,7 @@ pub async fn resolve_alias_handler(
                     &new_id,
                     &rec.filename,
                     rec.is_protected(),
+                    &state.config.juiceback_origin,
                 );
                 Ok(Json(serde_json::json!({ "new_id": new_id, "url": url })))
             } else {

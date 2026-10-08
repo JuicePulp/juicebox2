@@ -174,6 +174,7 @@ pub(crate) async fn finalize_concat(
         &record.id,
         &record.filename,
         record.is_protected(),
+        &state.config.juiceback_origin,
     );
     let protected = record.is_protected();
     let is_encrypted = record.is_encrypted;

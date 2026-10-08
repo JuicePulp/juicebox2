@@ -141,12 +141,15 @@ function markRowProtected(row) {
   if (!row || row.querySelector(".file-protected")) return;
   var nameEl = row.querySelector(".file-name");
   if (!nameEl) return;
+  var wrap = document.createElement("span");
+  wrap.className = "file-name-row";
+  nameEl.before(wrap);
   var badge = document.createElement("span");
   badge.className = "file-protected";
   badge.title = t(LOCALE, "files.protected");
   badge.setAttribute("aria-label", t(LOCALE, "files.protected"));
   badge.innerHTML = iconHTML("key", 16);
-  nameEl.after(badge);
+  wrap.append(nameEl, badge);
 }
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");

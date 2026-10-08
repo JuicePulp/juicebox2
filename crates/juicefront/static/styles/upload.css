@@ -1080,6 +1080,29 @@ html.js .upload-form .text-editor {
   font-family: "Secondary", "Unifont", monospace;
 }
 
+.file-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.file-name-row .file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-protected {
+  display: inline-flex;
+  flex: none;
+  color: var(--juice-400);
+}
+
+.file-protected svg {
+  display: block;
+}
+
 .file-size {
   color: var(--juice-500);
   font-size: 0.875rem;

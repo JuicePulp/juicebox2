@@ -48,7 +48,7 @@ pub async fn file_status_handler(
             let unlock_url = record.is_protected().then(|| {
                 format!(
                     "{}/file/{}/unlock",
-                    state.config.public_base_url.trim_end_matches('/'),
+                    state.config.juiceback_origin.trim_end_matches('/'),
                     id
                 )
             });
