@@ -636,6 +636,8 @@ mod tests {
             "JWT_SECRET",
             "TICKET_JWT_SECRET",
             "IP_PEPPER",
+            "BACKEND_URL",
+            "FRONTEND_URL",
         ] {
             unsafe {
                 std::env::remove_var(name);
@@ -712,5 +714,38 @@ mod tests {
         assert!(!cfg.quick_link);
         assert!(!cfg.custom_id);
         assert_eq!(cfg.default_ttl_hours, 6.0);
+    }
+
+    #[test]
+    fn backend_url_env_overrides_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_juicehost_env();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
+        let file: FileConfig = toml::from_str(
+            "[dirs]\nbackend_url = \"http://file.example\"\nfrontend_url = \"http://front.example\"\n",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "http://env.example/");
+        }
+        let cfg = Config::try_load_from(&file).unwrap();
+        assert_eq!(cfg.backend_url.as_deref(), Some("http://env.example"));
+        assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "none");
+            std::env::remove_var("FRONTEND_URL");
+        }
+        let cfg = Config::try_load_from(&file).unwrap();
+        assert_eq!(cfg.backend_url, None);
+        assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
+
+        unsafe {
+            std::env::remove_var("BACKEND_URL");
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
     }
 }
