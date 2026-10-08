@@ -128,7 +128,19 @@ pub(crate) async fn protected_shell_response(
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0)
                 .to_string();
-            Some(render_shell(filename, id, gateway_origin, &key_version, mode))
+            let size_label = body
+                .get("size_bytes")
+                .and_then(|v| v.as_u64())
+                .map(super::preview::human_size)
+                .unwrap_or_default();
+            Some(render_shell(
+                filename,
+                id,
+                gateway_origin,
+                &key_version,
+                &size_label,
+                mode,
+            ))
         }
         BackendStatus::Known(_) | BackendStatus::Unknown => None,
         // Fail closed: an unreachable backend must not leak bytes that
@@ -158,6 +170,7 @@ fn render_shell(
     id: &str,
     gateway_origin: &str,
     key_version: &str,
+    size_label: &str,
     mode: ShellMode,
 ) -> Response<Body> {
     let extension = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
@@ -180,8 +193,13 @@ fn render_shell(
             &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
         .replace("__APP_JS__", SHELL_APP_JS.trim_end())
+        .replace(
+            "__PREVIEW_CSS__",
+            juiceutils::web::PREVIEW_CSS.trim_end(),
+        )
         .replace("__FILE_ID__", &escape_html(id))
         .replace("__FILENAME__", &escape_html(filename))
+        .replace("__SIZE__", &escape_html(size_label))
         .replace("__GATEWAY_ORIGIN__", &escape_html(gateway_origin))
         .replace(
             "__CIPHERTEXT_URL__",
@@ -192,16 +210,17 @@ fn render_shell(
         .replace("__KEY_VERSION__", &escape_html(key_version))
         .replace("__MIME__", &escape_html(&mime));
     // Own CSP: the shell is a self-contained app (inline script + styles,
-    // data:/blob: media, cross-origin gateway fetch). The middleware keeps
-    // handler-set policies, so byte responses stay scriptless while the
-    // shell can actually run.
+    // data:/blob: media, cross-origin gateway fetch). Blob subresources
+    // (decrypted media, PDF frames) are explicitly allowed; top-level blob
+    // navigation is avoided entirely. The middleware keeps handler-set
+    // policies, so byte responses stay scriptless while the shell runs.
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
         .header(
             header::CONTENT_SECURITY_POLICY,
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; frame-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         )
         .body(Body::from(html))
         .unwrap_or_else(|_| not_found_html().into_response())

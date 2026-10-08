@@ -15,6 +15,11 @@ pub const BASE_CSS: &str = include_str!("../templates/shared/base.css");
 /// Pixel brand lockup (logo + Title font), shared by every file page.
 pub const BRAND_CSS: &str = include_str!("../templates/shared/brand.css");
 
+/// Preview chrome (topbar actions, stage, media, text, download hero),
+/// shared by the public preview page and the unlock shell so decrypted
+/// content renders identically on both.
+pub const PREVIEW_CSS: &str = include_str!("../templates/shared/preview_chrome.css");
+
 /// Brand font face with a `__FONT__` slot for the inlined woff2 data URI.
 pub const FONT_FACE_CSS: &str = include_str!("../templates/partials/font_face.css");
 
@@ -60,5 +65,8 @@ mod tests {
         assert!(BASE_CSS.contains(".fname{"));
         assert!(BRAND_CSS.contains(".brand-logo"));
         assert!(HEAD_META.contains("noindex"));
+        assert!(PREVIEW_CSS.contains(".audio-hero"));
+        assert!(PREVIEW_CSS.contains(".dl-hero"));
+        assert!(PREVIEW_CSS.contains(".text-view"));
     }
 }

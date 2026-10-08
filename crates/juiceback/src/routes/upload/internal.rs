@@ -59,6 +59,7 @@ pub async fn file_status_handler(
                 "id": id,
                 "status": record.status,
                 "filename": record.filename,
+                "size_bytes": record.size_bytes,
                 "expires_at": record.expires_at,
                 "protected": record.is_protected(),
                 "is_encrypted": record.is_encrypted,

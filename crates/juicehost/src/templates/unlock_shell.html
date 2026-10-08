@@ -9,6 +9,7 @@
     __FONT_FACE__
     __BASE_CSS__
     __BRAND_CSS__
+    __PREVIEW_CSS__
     .locktag{
       flex:none;
       font-size:.75rem;
@@ -19,17 +20,6 @@
       padding:.15rem .5rem;
       background:#241d17;
       white-space:nowrap;
-    }
-    .stage{
-      flex:1;
-      min-height:0;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      padding:1rem;
-      gap:1rem;
-      overflow:auto;
     }
     .card{
       width:min(26rem,100%);
@@ -69,36 +59,36 @@
     .status.err{color:#f87171}
     .progress{height:.4rem;background:#100d0a;border-radius:.2rem;overflow:hidden}
     .progress > div{height:100%;width:0;background:#f97316;transition:width .15s}
-    video#media,img#media{
-      max-width:100%;
-      max-height:100%;
-      object-fit:contain;
+    .btn[disabled]{opacity:.5;cursor:not-allowed}
+    .view-full .topbar{display:none}
+    .view-full .stage{padding:0}
+    .float-dl{
+      position:fixed;
+      right:1rem;
+      bottom:1rem;
+      z-index:10;
+      padding:.6rem 1.2rem;
+      border:1px solid #4a3d33;
       border-radius:.5rem;
-      background:#000;
+      background:#f97316;
+      color:#0a0908;
+      font-weight:700;
+      font-size:.9rem;
+      cursor:pointer;
     }
-    video#media{width:100%;height:100%}
-    .pdf-frame{width:100%;height:100%;border:0;border-radius:.5rem;background:#fff}
-    .text-view{
-      width:min(60rem,100%);
-      height:100%;
-      overflow:auto;
-      background:#100d0a;
-      border:1px solid #2e2620;
-      border-radius:.5rem;
-      padding:1rem 1.25rem;
-      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-      font-size:.85rem;
-      line-height:1.55;
-      white-space:pre-wrap;
-      word-break:break-word;
-    }
+    .float-dl:hover{background:#fb923c}
   </style>
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     __BRAND__
     <span class="fname" title="__FILENAME__">__FILENAME__</span>
+    <span class="fsize">__SIZE__</span>
     <span class="locktag">password-protected</span>
+    <nav class="actions">
+      <button class="btn btn--primary" id="topdl" type="button" disabled>Download</button>
+      <button class="btn" id="topraw" type="button" disabled>Raw</button>
+    </nav>
   </header>
   <main class="stage" id="stage">
     <div class="card" id="unlockcard">
