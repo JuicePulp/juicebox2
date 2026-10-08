@@ -41,7 +41,7 @@ pub fn finish_reservation(
 
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
     delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
-    password_hash, is_encrypted, enc_header";
+    password_hash, is_encrypted, enc_header, dek_wrapped, dek_salt, dek_escrow, key_version";
 
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
@@ -65,13 +65,17 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
         password_hash: row.get(11)?,
         is_encrypted: row.get::<_, i64>(12).unwrap_or(0) != 0,
         enc_header: row.get(13)?,
+        dek_wrapped: row.get(14).unwrap_or(None),
+        dek_salt: row.get(15).unwrap_or(None),
+        dek_escrow: row.get(16).unwrap_or(None),
+        key_version: row.get(17).unwrap_or(0),
     })
 }
 
 pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
+            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
         ),
         params![
             record.id,
@@ -88,6 +92,10 @@ pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
             record.password_hash.as_deref(),
             i64::from(record.is_encrypted),
             record.enc_header.as_deref(),
+            record.dek_wrapped.as_deref(),
+            record.dek_salt.as_deref(),
+            record.dek_escrow.as_deref(),
+            record.key_version,
         ],
     )?;
     Ok(())
@@ -183,7 +191,6 @@ pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Record password-gate and encryption metadata for a completed upload.
-/// Passing `password_hash = None` marks the file public.
 ///
 /// # Errors
 ///
@@ -191,13 +198,21 @@ pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
 pub fn set_protection(
     conn: &Connection,
     id: &str,
-    password_hash: Option<&str>,
-    is_encrypted: bool,
-    enc_header: Option<&str>,
+    material: &super::types::ProtectionMaterial,
 ) -> Result<bool> {
     let affected = conn.execute(
-        "UPDATE files SET password_hash = ?1, is_encrypted = ?2, enc_header = ?3 WHERE id = ?4",
-        params![password_hash, i64::from(is_encrypted), enc_header, id],
+        "UPDATE files SET password_hash = ?1, is_encrypted = ?2, enc_header = ?3, \
+         dek_wrapped = ?4, dek_salt = ?5, dek_escrow = ?6, key_version = ?7 WHERE id = ?8",
+        params![
+            material.password_hash,
+            i64::from(material.is_encrypted),
+            material.enc_header,
+            material.dek_wrapped,
+            material.dek_salt,
+            material.dek_escrow,
+            material.key_version,
+            id
+        ],
     )?;
     Ok(affected > 0)
 }

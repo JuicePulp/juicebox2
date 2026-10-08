@@ -186,9 +186,10 @@ pub async fn mark_protected(
     let id = file_id.to_string();
     let hash = password_hash.map(str::to_string);
     let hex_owned = header_hex.clone();
+    let material = db::ProtectionMaterial::legacy(hash, Some(hex_owned));
     let updated = state
         .db_call("set_protection", move |db| {
-            db::set_protection(db, &id, hash.as_deref(), true, Some(&hex_owned))
+            db::set_protection(db, &id, &material)
         })
         .await?;
     if !updated {
