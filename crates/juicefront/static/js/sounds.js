@@ -41,6 +41,23 @@ function toggle() {
   return next;
 }
 
+// Warm up the shared AudioContext on the first pointer press, so the cue on
+// the very first click — very often a navigation link — starts instantly.
+// Silent and one-shot; navigation itself is never delayed.
+try {
+  document.addEventListener(
+    "pointerdown",
+    function warmup() {
+      document.removeEventListener("pointerdown", warmup, true);
+      if (!storedEnabled()) return;
+      try {
+        play("tap", { volume: 0 });
+      } catch {}
+    },
+    true,
+  );
+} catch {}
+
 try {
   bind();
 } catch {}
