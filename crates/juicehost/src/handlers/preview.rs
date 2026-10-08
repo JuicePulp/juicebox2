@@ -91,6 +91,7 @@ fn escape_html(value: &str) -> String {
 
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
+const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
 /// User-Agent fragments identifying non-interactive clients (curl-like
 /// tools, social unfurlers, crawlers). Matched case-insensitively against
@@ -224,6 +225,7 @@ fn render_preview(page: &PreviewPage) -> String {
     PREVIEW_TEMPLATE
         .replace("__CURL_NOTICE__", &notice)
         .replace("__LOGO__", LOGO_DATA_URI.trim())
+        .replace("__FONT__", TITLE_FONT_DATA_URI.trim())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
         .replace("__OG_TAGS__", &og_tags(page))
