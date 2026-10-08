@@ -35,6 +35,10 @@ pub struct FileInfoResponse {
     pub url: String,
     pub storage_host: Option<String>,
     pub status: String,
+    #[serde(default)]
+    pub protected: bool,
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 impl FileInfoResponse {
@@ -46,16 +50,20 @@ impl FileInfoResponse {
             &record.id,
             &record.filename,
         );
+        let protected = record.is_protected();
+        let is_encrypted = record.is_encrypted;
         Self {
             id: record.id,
             filename: record.filename,
-            mime_type: record.mime_type,
             size_bytes: record.size_bytes,
+            mime_type: record.mime_type,
             uploaded_at: record.uploaded_at,
             expires_at: record.expires_at,
             url,
             storage_host: record.storage_host,
             status: record.status,
+            protected,
+            is_encrypted,
         }
     }
 }

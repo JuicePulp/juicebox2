@@ -231,6 +231,13 @@ fn main() {
             });
         }
 
+        {
+            let state_prune = Arc::clone(&state);
+            tokio::spawn(async move {
+                juiceback::jobs::cleanup::run_unlock_limiter_prune_loop(state_prune).await;
+            });
+        }
+
         let app = juiceback::routes::build_router(Arc::clone(&state));
 
         let host = &state.config.host;

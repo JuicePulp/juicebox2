@@ -49,6 +49,8 @@ pub async fn file_status_handler(
             "status": record.status,
             "filename": record.filename,
             "expires_at": record.expires_at,
+            "protected": record.is_protected(),
+            "is_encrypted": record.is_encrypted,
         }))),
         Ok(None) => Err(AppError::NotFound),
         Err(e) => Err(e),

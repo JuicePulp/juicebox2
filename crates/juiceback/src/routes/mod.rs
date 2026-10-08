@@ -31,6 +31,7 @@ pub mod pairing;
 pub mod presence;
 pub mod register;
 pub mod tus;
+pub mod unlock;
 pub mod upload;
 
 pub(crate) use health::openapi_json_handler;
@@ -306,6 +307,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/file/{id}/info", get(manage::file_info_handler))
         .route("/file/{id}/renew", post(manage::renew_file_id_handler))
         .route("/file/{id}", delete(manage::delete_file_handler))
+        .route("/file/{id}/unlock", get(unlock::unlock_page_handler).post(unlock::unlock_submit_handler))
+        .route(
+            "/file/{id}/content",
+            get(unlock::content_handler).head(unlock::content_handler),
+        )
         .route(
             "/internal/file/{id}/status",
             get(upload::file_status_handler),

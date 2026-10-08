@@ -69,6 +69,7 @@ pub struct AppState {
     pub presence_by_ip: DashMap<std::net::IpAddr, usize>,
     pub notification_semaphore: Arc<tokio::sync::Semaphore>,
     pub mint_limiter: Arc<crate::mint_limiter::MintLimiter>,
+    pub unlock_limiter: Arc<crate::mint_limiter::MintLimiter>,
 }
 
 impl AppState {
@@ -86,6 +87,13 @@ impl AppState {
             config.dte_mint_limit,
             config.dte_mint_window_secs,
             config.dte_mint_burst,
+        ));
+
+        // Unlock attempts: a few quick tries, then paced over the window.
+        let unlock_limiter = Arc::new(crate::mint_limiter::MintLimiter::new(
+            config.password_try_limit,
+            config.password_try_window_secs,
+            config.password_try_limit.min(3).max(1),
         ));
 
         let max_concurrent_uploads = config.max_concurrent_uploads.max(1) as usize;
@@ -114,6 +122,7 @@ impl AppState {
             presence_by_ip: DashMap::new(),
             notification_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
             mint_limiter,
+            unlock_limiter,
         })
     }
 
