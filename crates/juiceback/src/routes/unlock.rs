@@ -15,7 +15,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -30,11 +30,6 @@ use crate::{
 pub const UNLOCK_ISSUER: &str = "juiceback-unlock";
 const UNLOCK_TTL_SECS: usize = 300;
 const FORBIDDEN_BODY: &str = "invalid password";
-
-/// cuelume interaction sounds, bundled at compile time (the unlock page has
-/// no static-file server, so the bundle is inlined). Regenerate per
-/// `static/README.md` when upgrading cuelume.
-const CUELUME_BUNDLE: &str = include_str!("../../static/cuelume.bundle.js");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnlockClaims {
@@ -109,21 +104,6 @@ fn set_unlock_cookie(
     Ok(())
 }
 
-fn escape_html(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for c in input.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
 async fn protected_record(
     state: &Arc<AppState>,
     id: &str,
@@ -148,61 +128,12 @@ fn public_url_for(state: &Arc<AppState>, record: &db::FileRecord) -> String {
     )
 }
 
-fn unlock_page_html(id: &str, filename: &str) -> String {
-    let safe_name = escape_html(filename);
-    let page = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Unlock {safe_name} - Juicebox</title></head>
-<body>
-<main>
-<h1>This file is password-protected</h1>
-<p>Enter the password for <strong>{safe_name}</strong> to download it.</p>
-<form method="post" action="/file/{id}/unlock">
-<label for="password">Password</label>
-<input id="password" name="password" type="password" data-cuelume-type autocomplete="current-password" required>
-<button type="submit" data-cuelume-tap>Unlock</button>
-</form>
-<p>Fetching with curl? Append <code>?password=...</code> to
-<code>/file/{id}/content</code>, or send <code>X-File-Password</code>.</p>
-</main>
-<script>__CUELUME_BUNDLE__</script>
-<script>
-try {{ window.Cuelume && Cuelume.bind(); }} catch (e) {{}}
-function sfx(name, opts) {{
-  try {{ window.Cuelume && Cuelume.play(name, opts); }} catch (e) {{}}
-}}
-document.querySelector("form").addEventListener("submit", async (e) => {{
-  e.preventDefault();
-  const password = document.getElementById("password").value;
-  const res = await fetch("/file/{id}/unlock", {{
-    method: "POST",
-    headers: {{ "Content-Type": "application/json" }},
-    body: JSON.stringify({{ password }}),
-  }});
-  if (res.ok) {{
-    sfx("success", {{ emphasis: "subtle" }});
-    location.href = "/file/{id}/content";
-  }} else {{
-    sfx("error", {{ emphasis: "subtle" }});
-    alert("Invalid password");
-  }}
-}});
-</script>
-</body>
-</html>"#
-    );
-    page.replace("__CUELUME_BUNDLE__", CUELUME_BUNDLE)
-}
-
 #[utoipa::path(
     get,
     path = "/file/{id}/unlock",
     params(("id" = String, Path, description = "File ID")),
     responses(
-        (status = 200, description = "Password prompt"),
-        (status = 302, description = "Unprotected file redirects to its public URL"),
+        (status = 302, description = "Redirects to the juicehost unlock shell"),
         (status = 404, description = "File not found"),
     ),
     tag = "Files",
@@ -212,15 +143,15 @@ pub async fn unlock_page_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
+    // Public viewing lives on juicehost only: the unlock shell is the
+    // host `/f/` page, which talks to the key-release gateway directly.
+    // Old backend-origin links land here and bounce to the shell.
     let lookup = id.clone();
     let record = state
         .db_call("get_unlock_page", move |db| db::get_file(db, &lookup))
         .await?
         .ok_or(AppError::NotFound)?;
-    if !record.is_protected() {
-        return Ok(Redirect::to(&public_url_for(&state, &record)).into_response());
-    }
-    Ok(Html(unlock_page_html(&record.id, &record.filename)).into_response())
+    Ok(Redirect::to(&public_url_for(&state, &record)).into_response())
 }
 
 #[derive(Deserialize)]

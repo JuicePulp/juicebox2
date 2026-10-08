@@ -30,28 +30,18 @@ pub fn is_valid_id(id: &str) -> bool {
 
 pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
-/// Shareable URL for a file: the unlock prompt when protected (served by
-/// juiceback itself, so it is rooted at `juiceback_origin` — the `/f/` URL
-/// would only redirect there via the juicehost gate), else the public
-/// storage URL.
+/// Shareable URL for a file. Protected and public files alike share the
+/// juicehost `/f/` URL: juicehost serves the unlock shell for protected
+/// files and the bytes for public ones, so links never point at juiceback.
 #[must_use]
 pub fn share_url(
     public_base_url: &str,
     storage_host: Option<&str>,
     id: &str,
     filename: &str,
-    protected: bool,
-    juiceback_origin: &str,
+    _protected: bool,
 ) -> String {
-    if protected {
-        format!(
-            "{}/file/{}/unlock",
-            juiceback_origin.trim_end_matches('/'),
-            id
-        )
-    } else {
-        public_url(public_base_url, storage_host, id, filename)
-    }
+    public_url(public_base_url, storage_host, id, filename)
 }
 
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {

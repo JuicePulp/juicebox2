@@ -224,7 +224,6 @@ pub async fn fetch_status_handler(
                 &record.id,
                 &record.filename,
                 record.is_protected(),
-                &state.config.juiceback_origin,
             );
             let protected = record.is_protected();
             let is_encrypted = record.is_encrypted;

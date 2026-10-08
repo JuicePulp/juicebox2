@@ -45,11 +45,14 @@ pub async fn file_status_handler(
 
     match file {
         Ok(Some(record)) => {
+            // The unlock shell lives on juicehost: this URL is the public
+            // `/f/` page, never a juiceback address.
             let unlock_url = record.is_protected().then(|| {
-                format!(
-                    "{}/file/{}/unlock",
-                    state.config.juiceback_origin.trim_end_matches('/'),
-                    id
+                crate::utils::public_url(
+                    &state.config.public_base_url,
+                    record.storage_host.as_deref(),
+                    &id,
+                    &record.filename,
                 )
             });
             Ok(Json(serde_json::json!({
@@ -60,6 +63,8 @@ pub async fn file_status_handler(
                 "protected": record.is_protected(),
                 "is_encrypted": record.is_encrypted,
                 "unlock_url": unlock_url,
+                "key_version": record.key_version,
+                "gateway_origin": state.config.juiceback_origin,
             })))
         }
         Ok(None) => Err(AppError::NotFound),

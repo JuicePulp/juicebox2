@@ -23,6 +23,7 @@ use crate::{
 pub mod admin;
 pub mod api_doc;
 pub mod fetch;
+pub mod gateway;
 pub mod health;
 pub mod identity;
 pub mod manage;
@@ -269,6 +270,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let small_payload_routes = Router::new()
         .route("/api/owned-files", post(manage::owned_files_handler))
+        .route("/api/gateway/params/{id}", get(gateway::params_handler))
+        .route("/api/gateway/unlock", post(gateway::unlock_handler))
         .route(
             "/api/client-files",
             get(manage::list_client_files_handler).post(manage::put_client_files_handler),

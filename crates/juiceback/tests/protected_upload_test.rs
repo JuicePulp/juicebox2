@@ -714,7 +714,7 @@ async fn unlock_page_and_cookie_flow() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "unlockpage1").await;
 
-    // Prompt page renders without credentials.
+    // The backend unlock page is retired: old links bounce to the host shell.
     let resp = app
         .clone()
         .oneshot(
@@ -726,12 +726,17 @@ async fn unlock_page_and_cookie_flow() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let page = String::from_utf8_lossy(&bytes);
-    assert!(page.contains("password") && page.contains(&id));
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        location.ends_with(&format!("/f/{id}.txt")),
+        "unexpected redirect: {location}"
+    );
 
     // Content without credentials: 403.
     let resp = app
@@ -1141,7 +1146,7 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
     let info: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(info["protected"], true);
     assert!(
-        info["url"].as_str().unwrap_or_default().ends_with(&format!("/file/{id}/unlock")),
+        info["url"].as_str().unwrap_or_default().ends_with(&format!("/f/{id}.txt")),
         "unexpected url: {}",
         info["url"]
     );
@@ -1173,4 +1178,203 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
         hits.iter().any(|p| p.contains(&id)),
         "host ciphertext was not deleted: {hits:?}"
     );
+}
+
+async fn get_gateway_params(app: &axum::Router, id: &str) -> (StatusCode, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/gateway/params/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, json)
+}
+
+async fn post_gateway_unlock(
+    app: &axum::Router,
+    id: &str,
+    password: &str,
+) -> (StatusCode, axum::http::HeaderMap, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/gateway/unlock")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "id": id, "password": password }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, headers, json)
+}
+
+#[tokio::test]
+async fn gateway_params_and_unlock_release_working_dek() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "gateway1").await;
+
+    let (status, params) = get_gateway_params(&app, &id).await;
+    assert_eq!(status, StatusCode::OK, "{params}");
+    assert_eq!(params["key_version"], "1");
+    assert!(!params["salt"].as_str().unwrap_or_default().is_empty());
+    assert_eq!(params["chunk_shift"], 16);
+    assert_eq!(params["plain_len"], PLAINTEXT.len() as u64);
+    assert!(params["ciphertext_url"].as_str().unwrap().ends_with(&format!("/c/{id}")));
+    assert_eq!(params["filename"], "secret.txt");
+
+    // Wrong password: 403, no key.
+    let (status, _, _) = post_gateway_unlock(&app, &id, "wrong password").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Correct password: data key, no-store, decrypts the stored bytes.
+    let (status, headers, json) = post_gateway_unlock(&app, &id, PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        headers.get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    let dek_b64 = json["dek"].as_str().unwrap().to_string();
+    assert!(!dek_b64.is_empty());
+    assert!(!json.to_string().contains(PASSWORD));
+
+    use base64::Engine as _;
+    let dek_raw = base64::engine::general_purpose::STANDARD.decode(&dek_b64).unwrap();
+    let dek = juiceback::crypto_file::FileKey::from_bytes(&dek_raw).unwrap();
+    let stored: Vec<u8> = captured.lock().unwrap().concat();
+    let mut plain = Vec::new();
+    juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
+    assert_eq!(plain, PLAINTEXT);
+
+    // Unknown ids and public files: 404, never a key.
+    let (status, _) = get_gateway_params(&app, "nope1234").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = post_gateway_unlock(&app, "nope1234", PASSWORD).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let boundary = "gatewaypublic1";
+    let body = multipart_body(boundary, &[], ("a.txt", PLAINTEXT));
+    let (status, json) = post_upload(&app, body, boundary, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let plain_id = json["id"].as_str().unwrap().to_string();
+    let (status, _) = get_gateway_params(&app, &plain_id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = post_gateway_unlock(&app, &plain_id, PASSWORD).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Seed a legacy (global-key, `key_version` 0) protected row with matching
+/// mock-host bytes, proving old files keep working read-only.
+async fn seed_legacy(state: &Arc<AppState>, captured: Arc<Mutex<Vec<Vec<u8>>>>) -> String {
+    let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
+    let stored =
+        juiceback::crypto_file::encrypt_reader(&key, PLAINTEXT.len() as u64, &PLAINTEXT[..])
+            .unwrap();
+    captured.lock().unwrap().push(stored.clone());
+    let hash = juiceback::auth::hash_password(PASSWORD).unwrap();
+    let id = "legacy01".to_string();
+    let record = juiceback::db::FileRecord {
+        storage_path: format!("remote-{id}"),
+        id: id.clone(),
+        filename: "secret.txt".into(),
+        mime_type: "text/plain".into(),
+        size_bytes: PLAINTEXT.len() as i64,
+        delete_token: uuid::Uuid::new_v4().to_string(),
+        uploaded_at: chrono::Utc::now().timestamp(),
+        expires_at: chrono::Utc::now().timestamp() + 3600,
+        uploader_ip: None,
+        storage_host: None,
+        status: "ready".into(),
+        password_hash: Some(hash),
+        is_encrypted: true,
+        enc_header: Some(hex::encode(&stored[..13])),
+        dek_wrapped: None,
+        dek_salt: None,
+        dek_escrow: None,
+        key_version: 0,
+    };
+    state
+        .db_call("seed_legacy", move |db| {
+            juiceback::db::insert_file(db, &record)
+        })
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn legacy_files_stay_readable_without_key_release() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let id = seed_legacy(&state, Arc::clone(&captured)).await;
+    let app = common::mock_router(Arc::clone(&state));
+
+    let (status, params) = get_gateway_params(&app, &id).await;
+    assert_eq!(status, StatusCode::OK, "{params}");
+    assert_eq!(params["key_version"], "0");
+
+    // Legacy rows never release keys here.
+    let (status, _, _) = post_gateway_unlock(&app, &id, PASSWORD).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Server-side password transports still decrypt legacy bytes.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), PLAINTEXT);
+
+    // Old unlock links bounce to the host shell too.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/unlock"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
 }
