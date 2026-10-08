@@ -62,7 +62,7 @@ fn preview_kind(mime: &str) -> PreviewKind {
     }
 }
 
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
     const GB: u64 = 1024 * MB;
@@ -233,6 +233,10 @@ fn render_preview(page: &PreviewPage) -> String {
         .replace("__BASE_CSS__", juiceutils::web::BASE_CSS.trim_end())
         .replace("__BRAND_CSS__", juiceutils::web::BRAND_CSS.trim_end())
         .replace("__BRAND__", &juiceutils::web::brand_html(LOGO_DATA_URI.trim()))
+        .replace(
+            "__PREVIEW_CSS__",
+            juiceutils::web::PREVIEW_CSS.trim_end(),
+        )
         .replace("__APP_JS__", PREVIEW_APP_JS.trim_end())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())

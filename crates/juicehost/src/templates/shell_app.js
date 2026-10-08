@@ -21,6 +21,27 @@
     var pwInput = document.getElementById("password");
     var stage = document.getElementById("stage");
     var card = document.getElementById("unlockcard");
+    var topbar = document.getElementById("topbar");
+    var topdl = document.getElementById("topdl");
+    var topraw = document.getElementById("topraw");
+
+    // Held access after unlock: either the v1 data key or the legacy
+    // password. Memory only, never stored, never placed in a URL.
+    var held = null;
+
+    function enableTopbar() {
+      if (topdl) topdl.disabled = false;
+      if (topraw) topraw.disabled = false;
+    }
+    if (topdl) topdl.addEventListener("click", function () {
+      if (!held) return;
+      say("Downloading...");
+      downloadHeld(held).catch(function (e) { say(e.message, true); });
+    });
+    if (topraw) topraw.addEventListener("click", function () {
+      if (!held) return;
+      openHeld(held).catch(function (e) { say(e.message, true); });
+    });
 
     function say(msg, err) {
       statusEl.textContent = msg;
@@ -221,44 +242,132 @@
       return new Blob(parts, { type: CFG.mime || "application/octet-stream" });
     }
 
-    // Post-unlock actions for preview mode. Both reuse the held key only:
-    // the password is never resent, stored, or placed in a URL.
-    function offerActions(key, plainLen) {
-      var bar = document.createElement("div");
-      bar.setAttribute("style", "display:flex;gap:.5rem;flex:none;");
-      var dl = document.createElement("button");
-      dl.textContent = "Download decrypted";
-      dl.setAttribute("style", "padding:.45rem .9rem;border:1px solid #4a3d33;border-radius:.5rem;background:#241d17;color:#e8ded4;font-weight:600;cursor:pointer;");
-      dl.addEventListener("click", function () {
-        say("Downloading...");
-        v1Download(key, plainLen).catch(function (e) { say(e.message, true); });
-      });
-      var open = document.createElement("button");
-      open.textContent = "Open as file";
-      open.setAttribute("style", "padding:.45rem .9rem;border:1px solid #4a3d33;border-radius:.5rem;background:#241d17;color:#e8ded4;font-weight:600;cursor:pointer;");
-      open.addEventListener("click", function () {
-        v1View(key, plainLen).catch(function (e) { say(e.message, true); });
-      });
-      bar.appendChild(dl);
-      bar.appendChild(open);
-      stage.appendChild(bar);
+    function fmtSize(bytes) {
+      if (bytes >= 1099511627776) return (bytes / 1099511627776).toFixed(1) + " TB";
+      if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + " GB";
+      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+      if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return bytes + " B";
     }
 
-    // View mode (/f/): the decrypted bytes become the document itself via a
-    // blob URL, so the browser renders the file natively (image as image,
-    // PDF as PDF, text as text) instead of embedding it in this page.
-    // Blob URLs are origin-scoped unguessable tokens; nothing new is sent
-    // anywhere and the key stays in memory.
-    async function v1View(key, plainLen) {
-      if (plainLen > 512 * 1024 * 1024) {
+    // Download hero identical to the public preview page for unpreviewable
+    // types (same classes, same shared stylesheet).
+    function renderDlHero(mimeLabel, sizeLabel, onDownload) {
+      card.hidden = true;
+      var hero = document.createElement("div");
+      hero.className = "dl-hero";
+      var icon = document.createElement("div");
+      icon.className = "dl-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = "\u21E9";
+      var name = document.createElement("p");
+      name.className = "dl-name";
+      name.textContent = CFG.filename;
+      var meta = document.createElement("p");
+      meta.className = "dl-meta";
+      meta.textContent = mimeLabel + " \u00B7 " + sizeLabel;
+      var dlBtn = document.createElement("a");
+      dlBtn.className = "dl-btn";
+      dlBtn.href = "#";
+      dlBtn.textContent = "Download";
+      dlBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        say("Downloading...");
+        onDownload().catch(function (err) { say(err.message, true); });
+      });
+      hero.appendChild(icon);
+      hero.appendChild(name);
+      hero.appendChild(meta);
+      hero.appendChild(dlBtn);
+      stage.appendChild(hero);
+      say("");
+    }
+
+    // View mode (/f/): the decrypted bytes become the page content itself,
+    // natively rendered fullscreen with only a floating download left.
+    async function v1View(h) {
+      if (h.plainLen > 512 * 1024 * 1024) {
         say("File is too large to open in the browser. Download it instead.", true);
-        btn.textContent = "Download";
-        btn.onclick = function () { v1Download(key, plainLen).catch(function (e) { say(e.message, true); }); };
+        await v1Download(h.key, h.plainLen);
         return;
       }
       say("Decrypting...");
-      var blob = await decryptFull(key, plainLen);
-      location.href = URL.createObjectURL(blob);
+      var blob = await decryptFull(h.key, h.plainLen);
+      renderNative(blob, kindOf(CFG.mime), function () { return v1Download(h.key, h.plainLen); });
+    }
+
+    // Native fullscreen render of decrypted bytes: the document becomes the
+    // file itself (image/video/audio/PDF/text fill the viewport, no page
+    // chrome left except an optional floating download). Top-level blob
+    // navigation is deliberately avoided: it fails under page CSPs and drops
+    // the held access. Blob subresources stay in this document where the
+    // policy explicitly allows them.
+    function renderNative(blob, kind, withDownload) {
+      card.hidden = true;
+      if (topbar && !withDownload) topbar.style.display = "none";
+      document.title = CFG.filename + " - Juicebox";
+      stage.style.padding = "0";
+      if (kind === "text") {
+        blob.text().then(function (text) {
+          var pre = document.createElement("pre");
+          pre.className = "text-view";
+          pre.style.height = "100%";
+          pre.textContent = text;
+          stage.appendChild(pre);
+          if (withDownload) addFloatDl(withDownload);
+          say("");
+        }).catch(function () { say("Could not render the file.", true); });
+        return;
+      }
+      showBlob(blob, kind);
+      var media = document.getElementById("media");
+      if (media) { media.style.width = "100%"; media.style.height = "100%"; }
+      if (withDownload) addFloatDl(withDownload);
+      say("");
+    }
+
+    function addFloatDl(onClick) {
+      var old = document.getElementById("floatdl");
+      if (old) old.remove();
+      var b = document.createElement("button");
+      b.id = "floatdl";
+      b.className = "float-dl";
+      b.textContent = "Download";
+      b.addEventListener("click", function () {
+        say("Downloading...");
+        onClick().catch(function (e) { say(e.message, true); });
+      });
+      document.body.appendChild(b);
+    }
+
+    // Download + open through held access (topbar buttons + float button).
+    async function downloadHeld(h) {
+      if (h.v1) return v1Download(h.key, h.plainLen);
+      var res = await fetch(CFG.contentUrl, { headers: { "X-File-Password": h.password }, cache: "no-store" });
+      if (res.status === 403) throw new Error("Wrong password.");
+      if (!res.ok) throw new Error("Download failed (" + res.status + ").");
+      var blob = await res.blob();
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = CFG.filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      say("Download complete.");
+    }
+
+    async function openHeld(h) {
+      if (h.v1) {
+        if (h.plainLen > 512 * 1024 * 1024) throw new Error("File is too large to open in the browser.");
+        say("Decrypting...");
+        renderNative(await decryptFull(h.key, h.plainLen), kindOf(CFG.mime), false);
+        return;
+      }
+      say("Opening...");
+      var res = await fetch(CFG.contentUrl, { headers: { "X-File-Password": h.password }, cache: "no-store" });
+      if (res.status === 403) throw new Error("Wrong password.");
+      if (!res.ok) throw new Error("Open failed (" + res.status + ").");
+      renderNative(await res.blob(), kindOf(CFG.mime), false);
     }
 
     async function v1Preview(key, plainLen) {
@@ -276,30 +385,29 @@
         if (plainLen > end) text += "\n... (truncated preview, download for the full file)";
         showText(text);
         say("");
-        offerActions(key, plainLen);
         return;
       }
       if (kind === "download") {
-        say("This file type cannot be previewed. Press Unlock again to download it.");
-        btn.textContent = "Download";
-        btn.onclick = function () { v1Download(key, plainLen).catch(function (e) { say(e.message, true); }); };
+        renderDlHero(CFG.mime || "application/octet-stream", fmtSize(plainLen), function () {
+          return v1Download(key, plainLen);
+        });
         return;
       }
       if (plainLen > 512 * 1024 * 1024 && (kind === "video" || kind === "audio")) {
-        say("File is too large to preview in the browser. Press Unlock again to download it.", true);
-        btn.textContent = "Download";
-        btn.onclick = function () { v1Download(key, plainLen).catch(function (e) { say(e.message, true); }); };
+        renderDlHero(CFG.mime || "application/octet-stream", fmtSize(plainLen), function () {
+          return v1Download(key, plainLen);
+        });
         return;
       }
       say("Decrypting...");
       showBlob(await decryptFull(key, plainLen), kind);
       say("");
-      offerActions(key, plainLen);
     }
 
     async function legacyFlow(password) {
       var headers = { "X-File-Password": password };
-      if (CFG.mode === "download") {        say("Downloading...");
+      if (CFG.mode === "download") {
+        say("Downloading...");
         var res;
         try {
           res = await fetch(CFG.contentUrl, { headers: headers, cache: "no-store" });
@@ -322,7 +430,15 @@
         var r0 = await fetch(CFG.contentUrl, { headers: headers, cache: "no-store" });
         if (r0.status === 403) throw new Error("Wrong password.");
         if (!r0.ok) throw new Error("Open failed (" + r0.status + ").");
-        location.href = URL.createObjectURL(await r0.blob());
+        var blob0 = await r0.blob();
+        if (blob0.size > 512 * 1024 * 1024) {
+          say("File is too large to open in the browser. Download it instead.", true);
+          renderDlHero(CFG.mime || "application/octet-stream", fmtSize(blob0.size), function () {
+            return downloadHeld(held);
+          });
+          return;
+        }
+        renderNative(blob0, kind, function () { return downloadHeld(held); });
         return;
       }
       if (kind === "text") {
@@ -341,13 +457,9 @@
       if (!r2.ok) throw new Error("Preview failed (" + r2.status + ").");
       var blob2 = await r2.blob();
       if (kind === "download") {
-        var a2 = document.createElement("a");
-        a2.href = URL.createObjectURL(blob2);
-        a2.download = CFG.filename;
-        document.body.appendChild(a2);
-        a2.click();
-        setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 4000);
-        say("Download complete.");
+        renderDlHero(CFG.mime || "application/octet-stream", fmtSize(blob2.size), function () {
+          return downloadHeld(held);
+        });
       } else {
         showBlob(blob2, kind);
         say("");
@@ -363,14 +475,18 @@
         if (CFG.keyVersion === "1") {
           var unlocked = await v1Unlock(password);
           pwInput.value = "";
+          held = { v1: true, key: unlocked.key, plainLen: unlocked.plainLen };
+          enableTopbar();
           if (CFG.mode === "download") {
             await v1Download(unlocked.key, unlocked.plainLen);
           } else if (CFG.mode === "view") {
-            await v1View(unlocked.key, unlocked.plainLen);
+            await v1View(held);
           } else {
             await v1Preview(unlocked.key, unlocked.plainLen);
           }
         } else {
+          held = { v1: false, password: password };
+          enableTopbar();
           await legacyFlow(password);
           pwInput.value = "";
         }

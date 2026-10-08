@@ -1359,7 +1359,8 @@ async fn protected_file_serves_unlock_shell() {
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("v1View"));
-    assert!(page.contains("location.href = URL.createObjectURL"));
+    assert!(page.contains("renderNative"));
+    assert!(!page.contains("location.href = URL.createObjectURL"));
     assert_eq!(
         headers.get("content-type").and_then(|v| v.to_str().ok()),
         Some("text/html; charset=utf-8")
@@ -1773,13 +1774,21 @@ async fn preview_missing_and_protected() {
     let app = build_router(state);
     store_named(&app, "prot0001", "secret.mp4", b"ciphertext").await;
 
-    let (status, _, body) = get_public(&app, "/v/prot0001.mp4", None).await;
+    let (status, headers, body) = get_public(&app, "/v/prot0001.mp4", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"preview\""));
-    assert!(page.contains("offerActions"));
-    assert!(page.contains("Download decrypted"));
+    // Same topbar + stage chrome as the public preview page.
+    assert!(page.contains("id=\"topdl\""));
+    assert!(page.contains("id=\"topraw\""));
+    assert!(page.contains("dl-hero"));
+    assert!(page.contains("renderDlHero"));
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("frame-src blob:"), "{csp}");
 
     let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
