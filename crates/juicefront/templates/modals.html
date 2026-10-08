@@ -141,6 +141,11 @@
 <label class="form-label">{{ cx.t("host.blocked_types") }}</label>
 <div class="blocked-types-info" data-blocked-types-info><p class="blocked-types-text" data-blocked-types-text>{{ blocked_text }}</p></div>
 </div>
+<div class="form-field" data-upload-password-wrap="">
+<label class="form-label" for="host-upload-password">{{ cx.t("upload.password_label") }}</label>
+<input id="host-upload-password" class="form-input upload-password__input" type="password" data-upload-password="" data-cuelume-type placeholder="{{ cx.t("upload.password_ph") }}" autocomplete="new-password" minlength="8" maxlength="256">
+<p class="form-help-text" data-upload-password-hint="" hidden>{{ cx.t("upload.password_relay") }}</p>
+</div>
 </div>
 <div class="mdlfooter">
 <a href="{{ selector_href }}" data-cuelume-navigate class="mdlbtn mdlbtn--primary">{{ cx.t("host.browse") }}</a>

@@ -370,6 +370,11 @@ const shortcuts = [
           <p class="blocked-types-text" data-blocked-types-text>{blockedTypesText}</p>
         </div>
       </div>
+      <div class="form-field" data-upload-password-wrap="">
+        <label class="form-label" for="host-upload-password">{t(currentLocale, "upload.password_label")}</label>
+        <input id="host-upload-password" class="form-input upload-password__input" type="password" data-upload-password="" data-cuelume-type placeholder={t(currentLocale, "upload.password_ph")} autocomplete="new-password" minlength={8} maxlength={256} />
+        <p class="form-help-text" data-upload-password-hint="" hidden>{t(currentLocale, "upload.password_relay")}</p>
+      </div>
     </div>
     <div class="mdlfooter">
       <a href={selectorHref} data-cuelume-navigate class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
