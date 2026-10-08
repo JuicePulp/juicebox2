@@ -11,8 +11,13 @@ use serde_json::Value;
 use tower::ServiceExt;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
-    matchers::{method, path_regex},
+    matchers::{method, path as p, path_regex},
 };
+
+fn b64(s: &str) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(s)
+}
 
 const TEST_KEY_HEX: &str =
     "0000000000000000000000000000000000000000000000000000000000000001";
@@ -286,8 +291,7 @@ async fn short_password_rejected_at_reserve() {    let state = test_state("http:
 }
 
 #[tokio::test]
-async fn plain_relay_still_streams_plaintext() {
-    let server = MockServer::start().await;
+async fn plain_relay_still_streams_plaintext() {    let server = MockServer::start().await;
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
 
@@ -309,4 +313,284 @@ async fn plain_relay_still_streams_plaintext() {
     assert!(!record.is_protected());
     assert!(!record.is_encrypted);
     assert_eq!(record.enc_header, None);
+}
+
+async fn tus_create(
+    app: &axum::Router,
+    metadata: &str,
+    total_length: u64,
+) -> (StatusCode, Option<String>) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/tus")
+                .header("Tus-Resumable", "1.0.0")
+                .header("Upload-Length", total_length.to_string())
+                .header("Upload-Metadata", metadata)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    (status, location)
+}
+
+async fn tus_patch(
+    app: &axum::Router,
+    location: &str,
+    offset: u64,
+    chunk: &[u8],
+) -> (StatusCode, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(location)
+                .header("Tus-Resumable", "1.0.0")
+                .header("Upload-Offset", offset.to_string())
+                .header("content-type", "application/offset+octet-stream")
+                .body(Body::from(chunk.to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, json)
+}
+
+fn tus_meta(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{k} {}", b64(v)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[tokio::test]
+async fn tus_protected_roundtrip_spools_then_encrypts() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+
+    let meta = tus_meta(&[
+        ("filename", "secret.txt"),
+        ("mimetype", "text/plain"),
+        ("password", PASSWORD),
+    ]);
+    let (status, location) = tus_create(&app, &meta, PLAINTEXT.len() as u64).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let location = location.unwrap();
+
+    // Two PATCHes to prove offset bookkeeping works while spooling.
+    let mid = PLAINTEXT.len() / 2;
+    let (status, _) = tus_patch(&app, &location, 0, &PLAINTEXT[..mid]).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, json) = tus_patch(&app, &location, mid as u64, &PLAINTEXT[mid..]).await;
+    assert_eq!(status, StatusCode::OK, "completion failed: {json}");
+    assert_eq!(json["protected"], true);
+    assert_eq!(json["is_encrypted"], true);
+
+    let pushes = captured.lock().unwrap();
+    assert_eq!(pushes.len(), 1);
+    let stored: Vec<u8> = pushes.concat();
+    assert_eq!(&stored[..4], b"JBC1");
+    assert!(
+        !stored.windows(PLAINTEXT.len()).any(|w| w == PLAINTEXT),
+        "plaintext must not reach juicehost"
+    );
+
+    let id = json["id"].as_str().unwrap().to_string();
+    let record = db_record(&state, &id).await;
+    assert!(record.is_protected());
+    assert!(record.is_encrypted);
+    assert!(record.enc_header.is_some());
+}
+
+#[tokio::test]
+async fn tus_parallel_with_password_is_rejected() {
+    let state = test_state("http://127.0.0.1:1".into());
+    let app = common::mock_router(state);
+    let meta = format!(
+        "filename {},mimetype {},password {},session_id {},part_index {},total_parts {}",
+        b64("big.bin"),
+        b64("application/octet-stream"),
+        b64(PASSWORD),
+        b64("sess1"),
+        b64("0"),
+        b64("2"),
+    );
+    let (status, _) = tus_create(&app, &meta, 100).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn tus_adopts_protected_reservation() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload/reserve")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "filename": "secret.txt", "password": PASSWORD })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let reserve: Value = serde_json::from_slice(&bytes).unwrap();
+    let id = reserve["id"].as_str().unwrap();
+    let token = reserve["delete_token"].as_str().unwrap();
+
+    // No password in TUS metadata: the reservation carries the verifier.
+    let meta = tus_meta(&[
+        ("filename", "secret.txt"),
+        ("mimetype", "text/plain"),
+        ("reserve_id", id),
+        ("delete_token", token),
+    ]);
+    let (status, location) = tus_create(&app, &meta, PLAINTEXT.len() as u64).await;
+    assert_eq!(status, StatusCode::CREATED, "{location:?}");
+    let location = location.unwrap();
+    let (status, json) = tus_patch(&app, &location, 0, PLAINTEXT).await;
+    assert_eq!(status, StatusCode::OK, "completion failed: {json}");
+    assert_eq!(json["protected"], true);
+
+    let record = db_record(&state, id).await;
+    assert!(record.is_protected());
+    assert!(record.enc_header.is_some());
+    let pushes = captured.lock().unwrap();
+    assert_eq!(&pushes.concat()[..4], b"JBC1");
+}
+
+#[tokio::test]
+async fn fetch_with_password_stores_ciphertext_only() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+
+    Mock::given(method("POST"))
+        .and(p("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "tunnel",
+            "url": format!("{}/tunnel?id=abc123", server.uri()),
+            "filename": "clip.mp4",
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(p("/tunnel"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("fake-media-bytes"))
+        .mount(&server)
+        .await;
+    let cap = Arc::clone(&captured);
+    Mock::given(method("POST"))
+        .and(path_regex("/internal/file/stream/.*"))
+        .respond_with(move |req: &wiremock::Request| {
+            cap.lock()
+                .unwrap()
+                .push(req.body.clone());
+            ResponseTemplate::new(200)
+        })
+        .mount(&server)
+        .await;
+    let mut cfg = common::fetch_config_with_delay(server.uri(), None, None, 1);
+    cfg.juicehost_url = server.uri();
+    cfg.storage_encryption_key = TEST_KEY_HEX.into();
+    let state = common::state_from_config(cfg);
+    let app = common::mock_router(Arc::clone(&state));
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/fetch")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "url": "https://example.com/v/1", "password": PASSWORD })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .map(|h| h.split(';').next().unwrap_or_default().to_string());
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let started: Value = serde_json::from_slice(&bytes).unwrap();
+    let job_id = started["job_id"].as_str().unwrap().to_string();
+
+    let mut file_id = String::new();
+    for _ in 0..200 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut builder = Request::builder().uri(format!("/api/fetch/{job_id}"));
+        if let Some(ref cookie) = cookie {
+            builder = builder.header("cookie", cookie);
+        }
+        let resp = app
+            .clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let status: Value = serde_json::from_slice(&bytes).unwrap();
+        if status["status"] == "done" {
+            file_id = status["file"]["id"].as_str().unwrap_or_default().to_string();
+            break;
+        }
+        assert_ne!(status["status"], "failed", "fetch job failed: {status}");
+    }
+    assert!(!file_id.is_empty(), "fetch job did not complete");
+
+    let record = db_record(&state, &file_id).await;
+    assert!(record.is_protected());
+    assert!(record.is_encrypted);
+
+    let pushes = captured.lock().unwrap();
+    let stored: Vec<u8> = pushes.concat();
+    assert!(!stored.is_empty());
+    assert_eq!(&stored[..4], b"JBC1");
+    assert!(
+        !stored
+            .windows(b"fake-media-bytes".len())
+            .any(|w| w == b"fake-media-bytes"),
+        "plaintext must not reach juicehost"
+    );
 }

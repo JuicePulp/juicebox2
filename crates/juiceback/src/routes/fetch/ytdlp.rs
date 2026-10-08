@@ -102,6 +102,7 @@ pub(crate) async fn run_ytdlp_tier(
     max_size: u64,
     default_ttl_hours: f64,
     encrypted_ip: Option<String>,
+    password_hash: Option<String>,
 ) -> FetchResult {
     let _ = state
         .db_call("update_fetch_job_progress", {
@@ -252,6 +253,7 @@ pub(crate) async fn run_ytdlp_tier(
         max_size,
         default_ttl_hours,
         encrypted_ip,
+        password_hash,
     )
     .await;
 

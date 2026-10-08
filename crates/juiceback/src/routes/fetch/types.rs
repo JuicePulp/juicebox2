@@ -24,6 +24,11 @@ pub struct FetchStartRequest {
 
     #[serde(default)]
     pub youtube_video_codec: Option<String>,
+
+    /// Optional password gate. Relay-only: the fetched bytes pass through
+    /// juiceback, which encrypts before pushing to juicehost.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
