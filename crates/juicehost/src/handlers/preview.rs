@@ -2,7 +2,7 @@
 //!
 //! A self-contained immersive page in the Juicebox aesthetic: the media fills
 //! the viewport with minimal chrome (filename, download, raw, fullscreen).
-//! No card layouts — previews get the whole screen. Works without JS for
+//! No card layouts - previews get the whole screen. Works without JS for
 //! video/audio/image/PDF (native elements); text preview and the fullscreen
 //! button progressively enhance.
 
@@ -90,6 +90,7 @@ fn escape_html(value: &str) -> String {
 }
 
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
+const PREVIEW_APP_JS: &str = include_str!("../templates/preview_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
@@ -114,7 +115,7 @@ const BOT_UA_TOKENS: &[&str] = &[
 /// Layered bot check for the preview page (humans keep the HTML, anything
 /// else gets the raw bytes):
 /// 1. `Sec-Fetch-Mode: navigate` is only ever sent by browsers on page
-///    loads — always a user.
+///    loads - always a user.
 /// 2. Known bot/crawler/curler User-Agent tokens.
 /// 3. `Accept` without `text/html` (curl `*/*`, API clients), or neither
 ///    header at all (browsers navigating always send both).
@@ -204,7 +205,7 @@ fn stage_html(page: &PreviewPage) -> String {
             name = escape_html(&page.filename),
         ),
         PreviewKind::Text => format!(
-            "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview&hellip;</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
+            "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview...</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
         ),
         PreviewKind::Download => format!(
             "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">&#8681;</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} &middot; {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
@@ -218,14 +219,21 @@ fn stage_html(page: &PreviewPage) -> String {
 
 fn render_preview(page: &PreviewPage) -> String {
     let notice = format!(
-        " Juicebox preview page for {} — this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
+        " Juicebox preview page for {} - this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
         page.filename,
         page.raw_url,
     );
     PREVIEW_TEMPLATE
         .replace("__CURL_NOTICE__", &notice)
-        .replace("__LOGO__", LOGO_DATA_URI.trim())
-        .replace("__FONT__", TITLE_FONT_DATA_URI.trim())
+        .replace("__HEAD_META__", juiceutils::web::HEAD_META.trim_end())
+        .replace(
+            "__FONT_FACE__",
+            &juiceutils::web::font_face_css(TITLE_FONT_DATA_URI.trim()),
+        )
+        .replace("__BASE_CSS__", juiceutils::web::BASE_CSS.trim_end())
+        .replace("__BRAND_CSS__", juiceutils::web::BRAND_CSS.trim_end())
+        .replace("__BRAND__", &juiceutils::web::brand_html(LOGO_DATA_URI.trim()))
+        .replace("__APP_JS__", PREVIEW_APP_JS.trim_end())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
         .replace("__OG_TAGS__", &og_tags(page))

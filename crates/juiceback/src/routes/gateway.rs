@@ -6,10 +6,10 @@
 //! or keys), receiving the file's data key over TLS. The data key is
 //! per-file: the global storage key is never exposed.
 //!
-//! * `GET /api/gateway/params/{id}` — public derivation parameters (salt,
+//! * `GET /api/gateway/params/{id}` - public derivation parameters (salt,
 //!   KDF costs, chunk layout, ciphertext URL). The salt is public by design,
 //!   like a password-hash salt.
-//! * `POST /api/gateway/unlock` — verify the password (rate-limited) and
+//! * `POST /api/gateway/unlock` - verify the password (rate-limited) and
 //!   release the data key. Wrong passwords and unknown ids are
 //!   indistinguishable where possible; responses are `no-store`.
 

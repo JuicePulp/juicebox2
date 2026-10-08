@@ -74,7 +74,7 @@
 <div class="services-info__tip" role="tooltip">
 <strong>{{ cx.t("upload.services_title") }}</strong>
 <div class="services-info__cards" data-services-cards="">
-{% if services.is_empty() %}<code class="services-info__card services-info__loading">…</code>{% else %}{% for svc in services %}<code class="services-info__card">{{ svc }}</code>{% endfor %}{% endif %}
+{% if services.is_empty() %}<code class="services-info__card services-info__loading">...</code>{% else %}{% for svc in services %}<code class="services-info__card">{{ svc }}</code>{% endfor %}{% endif %}
 </div>
 </div>
 </details>

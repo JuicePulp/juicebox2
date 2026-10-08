@@ -305,7 +305,7 @@ pub fn print_startup_banner(config: &Config) {
         tracing::info!("backend: {backend}");
     } else {
         tracing::warn!(
-            "backend: none (backendless mode) — password gates are DISABLED and protected files serve as-is"
+            "backend: none (backendless mode) - password gates are DISABLED and protected files serve as-is"
         );
     }
     let min_gb = config.min_free_space_bytes / (1024 * 1024 * 1024);

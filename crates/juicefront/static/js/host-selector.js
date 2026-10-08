@@ -88,7 +88,7 @@ export function initHostSelector() {
     if (dot)
       dot.setAttribute("data-state", s.state);
     if (latency)
-      latency.textContent = s.latencyMs === null ? "—" : `${Math.round(s.latencyMs)} ms`;
+      latency.textContent = s.latencyMs === null ? "-" : `${Math.round(s.latencyMs)} ms`;
     if (status)
       status.textContent = s.state === "online" ? str(root, "online", "Online") : s.state === "offline" ? str(root, "offline", "Offline") : s.state === "checking" ? str(root, "checking", "Pinging...") : "";
     if (badges) {

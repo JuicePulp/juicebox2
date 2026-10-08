@@ -3,7 +3,7 @@
 //! juicehost stores ciphertext only and redirects protected public links
 //! here. juiceback verifies the password (Argon2id, rate-limited), then
 //! fetches ciphertext over the API-key-authenticated internal endpoint and
-//! decrypts locally — streaming, never buffering a whole file.
+//! decrypts locally - streaming, never buffering a whole file.
 //!
 //! The cleartext password is accepted in memory only: it is never logged,
 //! never persisted, and never sent to juicehost.

@@ -490,7 +490,7 @@ export function enhanceHostSelector(locale?: string) {
   const validateHost = async (): Promise<Record<string, unknown> | null> => {
     const host = input.value.trim();
     if (!host) {
-      status.textContent = "No host entered — using default";
+      status.textContent = "No host entered - using default";
       return null;
     }
     status.textContent = "checking...";

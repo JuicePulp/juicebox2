@@ -23,9 +23,9 @@ juicehost_url = "http://127.0.0.1:6402"
 
 [cors]
 # Protected unlock shells run on the storage host and POST passwords/keys
-# directly here, so the host's public origin must be listed (browser CORS).
-# Example: origins = ["http://localhost:6400", "http://localhost:6402"]
-origins = ["http://localhost:6400"]
+# directly here, so every host public origin must be listed (browser CORS),
+# e.g. origins = ["http://localhost:6400", "http://localhost:6402", "https://files.example.com"]
+origins = ["http://localhost:6400", "http://localhost:6402", "http://127.0.0.1:6402"]
 
 [report]
 retention_days = 90

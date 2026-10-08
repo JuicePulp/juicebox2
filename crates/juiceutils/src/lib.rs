@@ -5,6 +5,7 @@ pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
 pub mod urls;
+pub mod web;
 
 #[cfg(feature = "quic")]
 pub mod server;
@@ -108,7 +109,7 @@ pub async fn add_security_headers(
         }
     } else if is_preview_route {
         // The preview page carries inline styles, one inline script, and
-        // an inlined brand font (data: URI) — everything else is same-origin.
+        // an inlined brand font (data: URI) - everything else is same-origin.
         // Unlock shells served here set their own CSP (cross-origin gateway
         // fetch); keep it.
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {

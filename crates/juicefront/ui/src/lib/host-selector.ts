@@ -158,7 +158,7 @@ export function initHostSelector(): void {
     if (dot) dot.setAttribute("data-state", s.state);
     if (latency)
       latency.textContent =
-        s.latencyMs === null ? "—" : `${Math.round(s.latencyMs)} ms`;
+        s.latencyMs === null ? "-" : `${Math.round(s.latencyMs)} ms`;
     if (status)
       status.textContent =
         s.state === "online"
