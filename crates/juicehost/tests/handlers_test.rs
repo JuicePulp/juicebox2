@@ -1520,3 +1520,102 @@ async fn download_respects_protected_gate() {
         Some(unlock)
     );
 }
+
+async fn store_named(app: &axum::Router, id: &str, filename: &str, bytes: &[u8]) {
+    let boundary = "----PrevBoundary";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"id\"\r\n\r\n\
+         {id}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"filename\"\r\n\r\n\
+         {filename}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let (key, val) = api_key_header();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file")
+                .header(key, val)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn preview_renders_by_media_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "vid00001", "clip.mp4", b"fake-video").await;
+    store_named(&app, "aud00001", "song.mp3", b"fake-audio").await;
+    store_named(&app, "img00001", "pic.png", b"fake-image").await;
+    store_named(&app, "txt00001", "notes.txt", b"hello text preview").await;
+    store_named(&app, "zip00001", "archive.zip", b"fake-zip").await;
+
+    let (status, _, body) = get_public(&app, "/v/vid00001.mp4", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<video") && page.contains("/f/vid00001.mp4"));
+    assert!(page.contains("og:video"));
+
+    let (status, _, body) = get_public(&app, "/v/aud00001.mp3", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<audio") && page.contains("/f/aud00001.mp3"));
+
+    let (status, _, body) = get_public(&app, "/v/img00001.png", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<img") && page.contains("og:image"));
+
+    let (status, _, body) = get_public(&app, "/v/txt00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("textview") && page.contains("/f/txt00001.txt"));
+
+    let (status, _, body) = get_public(&app, "/v/zip00001.zip", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("/d/zip00001.zip") && page.contains("Download"));
+    assert!(!page.contains("card"));
+}
+
+#[tokio::test]
+async fn preview_missing_and_protected() {
+    let dir = tempfile::tempdir().unwrap();
+    let unlock = "https://box.example/file/prot0001/unlock";
+    let backend = mock_backend(
+        200,
+        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_named(&app, "prot0001", "secret.mp4", b"ciphertext").await;
+
+    let (status, headers, _) = get_public(&app, "/v/prot0001.mp4", None).await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some(unlock)
+    );
+
+    let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

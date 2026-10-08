@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1a1613">
+  <meta name="color-scheme" content="dark">
+  <title>__TITLE__</title>
+__OG_TAGS__
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      background:#1a1613;
+      color:#e8ded4;
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+      display:flex;
+      flex-direction:column;
+      height:100dvh;
+      overflow:hidden;
+    }
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:.75rem;
+      padding:.6rem 1rem;
+      border-bottom:1px solid #2e2620;
+      flex:none;
+    }
+    .brand{
+      font-weight:800;
+      letter-spacing:.02em;
+      color:#f97316;
+      white-space:nowrap;
+      text-decoration:none;
+      font-size:1.05rem;
+    }
+    .brand sup{font-size:.65em}
+    .fname{
+      flex:1;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      color:#e8ded4;
+      font-size:.95rem;
+    }
+    .fsize{color:#a29188;font-size:.85rem;white-space:nowrap}
+    .actions{display:flex;gap:.5rem;flex:none}
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      gap:.35rem;
+      padding:.45rem .9rem;
+      border:1px solid #4a3d33;
+      border-radius:.5rem;
+      background:#241d17;
+      color:#e8ded4;
+      text-decoration:none;
+      font-size:.85rem;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .btn:hover{background:#2e251d;border-color:#f97316}
+    .btn--primary{background:#f97316;border-color:#f97316;color:#0a0908}
+    .btn--primary:hover{background:#fb923c}
+    .stage{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      padding:1rem;
+      gap:1rem;
+    }
+    video#media,img#media{
+      max-width:100%;
+      max-height:100%;
+      object-fit:contain;
+      border-radius:.5rem;
+      background:#000;
+    }
+    video#media{width:100%;height:100%}
+    img#media{width:auto;height:auto}
+    .pdf-frame{width:100%;height:100%;border:0;border-radius:.5rem;background:#fff}
+    .audio-hero{
+      font-size:5rem;
+      line-height:1;
+      color:#f97316;
+      background:#241d17;
+      border:1px solid #4a3d33;
+      border-radius:1rem;
+      width:10rem;
+      height:10rem;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    audio#media{width:100%}
+    .audio-hero + audio#media{width:min(28rem,100%)}
+    .text-view{
+      width:min(60rem,100%);
+      height:100%;
+      overflow:auto;
+      background:#100d0a;
+      border:1px solid #2e2620;
+      border-radius:.5rem;
+      padding:1rem 1.25rem;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:.85rem;
+      line-height:1.55;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .fallback-note{color:#a29188;font-size:.9rem}
+    .fallback-note a{color:#f97316}
+    .dl-hero{display:flex;flex-direction:column;align-items:center;gap:.75rem;text-align:center}
+    .dl-icon{
+      font-size:3.5rem;
+      color:#f97316;
+      background:#241d17;
+      border:1px solid #4a3d33;
+      border-radius:1rem;
+      width:7rem;
+      height:7rem;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .dl-name{font-size:1.1rem;font-weight:700;word-break:break-all}
+    .dl-meta{color:#a29188;font-size:.9rem}
+    .dl-btn{
+      margin-top:.5rem;
+      padding:.7rem 2rem;
+      background:#f97316;
+      color:#0a0908;
+      border-radius:.5rem;
+      text-decoration:none;
+      font-weight:700;
+    }
+    .dl-btn:hover{background:#fb923c}
+    :fullscreen{background:#000}
+    :fullscreen .stage{padding:0}
+    :fullscreen video#media,:fullscreen img#media{border-radius:0}
+    :fullscreen .topbar{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(10,9,8,.85);backdrop-filter:blur(6px);transform:translateY(-100%);transition:transform .2s}
+    :fullscreen .topbar:hover,:fullscreen .topbar:focus-within{transform:none}
+  </style>
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <a class="brand" href="/">Juicebox<sup>2</sup></a>
+    <span class="fname" title="__FILENAME__">__FILENAME__</span>
+    <span class="fsize">__SIZE__</span>
+    <nav class="actions">
+      <a class="btn btn--primary" href="__DOWNLOAD_URL__" download>Download</a>
+      <a class="btn" href="__RAW_URL__">Raw</a>
+      <button class="btn" id="fsbtn" type="button" hidden>Fullscreen</button>
+    </nav>
+  </header>
+  <main class="stage" id="stage">__STAGE__</main>
+  <script>
+  (function () {
+    "use strict";
+    var stage = document.getElementById("stage");
+    var fsbtn = document.getElementById("fsbtn");
+    function isFs() { return !!(document.fullscreenElement); }
+    async function toggleFs() {
+      try {
+        if (isFs()) { await document.exitFullscreen(); }
+        else { await document.documentElement.requestFullscreen(); }
+      } catch (e) { /* unavailable */ }
+    }
+    if (fsbtn && document.fullscreenEnabled) {
+      fsbtn.hidden = false;
+      fsbtn.addEventListener("click", toggleFs);
+    }
+    var media = document.getElementById("media");
+    if (media && (media.tagName === "VIDEO" || media.tagName === "IMG")) {
+      media.addEventListener("dblclick", toggleFs);
+    }
+    document.addEventListener("keydown", function (e) {
+      if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey
+          && !(e.target instanceof HTMLInputElement)
+          && !(e.target instanceof HTMLTextAreaElement)) {
+        toggleFs();
+      }
+    });
+
+    var textview = document.getElementById("textview");
+    if (textview) {
+      var raw = textview.getAttribute("data-raw") || "";
+      var max = __TEXT_MAX__;
+      var note = document.querySelector("[data-truncated-note]");
+      fetch(raw, { headers: { "Range": "bytes=0-" + (max - 1) } })
+        .then(function (res) {
+          var total = null;
+          var cr = res.headers.get("Content-Range");
+          if (cr) {
+            var m = /\/(\d+)\s*$/.exec(cr);
+            if (m) total = parseInt(m[1], 10);
+          }
+          if (!res.ok && res.status !== 206) throw new Error("bad status");
+          return res.text().then(function (text) { return { text: text, total: total }; });
+        })
+        .then(function (r) {
+          textview.textContent = "";
+          textview.appendChild(document.createTextNode(r.text));
+          if (note && r.total !== null && r.total > r.text.length) {
+            note.hidden = false;
+          } else if (note && r.text.length >= max) {
+            note.hidden = false;
+          }
+        })
+        .catch(function () {
+          textview.textContent = "Could not load a text preview.";
+        });
+    }
+  })();
+  </script>
+</body>
+</html>

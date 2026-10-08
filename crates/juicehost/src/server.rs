@@ -183,6 +183,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let files_router = Router::new()
         .route("/f/{*path}", get(handlers::serve_file_wildcard))
         .route("/d/{*path}", get(handlers::serve_file_download))
+        .route("/v/{*path}", get(handlers::preview_file_wildcard))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             ban_check_middleware,
