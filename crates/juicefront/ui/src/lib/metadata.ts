@@ -34,7 +34,7 @@ export const REPO_METADATA: RepoMetadata = {
 
 export const getRepoUrl = (): string => REPO_METADATA.url;
 
-export const getFormattedCommitLabel = (includeBranch = true): string =>
+export const getFormattedCommitLabel = (includeBranch = false): string =>
   includeBranch
     ? REPO_METADATA.latestCommitRef
     : REPO_METADATA.latestCommitShortHash;
