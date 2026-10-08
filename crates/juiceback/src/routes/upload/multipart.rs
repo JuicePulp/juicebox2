@@ -86,7 +86,13 @@ pub async fn reserve_upload_handler(
 
     let encrypted_ip = super::ticket::encrypted_client_ip(&state, &headers, addr);
 
-    let password_hash = super::protected::hash_upload_password(&state, body.password).await?;
+    // A protected reservation mints its per-file data key now, while the
+    // password is in memory. Completion reuses the row material, so the
+    // form never needs to resend the password.
+    let setup = match body.password.filter(|p| !p.is_empty()) {
+        Some(password) => Some(super::protected::prepare_protection(&state, &password).await?),
+        None => None,
+    };
 
     let mut record = FileRecord::new(
         file_id.clone(),
@@ -99,9 +105,13 @@ pub async fn reserve_upload_handler(
         encrypted_ip,
         selected_host.clone(),
     );
-    if let Some(ref hash) = password_hash {
-        record.password_hash = Some(hash.clone());
+    if let Some(ref setup) = setup {
+        record.password_hash = Some(setup.password_hash.clone());
         record.is_encrypted = true;
+        record.dek_wrapped = Some(setup.wrapped_b64.clone());
+        record.dek_salt = Some(setup.salt_b64.clone());
+        record.dek_escrow = Some(setup.escrow_hex.clone());
+        record.key_version = crate::crypto_file::KEY_VERSION_V1;
     }
 
     let record =
@@ -223,15 +233,11 @@ pub async fn upload_handler(
 
     let now = chrono::Utc::now().timestamp();
 
-    // A protected reservation carries its verifier; otherwise the completion
-    // form may attach one. The reservation's hash wins when both exist.
-    let form_hash = super::protected::hash_upload_password(&state, params.password).await?;
-    let effective_hash: Option<String> = params
-        .reservation
-        .as_ref()
-        .and_then(|r| r.password_hash.clone())
-        .or(form_hash);
-    let protected = effective_hash.is_some();
+    // Protection was resolved while parsing (fresh setup from the form
+    // password, or the reservation row's material). The reservation's
+    // verifier wins when both exist — never mix a form password in.
+    let protection = params.protection;
+    let protected = protection.is_some();
     if protected && params.enc_header.is_none() {
         return Err(AppError::Internal("protected upload missing ciphertext".into()));
     }
@@ -276,20 +282,19 @@ pub async fn upload_handler(
             params.total_bytes
         );
         let mut completed = completed;
-        if protected {
+        if let Some(ref upload_protection) = protection {
             let header = params.enc_header.ok_or_else(|| {
                 AppError::Internal("protected upload missing ciphertext".into())
             })?;
-            let header_hex = super::protected::mark_protected(
-                &state,
-                &completed.id,
-                effective_hash.as_deref(),
-                &header,
-            )
-            .await?;
-            completed.password_hash = effective_hash.clone();
-            completed.is_encrypted = true;
-            completed.enc_header = Some(header_hex);
+            let material = upload_protection.material(hex::encode(header));
+            super::protected::mark_protected(&state, &completed.id, &material).await?;
+            completed.password_hash = material.password_hash.clone();
+            completed.is_encrypted = material.is_encrypted;
+            completed.enc_header = material.enc_header.clone();
+            completed.dek_wrapped = material.dek_wrapped.clone();
+            completed.dek_salt = material.dek_salt.clone();
+            completed.dek_escrow = material.dek_escrow.clone();
+            completed.key_version = material.key_version;
         }
         completed
     } else {
@@ -304,13 +309,18 @@ pub async fn upload_handler(
             encrypted_ip.clone(),
             params.selected_host.clone(),
         );
-        if protected {
+        if let Some(ref upload_protection) = protection {
             let header = params.enc_header.ok_or_else(|| {
                 AppError::Internal("protected upload missing ciphertext".into())
             })?;
-            record.password_hash = effective_hash;
-            record.is_encrypted = true;
-            record.enc_header = Some(hex::encode(header));
+            let material = upload_protection.material(hex::encode(header));
+            record.password_hash = material.password_hash.clone();
+            record.is_encrypted = material.is_encrypted;
+            record.enc_header = material.enc_header.clone();
+            record.dek_wrapped = material.dek_wrapped.clone();
+            record.dek_salt = material.dek_salt.clone();
+            record.dek_escrow = material.dek_escrow.clone();
+            record.key_version = material.key_version;
         }
 
         let db_start = std::time::Instant::now();

@@ -538,10 +538,16 @@ pub(crate) async fn serve_protected_bytes(
     let enc_header_hex = record.enc_header.clone().unwrap_or_default();
     let partial = start != 0 || end != plain_len;
 
-    let key = state
-        .config
-        .storage_file_key()
-        .map_err(|_| AppError::Internal("storage encryption unavailable".into()))?;
+    let key = match record.dek_escrow.as_deref() {
+        // Per-file data key via the global-key escrow copy (server-side
+        // legacy/curl/admin path; the browser flow never touches this).
+        Some(escrow) => crate::routes::upload::protected::unwrap_escrow(state, escrow)?,
+        // Legacy rows encrypted directly under the global storage key.
+        None => state
+            .config
+            .storage_file_key()
+            .map_err(|_| AppError::Internal("storage encryption unavailable".into()))?,
+    };
     let (cipher_start, cipher_len) =
         crypto_file::cipher_range_for_plain(start, end, plain_len)
             .map_err(|_| AppError::RangeNotSatisfiable("bad range".into()))?;

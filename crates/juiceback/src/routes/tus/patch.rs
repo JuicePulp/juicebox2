@@ -298,6 +298,10 @@ async fn patch_upload_handler_impl(
                     .or_else(|| upload.reservation_token.clone()),
                 user_id: upload.user_id.clone(),
                 password_hash: upload.password_hash.clone(),
+                dek: upload.dek.clone(),
+                dek_wrapped: upload.dek_wrapped.clone(),
+                dek_salt: upload.dek_salt.clone(),
+                dek_escrow: upload.dek_escrow.clone(),
                 upload_mode: upload.upload_mode,
             };
             (true, Some(meta))

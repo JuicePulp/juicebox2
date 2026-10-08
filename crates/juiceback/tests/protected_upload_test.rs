@@ -190,8 +190,15 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
         "plaintext must not appear in stored bytes"
     );
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
+    // New uploads use a per-file data key: recover it through the escrow
+    // copy (what the server does) and decrypt client-side with it.
+    let record = db_record(&state, &id).await;
+    let escrow = record.dek_escrow.clone().expect("v1 escrow material");
+    let escrow_raw = hex::decode(&escrow).unwrap();
+    let dek_bytes = juiceback::crypto_file::decrypt_chunk(&key, &escrow_raw).unwrap();
+    let dek = juiceback::crypto_file::FileKey::from_bytes(&dek_bytes).unwrap();
     let mut plain = Vec::new();
-    juiceback::crypto_file::decrypt_to_writer(&key, &stored, &mut plain).unwrap();
+    juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
     assert_eq!(plain, PLAINTEXT);
 
     // DB carries verifier + flags + header, never the password.

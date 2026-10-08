@@ -336,6 +336,7 @@ pub async fn stream_protected_upload_to_juicehost(
     max_size: i64,
     capability: &str,
     upload_mode: UploadMode,
+    dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
     let first_chunk = field
         .chunk()
@@ -390,6 +391,7 @@ pub async fn stream_protected_upload_to_juicehost(
         spool_file.path(),
         total,
         upload_mode,
+        dek,
     )
     .await?;
     let total_bytes =
@@ -414,6 +416,7 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
     capability: &str,
     upload_mode: UploadMode,
     danger: crate::file_validation::ProtectionLevel,
+    dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
     let (spool_tx, spool_handle) =
         crate::routes::upload::protected::spawn_spool_task(max_size);
@@ -453,6 +456,7 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
         spool_file.path(),
         total,
         upload_mode,
+        dek,
     )
     .await?;
     let total_bytes =
