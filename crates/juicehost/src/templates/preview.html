@@ -1,9 +1,11 @@
 <!DOCTYPE html>
+<!--__CURL_NOTICE__-->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="Juicebox file preview page (HTML preview, not the raw file). Raw bytes: __RAW_URL__">
   <meta name="theme-color" content="#1a1613">
   <meta name="color-scheme" content="dark">
   <title>__TITLE__</title>
@@ -29,6 +31,9 @@ __OG_TAGS__
       flex:none;
     }
     .brand{
+      display:inline-flex;
+      align-items:center;
+      gap:.45rem;
       font-weight:800;
       letter-spacing:.02em;
       color:#f97316;
@@ -37,6 +42,12 @@ __OG_TAGS__
       font-size:1.05rem;
     }
     .brand sup{font-size:.65em}
+    .brand-logo{
+      width:28px;
+      height:28px;
+      flex:none;
+      border-radius:.35rem;
+    }
     .fname{
       flex:1;
       min-width:0;
@@ -141,81 +152,76 @@ __OG_TAGS__
       font-weight:700;
     }
     .dl-btn:hover{background:#fb923c}
-    :fullscreen{background:#000}
-    :fullscreen .stage{padding:0}
-    :fullscreen video#media,:fullscreen img#media{border-radius:0}
-    :fullscreen .topbar{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(10,9,8,.85);backdrop-filter:blur(6px);transform:translateY(-100%);transition:transform .2s}
-    :fullscreen .topbar:hover,:fullscreen .topbar:focus-within{transform:none}
   </style>
 </head>
 <body>
   <header class="topbar" id="topbar">
-    <a class="brand" href="/">Juicebox<sup>2</sup></a>
+    <a class="brand" href="/"><img class="brand-logo" src="__LOGO__" alt="" width="28" height="28">Juicebox<sup>2</sup></a>
     <span class="fname" title="__FILENAME__">__FILENAME__</span>
     <span class="fsize">__SIZE__</span>
     <nav class="actions">
       <a class="btn btn--primary" href="__DOWNLOAD_URL__" download>Download</a>
       <a class="btn" href="__RAW_URL__">Raw</a>
-      <button class="btn" id="fsbtn" type="button" hidden>Fullscreen</button>
     </nav>
   </header>
   <main class="stage" id="stage">__STAGE__</main>
   <script>
   (function () {
     "use strict";
-    var stage = document.getElementById("stage");
-    var fsbtn = document.getElementById("fsbtn");
-    function isFs() { return !!(document.fullscreenElement); }
-    async function toggleFs() {
-      try {
-        if (isFs()) { await document.exitFullscreen(); }
-        else { await document.documentElement.requestFullscreen(); }
-      } catch (e) { /* unavailable */ }
-    }
-    if (fsbtn && document.fullscreenEnabled) {
-      fsbtn.hidden = false;
-      fsbtn.addEventListener("click", toggleFs);
-    }
-    var media = document.getElementById("media");
-    if (media && (media.tagName === "VIDEO" || media.tagName === "IMG")) {
-      media.addEventListener("dblclick", toggleFs);
-    }
-    document.addEventListener("keydown", function (e) {
-      if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey
-          && !(e.target instanceof HTMLInputElement)
-          && !(e.target instanceof HTMLTextAreaElement)) {
-        toggleFs();
-      }
-    });
-
     var textview = document.getElementById("textview");
     if (textview) {
       var raw = textview.getAttribute("data-raw") || "";
-      var max = __TEXT_MAX__;
-      var note = document.querySelector("[data-truncated-note]");
-      fetch(raw, { headers: { "Range": "bytes=0-" + (max - 1) } })
-        .then(function (res) {
-          var total = null;
-          var cr = res.headers.get("Content-Range");
-          if (cr) {
-            var m = /\/(\d+)\s*$/.exec(cr);
-            if (m) total = parseInt(m[1], 10);
-          }
+      var stride = __TEXT_MAX__;
+      var loaded = 0;
+      var total = null;
+      var loading = false;
+      var done = false;
+      var decoder = new TextDecoder();
+      var sentinel = document.createElement("div");
+      sentinel.setAttribute("aria-hidden", "true");
+      textview.after(sentin);
+      function parseTotal(res) {
+        var cr = res.headers.get("Content-Range");
+        if (cr) {
+          var m = /\/(\d+)\s*$/.exec(cr);
+          if (m) total = parseInt(m[1], 10);
+        }
+      }
+      async function loadMore() {
+        if (loading || done) return;
+        if (total !== null && loaded >= total) { done = true; return; }
+        loading = true;
+        try {
+          var res = await fetch(raw, { headers: { "Range": "bytes=" + loaded + "-" + (loaded + stride - 1) } });
+          if (res.status === 416) { done = true; return; }
           if (!res.ok && res.status !== 206) throw new Error("bad status");
-          return res.text().then(function (text) { return { text: text, total: total }; });
-        })
-        .then(function (r) {
-          textview.textContent = "";
-          textview.appendChild(document.createTextNode(r.text));
-          if (note && r.total !== null && r.total > r.text.length) {
-            note.hidden = false;
-          } else if (note && r.text.length >= max) {
-            note.hidden = false;
-          }
-        })
-        .catch(function () {
-          textview.textContent = "Could not load a text preview.";
+          parseTotal(res);
+          var buf = new Uint8Array(await res.arrayBuffer());
+          if (buf.length === 0) { done = true; return; }
+          var last = total !== null && loaded + buf.length >= total;
+          var text = decoder.decode(buf, last ? undefined : { stream: true });
+          if (loaded === 0) textview.textContent = "";
+          textview.appendChild(document.createTextNode(text));
+          loaded += buf.length;
+          if (last || (total !== null && loaded >= total)) done = true;
+        } catch (e) {
+          if (loaded === 0) textview.textContent = "Could not load a text preview.";
+          done = true;
+        } finally {
+          loading = false;
+        }
+      }
+      if ("IntersectionObserver" in window) {
+        new IntersectionObserver(function (entries) {
+          if (entries.some(function (en) { return en.isIntersecting; })) loadMore();
+        }, { rootMargin: "1200px" }).observe(sentinel);
+      } else {
+        var scroller = textview;
+        scroller.addEventListener("scroll", function () {
+          if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 1200) loadMore();
         });
+      }
+      loadMore();
     }
   })();
   </script>
