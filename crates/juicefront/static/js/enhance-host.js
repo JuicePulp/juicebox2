@@ -207,6 +207,30 @@ export function enhanceHostSelector(locale) {
       localStorage.setItem("juicebox_quick_link", quickLinkToggle.checked ? "true" : "false");
     });
   }
+  // Upload password lives in Storage Host settings and persists like the
+  // other host options. Note the tradeoff: the gate password is stored in
+  // plain text in this browser's localStorage so uploads stay protected
+  // without retyping. Clear the field to go back to public links.
+  const pwInput = document.querySelector("[data-upload-password]");
+  const pwHint = document.querySelector("[data-upload-password-hint]");
+  if (pwInput) {
+    try {
+      const savedPw = localStorage.getItem("juicebox_upload_password") || "";
+      if (savedPw && !pwInput.value) pwInput.value = savedPw;
+    } catch {}
+    var syncPwState = function () {
+      const has = !!((pwInput.value || "").trim());
+      try {
+        if (has) localStorage.setItem("juicebox_upload_password", pwInput.value.trim());
+        else localStorage.removeItem("juicebox_upload_password");
+      } catch {}
+      if (pwHint) pwHint.hidden = !has;
+      const indicators = document.querySelectorAll("[data-upload-password-indicator]");
+      for (let i = 0; i < indicators.length; i++) indicators[i].hidden = !has;
+    };
+    pwInput.addEventListener("input", syncPwState);
+    syncPwState();
+  }
   const ultrafastToggle = document.querySelector("[data-ultrafast-toggle]");
   if (ultrafastToggle) {
     ultrafastToggle.checked = localStorage.getItem("juicebox_ultrafast_enabled") === "true";
