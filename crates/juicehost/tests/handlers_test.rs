@@ -1354,9 +1354,12 @@ async fn protected_file_serves_unlock_shell() {
     let app = build_router(state);
     store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
 
-    // No more off-origin redirect: the shell lives here.
+    // View mode opens the decrypted bytes natively, preview keeps the page.
     let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
     assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("v1View"));
+    assert!(page.contains("location.href = URL.createObjectURL"));
     assert_eq!(
         headers.get("content-type").and_then(|v| v.to_str().ok()),
         Some("text/html; charset=utf-8")
@@ -1775,6 +1778,8 @@ async fn preview_missing_and_protected() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"preview\""));
+    assert!(page.contains("offerActions"));
+    assert!(page.contains("Download decrypted"));
 
     let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);

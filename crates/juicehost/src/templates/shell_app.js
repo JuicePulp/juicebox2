@@ -207,6 +207,60 @@
       say("Download complete.");
     }
 
+    // Full decrypt into one Blob (view/open + media preview). Holds the
+    // whole file in memory: callers cap absurd sizes first.
+    async function decryptFull(key, plainLen) {
+      var parts = [];
+      var done = 0;
+      var totalChunks = Math.max(1, Math.ceil(plainLen / PLAIN_CHUNK));
+      await decryptRange(key, 0, plainLen, plainLen, async function (bytes) {
+        parts.push(bytes);
+        done++;
+        progress(done / totalChunks);
+      });
+      return new Blob(parts, { type: CFG.mime || "application/octet-stream" });
+    }
+
+    // Post-unlock actions for preview mode. Both reuse the held key only:
+    // the password is never resent, stored, or placed in a URL.
+    function offerActions(key, plainLen) {
+      var bar = document.createElement("div");
+      bar.setAttribute("style", "display:flex;gap:.5rem;flex:none;");
+      var dl = document.createElement("button");
+      dl.textContent = "Download decrypted";
+      dl.setAttribute("style", "padding:.45rem .9rem;border:1px solid #4a3d33;border-radius:.5rem;background:#241d17;color:#e8ded4;font-weight:600;cursor:pointer;");
+      dl.addEventListener("click", function () {
+        say("Downloading...");
+        v1Download(key, plainLen).catch(function (e) { say(e.message, true); });
+      });
+      var open = document.createElement("button");
+      open.textContent = "Open as file";
+      open.setAttribute("style", "padding:.45rem .9rem;border:1px solid #4a3d33;border-radius:.5rem;background:#241d17;color:#e8ded4;font-weight:600;cursor:pointer;");
+      open.addEventListener("click", function () {
+        v1View(key, plainLen).catch(function (e) { say(e.message, true); });
+      });
+      bar.appendChild(dl);
+      bar.appendChild(open);
+      stage.appendChild(bar);
+    }
+
+    // View mode (/f/): the decrypted bytes become the document itself via a
+    // blob URL, so the browser renders the file natively (image as image,
+    // PDF as PDF, text as text) instead of embedding it in this page.
+    // Blob URLs are origin-scoped unguessable tokens; nothing new is sent
+    // anywhere and the key stays in memory.
+    async function v1View(key, plainLen) {
+      if (plainLen > 512 * 1024 * 1024) {
+        say("File is too large to open in the browser. Download it instead.", true);
+        btn.textContent = "Download";
+        btn.onclick = function () { v1Download(key, plainLen).catch(function (e) { say(e.message, true); }); };
+        return;
+      }
+      say("Decrypting...");
+      var blob = await decryptFull(key, plainLen);
+      location.href = URL.createObjectURL(blob);
+    }
+
     async function v1Preview(key, plainLen) {
       var kind = kindOf(CFG.mime);
       if (kind === "text") {
@@ -222,6 +276,7 @@
         if (plainLen > end) text += "\n... (truncated preview, download for the full file)";
         showText(text);
         say("");
+        offerActions(key, plainLen);
         return;
       }
       if (kind === "download") {
@@ -237,22 +292,14 @@
         return;
       }
       say("Decrypting...");
-      var parts = [];
-      var done = 0;
-      var totalChunks = Math.max(1, Math.ceil(plainLen / PLAIN_CHUNK));
-      await decryptRange(key, 0, plainLen, plainLen, async function (bytes) {
-        parts.push(bytes);
-        done++;
-        progress(done / totalChunks);
-      });
-      showBlob(new Blob(parts, { type: CFG.mime || "application/octet-stream" }), kind);
+      showBlob(await decryptFull(key, plainLen), kind);
       say("");
+      offerActions(key, plainLen);
     }
 
     async function legacyFlow(password) {
       var headers = { "X-File-Password": password };
-      if (CFG.mode === "download") {
-        say("Downloading...");
+      if (CFG.mode === "download") {        say("Downloading...");
         var res;
         try {
           res = await fetch(CFG.contentUrl, { headers: headers, cache: "no-store" });
@@ -270,6 +317,14 @@
         return;
       }
       var kind = kindOf(CFG.mime);
+      if (CFG.mode === "view") {
+        say("Opening...");
+        var r0 = await fetch(CFG.contentUrl, { headers: headers, cache: "no-store" });
+        if (r0.status === 403) throw new Error("Wrong password.");
+        if (!r0.ok) throw new Error("Open failed (" + r0.status + ").");
+        location.href = URL.createObjectURL(await r0.blob());
+        return;
+      }
       if (kind === "text") {
         var r = await fetch(CFG.contentUrl, { headers: Object.assign({ "Range": "bytes=0-" + (TEXT_PREVIEW_MAX - 1) }, headers), cache: "no-store" });
         if (r.status === 403) throw new Error("Wrong password.");
@@ -310,6 +365,8 @@
           pwInput.value = "";
           if (CFG.mode === "download") {
             await v1Download(unlocked.key, unlocked.plainLen);
+          } else if (CFG.mode === "view") {
+            await v1View(unlocked.key, unlocked.plainLen);
           } else {
             await v1Preview(unlocked.key, unlocked.plainLen);
           }
