@@ -229,7 +229,7 @@ const en = {
   "faq.q9": "What file types are supported?",
   "faq.a9": "Most file types. The server may block dangerous types like executables, scripts, or HTML files depending on the protection level configured by the administrator.",
   "faq.q10": "Is Juicebox end-to-end encrypted?",
-  "faq.a10": "Files are transferred over HTTPS. You can also set a password when uploading: juiceback then encrypts the file before storage, so juicehost operators only ever see ciphertext. Unprotected files are stored as-is. This protects against the storage host, not against the juiceback operator.",
+  "faq.a10": "Files are transferred over HTTPS. You can also set a password when uploading: juiceback then encrypts the file with a per-file key before storage, so juicehost operators only ever see ciphertext, and protected links always stay on the storage host address. Opening a protected link decrypts the file inside your browser after you enter the password. Unprotected files are stored as-is. This protects against the storage host, not against the juiceback operator.",
 
   "error.file_too_large": "File is too large. Check the upload size limit.",
   "error.file_blocked": "File type not allowed: {reason}",
