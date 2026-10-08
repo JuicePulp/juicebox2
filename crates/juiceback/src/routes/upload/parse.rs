@@ -27,11 +27,11 @@ pub struct UploadParams {
     pub(crate) ttl_seconds: i64,
     pub(crate) reservation: Option<FileRecord>,
     pub(crate) file_capability: String,
-    /// Raw password for a protected upload, if the client sent one. Must
-    /// precede the `file` field like the other metadata fields. Never logged.
-    pub(crate) password: Option<String>,
     /// Container header emitted by the protected push, if any.
     pub(crate) enc_header: Option<[u8; crate::crypto_file::HEADER_LEN]>,
+    /// Resolved key material for a protected upload (fresh or reservation).
+    /// Carries the in-memory data key; never logged.
+    pub(crate) protection: Option<super::protected::UploadProtection>,
 }
 
 pub async fn parse_multipart(
@@ -61,6 +61,7 @@ pub async fn parse_multipart(
     let mut file_capability = default_capability;
     let mut password: Option<String> = None;
     let mut enc_header: Option<[u8; crate::crypto_file::HEADER_LEN]> = None;
+    let mut protection: Option<super::protected::UploadProtection> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         tracing::warn!("multipart field parse error: {:?}", e);
@@ -165,6 +166,13 @@ pub async fn parse_multipart(
             };
 
             if protected {
+                let upload_protection =
+                    super::protected::resolve_multipart_protection(state, password.clone(), reservation.as_ref())
+                        .await?
+                        .ok_or_else(|| {
+                            AppError::Internal("protected upload missing credentials".into())
+                        })?;
+                let dek = upload_protection.dek(state)?;
                 let (bytes, header) = if is_gzip {
                     stream_protected_gzip_upload_to_juicehost(
                         field,
@@ -177,6 +185,7 @@ pub async fn parse_multipart(
                         &file_capability,
                         push_mode,
                         danger,
+                        &dek,
                     )
                     .await?
                 } else {
@@ -190,11 +199,13 @@ pub async fn parse_multipart(
                         max_size as i64,
                         &file_capability,
                         push_mode,
+                        &dek,
                     )
                     .await?
                 };
                 total_bytes = bytes;
                 enc_header = Some(header);
+                protection = Some(upload_protection);
             } else if is_gzip {
                 let (bytes, read_time, push_wait) = stream_gzip_upload_to_juicehost(
                     field,
@@ -251,7 +262,7 @@ pub async fn parse_multipart(
         ttl_seconds,
         reservation,
         file_capability,
-        password,
         enc_header,
+        protection,
     })
 }

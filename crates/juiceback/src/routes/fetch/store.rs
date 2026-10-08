@@ -28,7 +28,7 @@ pub(crate) async fn download_and_store(
     max_size: u64,
     ttl_hours: f64,
     encrypted_ip: Option<String>,
-    password_hash: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let filename = sanitize_filename(filename, opts.audio_only);
     let fallback_mime: &str = if opts.audio_only {
@@ -57,9 +57,24 @@ pub(crate) async fn download_and_store(
         encrypted_ip,
         None,
     );
-    if let Some(ref hash) = password_hash {
-        record.password_hash = Some(hash.clone());
+    // Mint the per-file data key while the password is in memory, so the
+    // pending row already carries verifier plus wrapped key material.
+    let setup = match password.filter(|p| !p.is_empty()) {
+        Some(password) => Some(
+            crate::routes::upload::protected::prepare_protection(state, &password)
+                .await
+                .map_err(|e| format!("protection setup failed: {e:?}"))?,
+        ),
+        None => None,
+    };
+
+    if let Some(ref setup) = setup {
+        record.password_hash = Some(setup.password_hash.clone());
         record.is_encrypted = true;
+        record.dek_wrapped = Some(setup.wrapped_b64.clone());
+        record.dek_salt = Some(setup.salt_b64.clone());
+        record.dek_escrow = Some(setup.escrow_hex.clone());
+        record.key_version = crate::crypto_file::KEY_VERSION_V1;
     }
 
     if let Err(e) = db::insert_pending_file(state, record.clone()).await {
@@ -83,7 +98,7 @@ pub(crate) async fn download_and_store(
         source_url,
         &byte_source,
         max_size,
-        password_hash.as_deref(),
+        setup.as_ref().map(|setup| setup.dek.clone()),
     )
     .await;
 
@@ -97,7 +112,14 @@ pub(crate) async fn download_and_store(
         mime_type,
         size_bytes,
         delete_token,
-        password_hash.as_deref(),
+        setup.as_ref().map(|setup| {
+            (
+                setup.password_hash.clone(),
+                setup.wrapped_b64.clone(),
+                setup.salt_b64.clone(),
+                setup.escrow_hex.clone(),
+            )
+        }),
         enc_header.as_deref(),
     )
     .await
@@ -182,7 +204,7 @@ async fn transfer_to_juicehost(
     source_url: &str,
     byte_source: &ByteSource,
     max_size: u64,
-    password_hash: Option<&str>,
+    dek: Option<crate::crypto_file::FileKey>,
 ) -> Result<(u64, Option<String>), String> {
     use tokio::io::AsyncReadExt as _;
     let (mut stream, _precheck_len): (
@@ -238,7 +260,7 @@ async fn transfer_to_juicehost(
         }
     };
 
-    if password_hash.is_some() {
+    if let Some(dek) = dek {
         return transfer_protected_to_juicehost(
             state,
             file_id,
@@ -248,6 +270,7 @@ async fn transfer_to_juicehost(
             &mut stream,
             max_size,
             source_url,
+            &dek,
         )
         .await;
     }
@@ -348,6 +371,7 @@ async fn transfer_protected_to_juicehost(
     >,
     max_size: u64,
     source_url: &str,
+    dek: &crate::crypto_file::FileKey,
 ) -> Result<(u64, Option<String>), String> {
     let (spool_tx, spool_handle) =
         crate::routes::upload::protected::spawn_spool_task(max_size as i64);
@@ -375,6 +399,7 @@ async fn transfer_protected_to_juicehost(
         spool_file.path(),
         total,
         crate::upload_mode::UploadMode::Standard,
+        dek,
     )
     .await
     .map_err(|e| format!("encrypted push failed: {e:?}"))?;
@@ -389,7 +414,7 @@ async fn finalize_stored_file(
     mime_type: String,
     size_bytes: u64,
     delete_token: String,
-    password_hash: Option<&str>,
+    key_material: Option<(String, String, String, String)>,
     enc_header: Option<&str>,
 ) -> FetchResult {
     let completed = state
@@ -411,12 +436,17 @@ async fn finalize_stored_file(
         db::FinishReservationResult::Completed(record) => {
             let owned = record.clone();
             let owner = user_id.to_string();
-            if password_hash.is_some() {
+            if let Some((hash, wrapped, salt, escrow)) = key_material {
                 let rid = record.id.clone();
-                let material = db::ProtectionMaterial::legacy(
-                    password_hash.map(str::to_string),
-                    enc_header.map(str::to_string),
-                );
+                let material = db::ProtectionMaterial {
+                    password_hash: Some(hash),
+                    is_encrypted: true,
+                    enc_header: enc_header.map(str::to_string),
+                    dek_wrapped: Some(wrapped),
+                    dek_salt: Some(salt),
+                    dek_escrow: Some(escrow),
+                    key_version: crate::crypto_file::KEY_VERSION_V1,
+                };
                 if let Err(e) = state
                     .db_call("set_fetch_protection", move |db| {
                         db::set_protection(db, &rid, &material).map(|_| ())

@@ -249,12 +249,22 @@ pub async fn create_upload_handler(
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 
     // The reservation's verifier is already hashed; only a fresh session
-    // password goes through Argon2id (on the blocking pool).
+    // password mints a per-file data key (blocking pool: two Argon2id runs).
+    // Reservation-backed sessions reuse the row material at completion.
+    let protection_setup = match reservation_hash {
+        Some(_) => None,
+        None => match password {
+            Some(password) => Some(
+                crate::routes::upload::protected::prepare_protection(&state, &password).await?,
+            ),
+            None => None,
+        },
+    };
     let password_hash = match reservation_hash {
         Some(hash) => Some(hash),
-        None => {
-            crate::routes::upload::protected::hash_upload_password(&state, password).await?
-        }
+        None => protection_setup
+            .as_ref()
+            .map(|setup| setup.password_hash.clone()),
     };
 
     // Protected uploads always relay; pin standard relay unless the operator
@@ -287,6 +297,10 @@ pub async fn create_upload_handler(
         upload_mode: storage_upload_mode,
         push_rx: Some(rx),
         password_hash,
+        dek: protection_setup.as_ref().map(|setup| setup.dek.clone()),
+        dek_wrapped: protection_setup.as_ref().map(|setup| setup.wrapped_b64.clone()),
+        dek_salt: protection_setup.as_ref().map(|setup| setup.salt_b64.clone()),
+        dek_escrow: protection_setup.as_ref().map(|setup| setup.escrow_hex.clone()),
         spool_path: None,
     };
 

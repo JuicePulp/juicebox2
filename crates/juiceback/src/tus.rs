@@ -43,6 +43,17 @@ pub struct TusUpload {
     /// Protected sessions spool PATCH bytes to `spool_path` instead of
     /// pushing them to juicehost.
     pub password_hash: Option<String>,
+    /// In-memory per-file data key for fresh-password sessions. Memory only:
+    /// only the wrapped/escrow strings below ever reach the database.
+    /// `None` for public sessions and reservation-backed sessions (whose
+    /// material is reloaded from the reservation row at completion).
+    pub dek: Option<crate::crypto_file::FileKey>,
+    /// Password-wrapped DEK (base64), minted at session creation.
+    pub dek_wrapped: Option<String>,
+    /// KEK salt (base64), minted at session creation.
+    pub dek_salt: Option<String>,
+    /// Global-key escrow copy of the DEK (hex), minted at session creation.
+    pub dek_escrow: Option<String>,
     pub spool_path: Option<std::path::PathBuf>,
 }
 

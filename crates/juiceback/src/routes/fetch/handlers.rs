@@ -57,9 +57,17 @@ pub async fn fetch_start_handler(
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
 
-    let password_hash =
-        crate::routes::upload::protected::hash_upload_password(&state, body.password.clone())
-            .await?;
+    // Policy-checked here; the cleartext password travels with the job and
+    // mints its per-file data key at store time (same operator trust as
+    // relay uploads, which also see plaintext).
+    if let Some(ref password) = body.password {
+        if !password.is_empty() {
+            state
+                .config
+                .check_upload_password(password)
+                .map_err(AppError::BadRequest)?;
+        }
+    }
 
     let job_id = nanoid::nanoid!(12);
     state
@@ -78,7 +86,7 @@ pub async fn fetch_start_handler(
         source_url,
         opts,
         encrypted_ip,
-        password_hash,
+        body.password.filter(|p| !p.is_empty()),
     ));
 
     tracing::info!("fetch job {job_id} queued");
