@@ -1239,3 +1239,222 @@ async fn empty_api_key_fails_closed_without_explicit_opt_out() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+async fn mock_backend(status_code: u16, body: serde_json::Value) -> String {
+    let app = axum::Router::new().route(
+        "/internal/file/{id}/status",
+        axum::routing::get(move || {
+            let body = body.clone();
+            async move {
+                (
+                    axum::http::StatusCode::from_u16(status_code).unwrap(),
+                    axum::Json(body),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn backend_state(dir: &std::path::Path, backend_url: Option<String>) -> Arc<AppState> {
+    let backend = Arc::new(LocalBackend::new(dir.to_path_buf(), 0).unwrap());
+    backend.init_cache().await.unwrap();
+    let mut cfg = test_config("", None);
+    cfg.allow_no_auth = true;
+    cfg.backend_url = backend_url;
+    Arc::new(AppState::new(&cfg, backend))
+}
+
+async fn store_bytes(app: &axum::Router, id: &str, bytes: &[u8]) {
+    let boundary = "----GateBoundary";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"id\"\r\n\r\n\
+         {id}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"filename\"\r\n\r\n\
+         test.txt\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let (key, val) = api_key_header();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file")
+                .header(key, val)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+async fn get_public(app: &axum::Router, uri: &str, range: Option<&str>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(range) = range {
+        builder = builder.header("range", range);
+    }
+    let resp = app.clone().oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+    (status, headers, bytes)
+}
+
+#[tokio::test]
+async fn protected_file_redirects_to_unlock() {
+    let dir = tempfile::tempdir().unwrap();
+    let unlock = "https://box.example/file/abc12345/unlock";
+    let backend = mock_backend(
+        200,
+        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
+
+    let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some(unlock)
+    );
+    assert!(String::from_utf8_lossy(&body).contains(unlock));
+}
+
+#[tokio::test]
+async fn protected_file_without_unlock_url_is_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(200, serde_json::json!({ "protected": true })).await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "lockedfile", b"ciphertext-bytes").await;
+
+    let (status, _, _) = get_public(&app, "/f/lockedfile", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn unprotected_file_serves_normally_with_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({ "protected": false, "expires_at": 9_999_999_999i64 }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "openfile", b"hello world").await;
+
+    let (status, _, body) = get_public(&app, "/f/openfile.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"hello world");
+}
+
+#[tokio::test]
+async fn unknown_backend_status_serves_legacy_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(404, serde_json::json!({})).await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "legacy01", b"legacy bytes").await;
+
+    let (status, _, body) = get_public(&app, "/f/legacy01", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"legacy bytes");
+}
+
+#[tokio::test]
+async fn unreachable_backend_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), Some("http://127.0.0.1:1".into())).await;
+    let app = build_router(state);
+    store_bytes(&app, "somefile", b"bytes").await;
+
+    let (status, _, _) = get_public(&app, "/f/somefile", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn internal_ciphertext_endpoint_serves_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "cipher01", b"0123456789abcdef").await;
+    let (key, val) = api_key_header();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .header(key, val)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(bytes.as_ref(), b"0123456789abcdef");
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .header(key, val)
+                .header("range", "bytes=4-7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        resp.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 4-7/16")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(bytes.as_ref(), b"4567");
+
+    // No credentials: rejected.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}

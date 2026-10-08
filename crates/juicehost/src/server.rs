@@ -158,6 +158,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/internal/file/{id}", delete(handlers::delete_file))
         .route("/internal/file/{id}/rename", post(handlers::rename_file))
         .route("/internal/file/{id}/stat", get(handlers::stat_file))
+        .route(
+            "/internal/file/{id}/ciphertext",
+            get(handlers::ciphertext_file),
+        )
         .merge(concat)
         .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
         .layer(middleware::from_fn_with_state(
