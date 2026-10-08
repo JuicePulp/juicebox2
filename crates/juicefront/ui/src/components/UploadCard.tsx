@@ -231,12 +231,15 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     if (row.querySelector(".file-protected")) return;
     const nameEl = row.querySelector(".file-name, .file-card-name");
     if (!nameEl) return;
+    const wrap = document.createElement("span");
+    wrap.className = "file-name-row";
+    nameEl.before(wrap);
     const badge = document.createElement("span");
     badge.className = "file-protected";
     badge.title = t(locale(), "files.protected");
     badge.setAttribute("aria-label", t(locale(), "files.protected"));
     badge.innerHTML = iconHTML("key", 16);
-    nameEl.after(badge);
+    wrap.append(nameEl, badge);
   }
 
   function completeRow(item: UploadItem, row: HTMLElement) {

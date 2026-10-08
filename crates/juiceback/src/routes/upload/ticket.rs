@@ -103,6 +103,7 @@ pub fn public_url_for(state: &Arc<AppState>, record: &FileRecord) -> String {
         &record.id,
         &record.filename,
         record.is_protected(),
+        &state.config.juiceback_origin,
     )
 }
 

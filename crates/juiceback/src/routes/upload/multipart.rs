@@ -350,6 +350,7 @@ pub async fn upload_handler(
         &record.id,
         &record.filename,
         record.is_protected(),
+        &state.config.juiceback_origin,
     );
 
     build_upload_response(
