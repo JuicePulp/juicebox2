@@ -9,7 +9,6 @@ use utoipa::ToSchema;
 
 const NOT_FOUND_HTML_TEMPLATE: &str = include_str!("templates/not_found.html");
 const TEAPOT_HTML_TEMPLATE: &str = include_str!("templates/teapot_uploading.html");
-const PROTECTED_REDIRECT_HTML_TEMPLATE: &str = include_str!("templates/protected_redirect.html");
 
 #[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
@@ -64,15 +63,6 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
     (
         StatusCode::NOT_FOUND,
         Html(NOT_FOUND_HTML_TEMPLATE.to_string()),
-    )
-}
-
-/// Body for the 308 redirect that password-gated files answer with on public
-/// routes. The `Location` header carries the same URL for non-HTML clients.
-pub fn protected_redirect_html(unlock_url: &str) -> Html<String> {
-    Html(
-        PROTECTED_REDIRECT_HTML_TEMPLATE
-            .replace("__UNLOCK_URL__", &escape_html(unlock_url)),
     )
 }
 

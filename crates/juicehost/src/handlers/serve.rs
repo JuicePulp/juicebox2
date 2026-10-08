@@ -9,6 +9,7 @@ use axum::{
 use futures::StreamExt;
 
 use super::common::backend_request;
+use super::shell::{ShellMode, protected_shell_response, remaining_ttl_secs};
 use crate::{
     error::{JuicehostError, StorageError, not_found_html, teapot_html},
     state::AppState,
@@ -32,108 +33,6 @@ pub(crate) fn file_cache_control_value(
             format!("public, max-age={age}, s-maxage={age}")
         }
         _ => FILE_CACHE_CONTROL.to_string(),
-    }
-}
-
-pub(crate) async fn remaining_ttl_secs(state: &AppState, id: &str) -> Option<u64> {
-    if !state.file_cache_enabled {
-        return None;
-    }
-    backend_file_status(state, id)
-        .await
-        .into_known()
-        .and_then(|body| body.get("expires_at")?.as_i64())
-        .map(ttl_from_expires_at)
-}
-
-/// Seconds until `expires_at` (unix), saturating at zero.
-fn ttl_from_expires_at(expires_at: i64) -> u64 {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    (expires_at - now).max(0) as u64
-}
-
-/// Backend file-status probe outcome.
-enum BackendStatus {
-    /// Backend answered with a status document.
-    Known(serde_json::Value),
-    /// Backend answered but knows nothing about this id (legacy/direct file).
-    Unknown,
-    /// No backend configured, or the probe failed. Callers fail closed.
-    Unavailable,
-}
-
-impl BackendStatus {
-    fn into_known(self) -> Option<serde_json::Value> {
-        match self {
-            Self::Known(body) => Some(body),
-            _ => None,
-        }
-    }
-}
-
-async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
-    let Some(backend_url) = state.backend_url.as_ref() else {
-        return BackendStatus::Unavailable;
-    };
-    let status_url = format!("{backend_url}/internal/file/{id}/status");
-    let Ok(resp) = backend_request(state, status_url).send().await else {
-        return BackendStatus::Unavailable;
-    };
-    if resp.status() == StatusCode::NOT_FOUND {
-        return BackendStatus::Unknown;
-    }
-    if !resp.status().is_success() {
-        return BackendStatus::Unavailable;
-    }
-    match resp.json::<serde_json::Value>().await {
-        Ok(body) => BackendStatus::Known(body),
-        Err(_) => BackendStatus::Unavailable,
-    }
-}
-
-/// Password-gate check for public byte routes (`/f/`, `/d/`, `/v/`).
-///
-/// Returns `Some(response)` when the request must not proceed to bytes: a
-/// 308 to the juiceback unlock page for protected files, or a 404 when
-/// protection cannot be ruled out (unreachable backend) or no unlock URL is
-/// known. Returns `None` when serving may proceed — including standalone
-/// hosts without a backend (nothing can be protected there) and ids the
-/// backend does not know (legacy direct files).
-pub(crate) async fn protected_gate_response(
-    state: &AppState,
-    id: &str,
-) -> Option<Response<Body>> {
-    if state.backend_url.is_none() {
-        return None;
-    }
-    match backend_file_status(state, id).await {
-        BackendStatus::Known(body)
-            if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
-        {
-            match body
-                .get("unlock_url")
-                .and_then(|v| v.as_str())
-                .filter(|u| !u.is_empty())
-            {
-                Some(unlock_url) => Response::builder()
-                    .status(StatusCode::PERMANENT_REDIRECT)
-                    .header(header::LOCATION, unlock_url)
-                    .header(header::CACHE_CONTROL, FILE_CACHE_CONTROL)
-                    .body(Body::from(
-                        crate::error::protected_redirect_html(unlock_url).0,
-                    ))
-                    .ok(),
-                None => Some(prevent_file_caching(not_found_html().into_response())),
-            }
-        }
-        BackendStatus::Known(_) | BackendStatus::Unknown => None,
-        // Fail closed: an unreachable backend must not leak bytes that
-        // might be ciphertext for a protected file.
-        BackendStatus::Unavailable => {
-            Some(prevent_file_caching(not_found_html().into_response()))
-        }
     }
 }
 
@@ -227,10 +126,15 @@ async fn serve_file_inner(
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
-    // Password-gated files store ciphertext only: never serve their bytes
-    // on public routes.
-    if let Some(gated) = protected_gate_response(&state, &id).await {
-        return Ok(gated);
+    // Password-gated files store ciphertext only: serve the unlock shell
+    // on public routes, never raw bytes.
+    let mode = if force_download {
+        ShellMode::Download
+    } else {
+        ShellMode::View
+    };
+    if let Some(shelled) = protected_shell_response(&state, &id, mode).await {
+        return Ok(shelled);
     }
 
     let etag = &file_meta.etag;

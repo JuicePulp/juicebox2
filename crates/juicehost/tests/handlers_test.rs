@@ -1321,37 +1321,65 @@ async fn get_public(app: &axum::Router, uri: &str, range: Option<&str>) -> (Stat
 }
 
 #[tokio::test]
-async fn protected_file_redirects_to_unlock() {
+async fn protected_file_serves_unlock_shell() {
     let dir = tempfile::tempdir().unwrap();
-    let unlock = "https://box.example/file/abc12345/unlock";
     let backend = mock_backend(
         200,
-        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
     )
     .await;
     let state = backend_state(dir.path(), Some(backend)).await;
     let app = build_router(state);
     store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
 
+    // No more off-origin redirect: the shell lives here.
     let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
-    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some(unlock)
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("text/html; charset=utf-8")
     );
-    assert!(String::from_utf8_lossy(&body).contains(unlock));
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("/c/abc12345"));
+    assert!(page.contains("https://box.example/api/gateway/unlock") || page.contains("https://box.example"));
+    assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
+
+    // Ciphertext stays public for browser-side decryption.
+    let (status, headers, body) = get_public(&app, "/c/abc12345", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ciphertext-bytes");
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
+    );
+
+    // Ciphertext ranges work for chunk-aligned decrypt fetches.
+    let (status, headers, body) = get_public(&app, "/c/abc12345", Some("bytes=0-9")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"ciphertext");
+    assert_eq!(
+        headers.get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 0-9/16")
+    );
 }
 
 #[tokio::test]
-async fn protected_file_without_unlock_url_is_hidden() {
+async fn protected_shell_needs_no_unlock_url() {
     let dir = tempfile::tempdir().unwrap();
     let backend = mock_backend(200, serde_json::json!({ "protected": true })).await;
     let state = backend_state(dir.path(), Some(backend)).await;
     let app = build_router(state);
     store_bytes(&app, "lockedfile", b"ciphertext-bytes").await;
 
-    let (status, _, _) = get_public(&app, "/f/lockedfile", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, body) = get_public(&app, "/f/lockedfile", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("password-protected"));
 }
 
 #[tokio::test]
@@ -1501,24 +1529,27 @@ async fn download_supports_ranges() {
 }
 
 #[tokio::test]
-async fn download_respects_protected_gate() {
+async fn download_serves_unlock_shell_for_protected() {
     let dir = tempfile::tempdir().unwrap();
-    let unlock = "https://box.example/file/abc12345/unlock";
     let backend = mock_backend(
         200,
-        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+        serde_json::json!({
+            "protected": true,
+            "filename": "abc12345.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
     )
     .await;
     let state = backend_state(dir.path(), Some(backend)).await;
     let app = build_router(state);
     store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
 
-    let (status, headers, _) = get_public(&app, "/d/abc12345.txt", None).await;
-    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some(unlock)
-    );
+    let (status, _, body) = get_public(&app, "/d/abc12345.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("mode: \"download\""));
 }
 
 async fn store_named(app: &axum::Router, id: &str, filename: &str, bytes: &[u8]) {
@@ -1599,22 +1630,25 @@ async fn preview_renders_by_media_kind() {
 #[tokio::test]
 async fn preview_missing_and_protected() {
     let dir = tempfile::tempdir().unwrap();
-    let unlock = "https://box.example/file/prot0001/unlock";
     let backend = mock_backend(
         200,
-        serde_json::json!({ "protected": true, "unlock_url": unlock }),
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.mp4",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
     )
     .await;
     let state = backend_state(dir.path(), Some(backend)).await;
     let app = build_router(state);
     store_named(&app, "prot0001", "secret.mp4", b"ciphertext").await;
 
-    let (status, headers, _) = get_public(&app, "/v/prot0001.mp4", None).await;
-    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some(unlock)
-    );
+    let (status, _, body) = get_public(&app, "/v/prot0001.mp4", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("mode: \"preview\""));
 
     let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);

@@ -15,7 +15,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::serve::protected_gate_response;
+use super::shell::{ShellMode, protected_shell_response};
 use crate::{
     error::not_found_html,
     state::AppState,
@@ -220,8 +220,8 @@ async fn preview_file_inner(
         Err(_) => return Err(JuicehostError::Internal),
     };
 
-    if let Some(gated) = protected_gate_response(&state, id).await {
-        return Ok(gated);
+    if let Some(shelled) = protected_shell_response(&state, id, ShellMode::Preview).await {
+        return Ok(shelled);
     }
 
     let extension = if ext.is_empty() {

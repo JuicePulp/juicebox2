@@ -199,14 +199,35 @@ pub async fn ciphertext_file(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
+    serve_stored_bytes(&state, &headers, &id).await
+}
+
+/// Public ciphertext bytes for browser-side decryption (`/c/{id}`).
+/// No gate: ciphertext is useless without the data key, which juicehost
+/// never holds. Same bytes and Range semantics as the internal endpoint.
+#[tracing::instrument(skip_all)]
+pub async fn ciphertext_public(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(path): Path<String>,
+) -> Result<Response<Body>, JuicehostError> {
+    let id = path.split('.').next().unwrap_or(&path).to_string();
+    serve_stored_bytes(&state, &headers, &id).await
+}
+
+pub(crate) async fn serve_stored_bytes(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<Response<Body>, JuicehostError> {
     use futures::StreamExt as _;
 
-    if !is_valid_id(&id) {
+    if !is_valid_id(id) {
         return Err(JuicehostError::BadRequest);
     }
     let meta = state
         .storage
-        .stat(&id)
+        .stat(id)
         .await
         .map_err(|e| match e {
             StorageError::NotFound => JuicehostError::NotFound,
@@ -221,7 +242,7 @@ pub async fn ciphertext_file(
             super::serve::RangeResult::Satisfiable(start, end) => {
                 let stream = state
                     .storage
-                    .get_range_stream(&id, start, end)
+                    .get_range_stream(id, start, end)
                     .await
                     .map_err(|_| JuicehostError::Internal)?;
                 return Response::builder()
@@ -258,7 +279,7 @@ pub async fn ciphertext_file(
 
     let stream = state
         .storage
-        .get_stream(&id)
+        .get_stream(id)
         .await
         .map_err(|_| JuicehostError::Internal)?;
     Response::builder()
