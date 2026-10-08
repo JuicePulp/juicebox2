@@ -39,6 +39,10 @@ pub const MAGIC: &[u8; 4] = b"JBC1";
 pub const HEADER_LEN: usize = 13;
 
 /// 256-bit storage key. Zeroized on drop; never logged or Debug-printed.
+///
+/// Cloned only to hand a request-scoped copy to streaming decryptors; every
+/// copy is still zeroized on drop.
+#[derive(Clone)]
 pub struct FileKey(Zeroizing<[u8; 32]>);
 
 impl fmt::Debug for FileKey {
@@ -134,6 +138,39 @@ pub const fn ciphertext_len(plain_len: u64) -> u64 {
 /// Stored length of one chunk holding `plain_len` plaintext bytes.
 const fn stored_chunk_len(plain_len: usize) -> usize {
     NONCE_LEN + plain_len + TAG_LEN
+}
+
+/// Stored byte range covering plaintext `[start, end)` (end exclusive).
+///
+/// Lets callers issue a single Range GET for exactly the chunks overlapping
+/// the requested plaintext, then decrypt and slice locally.
+///
+/// # Errors
+///
+/// Returns [`CryptoError::RangeOutOfBounds`] when `start > end` or
+/// `end > plain_len`.
+pub fn cipher_range_for_plain(
+    start: u64,
+    end: u64,
+    plain_len: u64,
+) -> Result<(u64, u64), CryptoError> {
+    if start > end || end > plain_len {
+        return Err(CryptoError::RangeOutOfBounds);
+    }
+    if start == end {
+        return Ok((HEADER_LEN as u64, 0));
+    }
+    let chunk = PLAINTEXT_CHUNK_LEN as u64;
+    let full_stored = NONCE_LEN as u64 + chunk + TAG_LEN as u64;
+    let first = start / chunk;
+    let last = (end - 1) / chunk;
+    // Only the final chunk overall can be short, so every chunk before
+    // `last` is full and offsets are closed-form.
+    let cipher_start = HEADER_LEN as u64 + first * full_stored;
+    let last_plain = plain_len - last * chunk;
+    let cipher_len =
+        (last - first) * full_stored + (NONCE_LEN as u64 + last_plain + TAG_LEN as u64);
+    Ok((cipher_start, cipher_len))
 }
 
 fn write_header(out: &mut Vec<u8>, plain_len: u64) {
@@ -468,6 +505,33 @@ mod tests {
         assert_eq!(
             decrypt_range(&other_key(), &data, 0, 10).unwrap_err(),
             CryptoError::Decrypt
+        );
+    }
+
+    #[test]
+    fn cipher_range_covers_exact_chunks() {
+        // Single-chunk file.
+        assert_eq!(cipher_range_for_plain(0, 100, 100).unwrap(), (13, 12 + 100 + 16));
+        // Empty range.
+        assert_eq!(cipher_range_for_plain(5, 5, 100).unwrap(), (13, 0));
+        // Two full chunks + short tail: range inside second chunk only.
+        let len = 65_536 * 2 + 7;
+        let (off, n) = cipher_range_for_plain(65_536, 65_540, len).unwrap();
+        assert_eq!(off, 13 + (12 + 65_536 + 16));
+        assert_eq!(n, 12 + 65_536 + 16);
+        // Spanning chunks 0..2 (tail short): covers all three stored chunks.
+        let (off, n) = cipher_range_for_plain(0, len, len).unwrap();
+        assert_eq!(off, 13);
+        assert_eq!(n, 2 * (12 + 65_536 + 16) + (12 + 7 + 16));
+        assert_eq!(off + n, ciphertext_len(len));
+        // Out of bounds.
+        assert_eq!(
+            cipher_range_for_plain(0, len + 1, len).unwrap_err(),
+            CryptoError::RangeOutOfBounds
+        );
+        assert_eq!(
+            cipher_range_for_plain(9, 3, len).unwrap_err(),
+            CryptoError::RangeOutOfBounds
         );
     }
 

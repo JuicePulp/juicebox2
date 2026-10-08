@@ -40,6 +40,43 @@ fn captured_pushes() -> Arc<Mutex<Vec<Vec<u8>>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
 
+/// Serves captured pushes back as the internal ciphertext endpoint,
+/// honoring a single `Range: bytes=A-B` header like juicehost does.
+async fn mock_ciphertext_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>>>>) {
+    Mock::given(method("GET"))
+        .and(path_regex("/internal/file/.*/ciphertext"))
+        .respond_with(move |req: &wiremock::Request| {
+            let stored: Vec<u8> = captured.lock().unwrap().concat();
+            let total = stored.len() as u64;
+            let range = req
+                .headers
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("bytes="))
+                .and_then(|spec| {
+                    let (s, e) = spec.split_once('-')?;
+                    let start: u64 = s.parse().ok()?;
+                    let end: u64 = if e.is_empty() {
+                        total.saturating_sub(1)
+                    } else {
+                        e.parse().ok()?
+                    };
+                    (start <= end && start < total).then(|| (start, end.min(total - 1)))
+                });
+            match range {
+                Some((start, end)) => ResponseTemplate::new(206)
+                    .insert_header(
+                        "content-range",
+                        format!("bytes {start}-{end}/{total}"),
+                    )
+                    .set_body_bytes(stored[start as usize..=end as usize].to_vec()),
+                None => ResponseTemplate::new(200).set_body_bytes(stored),
+            }
+        })
+        .mount(server)
+        .await;
+}
+
 async fn mock_push_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>>>>) {
     Mock::given(method("POST"))
         .and(path_regex("/internal/file/stream/.*"))
@@ -122,6 +159,8 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     let server = MockServer::start().await;
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
 
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
@@ -219,6 +258,8 @@ async fn reserve_with_password_completes_via_relay() {
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
 
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
 
@@ -294,6 +335,8 @@ async fn short_password_rejected_at_reserve() {    let state = test_state("http:
 async fn plain_relay_still_streams_plaintext() {    let server = MockServer::start().await;
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
 
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
@@ -385,6 +428,8 @@ async fn tus_protected_roundtrip_spools_then_encrypts() {
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
 
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
 
@@ -444,6 +489,8 @@ async fn tus_adopts_protected_reservation() {
     let server = MockServer::start().await;
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
 
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
@@ -593,4 +640,335 @@ async fn fetch_with_password_stores_ciphertext_only() {
             .any(|w| w == b"fake-media-bytes"),
         "plaintext must not reach juicehost"
     );
+}
+
+/// Upload a protected file through the relay and return its id.
+async fn upload_protected(
+    app: &axum::Router,
+    state: &Arc<AppState>,
+    boundary: &str,
+) -> String {
+    let body = multipart_body(boundary, &[("password", PASSWORD)], ("secret.txt", PLAINTEXT));
+    let (status, json) = post_upload(app, body, boundary, None).await;
+    assert_eq!(status, StatusCode::OK, "setup upload failed: {json}");
+    let id = json["id"].as_str().unwrap().to_string();
+    let record = db_record(state, &id).await;
+    assert!(record.is_protected());
+    id
+}
+
+async fn post_unlock_json(
+    app: &axum::Router,
+    id: &str,
+    password: &str,
+) -> (StatusCode, axum::http::HeaderMap, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/file/{id}/unlock"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "password": password }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, headers, json)
+}
+
+fn unlock_cookie(headers: &axum::http::HeaderMap, id: &str) -> Option<String> {
+    let name = format!("jb_unlock_{id}=");
+    headers
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with(&name))
+        .map(|v| v.split(';').next().unwrap_or_default().to_string())
+}
+
+#[tokio::test]
+async fn unlock_page_and_cookie_flow() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "unlockpage1").await;
+
+    // Prompt page renders without credentials.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/unlock"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let page = String::from_utf8_lossy(&bytes);
+    assert!(page.contains("password") && page.contains(&id));
+
+    // Content without credentials: 403.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let no_auth_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    // Wrong password: identical 403 body (no oracle).
+    let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Correct password: cookie + JSON ok.
+    let (status, headers, json) = post_unlock_json(&app, &id, PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let cookie = unlock_cookie(&headers, &id).expect("unlock cookie");
+    assert!(cookie.starts_with(&format!("jb_unlock_{id}=")));
+
+    // Cookie grants the bytes.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        Some("bytes")
+    );
+    assert_eq!(
+        resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), PLAINTEXT);
+
+    // The 403 bodies for missing vs wrong credentials match.
+    let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let _ = no_auth_body;
+}
+
+#[tokio::test]
+async fn content_password_transports_and_ranges() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    mock_ciphertext_endpoint(&server, Arc::clone(&captured)).await;
+
+    let state = test_state(server.uri());
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "unlockrange1").await;
+
+    // ?password= query transport.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content?password={}", urlencode(PASSWORD)))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), PLAINTEXT);
+
+    // X-File-Password transport.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Byte range over the decrypted representation.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .header("Range", "bytes=0-9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    let total = PLAINTEXT.len();
+    assert_eq!(
+        resp.headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
+        Some(format!("bytes 0-9/{total}").as_str())
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), &PLAINTEXT[..10]);
+
+    // Open-ended range.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .header("Range", format!("bytes={}-", total - 5))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), &PLAINTEXT[total - 5..]);
+
+    // Unsatisfiable range.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .header("Range", format!("bytes={}-{}", total + 100, total + 200))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+
+    // HEAD mirrors headers with no body.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri(format!("/file/{id}/content"))
+                .header("X-File-Password", PASSWORD)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers().get("content-length").and_then(|v| v.to_str().ok()),
+        Some(total.to_string().as_str())
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(bytes.is_empty());
+
+    // Unprotected files redirect to their public URL instead.
+    let boundary = "plainunlock1";
+    let body = multipart_body(boundary, &[], ("a.txt", PLAINTEXT));
+    let (status, json) = post_upload(&app, body, boundary, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let plain_id = json["id"].as_str().unwrap().to_string();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/file/{plain_id}/content"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-.~_".contains(&b) {
+            out.push(b as char);
+        } else if b == b' ' {
+            out.push_str("%20");
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn unlock_rate_limits_guessing() {
+    let server = MockServer::start().await;
+    let captured = captured_pushes();
+    mock_push_endpoint(&server, Arc::clone(&captured)).await;
+
+    let mut cfg = common::test_config();
+    cfg.juicehost_url = server.uri();
+    cfg.storage_encryption_key = TEST_KEY_HEX.into();
+    cfg.password_try_limit = 3;
+    let state = common::state_from_config(cfg);
+    let app = common::mock_router(Arc::clone(&state));
+    let id = upload_protected(&app, &state, "unlocklimit1").await;
+
+    for _ in 0..3 {
+        let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }

@@ -284,3 +284,16 @@ pub async fn run_mint_limiter_prune_loop(state: Arc<AppState>) {
         }
     }
 }
+
+pub async fn run_unlock_limiter_prune_loop(state: Arc<AppState>) {
+    let mut ticker = tokio::time::interval(Duration::from_secs(MINT_LIMITER_PRUNE_INTERVAL_SECS));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let before = state.unlock_limiter.len_probe();
+        state.unlock_limiter.prune();
+        if before != 0 {
+            tracing::debug!("unlock limiter: pruned buckets before={before}");
+        }
+    }
+}

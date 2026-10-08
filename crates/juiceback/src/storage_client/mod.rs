@@ -1,5 +1,6 @@
 pub(crate) mod client;
 pub mod config;
+pub mod download;
 pub mod errors;
 pub mod files;
 pub mod probe;
@@ -10,6 +11,7 @@ pub mod target;
 mod tests;
 
 pub use config::{JuicehostConfig, fetch_juicehost_config};
+pub use download::download_ciphertext;
 pub(crate) use errors::format_error_response;
 pub use files::{concat_files, delete_file_on_juicehost, rename_file_on_juicehost};
 pub use probe::stat_file_on_juicehost;
