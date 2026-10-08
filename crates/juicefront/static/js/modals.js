@@ -273,8 +273,6 @@ import { playSound } from "./sounds.js";
                 copyBar.classList.add("copy-bar--copied");
                 setTimeout(function () { copyBar.classList.remove("copy-bar--copied"); }, 2000);
               }
-              showChordIndicator(["Copied!"]);
-              setTimeout(hideChordIndicator, 1500);
             }
           }).catch(function () {});
         }
