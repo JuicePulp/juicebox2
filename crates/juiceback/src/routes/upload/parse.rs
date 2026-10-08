@@ -83,12 +83,14 @@ pub async fn parse_multipart(
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().trim_end_matches('/').to_string();
             if !text.is_empty() {
+                // Surface the concrete reason (DNS, blocked range, …):
+                // a generic INVALID_MULTIPART here cost real debugging time.
                 let checked = crate::storage_client::check_storage_host(
                     &text,
                     state.config.allow_private_fetch,
                 )
                 .await
-                .map_err(|_| AppError::InvalidMultipart)?;
+                .map_err(|e| AppError::BadRequest(format!("invalid storage host: {e}")))?;
                 selected_host = Some(checked);
             }
             tracing::debug!("  field host took {:?}", field_start.elapsed());
