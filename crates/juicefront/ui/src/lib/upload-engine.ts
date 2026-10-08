@@ -72,6 +72,7 @@ export interface UploadItem {
   customHost: string;
   uploadMode: string;
   password?: string;
+  protected?: boolean;
   serverId?: string;
   url?: string;
   deleteToken?: string;
@@ -375,6 +376,7 @@ function startDirectUpload(
             expiresAt: res.expires_at
               ? Number(res.expires_at)
               : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+            protected: !!res.protected,
             state: "done",
             progress: 100,
           });
@@ -584,6 +586,7 @@ function startDirectTicketUpload(
         expiresAt: data.expires_at
           ? Number(data.expires_at)
           : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100,
       });
@@ -1344,6 +1347,7 @@ function startTusUpload(
         expiresAt: data.expires_at
           ? Number(data.expires_at)
           : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100,
       });

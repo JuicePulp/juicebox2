@@ -876,9 +876,9 @@ export default function FilesCard(props: Props) {
 
       <footer class="footr footr--divd" data-footr="">
         <div class="footr__primary">
-          {(props.footerMessage ?? "juicebox2-epsilon") && (
+          {(props.footerMessage ?? "") && (
             <p class="footr__message">
-              {props.footerMessage ?? "juicebox2-epsilon"}
+              {props.footerMessage ?? ""}
             </p>
           )}
           <a

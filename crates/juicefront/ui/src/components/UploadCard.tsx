@@ -226,6 +226,19 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     getRowParts(row).pill.after(makeCopyBar(item.reserveUrl, copyBarStrings(locale())));
   }
 
+  // Key badge next to the filename for protected rows. Idempotent.
+  function markRowProtected(row: HTMLElement) {
+    if (row.querySelector(".file-protected")) return;
+    const nameEl = row.querySelector(".file-name, .file-card-name");
+    if (!nameEl) return;
+    const badge = document.createElement("span");
+    badge.className = "file-protected";
+    badge.title = t(locale(), "files.protected");
+    badge.setAttribute("aria-label", t(locale(), "files.protected"));
+    badge.innerHTML = iconHTML("key", 16);
+    nameEl.after(badge);
+  }
+
   function completeRow(item: UploadItem, row: HTMLElement) {
     const { fill, status, pill } = getRowParts(row);
     fill.classList.remove("finalizing");
@@ -238,6 +251,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }
     row.classList.add("complete");
     row.querySelector(".file-action-area")?.classList.add("complete");
+    if (item.protected) markRowProtected(row);
     status.textContent = t(locale(), "upload.complete");
     pill.querySelector(".spinner")?.remove();
     const existingCopyBar = pill.nextElementSibling;
@@ -804,6 +818,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       url: string;
       expires_at: number;
       delete_token: string;
+      protected?: boolean;
     },
     item: HTMLElement,
     fill: HTMLElement,
@@ -814,6 +829,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     item.querySelector(".file-size")!.textContent = formatSize(
       file.size_bytes,
     );
+    if (file.protected) markRowProtected(item);
     const iconContainer = item.querySelector(".file-card-icon") as HTMLElement | null;
     if (iconContainer && file.mime_type) {
       iconContainer.innerHTML = iconHTML(iconForMime(file.mime_type), 24);
