@@ -128,6 +128,14 @@ function removeItem(item) {
     setEmpty(!listContentRef || !listContentRef.querySelector(".file-item:not(.exiting)"));
   }, 300);
 }
+// Dismiss a queued/uploading/errored row boundedly: drop the DOM row AND
+// purge the upload store, otherwise the subscribe loop re-adopts the row on
+// the next store tick and deleted rows come back from the dead.
+function dismissRow(item) {
+  var id = item.getAttribute("data-upload-id");
+  if (id) removeUpload(id);
+  removeItem(item);
+}
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
   pill.classList.add("error");
@@ -381,7 +389,7 @@ function startUltraFastFromDropzone() {
     '<span class="status-text">' + t(LOCALE, "upload.delegating_to_app") + "</span>" +
     "</div></div></div>";
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
@@ -576,7 +584,7 @@ function startCobaltFetch(url) {
   var nameEl = item.querySelector(".file-name");
   if (nameEl) nameEl.textContent = url.length > 48 ? url.slice(0, 45) + "..." : url;
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
@@ -775,7 +783,7 @@ function adoptItem(data) {
   setEmpty(false);
   var item = buildRow(data.filename || "upload", formatSize(data.size || 0), iconForMime(data.mimeType || ""));
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   item.setAttribute("data-upload-id", data.id);
@@ -787,7 +795,7 @@ function startItem(file) {
   setEmpty(false);
   var item = buildRow(file.name, formatSize(file.size), extIcon(file.name));
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
