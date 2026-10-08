@@ -38,6 +38,12 @@ pub struct TusUpload {
     pub upload_mode: UploadMode,
 
     pub push_rx: Option<mpsc::Receiver<Result<Bytes, String>>>,
+
+    /// Argon2id verifier for password-gated uploads (`None` = public).
+    /// Protected sessions spool PATCH bytes to `spool_path` instead of
+    /// pushing them to juicehost.
+    pub password_hash: Option<String>,
+    pub spool_path: Option<std::path::PathBuf>,
 }
 
 pub type TusMap = Arc<DashMap<String, TusUpload>>;

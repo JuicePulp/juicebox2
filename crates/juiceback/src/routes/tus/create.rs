@@ -107,6 +107,22 @@ pub async fn create_upload_handler(
     let total_parts = parse_parallel_number(find_meta(&metadata, "total_parts"))?;
     let parallel = validate_parallel_metadata(session_id.as_deref(), part_index, total_parts)?;
 
+    // Password gate: validated here, hashed below. Parallel (server-side
+    // concat of plaintext parts) can never be protected.
+    let password = find_meta(&metadata, "password")
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            state
+                .config
+                .check_upload_password(v)
+                .map(|()| v.to_string())
+                .map_err(AppError::BadRequest)
+        })
+        .transpose()?;
+    if password.is_some() && parallel.is_some() {
+        return Err(crate::routes::upload::protected::relay_required());
+    }
+
     let reserve_id = find_meta(&metadata, "reserve_id")
         .filter(|v| !v.is_empty())
         .map(|value| {
@@ -120,6 +136,7 @@ pub async fn create_upload_handler(
     let reservation_token = find_meta(&metadata, "delete_token")
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
+    let mut reservation_hash: Option<String> = None;
     if let Some(ref reserve_id) = reserve_id {
         let token = reservation_token
             .as_deref()
@@ -138,6 +155,14 @@ pub async fn create_upload_handler(
             return Err(AppError::Forbidden(
                 "invalid reservation delete token".into(),
             ));
+        }
+        if reservation.is_protected() {
+            // The reservation already carries the verifier; a second password
+            // here would be ambiguous, and parallel parts would land plaintext.
+            if password.is_some() || parallel.is_some() {
+                return Err(crate::routes::upload::protected::relay_required());
+            }
+            reservation_hash = reservation.password_hash.clone();
         }
         storage_host = reservation.storage_host;
     }
@@ -223,6 +248,23 @@ pub async fn create_upload_handler(
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 
+    // The reservation's verifier is already hashed; only a fresh session
+    // password goes through Argon2id (on the blocking pool).
+    let password_hash = match reservation_hash {
+        Some(hash) => Some(hash),
+        None => {
+            crate::routes::upload::protected::hash_upload_password(&state, password).await?
+        }
+    };
+
+    // Protected uploads always relay; pin standard relay unless the operator
+    // opted out (mirrors the multipart path).
+    let storage_upload_mode = if password_hash.is_some() && state.config.encrypted_force_relay {
+        crate::upload_mode::UploadMode::Standard
+    } else {
+        storage_upload_mode
+    };
+
     let upload = TusUpload {
         id: id.clone(),
         offset: 0,
@@ -244,6 +286,8 @@ pub async fn create_upload_handler(
         user_id,
         upload_mode: storage_upload_mode,
         push_rx: Some(rx),
+        password_hash,
+        spool_path: None,
     };
 
     state.tus.insert(id.clone(), upload);

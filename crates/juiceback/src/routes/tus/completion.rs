@@ -12,7 +12,9 @@ pub(crate) async fn complete_tus_upload(
     meta: TusUploadMeta,
 ) -> Result<serde_json::Value, AppError> {
     state.tus_senders.remove(&meta.id);
-    await_storage_push(state, &meta.id).await?;
+    if meta.password_hash.is_none() {
+        await_storage_push(state, &meta.id).await?;
+    }
     finish_tus_upload(state, meta).await
 }
 
@@ -20,11 +22,45 @@ pub(crate) async fn finish_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
 ) -> Result<serde_json::Value, AppError> {
-    if let Some(ref reserve_id) = meta.reserve_id {
+    // Protected uploads land here with plaintext spooled locally and nothing
+    // pushed yet. Encrypt and push under the final id, skipping the rename.
+    let protected_header: Option<[u8; crate::crypto_file::HEADER_LEN]> =
+        if meta.password_hash.is_some() {
+            let target_id = meta.reserve_id.as_deref().unwrap_or(&meta.id);
+            let spool = crate::routes::upload::protected::tus_spool_path(&meta.id);
+            let spooled = tokio::fs::metadata(&spool).await.map_err(|_| {
+                AppError::Internal("protected upload spool missing".into())
+            })?;
+            if spooled.len() != meta.total_length {
+                return Err(AppError::Internal("protected upload size mismatch".into()));
+            }
+            let capability = meta
+                .reservation_token
+                .clone()
+                .unwrap_or_else(|| meta.delete_token.clone());
+            let header = crate::routes::upload::protected::push_encrypted_file(
+                state,
+                target_id,
+                &meta.filename,
+                &meta.mime_type,
+                meta.storage_host.as_deref(),
+                &capability,
+                &spool,
+                meta.total_length,
+                meta.upload_mode,
+            )
+            .await?;
+            let _ = tokio::fs::remove_file(&spool).await;
+            Some(header)
+        } else {
+            None
+        };
+
+    if meta.reserve_id.is_some() && meta.password_hash.is_none() {
         crate::storage_client::rename_file_on_juicehost(
             state,
             &meta.id,
-            reserve_id,
+            meta.reserve_id.as_deref().unwrap_or(&meta.id),
             meta.storage_host.as_deref(),
             meta.reservation_token.as_deref(),
         )
@@ -72,9 +108,22 @@ pub(crate) async fn finish_tus_upload(
         let completed_id = &completed.id;
         let completed_size = completed.size_bytes;
         tracing::info!("reserved TUS upload completed: id={completed_id} size={completed_size}");
+        let mut completed = completed;
+        if let Some(header) = protected_header {
+            let header_hex = crate::routes::upload::protected::mark_protected(
+                state,
+                &completed.id,
+                meta.password_hash.as_deref(),
+                &header,
+            )
+            .await?;
+            completed.password_hash = meta.password_hash.clone();
+            completed.is_encrypted = true;
+            completed.enc_header = Some(header_hex);
+        }
         completed
     } else {
-        let record = FileRecord::from_upload_with_token(
+        let mut record = FileRecord::from_upload_with_token(
             meta.id.clone(),
             meta.filename,
             meta.mime_type,
@@ -84,6 +133,11 @@ pub(crate) async fn finish_tus_upload(
             Some(meta.encrypted_ip),
             meta.storage_host.clone(),
         );
+        if let Some(header) = protected_header {
+            record.password_hash = meta.password_hash.clone();
+            record.is_encrypted = true;
+            record.enc_header = Some(hex::encode(header));
+        }
         Box::new(db::insert_new_file(state, record).await?)
     };
 
