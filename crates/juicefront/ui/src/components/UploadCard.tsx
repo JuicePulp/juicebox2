@@ -226,7 +226,8 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     getRowParts(row).pill.after(makeCopyBar(item.reserveUrl, copyBarStrings(locale())));
   }
 
-  // Key badge next to the filename for protected rows. Idempotent.
+  // Key badge before the filename for protected rows (before, so filename
+  // ellipsis can never push it out). Idempotent.
   function markRowProtected(row: HTMLElement) {
     if (row.querySelector(".file-protected")) return;
     const nameEl = row.querySelector(".file-name, .file-card-name");
@@ -238,8 +239,8 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     badge.className = "file-protected";
     badge.title = t(locale(), "files.protected");
     badge.setAttribute("aria-label", t(locale(), "files.protected"));
-    badge.innerHTML = iconHTML("key", 16);
-    wrap.append(nameEl, badge);
+    badge.innerHTML = iconHTML("key", 24);
+    wrap.append(badge, nameEl);
   }
 
   function completeRow(item: UploadItem, row: HTMLElement) {

@@ -1089,13 +1089,17 @@ html.js .upload-form .text-editor {
 }
 
 .file-name-row .file-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .file-protected {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 24px;
+  height: 24px;
   color: var(--juice-400);
 }
 

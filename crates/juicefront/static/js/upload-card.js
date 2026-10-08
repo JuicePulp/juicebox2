@@ -136,7 +136,8 @@ function dismissRow(item) {
   if (id) removeUpload(id);
   removeItem(item);
 }
-// Key badge next to the filename for protected rows. Idempotent.
+// Key badge before the filename for protected rows (before, so filename
+// ellipsis can never push it out). Idempotent.
 function markRowProtected(row) {
   if (!row || row.querySelector(".file-protected")) return;
   var nameEl = row.querySelector(".file-name");
@@ -148,8 +149,8 @@ function markRowProtected(row) {
   badge.className = "file-protected";
   badge.title = t(LOCALE, "files.protected");
   badge.setAttribute("aria-label", t(LOCALE, "files.protected"));
-  badge.innerHTML = iconHTML("key", 16);
-  wrap.append(nameEl, badge);
+  badge.innerHTML = iconHTML("key", 24);
+  wrap.append(badge, nameEl);
 }
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
