@@ -36,6 +36,7 @@ pub use hosters::{
 };
 pub use reports::{
     AdminReportEntry, AdminReportsResponse, delete_report_handler, list_reports_handler,
+    preview_report_handler,
 };
 
 #[must_use]
@@ -88,6 +89,10 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
         .route(
             "/api/admin/report/{id}",
             axum::routing::delete(delete_report_handler),
+        )
+        .route(
+            "/api/admin/report/{id}/preview",
+            axum::routing::get(preview_report_handler),
         )
         .route(
             "/api/admin/bans",

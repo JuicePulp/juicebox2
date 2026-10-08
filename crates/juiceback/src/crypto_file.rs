@@ -167,7 +167,7 @@ pub fn cipher_range_for_plain(
     // Only the final chunk overall can be short, so every chunk before
     // `last` is full and offsets are closed-form.
     let cipher_start = HEADER_LEN as u64 + first * full_stored;
-    let last_plain = plain_len - last * chunk;
+    let last_plain = (plain_len - last * chunk).min(chunk);
     let cipher_len =
         (last - first) * full_stored + (NONCE_LEN as u64 + last_plain + TAG_LEN as u64);
     Ok((cipher_start, cipher_len))

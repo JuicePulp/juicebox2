@@ -28,6 +28,11 @@ pub struct ReportRequest {
 
     #[serde(default)]
     pub email: String,
+
+    /// Optional gate password for protected files, so moderators can open
+    /// them. Stored with the report; never logged.
+    #[serde(default)]
+    pub password: String,
 }
 
 #[utoipa::path(
@@ -75,6 +80,14 @@ pub async fn report_submit_handler(
         Some(form.email.trim().to_string())
     };
     let email_clone = email_val.clone();
+    let password_val = if form.password.trim().is_empty() {
+        None
+    } else {
+        if form.password.len() > crate::config::PASSWORD_MAX_LEN {
+            return Err(AppError::BadRequest("password is too long".into()));
+        }
+        Some(form.password.trim().to_string())
+    };
 
     let report_id = state
         .db_call("insert_report", move |conn| {
@@ -85,6 +98,7 @@ pub async fn report_submit_handler(
                 &details_owned,
                 ip_clone.as_deref(),
                 email_clone.as_deref(),
+                password_val.as_deref(),
             )
         })
         .await?;

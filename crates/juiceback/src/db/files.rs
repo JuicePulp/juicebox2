@@ -184,6 +184,10 @@ pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
 
 /// Record password-gate and encryption metadata for a completed upload.
 /// Passing `password_hash = None` marks the file public.
+///
+/// # Errors
+///
+/// Returns [`rusqlite::Error`] on database failure.
 pub fn set_protection(
     conn: &Connection,
     id: &str,
