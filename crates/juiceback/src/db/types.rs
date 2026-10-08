@@ -108,6 +108,22 @@ pub struct FileRecord {
     /// Hex-encoded 13-byte container header (lets juiceback serve Ranges
     /// without fetching ciphertext first).
     pub enc_header: Option<String>,
+
+    /// Password-wrapped per-file data key (base64 `nonce || ct || tag`).
+    /// `None` for public files and legacy (`key_version` 0) protected files.
+    pub dek_wrapped: Option<String>,
+
+    /// Base64 salt for the password-to-KEK derivation. Public by design
+    /// (like a password-hash salt); useless without the password.
+    pub dek_salt: Option<String>,
+
+    /// Global-key-wrapped copy of the data key (hex). Lets admins and
+    /// report moderators preview reported files; never leaves juiceback.
+    pub dek_escrow: Option<String>,
+
+    /// 0 = encrypted under the single global storage key (legacy),
+    /// 1 = encrypted under the per-file data key.
+    pub key_version: i64,
 }
 
 impl FileRecord {
@@ -142,6 +158,10 @@ impl FileRecord {
             password_hash: None,
             is_encrypted: false,
             enc_header: None,
+            dek_wrapped: None,
+            dek_salt: None,
+            dek_escrow: None,
+            key_version: 0,
         }
     }
 
@@ -151,13 +171,21 @@ impl FileRecord {
         self.password_hash.is_some()
     }
 
+    /// Whether this file uses a per-file data key (vs the legacy global
+    /// storage key). Only meaningful when [`Self::is_protected`].
+    #[must_use]
+    pub fn uses_per_file_key(&self) -> bool {
+        self.key_version == crate::crypto_file::KEY_VERSION_V1
+            && self.dek_wrapped.is_some()
+            && self.dek_salt.is_some()
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
     )]
     #[must_use]
-    pub fn from_upload_with_token(
-        id: String,
+    pub fn from_upload_with_token(        id: String,
         filename: String,
         mime_type: String,
         size_bytes: i64,
@@ -179,6 +207,37 @@ impl FileRecord {
             uploader_ip,
             storage_host,
         )
+    }
+}
+
+/// Password-gate plus encryption metadata written once a protected upload
+/// completes. Built where the cleartext password is still in memory, then
+/// only hashes/wrapped keys touch the database.
+#[derive(Debug, Clone)]
+pub struct ProtectionMaterial {
+    pub password_hash: Option<String>,
+    pub is_encrypted: bool,
+    pub enc_header: Option<String>,
+    pub dek_wrapped: Option<String>,
+    pub dek_salt: Option<String>,
+    pub dek_escrow: Option<String>,
+    pub key_version: i64,
+}
+
+impl ProtectionMaterial {
+    /// Legacy shape: global-key encryption, no per-file key material.
+    /// Used until each upload path mints per-file keys.
+    #[must_use]
+    pub fn legacy(password_hash: Option<String>, enc_header: Option<String>) -> Self {
+        Self {
+            password_hash,
+            is_encrypted: true,
+            enc_header,
+            dek_wrapped: None,
+            dek_salt: None,
+            dek_escrow: None,
+            key_version: 0,
+        }
     }
 }
 

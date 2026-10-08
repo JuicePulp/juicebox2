@@ -413,12 +413,13 @@ async fn finalize_stored_file(
             let owner = user_id.to_string();
             if password_hash.is_some() {
                 let rid = record.id.clone();
-                let hash = password_hash.map(str::to_string);
-                let header = enc_header.map(str::to_string);
+                let material = db::ProtectionMaterial::legacy(
+                    password_hash.map(str::to_string),
+                    enc_header.map(str::to_string),
+                );
                 if let Err(e) = state
                     .db_call("set_fetch_protection", move |db| {
-                        db::set_protection(db, &rid, hash.as_deref(), true, header.as_deref())
-                            .map(|_| ())
+                        db::set_protection(db, &rid, &material).map(|_| ())
                     })
                     .await
                 {

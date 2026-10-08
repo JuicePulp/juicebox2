@@ -37,6 +37,22 @@ pub const TAG_LEN: usize = 16;
 pub const MAGIC: &[u8; 4] = b"JBC1";
 /// Header length: 4B magic + 1B shift + 8B original size.
 pub const HEADER_LEN: usize = 13;
+/// Per-file data-key length (AES-256).
+pub const DEK_LEN: usize = 32;
+/// Random salt length for the password-to-KEK derivation.
+pub const DEK_SALT_LEN: usize = 16;
+/// Wrapped DEK length: nonce (12B) + DEK (32B) + tag (16B).
+pub const WRAPPED_DEK_LEN: usize = NONCE_LEN + DEK_LEN + TAG_LEN;
+/// `key_version` for files encrypted under a per-file data key.
+/// Version 0 is the legacy single global storage key.
+pub const KEY_VERSION_V1: i64 = 1;
+/// Argon2id cost for password-to-KEK derivation (matches the password
+/// verifier defaults: ~19 MiB, 2 passes, single lane).
+pub const KDF_MEM_KIB: u32 = 19456;
+/// Argon2id time cost for password-to-KEK derivation.
+pub const KDF_TIME: u32 = 2;
+/// Argon2id parallelism for password-to-KEK derivation.
+pub const KDF_LANES: u32 = 1;
 
 /// 256-bit storage key. Zeroized on drop; never logged or Debug-printed.
 ///
@@ -76,6 +92,90 @@ impl FileKey {
         let key = Key::<Aes256Gcm>::try_from(&self.0[..]).expect("FileKey always holds 32 bytes");
         Aes256Gcm::new(&key)
     }
+
+    /// Raw key bytes for wrapping operations (escrow, DEK wrap). The
+    /// returned reference borrows the zeroized backing store.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Fresh random 256-bit key for one protected file.
+    #[must_use]
+    pub fn generate() -> Self {
+        let mut bytes = [0_u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        Self(Zeroizing::new(bytes))
+    }
+}
+
+/// Fresh random salt for one file's password-to-KEK derivation.
+#[must_use]
+pub fn random_salt() -> [u8; DEK_SALT_LEN] {
+    let mut salt = [0_u8; DEK_SALT_LEN];
+    rand::rng().fill_bytes(&mut salt);
+    salt
+}
+
+/// Derive a 32-byte key-encryption key from `password` and `salt` with
+/// Argon2id at [`KDF_MEM_KIB`]/[`KDF_TIME`]/[`KDF_LANES`].
+///
+/// CPU-bound like password hashing: callers must run this on the blocking
+/// pool, never on async workers. The password never appears in errors.
+///
+/// # Errors
+///
+/// Returns [`CryptoError::Kdf`] when the parameters are rejected or the
+/// salt has the wrong length.
+pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
+    use argon2::{Algorithm, Argon2, Params, Version};
+    let params = Params::new(KDF_MEM_KIB, KDF_TIME, KDF_LANES, Some(DEK_LEN))
+        .map_err(|_| CryptoError::Kdf)?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut out = [0_u8; DEK_LEN];
+    argon
+        .hash_password_into(password.as_bytes(), salt, &mut out)
+        .map_err(|_| CryptoError::Kdf)?;
+    Ok(FileKey(Zeroizing::new(out)))
+}
+
+/// Wrap `dek` under `kek`: `nonce (12B) || ct || tag (16B)`.
+///
+/// # Errors
+///
+/// GCM encryption cannot fail for valid inputs; the error arm only guards
+/// API misuse.
+pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
+    let mut nonce = [0_u8; NONCE_LEN];
+    rand::rng().fill_bytes(&mut nonce);
+    let ct = kek
+        .cipher()
+        .encrypt(&Nonce::from(nonce), dek.as_bytes().as_slice())
+        .map_err(|_| CryptoError::Decrypt)?;
+    let mut out = Vec::with_capacity(WRAPPED_DEK_LEN);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+/// Unwrap a [`wrap_dek`] blob back into the file's data key.
+///
+/// # Errors
+///
+/// Returns [`CryptoError::Truncated`] on framing shortfall and
+/// [`CryptoError::Decrypt`] when the password (and therefore the KEK) is
+/// wrong or the bytes were tampered with.
+pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError> {
+    if wrapped.len() != WRAPPED_DEK_LEN {
+        return Err(CryptoError::Truncated);
+    }
+    let (nonce, body) = wrapped.split_at(NONCE_LEN);
+    let nonce = Nonce::try_from(nonce).map_err(|_| CryptoError::Truncated)?;
+    let plain = kek
+        .cipher()
+        .decrypt(&nonce, body)
+        .map_err(|_| CryptoError::Decrypt)?;
+    FileKey::from_bytes(&plain)
 }
 
 /// Failures for [`encrypt_reader`], [`decrypt_to_writer`], [`decrypt_range`],
@@ -94,6 +194,8 @@ pub enum CryptoError {
     RangeOutOfBounds,
     /// GCM authentication failed (wrong key or tampered bytes).
     Decrypt,
+    /// Password-to-key derivation failed (bad parameters, never key material).
+    Kdf,
     /// Underlying I/O failed.
     Io(String),
 }
@@ -107,6 +209,7 @@ impl fmt::Display for CryptoError {
             Self::LengthMismatch => write!(f, "plaintext length mismatch"),
             Self::RangeOutOfBounds => write!(f, "range outside file bounds"),
             Self::Decrypt => write!(f, "authentication failed"),
+            Self::Kdf => write!(f, "key derivation failed"),
             Self::Io(detail) => write!(f, "storage crypto i/o: {detail}"),
         }
     }
@@ -544,6 +647,81 @@ mod tests {
         assert_eq!(
             encrypt_reader(&test_key(), 9, &[1_u8; 10][..]).unwrap_err(),
             CryptoError::LengthMismatch
+        );
+    }
+
+    #[test]
+    fn dek_wrap_roundtrip() {
+        let kek = derive_kek("correct horse 999", &[7_u8; DEK_SALT_LEN]).unwrap();
+        let dek = FileKey::generate();
+        let wrapped = wrap_dek(&kek, &dek).unwrap();
+        assert_eq!(wrapped.len(), WRAPPED_DEK_LEN);
+        let back = unwrap_dek(&kek, &wrapped).unwrap();
+        assert_eq!(back.as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn dek_wraps_are_randomized() {
+        let kek = derive_kek("correct horse 999", &[7_u8; DEK_SALT_LEN]).unwrap();
+        let dek = FileKey::generate();
+        assert_ne!(wrap_dek(&kek, &dek).unwrap(), wrap_dek(&kek, &dek).unwrap());
+    }
+
+    #[test]
+    fn wrong_password_kek_fails_unwrap() {
+        let kek = derive_kek("correct horse 999", &[7_u8; DEK_SALT_LEN]).unwrap();
+        let dek = FileKey::generate();
+        let wrapped = wrap_dek(&kek, &dek).unwrap();
+        let wrong = derive_kek("wrong password", &[7_u8; DEK_SALT_LEN]).unwrap();
+        assert_eq!(unwrap_dek(&wrong, &wrapped).unwrap_err(), CryptoError::Decrypt);
+    }
+
+    #[test]
+    fn wrong_salt_kek_fails_unwrap() {
+        let kek = derive_kek("correct horse 999", &[7_u8; DEK_SALT_LEN]).unwrap();
+        let dek = FileKey::generate();
+        let wrapped = wrap_dek(&kek, &dek).unwrap();
+        let other = derive_kek("correct horse 999", &[8_u8; DEK_SALT_LEN]).unwrap();
+        assert_eq!(unwrap_dek(&other, &wrapped).unwrap_err(), CryptoError::Decrypt);
+    }
+
+    #[test]
+    fn tampered_wrap_fails() {
+        let kek = derive_kek("correct horse 999", &[7_u8; DEK_SALT_LEN]).unwrap();
+        let dek = FileKey::generate();
+        let mut wrapped = wrap_dek(&kek, &dek).unwrap();
+        wrapped[20] ^= 1;
+        assert_eq!(unwrap_dek(&kek, &wrapped).unwrap_err(), CryptoError::Decrypt);
+        assert_eq!(
+            unwrap_dek(&kek, &wrapped[..WRAPPED_DEK_LEN - 1]).unwrap_err(),
+            CryptoError::Truncated
+        );
+    }
+
+    #[test]
+    fn escrow_roundtrip_through_storage_key() {
+        let storage = test_key();
+        let dek = FileKey::generate();
+        let escrow = encrypt_chunk(&storage, dek.as_bytes()).unwrap();
+        let back = decrypt_chunk(&storage, &escrow).unwrap();
+        assert_eq!(back, dek.as_bytes());
+        assert_eq!(
+            FileKey::from_bytes(&back).unwrap().as_bytes(),
+            dek.as_bytes()
+        );
+    }
+
+    #[test]
+    fn dek_encrypts_container() {
+        let dek = FileKey::generate();
+        let plain = pattern(100_000);
+        let data = encrypt_reader(&dek, plain.len() as u64, &plain[..]).unwrap();
+        let mut out = Vec::new();
+        decrypt_to_writer(&dek, &data, &mut out).unwrap();
+        assert_eq!(out, plain);
+        assert_eq!(
+            decrypt_to_writer(&test_key(), &data, &mut Vec::new()).unwrap_err(),
+            CryptoError::Decrypt
         );
     }
 }

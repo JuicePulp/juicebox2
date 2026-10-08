@@ -38,6 +38,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("client_files.legacy_index", m08_client_files_legacy_index),
     ("files.protected_links", m09_files_protected_links),
     ("reports.password", m10_reports_password),
+    ("files.per_file_dek", m11_files_per_file_dek),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -176,6 +177,40 @@ fn m10_reports_password(conn: &Connection) -> Result<()> {
     if !has_column(conn, "reports", "password")? {
         conn.execute(
             "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
+    // Per-file data keys for password-gated files: the DEK wrapped by a
+    // password-derived KEK (`dek_wrapped`, base64) plus its salt
+    // (`dek_salt`, base64), and a global-key escrow copy (`dek_escrow`,
+    // hex) so admins/moderators can still preview reported files.
+    // `key_version` 0 = legacy single global key, 1 = per-file DEK.
+    // Existing protected rows keep working untouched (they stay version 0).
+    if !has_column(conn, "files", "dek_wrapped")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_wrapped TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_salt")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_salt TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_escrow")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_escrow TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "key_version")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN key_version INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
     }
