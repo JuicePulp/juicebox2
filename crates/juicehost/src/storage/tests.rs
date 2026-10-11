@@ -323,3 +323,180 @@ async fn local_cache_init() {
         Some("txt".into())
     );
 }
+
+#[tokio::test]
+async fn local_freeze_blocks_reads_with_frozen() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), None)
+        .await
+        .unwrap();
+    assert!(backend.freeze("fr1").await.unwrap());
+    assert!(backend.is_frozen("fr1").await.unwrap());
+    assert!(matches!(
+        backend.stat("fr1").await,
+        Err(StorageError::Frozen)
+    ));
+    assert!(matches!(
+        backend.get("fr1").await,
+        Err(StorageError::Frozen)
+    ));
+    assert!(matches!(
+        backend.get_stream("fr1").await,
+        Err(StorageError::Frozen)
+    ));
+    assert!(matches!(
+        backend.get_range_stream("fr1", 0, 2).await,
+        Err(StorageError::Frozen)
+    ));
+}
+
+#[tokio::test]
+async fn local_freeze_blocks_mutations() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), None)
+        .await
+        .unwrap();
+    backend.freeze("fr1").await.unwrap();
+    assert!(matches!(
+        backend.delete("fr1", None).await,
+        Err(StorageError::Frozen)
+    ));
+    assert!(matches!(
+        backend.rename("fr1", "fr2", None).await,
+        Err(StorageError::Frozen)
+    ));
+    backend
+        .put("other", "g.txt", Bytes::from("x"), None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        backend
+            .concat("tgt", "t.txt", &["fr1", "other"], None)
+            .await,
+        Err(StorageError::Frozen)
+    ));
+    
+    assert_eq!(backend.unfreeze("fr1").await.unwrap(), true);
+    assert!(!backend.is_frozen("fr1").await.unwrap());
+    assert_eq!(backend.get("fr1").await.unwrap().data.as_ref(), b"secret");
+}
+
+#[tokio::test]
+async fn local_freeze_is_idempotent_and_needs_existing_file() {
+    let (_dir, backend) = setup_local_backend().await;
+    assert!(matches!(
+        backend.freeze("ghost").await,
+        Err(StorageError::NotFound)
+    ));
+    assert!(matches!(
+        backend.unfreeze("ghost").await,
+        Err(StorageError::NotFound)
+    ));
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), None)
+        .await
+        .unwrap();
+    assert!(backend.freeze("fr1").await.unwrap());
+    assert!(backend.freeze("fr1").await.unwrap());
+    assert!(backend.unfreeze("fr1").await.unwrap());
+    assert!(backend.unfreeze("fr1").await.unwrap());
+    assert!(!backend.is_frozen("fr1").await.unwrap());
+}
+
+#[tokio::test]
+async fn local_freeze_rejects_invalid_ids() {
+    let (_dir, backend) = setup_local_backend().await;
+    assert!(backend.freeze("../evil").await.is_err());
+    assert!(backend.freeze("a.b").await.is_err());
+    assert!(!backend.is_frozen("../evil").await.unwrap());
+    assert!(!backend.is_frozen("").await.unwrap());
+}
+
+#[tokio::test]
+async fn local_freeze_marker_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), None)
+        .await
+        .unwrap();
+    backend.freeze("fr1").await.unwrap();
+    drop(backend);
+    let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
+    backend2.init_cache().await.unwrap();
+    assert!(backend2.is_frozen("fr1").await.unwrap());
+    assert!(matches!(
+        backend2.stat("fr1").await,
+        Err(StorageError::Frozen)
+    ));
+    assert!(backend2.unfreeze("fr1").await.unwrap());
+    assert_eq!(backend2.get("fr1").await.unwrap().data.as_ref(), b"secret");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn local_freeze_symlink_marker_fails_closed() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), None)
+        .await
+        .unwrap();
+    
+    symlink(dir.path().join("fr1.txt"), dir.path().join(".frz.fr1")).unwrap();
+    assert!(backend.is_frozen("fr1").await.unwrap());
+    assert!(matches!(
+        backend.stat("fr1").await,
+        Err(StorageError::Frozen)
+    ));
+    
+    drop(backend);
+    let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
+    backend2.init_cache().await.unwrap();
+    assert!(backend2.is_frozen("fr1").await.unwrap());
+}
+
+#[tokio::test]
+async fn link_or_rename_falls_back_when_hard_links_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"payload").await.unwrap();
+
+    let renamed = tokio::fs::rename(&src, &dst).await;
+    assert!(renamed.is_ok(), "same-directory rename must be available");
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
+    assert!(!tokio::fs::try_exists(&src).await.unwrap());
+}
+
+#[tokio::test]
+async fn link_or_rename_does_not_overwrite_existing_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"new").await.unwrap();
+    tokio::fs::write(&dst, b"old").await.unwrap();
+
+    let result = super::local::link_or_rename(&src, &dst).await;
+    assert!(
+        matches!(result, Err(StorageError::Conflict)),
+        "existing destination must yield Conflict, got {result:?}"
+    );
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"old");
+    assert_eq!(tokio::fs::read(&src).await.unwrap(), b"new");
+}
+
+#[tokio::test]
+async fn link_or_rename_publishes_when_destination_is_free() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"payload").await.unwrap();
+
+    super::local::link_or_rename(&src, &dst).await.unwrap();
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
+    assert!(!tokio::fs::try_exists(&src).await.unwrap());
+}

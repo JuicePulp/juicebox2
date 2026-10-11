@@ -1,0 +1,25 @@
+.brand{
+      display:inline-flex;
+      align-items:center;
+      gap:.45rem;
+      font-family:"Title","Unifont",monospace;
+      text-transform:uppercase;
+      font-weight:400;
+      letter-spacing:.02em;
+      color:#f97316;
+      white-space:nowrap;
+      text-decoration:none;
+      font-size:1.05rem;
+      text-shadow:
+        2px 0 0 #000,
+        -2px 0 0 #000,
+        0 2px 0 #000,
+        0 -2px 0 #000;
+    }
+    .brand sup{font-size:.65em}
+    .brand-logo{
+      width:28px;
+      height:28px;
+      flex:none;
+      border-radius:.35rem;
+    }

@@ -11,6 +11,8 @@
           { "not": { "href_matches": "/static/*" } },
           { "not": { "href_matches": "/file/*" } },
           { "not": { "href_matches": "/f/*" } },
+          { "not": { "href_matches": "/v/*" } },
+          { "not": { "href_matches": "/d/*" } },
           { "not": { "href_matches": "/upload*" } }
         ]
       },

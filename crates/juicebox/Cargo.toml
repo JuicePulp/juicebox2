@@ -11,7 +11,11 @@ publish = false
 juiceutils = { path = "../juiceutils" }
 libc.workspace = true
 # Process supervision only: spawn/kill children, watch for Ctrl-C/SIGTERM.
-tokio = { workspace = true, features = ["process", "signal", "macros", "rt-multi-thread", "sync", "time"] }
+# `full` (not the minimal subset) on purpose: the supervisor's inner
+# `cargo build -p juicehost -p juiceback -p juicefront` unifies tokio with
+# `full` anyway, so requesting it here keeps both builds on one tokio
+# variant instead of recompiling the tokio subtree on every switch.
+tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

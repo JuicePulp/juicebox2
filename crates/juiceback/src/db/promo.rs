@@ -1,0 +1,103 @@
+use std::collections::HashMap;
+
+use rusqlite::{Connection, Result, params};
+
+#[derive(Debug, Clone)]
+pub struct PromoCandidate {
+    pub id: String,
+    pub storage_host: String,
+    pub size_bytes: i64,
+    pub filename: String,
+}
+
+pub fn list_promo_candidates(
+    conn: &Connection,
+    min_expires_at: i64,
+    limit: i64,
+) -> Result<Vec<PromoCandidate>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, storage_host, size_bytes, filename FROM files
+         WHERE status = 'ready' AND tier = 'standard' AND expires_at > ?1
+         ORDER BY uploaded_at DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![min_expires_at, limit], |row| {
+        Ok(PromoCandidate {
+            id: row.get(0)?,
+            storage_host: row.get(1)?,
+            size_bytes: row.get(2)?,
+            filename: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn read_promo_state(
+    conn: &Connection,
+    ids: &[String],
+) -> Result<HashMap<String, (i64, i64, i64)>> {
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let placeholders: String = (1..=ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT file_id, views_seen, downloads_seen, checked_at FROM promo_state WHERE file_id IN ({placeholders})"
+    );
+    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ),
+        ))
+    })?;
+    for row in rows {
+        let (id, state) = row?;
+        out.insert(id, state);
+    }
+    Ok(out)
+}
+
+pub fn upsert_promo_state(conn: &Connection, rows: &[(String, i64, i64, i64)]) -> Result<()> {
+    for (id, views, downloads, checked_at) in rows {
+        conn.execute(
+            "INSERT INTO promo_state (file_id, views_seen, downloads_seen, checked_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(file_id) DO UPDATE SET
+                 views_seen = excluded.views_seen,
+                 downloads_seen = excluded.downloads_seen,
+                 checked_at = excluded.checked_at",
+            params![id, views, downloads, checked_at],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn prune_promo_state(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM promo_state WHERE file_id NOT IN (SELECT id FROM files)",
+        [],
+    )? as usize)
+}
+
+pub fn set_file_tier(conn: &Connection, id: &str, tier: &str, r2_key: &str) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE files SET tier = ?1, r2_key = ?2 WHERE id = ?3",
+        params![tier, r2_key, id],
+    )? as usize)
+}
+
+pub fn hot_usage(conn: &Connection) -> Result<(i64, i64)> {
+    conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM files WHERE tier = 'hot'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+}

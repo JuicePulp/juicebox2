@@ -13,6 +13,11 @@
     transition: opacity 0.2s ease;
     pointer-events: none;
   }
+
+
+.mdl-alias {
+    display: none;
+}
   .chord-indicator[hidden] {
     display: flex;
     opacity: 0;

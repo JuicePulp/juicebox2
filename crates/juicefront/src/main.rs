@@ -9,6 +9,7 @@ use axum::{
     body::Body,
     http::Request,
     middleware,
+    response::Response,
     routing::{any, get},
 };
 use mimalloc::MiMalloc;
@@ -52,6 +53,23 @@ fn static_base() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+async fn static_font_cache(req: Request<Body>, next: middleware::Next) -> Response<Body> {
+    let is_font = req.uri().path().rsplit('.').next().is_some_and(|ext| {
+        matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "woff2" | "woff" | "ttf" | "otf"
+        )
+    });
+    let mut res = next.run(req).await;
+    if is_font && res.status().is_success() {
+        res.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+    res
 }
 
 fn main() {
@@ -140,10 +158,14 @@ fn main() {
             .route("/", any(handlers::index))
             .route("/{locale}", any(handlers::index))
             .route("/{locale}/", any(handlers::index))
+            .route("/index.html", any(handlers::index))
+            .route("/{locale}/index.html", any(handlers::index))
             .route("/files", get(handlers::files_page))
             .route("/files/", get(handlers::files_page))
             .route("/{locale}/files", get(handlers::files_page))
             .route("/{locale}/files/", get(handlers::files_page))
+            .route("/files.html", get(handlers::files_page))
+            .route("/{locale}/files.html", get(handlers::files_page))
             .route("/download", get(handlers::download_page))
             .route("/download/", get(handlers::download_page))
             .route("/{locale}/download", get(handlers::download_page))
@@ -180,6 +202,7 @@ fn main() {
             .route("/admin/login", get(handlers::admin_login))
             .route("/admin/files", get(handlers::admin_files))
             .route("/admin/bans", get(handlers::admin_bans))
+            .route("/admin/hosters", get(handlers::admin_hosters))
             .route("/admin/reports", get(handlers::admin_reports))
             .route("/admin/feedback", get(handlers::admin_feedback))
             .route("/admin/announcement", get(handlers::admin_announcement))
@@ -198,7 +221,12 @@ fn main() {
                     "/static/styles",
                     revalidate().service(ServeDir::new(base.join("styles"))),
                 )
-                .nest_service("/static/assets", ServeDir::new(base.join("assets")))
+                .nest_service(
+                    "/static/assets",
+                    tower::ServiceBuilder::new()
+                        .layer(middleware::from_fn(static_font_cache))
+                        .service(ServeDir::new(base.join("assets"))),
+                )
                 .nest_service(
                     "/static/js",
                     revalidate().service(ServeDir::new(base.join("js"))),
@@ -227,7 +255,20 @@ fn main() {
                 admin::admin_guard,
             ))
             .layer(middleware::from_fn(juiceutils::add_security_headers))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                    if juiceutils::is_noisy_http_path(request.uri().path()) {
+                        tracing::Span::none()
+                    } else {
+                        tracing::info_span!(
+                            "http.request",
+                            method = %request.method(),
+                            path = request.uri().path(),
+                            version = ?request.version(),
+                        )
+                    }
+                }),
+            )
             .layer(NewSentryLayer::<Request<Body>>::new_from_top())
             .with_state(state.clone());
 

@@ -98,13 +98,14 @@ fn inline(text: &str) -> String {
 }
 
 fn apply_markup(text: &str, token: &str, strong: &str, em: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find(token) {
         let after = &rest[start + token.len()..];
         if let Some(end) = after.find(token) {
             out.push_str(&rest[..start]);
-            out.push_str(&format!("<{strong}>{}</{strong}>", &after[..end]));
+            let _ = write!(out, "<{strong}>{}</{strong}>", &after[..end]);
             rest = &after[end + token.len()..];
         } else {
             break;

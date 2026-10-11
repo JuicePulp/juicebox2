@@ -38,6 +38,23 @@ pub struct TusUpload {
     pub upload_mode: UploadMode,
 
     pub push_rx: Option<mpsc::Receiver<Result<Bytes, String>>>,
+
+    
+    
+    
+    pub password_hash: Option<String>,
+    
+    
+    
+    
+    pub dek: Option<crate::crypto_file::FileKey>,
+    
+    pub dek_wrapped: Option<String>,
+    
+    pub dek_salt: Option<String>,
+    
+    pub dek_escrow: Option<String>,
+    pub spool_path: Option<std::path::PathBuf>,
 }
 
 pub type TusMap = Arc<DashMap<String, TusUpload>>;

@@ -1,6 +1,6 @@
 @font-face {
   font-family: "Title";
-  src: url("/static/assets/title.woff2") format("woff2");
+  src: url("/static/assets/title.woff2?v=1") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -19,10 +19,12 @@
 
 .upload-header--centered {
   text-align: center;
+  container-type: inline-size;
 }
 
 .upload-header--left {
   text-align: left;
+  container-type: inline-size;
 }
 
 .upload-header__eyebrow {
@@ -62,6 +64,14 @@
   flex-shrink: 0;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+/* The 64px logo plus the pixel title only just fits a ~320px viewport;
+   drop the logo (keep the wordmark) when the header gets narrower. */
+@container (max-width: 320px) {
+  .upload-header__logo {
+    display: none;
+  }
 }
 .upload-header--left .upload-header__title {
   justify-content: flex-start;

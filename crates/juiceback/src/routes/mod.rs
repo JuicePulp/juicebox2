@@ -23,6 +23,7 @@ use crate::{
 pub mod admin;
 pub mod api_doc;
 pub mod fetch;
+pub mod gateway;
 pub mod health;
 pub mod identity;
 pub mod manage;
@@ -30,7 +31,9 @@ pub mod noscript;
 pub mod pairing;
 pub mod presence;
 pub mod register;
+pub mod stats;
 pub mod tus;
+pub mod unlock;
 pub mod upload;
 
 pub(crate) use health::openapi_json_handler;
@@ -143,11 +146,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    // TUS traffic (session creation, chunk PATCH, offset GET, session
-    // DELETE) gets its own generous budget: a parallel upload fans out
-    // dozens of requests in seconds and sustains a dozen per second on fast
-    // links, which would starve on the action governor and wedge uploads
-    // behind 429s. Abandoned sessions expire via the cleanup job.
+    
+    
+    
+    
+    
     let mut tus_data_builder = GovernorConfigBuilder::default();
     tus_data_builder.period(std::time::Duration::from_secs_f64(
         60.0 / f64::from(crate::constants::TUS_DATA_RATE_LIMIT_PER_MINUTE),
@@ -162,9 +165,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    // Reap stale per-IP buckets so NAT/IPv6 churn can't grow the governor
-    // stores without bound. `retain_recent` only drops buckets that are
-    // indistinguishable from fresh, so live limiters are untouched.
+    
+    
+    
     {
         let governors = [
             Arc::clone(&upload_governor_conf),
@@ -217,6 +220,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 header::HeaderName::from_static("upload-metadata"),
                 header::HeaderName::from_static("tus-resumable"),
                 header::HeaderName::from_static("x-delete-token"),
+                header::HeaderName::from_static("x-file-password"),
+                header::RANGE,
             ])
     };
 
@@ -238,6 +243,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/direct/complete",
             post(upload::direct_upload_complete_handler),
+        )
+        .route(
+            "/direct/parallel/reserve",
+            post(upload::direct_parallel_reserve_handler),
+        )
+        .route(
+            "/direct/parallel/complete",
+            post(upload::direct_parallel_complete_handler),
         )
         .layer(GovernorLayer::new(upload_governor_conf.clone()))
         .layer(middleware::from_fn(rate_limit_error_mapper))
@@ -268,6 +281,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let small_payload_routes = Router::new()
         .route("/api/owned-files", post(manage::owned_files_handler))
+        .route("/api/gateway/params/{id}", get(gateway::params_handler))
+        .route("/api/gateway/unlock", post(gateway::unlock_handler))
         .route(
             "/api/client-files",
             get(manage::list_client_files_handler).post(manage::put_client_files_handler),
@@ -307,14 +322,28 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/file/{id}/renew", post(manage::renew_file_id_handler))
         .route("/file/{id}", delete(manage::delete_file_handler))
         .route(
+            "/file/{id}/unlock",
+            get(unlock::unlock_page_handler).post(unlock::unlock_submit_handler),
+        )
+        .route(
+            "/file/{id}/content",
+            get(unlock::content_handler).head(unlock::content_handler),
+        )
+        .route(
             "/internal/file/{id}/status",
             get(upload::file_status_handler),
+        )
+        .route(
+            "/internal/resolve/{id}",
+            get(upload::resolve_file_handler),
         )
         .route(
             "/internal/alias/{old_id}",
             get(manage::resolve_alias_handler),
         )
         .route("/internal/ban-snapshot", get(ban_snapshot_handler))
+        .route("/internal/stats/hit", post(stats::hit_handler))
+        .route("/internal/stats/visit", post(stats::visit_handler))
         .route("/file/{id}/delete", post(manage::delete_file_form_handler))
         .route("/file/{id}/rename", post(manage::rename_file_form_handler))
         .merge(small_payload_routes)
@@ -353,13 +382,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn(add_security_headers))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-                tracing::info_span!(
-                    "http.request",
-                    method = %request.method(),
-                    path = request.uri().path(),
-                    version = ?request.version(),
-                    client_ip = tracing::field::Empty,
-                )
+                if juiceutils::is_noisy_http_path(request.uri().path()) {
+                    tracing::Span::none()
+                } else {
+                    tracing::info_span!(
+                        "http.request",
+                        method = %request.method(),
+                        path = request.uri().path(),
+                        version = ?request.version(),
+                        client_ip = tracing::field::Empty,
+                    )
+                }
             }),
         )
         .layer(NewSentryLayer::<Request<Body>>::new_from_top())

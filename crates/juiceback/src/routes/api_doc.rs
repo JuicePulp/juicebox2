@@ -6,9 +6,9 @@ use crate::{
         admin::{
             AdminBansResponse, AdminFeedbackEntry, AdminFeedbackResponse, AdminFileEntry,
             AdminFilesResponse, AdminHostersResponse, AdminReportEntry, AdminReportsResponse,
-            AnnouncementRequest, AnnouncementResponse, BanExportEntry, BanExportResponse,
-            BanImportEntry, BanImportRequest, BanImportResponse, BanIpRequest, CheckResponse,
-            HosterBanRequest, LoginRequest, LoginResponse,
+            AdminStatsOverview, AnnouncementRequest, AnnouncementResponse, BanExportEntry,
+            BanExportResponse, BanImportEntry, BanImportRequest, BanImportResponse, BanIpRequest,
+            CheckResponse, HosterBanRequest, LoginRequest, LoginResponse,
         },
         manage::{
             ClientFilesRequest, ClientFilesResponse, FileInfoResponse, OwnedFilesRequest,
@@ -20,6 +20,7 @@ use crate::{
         },
         presence::{DeviceListResponse, PresenceDevice},
         register::{RegisterRequest, RegisterResponse},
+        stats::{HitRequest, VisitRequest},
         upload::{ReserveResponse, ReserveUploadRequest, UploadResponse},
     },
 };
@@ -43,6 +44,8 @@ use crate::{
         crate::routes::upload::multipart::reserve_upload_handler,
         crate::routes::upload::direct::direct_upload_reserve_handler,
         crate::routes::upload::direct::direct_upload_complete_handler,
+        crate::routes::upload::parallel::direct_parallel_reserve_handler,
+        crate::routes::upload::parallel::direct_parallel_complete_handler,
         crate::routes::tus::create::create_upload_handler,
         crate::routes::tus::query::get_upload_handler,
         crate::routes::tus::patch::patch_upload_handler,
@@ -77,7 +80,11 @@ use crate::{
         crate::routes::register::register_handler,
 
         crate::routes::upload::internal::file_status_handler,
+        crate::routes::upload::internal::resolve_file_handler,
         crate::routes::health::ban_snapshot_handler,
+
+        crate::routes::stats::hit_handler,
+        crate::routes::stats::visit_handler,
 
         crate::routes::fetch::handlers::fetch_start_handler,
         crate::routes::fetch::handlers::fetch_status_handler,
@@ -88,6 +95,7 @@ use crate::{
         crate::routes::admin::auth::check_handler,
         crate::routes::admin::files::list_files_handler,
         crate::routes::admin::files::delete_file_handler,
+        crate::routes::admin::stats::stats_overview_handler,
         crate::routes::admin::reports::list_reports_handler,
         crate::routes::admin::reports::delete_report_handler,
         crate::routes::admin::feedback::list_feedback_handler,
@@ -111,6 +119,10 @@ use crate::{
         crate::routes::upload::direct::DirectUploadReserveRequest,
         crate::routes::upload::direct::DirectUploadReserveResponse,
         crate::routes::upload::direct::DirectUploadCompleteRequest,
+        crate::routes::upload::parallel::DirectParallelReserveRequest,
+        crate::routes::upload::parallel::DirectParallelReserveResponse,
+        crate::routes::upload::parallel::DirectParallelPart,
+        crate::routes::upload::parallel::DirectParallelCompleteRequest,
 
         FileInfoResponse,
         RenewResponse,
@@ -131,6 +143,7 @@ use crate::{
 
         AdminFilesResponse,
         AdminFileEntry,
+        AdminStatsOverview,
         AdminReportsResponse,
         AdminReportEntry,
         AdminFeedbackResponse,
@@ -159,6 +172,8 @@ use crate::{
 
         RegisterRequest,
         RegisterResponse,
+        HitRequest,
+        VisitRequest,
         crate::routes::fetch::FetchStartRequest,
         crate::routes::fetch::FetchStartResponse,
         crate::routes::fetch::FetchStatusResponse,

@@ -24,6 +24,11 @@ pub struct FetchStartRequest {
 
     #[serde(default)]
     pub youtube_video_codec: Option<String>,
+
+    
+    
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -46,6 +51,12 @@ pub struct FetchFileResponse {
     pub expires_at: i64,
 
     pub delete_token: String,
+
+    #[serde(default)]
+    pub protected: bool,
+
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -78,6 +89,14 @@ pub(crate) type FetchResult = Result<String, String>;
 
 pub(crate) enum ByteSource {
     Tunnel(String),
+
+    BunService {
+        fetch_url: String,
+        api_key: String,
+        payload_url: String,
+        audio_only: bool,
+        max_height: u32,
+    },
 
     LocalFile(PathBuf),
 }

@@ -9,9 +9,11 @@ pub mod files;
 pub mod hosters;
 pub mod maintenance;
 pub mod paginated;
+pub mod promo;
 pub mod reports;
 pub mod schema;
 pub mod sessions;
+pub mod stats;
 pub mod types;
 
 #[cfg(test)]
@@ -27,7 +29,9 @@ pub use files::*;
 pub use hosters::*;
 pub use maintenance::*;
 pub use paginated::*;
+pub use promo::*;
 pub use reports::*;
 pub use schema::*;
 pub use sessions::*;
+pub use stats::*;
 pub use types::*;

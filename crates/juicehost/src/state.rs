@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{config::Config, storage::StorageBackend};
+use crate::{
+    config::Config,
+    storage::{R2Store, StorageBackend},
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -38,9 +41,6 @@ pub struct AppState {
 
     pub ban_list_file: Option<std::path::PathBuf>,
 
-    pub ban_sync_url: Option<String>,
-
-    pub ban_sync_interval: u64,
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
     pub max_range_response_bytes: u64,
     pub max_concat_parts: usize,
@@ -48,6 +48,8 @@ pub struct AppState {
     pub tcp_request_total: std::time::Duration,
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
     pub download_semaphore: Arc<tokio::sync::Semaphore>,
+
+    pub r2: Option<Arc<R2Store>>,
 
     pub backend_client: reqwest::Client,
 }
@@ -74,8 +76,6 @@ impl AppState {
             ticket_jwt_secret: config.ticket_jwt_secret.clone(),
             ban_list: Arc::new(juiceutils::ban::BanList::new(config.ip_pepper.clone())),
             ban_list_file: config.ban_list_file.clone(),
-            ban_sync_url: config.ban_sync_url.clone(),
-            ban_sync_interval: config.ban_sync_interval,
             trusted_proxy_cidrs: config.trusted_proxy_cidrs.clone(),
             max_range_response_bytes: config.max_range_response_bytes,
             max_concat_parts: config.max_concat_parts,
@@ -85,6 +85,28 @@ impl AppState {
             download_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 config.max_concurrent_downloads,
             )),
+            r2: match (
+                config.r2_bucket.as_deref(),
+                config.r2_endpoint.as_deref(),
+                config.r2_access_key.as_deref(),
+                config.r2_secret_key.as_deref(),
+            ) {
+                (Some(bucket), Some(endpoint), Some(access), Some(secret))
+                    if !bucket.is_empty() && !endpoint.is_empty() =>
+                {
+                    match R2Store::new(bucket, endpoint, &config.r2_region, access, secret) {
+                        Ok(store) => {
+                            tracing::info!("R2 hot-tier enabled: bucket={bucket}");
+                            Some(Arc::new(store))
+                        }
+                        Err(e) => {
+                            tracing::error!("R2 hot-tier disabled: client build failed: {e}");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            },
             backend_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(2))
                 .build()

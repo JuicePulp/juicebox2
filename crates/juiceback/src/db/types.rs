@@ -29,6 +29,8 @@ pub struct ReportRecord {
     pub reporter_ip: Option<String>,
     pub email: Option<String>,
     pub created_at: i64,
+
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -95,6 +97,24 @@ pub struct FileRecord {
     pub storage_host: Option<String>,
 
     pub status: String,
+
+    pub tier: String,
+
+    pub r2_key: String,
+
+    pub password_hash: Option<String>,
+
+    pub is_encrypted: bool,
+
+    pub enc_header: Option<String>,
+
+    pub dek_wrapped: Option<String>,
+
+    pub dek_salt: Option<String>,
+
+    pub dek_escrow: Option<String>,
+
+    pub key_version: i64,
 }
 
 impl FileRecord {
@@ -126,7 +146,28 @@ impl FileRecord {
             uploader_ip,
             storage_host,
             status: "ready".to_string(),
+            tier: "standard".to_string(),
+            r2_key: String::new(),
+            password_hash: None,
+            is_encrypted: false,
+            enc_header: None,
+            dek_wrapped: None,
+            dek_salt: None,
+            dek_escrow: None,
+            key_version: 0,
         }
+    }
+
+    #[must_use]
+    pub fn is_protected(&self) -> bool {
+        self.password_hash.is_some()
+    }
+
+    #[must_use]
+    pub fn uses_per_file_key(&self) -> bool {
+        self.key_version == crate::crypto_file::KEY_VERSION_V1
+            && self.dek_wrapped.is_some()
+            && self.dek_salt.is_some()
     }
 
     #[expect(
@@ -157,6 +198,32 @@ impl FileRecord {
             uploader_ip,
             storage_host,
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProtectionMaterial {
+    pub password_hash: Option<String>,
+    pub is_encrypted: bool,
+    pub enc_header: Option<String>,
+    pub dek_wrapped: Option<String>,
+    pub dek_salt: Option<String>,
+    pub dek_escrow: Option<String>,
+    pub key_version: i64,
+}
+
+impl ProtectionMaterial {
+    #[must_use]
+    pub fn legacy(password_hash: Option<String>, enc_header: Option<String>) -> Self {
+        Self {
+            password_hash,
+            is_encrypted: true,
+            enc_header,
+            dek_wrapped: None,
+            dek_salt: None,
+            dek_escrow: None,
+            key_version: 0,
+        }
     }
 }
 

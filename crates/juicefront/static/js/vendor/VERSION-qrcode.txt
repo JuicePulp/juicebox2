@@ -1,0 +1,2 @@
+qrcode-generator 2.0.4 (dist/qrcode.mjs, MIT, Kazuhiko Arase)
+Vendored for the file QR modal; loaded lazily by ../qr.js.

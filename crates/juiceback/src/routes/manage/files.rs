@@ -33,29 +33,40 @@ pub struct FileInfoResponse {
     pub uploaded_at: i64,
     pub expires_at: i64,
     pub url: String,
+    #[serde(default)]
+    pub delete_token: String,
     pub storage_host: Option<String>,
     pub status: String,
+    #[serde(default)]
+    pub protected: bool,
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 impl FileInfoResponse {
     #[must_use]
-    pub fn from_record(record: FileRecord, public_base_url: &str) -> Self {
-        let url = crate::utils::public_url(
-            public_base_url,
+    pub fn from_record(record: FileRecord, config: &crate::config::Config) -> Self {
+        let url = crate::utils::share_link(
+            config,
             record.storage_host.as_deref(),
             &record.id,
             &record.filename,
         );
+        let protected = record.is_protected();
+        let is_encrypted = record.is_encrypted;
         Self {
             id: record.id,
             filename: record.filename,
-            mime_type: record.mime_type,
             size_bytes: record.size_bytes,
+            mime_type: record.mime_type,
             uploaded_at: record.uploaded_at,
             expires_at: record.expires_at,
             url,
+            delete_token: String::new(),
             storage_host: record.storage_host,
             status: record.status,
+            protected,
+            is_encrypted,
         }
     }
 }
@@ -115,7 +126,7 @@ pub async fn file_info_handler(
         headers,
         Json(FileInfoResponse::from_record(
             record,
-            &state.config.public_base_url,
+            &state.config,
         )),
     ))
 }
@@ -128,7 +139,7 @@ pub async fn file_info_handler(
     ),
     request_body(content_type = "application/x-www-form-urlencoded", description = "Form with a 'token' field containing the delete token"),
     responses(
-        (status = 302, description = "Redirects to /files.html?deleted={id}"),
+        (status = 302, description = "Redirects to /files?deleted={id}"),
         (status = 403, description = "Invalid delete token"),
         (status = 404, description = "File not found"),
     ),
@@ -137,11 +148,17 @@ pub async fn file_info_handler(
 pub async fn delete_file_form_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Form(_params): Form<noscript::DeleteRequest>,
-) -> Result<Redirect, AppError> {
+) -> Result<Response, AppError> {
     delete_file_inner(&state, &user_id, &id, None).await?;
-    Ok(Redirect::to(&format!("/files.html?deleted={id}")))
+    let mut response = Redirect::to(&format!("/files?deleted={id}")).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        noscript::remove_file_cookie_header(&headers, &id),
+    );
+    Ok(response)
 }
 
 async fn delete_file_inner(
@@ -196,9 +213,7 @@ async fn delete_file_inner(
 
     crate::cloudflare::purge_file(
         &state.config,
-        id,
-        &record.filename,
-        record.storage_host.as_deref(),
+        &record,
     );
 
     tracing::info!("delete: id={id}");
@@ -224,12 +239,17 @@ pub async fn delete_file_handler(
     UserId(user_id): UserId,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<StatusCode, AppError> {
+) -> Result<(HeaderMap, StatusCode), AppError> {
     let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
 
     delete_file_inner(&state, &user_id, &id, token).await?;
 
-    Ok(StatusCode::NO_CONTENT)
+    let mut out = HeaderMap::new();
+    out.insert(
+        axum::http::header::SET_COOKIE,
+        crate::routes::noscript::remove_file_cookie_header(&headers, &id),
+    );
+    Ok((out, StatusCode::NO_CONTENT))
 }
 
 #[utoipa::path(
@@ -255,7 +275,7 @@ pub async fn renew_file_id_handler(
     headers: HeaderMap,
     Path(id): Path<String>,
     body: Option<Json<RenewRequest>>,
-) -> Result<Json<RenewResponse>, AppError> {
+) -> Result<(HeaderMap, Json<RenewResponse>), AppError> {
     let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
     let id2 = id.clone();
     let record = state
@@ -304,8 +324,8 @@ pub async fn renew_file_id_handler(
     )
     .await?;
 
-    let url = crate::utils::public_url(
-        &state.config.public_base_url,
+    let url = crate::utils::share_link(
+        &state.config,
         record.storage_host.as_deref(),
         &new_id,
         &record.filename,
@@ -313,9 +333,7 @@ pub async fn renew_file_id_handler(
 
     crate::cloudflare::purge_file(
         &state.config,
-        &id,
-        &record.filename,
-        record.storage_host.as_deref(),
+        &record,
     );
 
     tracing::info!(
@@ -325,13 +343,21 @@ pub async fn renew_file_id_handler(
         is_custom
     );
 
-    Ok(Json(RenewResponse {
-        id: new_id,
-        url,
-        filename: record.filename,
-        expires_at: record.expires_at,
-        custom: is_custom,
-    }))
+    let mut headers_out = HeaderMap::new();
+    headers_out.insert(
+        header::SET_COOKIE,
+        noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token),
+    );
+    Ok((
+        headers_out,
+        Json(RenewResponse {
+            id: new_id,
+            url,
+            filename: record.filename,
+            expires_at: record.expires_at,
+            custom: is_custom,
+        }),
+    ))
 }
 
 pub async fn rename_file_form_handler(
@@ -387,7 +413,7 @@ pub async fn rename_file_form_handler(
         noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token);
 
     tracing::info!("rename form: old_id={id} new_id={new_id}");
-    let mut response = Redirect::to("/files.html?renamed=1").into_response();
+    let mut response = Redirect::to("/files?renamed=1").into_response();
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie_hdr);
@@ -421,8 +447,8 @@ pub async fn resolve_alias_handler(
                 .db_call("get_file", move |db| db::get_file(db, &id))
                 .await?;
             if let Some(rec) = record {
-                let url = crate::utils::public_url(
-                    &state.config.public_base_url,
+                let url = crate::utils::share_link(
+                    &state.config,
                     rec.storage_host.as_deref(),
                     &new_id,
                     &rec.filename,

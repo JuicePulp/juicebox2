@@ -1,34 +1,54 @@
-.rttinfo {
+.rttoolbar {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--juice-400);
-  font-size: 0.875rem;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  width: max-content;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  background-color: var(--juice-900);
+  border: 1px solid var(--juice-700);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  gap: 0.75rem;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.rttlabel-group {
+.rttoolbar__header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
 }
 
-.rttlabel {
-  color: var(--juice-300);
-  font-size: 18px;
-}
-
-.rtticon {
-  color: var(--orange-500);
-  width: 24px;
-  height: 24px;
+.host-btn--toolbar {
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.rttlabel {
+  flex: none;
+  margin: 0;
+  color: var(--juice-100);
+  font-size: 16bpx;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.rttlabel-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rtticon {
+  display: inline-flex;
+  flex: none;
+  color: var(--juice-300);
 }
 
 .rtticon svg {
@@ -42,18 +62,21 @@
   overflow: hidden;
   display: inline-flex;
   align-items: center;
+  align-self: center;
+  flex: none;
 }
 
 .rttvalue-wrapper {
   display: flex;
+  align-items: center;
   gap: 0.3em;
+  position: relative;
   font-family: "Secondary", "Unifont", monospace;
   font-size: 18px;
   color: var(--juice-200);
 }
 
 .rttnumber,
-.rttunit,
 .rttunit-base,
 .rttunit-s {
   display: inline-block;
@@ -72,12 +95,15 @@
 .animate-up-enter {
   animation: slide-up-enter 0.15s ease-out forwards;
 }
+
 .animate-down-enter {
   animation: slide-down-enter 0.15s ease-out forwards;
 }
+
 .animate-up-exit {
   animation: slide-up-exit 0.15s ease-out forwards;
 }
+
 .animate-down-exit {
   animation: slide-down-exit 0.15s ease-out forwards;
 }
@@ -92,6 +118,7 @@
     opacity: 1;
   }
 }
+
 @keyframes slide-down-enter {
   from {
     transform: translateY(-100%);
@@ -102,6 +129,7 @@
     opacity: 1;
   }
 }
+
 @keyframes slide-up-exit {
   from {
     transform: translateY(0);
@@ -112,6 +140,7 @@
     opacity: 0;
   }
 }
+
 @keyframes slide-down-exit {
   from {
     transform: translateY(0);
@@ -123,109 +152,214 @@
   }
 }
 
-.slider-wrapper {
+.rtt-options {
   position: relative;
-  width: 100%;
-  height: 24px;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  background-color: var(--juice-800);
+  border: 1px solid var(--juice-700);
+  border-radius: 9999px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  cursor: ew-resize;
 }
 
-.rttslider {
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  background: var(--juice-800);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-  margin-top: 6px;
-  z-index: 2;
-  touch-action: none;
-}
-
-.rttslider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  background: var(--orange-500);
-  border: 2px solid var(--juice-900);
-  border-radius: 50%;
-  cursor: pointer;
-  transition:
-    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s;
-}
-.rttslider:hover::-webkit-slider-thumb {
-  background: var(--orange-400);
-  transform: scale(1.15);
-}
-.rttslider:active::-webkit-slider-thumb {
-  transform: scale(0.9);
-}
-
-.rttslider:focus-visible::-webkit-slider-thumb {
-  outline: 2px solid var(--orange-400);
-  outline-offset: 3px;
-}
-
-.rttslider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--orange-500);
-  border: 2px solid var(--juice-900);
-  border-radius: 50%;
-  cursor: pointer;
-  transition:
-    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s;
-}
-.rttslider:hover::-moz-range-thumb {
-  background: var(--orange-400);
-  transform: scale(1.15);
-}
-.rttslider:active::-moz-range-thumb {
-  transform: scale(0.9);
-}
-
-.rttslider:focus-visible::-moz-range-thumb {
-  outline: 2px solid var(--orange-400);
-  outline-offset: 3px;
-}
-
-.slider-ticks {
+.rtt-dragthumb {
   position: absolute;
-  top: 18px;
-  left: 0;
-  width: 100%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  max-width: 70%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  background-color: var(--orange-600);
+  color: #fff;
+  font-family: "Num", "General", "Unifont", monospace;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
   pointer-events: none;
-  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  z-index: 3;
 }
 
-.tick {
-  position: absolute;
-  left: var(--tick-left, 0);
-  width: 2px;
-  height: 4px;
-  background-color: var(--juice-700);
-  border-radius: 1px;
-  transform: translateX(-50%);
-  transition:
-    background-color 0.3s ease,
-    height 0.3s ease,
-    transform 0.3s ease;
+.rtt-dragthumb.on {
+  opacity: 1;
 }
-.tick.active {
+
+/* While a drag is held, the strip's checked pill goes visually neutral so
+   the floating chip is the single selected thing on screen. */
+.rtt-options.rtt-dragging .rtt-option:has(input:checked) {
+  background-color: transparent;
+}
+
+.rtt-options.rtt-dragging .rtt-option:has(input:checked) span {
+  color: var(--juice-400);
+}
+
+.rtt-options::-webkit-scrollbar {
+  display: none;
+}
+
+.rtt-options[hidden] {
+  display: none !important;
+}
+
+/* Tier grouping for the mobile chip layout. Transparent on desktop so the
+   flat segmented pill renders exactly as before. */
+.rtt-tier {
+  display: contents;
+}
+
+.rtt-option {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.rtt-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rtt-option span {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0.5rem 0.25rem;
+  font-size: 16px;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--juice-400);
+  font-family: "Num", "General", "Unifont", monospace;
+  transition: color 0.15s ease;
+}
+
+.rtt-option:hover {
+  background-color: var(--juice-700);
+}
+
+.rtt-option:hover span {
+  color: var(--juice-100);
+}
+
+.rtt-option:has(input:checked) {
+  background-color: var(--orange-600);
+}
+
+.rtt-option:has(input:checked) span {
+  color: #fff;
+}
+
+.rtt-option:has(input:checked):hover {
   background-color: var(--orange-500);
-  height: 6px;
-  transform: translateX(-50%) scaleY(1.5);
+}
+
+.rtt-option input:focus-visible + span {
+  outline: 2px solid var(--orange-400);
+  outline-offset: -2px;
+}
+
+.rtt-divider {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  background-color: var(--juice-700);
 }
 
 @media (max-width: 768px) {
   .rttoolbar {
+    padding: 0.6rem 0.75rem;
+    gap: 0.6rem;
+  }
+
+  .rtt-options {
     flex-direction: column;
     align-items: stretch;
-    gap: 1rem;
+    gap: 0.5rem;
+    padding: 0;
+    border: none;
+    background: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .rtt-tier {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .rtt-option {
+    margin-left: -1px;
+    border: 1px solid var(--juice-700);
+    border-radius: 0;
+    background-color: var(--juice-800);
+  }
+
+  .rtt-tier > .rtt-option:first-child {
+    margin-left: 0;
+    border-top-left-radius: 9999px;
+    border-bottom-left-radius: 9999px;
+  }
+
+  .rtt-tier > .rtt-option:last-child {
+    border-top-right-radius: 9999px;
+    border-bottom-right-radius: 9999px;
+  }
+
+  .rtt-option:has(input:checked) {
+    border-color: transparent;
+    z-index: 1;
+  }
+
+  .rtt-option span {
+    padding: 0.45rem 0.75rem;
+  }
+
+  .rtt-divider {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rtt-option {
+    transition: none;
+  }
+
+  .rtt-option span {
+    transition: none;
+  }
+
+  .animate-up-enter,
+  .animate-down-enter,
+  .animate-up-exit,
+  .animate-down-exit {
+    animation: none;
   }
 }

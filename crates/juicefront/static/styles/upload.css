@@ -4,7 +4,7 @@
 
 @font-face {
   font-family: "General";
-  src: url("/static/assets/general-cyrillic-ext.woff2") format("woff2");
+  src: url("/static/assets/general-cyrillic-ext.woff2?v=1") format("woff2");
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
   font-weight: normal;
   font-style: normal;
@@ -13,7 +13,7 @@
 
 @font-face {
   font-family: "General";
-  src: url("/static/assets/general-cyrillic.woff2") format("woff2");
+  src: url("/static/assets/general-cyrillic.woff2?v=1") format("woff2");
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
   font-weight: normal;
   font-style: normal;
@@ -22,7 +22,7 @@
 
 @font-face {
   font-family: "General";
-  src: url("/static/assets/general-latin-ext.woff2") format("woff2");
+  src: url("/static/assets/general-latin-ext.woff2?v=1") format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
   font-weight: normal;
   font-style: normal;
@@ -31,7 +31,7 @@
 
 @font-face {
   font-family: "General";
-  src: url("/static/assets/general-latin.woff2") format("woff2");
+  src: url("/static/assets/general-latin.woff2?v=1") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
   font-weight: normal;
   font-style: normal;
@@ -40,7 +40,15 @@
 
 @font-face {
   font-family: "Secondary";
-  src: url("/static/assets/secondary.woff2") format("woff2");
+  src: url("/static/assets/secondary.woff2?v=1") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Num";
+  src: url("/static/assets/num.woff2?v=1") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -48,7 +56,7 @@
 
 @font-face {
   font-family: "Unifont";
-  src: url("/static/assets/unifont.woff2") format("woff2");
+  src: url("/static/assets/unifont.woff2?v=1") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -413,23 +421,14 @@ html[data-banned] .upload-tabs {
   border-bottom: none;
 }
 
-.upload-tabs--mobile {
-  display: none;
-}
-
-/* JS on: the File | Video Upload | Text strip is the primary tab strip at
- * every width, not just <=768px. The desktop strip is `.nojs-only`, so with
- * JS the tabs must come from here or the upload-mode selector (and the Video
- * upload entry point) silently disappears on wider / desktop-mode viewports.
+/* Single tab strip shared by JS and no-JS: the File | Video | Text labels
+ * below the retention toolbar always come from this one element.
  */
-html.js .upload-tabs--mobile {
-  display: flex;
-}
 
-/* Tabs are always visible with JS, so whatever panel sits below loses its top
+/* Tabs are always visible, so whatever panel sits below loses its top
    corners at every width. */
-html.js .upload-form .drop-zone,
-html.js .upload-form .text-editor {
+.upload-form .drop-zone,
+.upload-form .text-editor {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
@@ -1080,6 +1079,33 @@ html.js .upload-form .text-editor {
   font-family: "Secondary", "Unifont", monospace;
 }
 
+.file-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.file-name-row .file-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.file-protected {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  color: var(--juice-400);
+}
+
+.file-protected svg {
+  display: block;
+}
+
 .file-size {
   color: var(--juice-500);
   font-size: 0.875rem;
@@ -1516,13 +1542,6 @@ html.js .upload-form .text-editor {
   ::view-transition-new(page-content) {
     animation: none;
   }
-
-  html[data-astro-transition-fallback="old"]
-    ::view-transition-old(page-content),
-  html[data-astro-transition-fallback="old"]
-    ::view-transition-new(page-content) {
-    animation: none;
-  }
 }
 
 @keyframes smooth-slide-from-right {
@@ -1547,42 +1566,12 @@ html.js .upload-form .text-editor {
   }
 }
 
-@keyframes smooth-slide-from-left {
-  0% {
-    opacity: 0;
-    transform: translateX(-30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes smooth-slide-to-right {
-  0% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(30px);
-  }
-}
-
 ::view-transition-old(page-content) {
   animation: smooth-slide-to-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 ::view-transition-new(page-content) {
   animation: smooth-slide-from-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-html[data-astro-transition-fallback="old"] ::view-transition-old(page-content) {
-  animation: smooth-slide-to-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
-  animation: smooth-slide-from-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .action-btn:active,
@@ -1862,7 +1851,7 @@ html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
 .pair-code__code {
   opacity: 1;
   transform: translateY(0);
-  font-family: "Primary", "Unifont", monospace;
+  font-family: "Num", "Unifont", monospace;
   font-size: 2rem;
   letter-spacing: 0.15em;
   color: var(--juice-100);

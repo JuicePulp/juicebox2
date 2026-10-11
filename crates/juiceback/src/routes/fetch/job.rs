@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::{
+    bun::{bun_fetch_configured, run_bun_tier},
     store::download_and_store,
     types::{ByteSource, FetchResult},
     ytdlp::{run_ytdlp_tier, ytdlp_enabled},
@@ -18,11 +19,20 @@ pub(crate) async fn run_fetch_job(
     source_url: String,
     opts: FetchOptions,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) {
     let timeout = std::time::Duration::from_secs(crate::constants::FETCH_JOB_TIMEOUT_SECS);
     match tokio::time::timeout(
         timeout,
-        run_fetch_job_inner(&state, &job_id, &user_id, &source_url, &opts, encrypted_ip),
+        run_fetch_job_inner(
+            &state,
+            &job_id,
+            &user_id,
+            &source_url,
+            &opts,
+            encrypted_ip,
+            password,
+        ),
     )
     .await
     {
@@ -60,9 +70,13 @@ pub(crate) async fn run_fetch_job_inner(
     source_url: &str,
     opts: &FetchOptions,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let (max_size, default_ttl_hours) = {
-        let jh = state.juicehost_config().map_err(|e| format!("{e:?}"))?;
+        let jh = state
+            .juicehost_config_or_refresh()
+            .await
+            .map_err(|e| format!("{e:?}"))?;
         (jh.max_file_size_bytes, jh.default_ttl_hours)
     };
 
@@ -89,6 +103,7 @@ pub(crate) async fn run_fetch_job_inner(
         max_size,
         default_ttl_hours,
         encrypted_ip.clone(),
+        password.clone(),
     )
     .await;
 
@@ -126,6 +141,7 @@ pub(crate) async fn run_fetch_job_inner(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip.clone(),
+                password.clone(),
             )
             .await;
             if !matches!(&r, Err(e) if youtube_needs_rescue(e)) {
@@ -180,6 +196,7 @@ pub(crate) async fn run_fetch_job_inner(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip.clone(),
+                password.clone(),
             )
             .await;
             let empty_retry = matches!(&retry, Err(e) if is_empty_stream_error(e));
@@ -207,25 +224,53 @@ pub(crate) async fn run_fetch_job_inner(
             max_size,
             default_ttl_hours,
             encrypted_ip.clone(),
+            password.clone(),
         )
         .await;
 
-        if matches!(&session_result, Err(e) if is_rescue_err(e)) && ytdlp_enabled() {
-            tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
-            match run_ytdlp_tier(
-                state,
-                job_id,
-                user_id,
-                source_url,
-                opts,
-                max_size,
-                default_ttl_hours,
-                encrypted_ip.clone(),
-            )
-            .await
-            {
-                Ok(r) => return Ok(r),
-                Err(e3) => last = Err(e3),
+        if matches!(&session_result, Err(e) if is_rescue_err(e)) {
+            if bun_fetch_configured(state) {
+                tracing::info!("cobalt tiers exhausted; falling back to bun-fetch");
+                match run_bun_tier(
+                    state,
+                    job_id,
+                    user_id,
+                    source_url,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
+                {
+                    Ok(r) => return Ok(r),
+                    Err(e3) => {
+                        tracing::warn!("bun-fetch tier failed, trying local yt-dlp: {e3}");
+                        last = Err(e3);
+                    }
+                }
+            } else {
+                last = session_result;
+            }
+            if ytdlp_enabled() {
+                tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
+                match run_ytdlp_tier(
+                    state,
+                    job_id,
+                    user_id,
+                    source_url,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
+                {
+                    Ok(r) => return Ok(r),
+                    Err(e3) => last = Err(e3),
+                }
             }
         } else {
             last = session_result;
@@ -248,6 +293,7 @@ pub(crate) async fn fetch_via(
     max_size: u64,
     default_ttl_hours: f64,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let response = cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
 
@@ -285,6 +331,7 @@ pub(crate) async fn fetch_via(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip,
+                password.clone(),
             )
             .await
         }

@@ -22,11 +22,19 @@ pub struct Config {
 
     pub public_juicehost_url: String,
     pub juiceback_origin: String,
+    pub router_base_url: Option<String>,
     pub jwt_secret: String,
 
     pub ip_encryption_key: String,
 
     pub ip_pepper: String,
+
+    pub storage_encryption_key: String,
+
+    pub password_min_len: usize,
+    pub password_try_limit: u32,
+    pub password_try_window_secs: u64,
+    pub encrypted_force_relay: bool,
     pub cors_origins: Vec<String>,
 
     pub report_webhook_url: Option<String>,
@@ -69,6 +77,10 @@ pub struct Config {
 
     pub cobalt_session_api_key: Option<String>,
 
+    pub bun_fetch_url: Option<String>,
+
+    pub bun_fetch_key: Option<String>,
+
     pub fetch_empty_retry_delay_secs: u64,
     pub dte_enabled: bool,
     pub dte_assumed_bps: f64,
@@ -82,6 +94,22 @@ pub struct Config {
     pub region_public_juicehosts: HashMap<String, String>,
 
     pub allow_private_fetch: bool,
+
+    pub r2_enabled: bool,
+    pub r2_bucket: Option<String>,
+    pub r2_endpoint: Option<String>,
+    pub r2_public_base_url: String,
+    pub r2_access_key: String,
+    pub r2_secret_key: String,
+    pub r2_max_bytes: u64,
+    pub r2_max_hot_files: u64,
+    pub r2_max_promote_bytes: u64,
+
+    pub promo_interval_secs: u64,
+    pub promo_min_views: u64,
+    pub promo_min_views_per_min: f64,
+    pub promo_min_ttl_remaining_secs: i64,
+    pub promo_dry_run: bool,
 }
 
 impl std::fmt::Debug for Config {
@@ -104,6 +132,11 @@ impl std::fmt::Debug for Config {
             .field("jwt_secret", &"[REDACTED]")
             .field("ip_encryption_key", &"[REDACTED]")
             .field("ip_pepper", &"[REDACTED]")
+            .field("storage_encryption_key", &"[REDACTED]")
+            .field("password_min_len", &self.password_min_len)
+            .field("password_try_limit", &self.password_try_limit)
+            .field("password_try_window_secs", &self.password_try_window_secs)
+            .field("encrypted_force_relay", &self.encrypted_force_relay)
             .field("cors_origins", &self.cors_origins)
             .field(
                 "report_webhook_url",
@@ -140,6 +173,11 @@ impl std::fmt::Debug for Config {
             .field(
                 "cobalt_session_api_key",
                 &self.cobalt_session_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("bun_fetch_url", &self.bun_fetch_url)
+            .field(
+                "bun_fetch_key",
+                &self.bun_fetch_key.as_ref().map(|_| "[REDACTED]"),
             )
             .field("dte_enabled", &self.dte_enabled)
             .field("dte_assumed_bps", &self.dte_assumed_bps)
@@ -187,6 +225,14 @@ impl Config {
         let cobalt_api_key =
             juiceutils::config::optional_secret("COBALT_API_KEY").unwrap_or_default();
         let cobalt_session_api_key = juiceutils::config::optional_secret("COBALT_SESSION_API_KEY");
+        let bun_fetch_url = std::env::var("BUN_FETCH_URL")
+            .ok()
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
+        let bun_fetch_key = std::env::var("BUN_FETCH_KEY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let cf_api_token = juiceutils::config::optional_secret("CF_API_TOKEN");
 
         let encryption_key_bytes = hex::decode(&ip_encryption_key)
@@ -194,6 +240,17 @@ impl Config {
         if encryption_key_bytes.len() != 32 {
             return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
         }
+
+        let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
+            .map_err(|e| e.to_string())?;
+        validate_storage_key_hex(&storage_encryption_key)?;
+
+        let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
+        let password_try_limit = parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
+        let password_try_window_secs =
+            parse_env_u64("PASSWORD_TRY_WINDOW_SECS", DEFAULT_PASSWORD_TRY_WINDOW_SECS)?;
+        let encrypted_force_relay =
+            parse_env_bool("ENCRYPTED_FORCE_RELAY", DEFAULT_ENCRYPTED_FORCE_RELAY)?;
 
         let juicehost_url = file.urls.juicehost_url.trim_end_matches('/').to_string();
         let public_juicehost_url = file
@@ -212,6 +269,12 @@ impl Config {
             .unwrap_or_else(|| format!("http://{host}:{port}"))
             .trim_end_matches('/')
             .to_string();
+        let router_base_url = std::env::var("ROUTER_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.urls.router_base_url.clone())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim_end_matches('/').to_string());
 
         let cors_origins: Vec<String> = file
             .cors
@@ -266,9 +329,51 @@ impl Config {
 
         let region_public_juicehosts = file.regions.public_juicehosts.clone().unwrap_or_default();
 
+        let r2_enabled = file.r2.enabled;
+        let r2_bucket = std::env::var("R2_BUCKET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.bucket.clone());
+        let r2_endpoint = std::env::var("R2_ENDPOINT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.endpoint.clone());
+        let r2_public_base_url = std::env::var("R2_PUBLIC_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.public_base_url.clone())
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string();
+        let r2_access_key =
+            juiceutils::config::optional_secret("R2_ACCESS_KEY").unwrap_or_default();
+        let r2_secret_key =
+            juiceutils::config::optional_secret("R2_SECRET_KEY").unwrap_or_default();
+        let r2_max_bytes = parse_env_u64("R2_MAX_BYTES", file.r2.max_bytes)?;
+        let r2_max_hot_files = parse_env_u64("R2_MAX_HOT_FILES", file.r2.max_hot_files)?;
+        let r2_max_promote_bytes =
+            parse_env_u64("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
+
+        let promo_interval_secs = file.promo.interval_secs.max(60);
+        let promo_min_views = file.promo.min_views;
+        let promo_min_views_per_min = file.promo.min_views_per_min;
+        let promo_min_ttl_remaining_secs = file.promo.min_ttl_remaining_secs.max(0);
+        let promo_dry_run = std::env::var("PROMO_DRY_RUN")
+            .ok()
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(file.promo.dry_run);
+
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
             return Err(
                 "cobalt session_api_url and COBALT_SESSION_API_KEY must be set together \
+                 (or both left unset)."
+                    .to_string(),
+            );
+        }
+
+        if bun_fetch_url.is_some() != bun_fetch_key.is_some() {
+            return Err(
+                "BUN_FETCH_URL and BUN_FETCH_KEY must be set together \
                  (or both left unset)."
                     .to_string(),
             );
@@ -304,9 +409,15 @@ impl Config {
             juicehost_url,
             public_juicehost_url,
             juiceback_origin,
+            router_base_url,
             jwt_secret,
             ip_encryption_key,
             ip_pepper,
+            storage_encryption_key,
+            password_min_len,
+            password_try_limit,
+            password_try_window_secs,
+            encrypted_force_relay,
             cors_origins,
             report_webhook_url,
             smtp_host,
@@ -330,6 +441,8 @@ impl Config {
             cobalt_api_key,
             cobalt_session_api_url,
             cobalt_session_api_key,
+            bun_fetch_url,
+            bun_fetch_key,
             fetch_empty_retry_delay_secs,
             dte_enabled,
             dte_assumed_bps,
@@ -342,10 +455,134 @@ impl Config {
             dte_mint_burst,
             region_public_juicehosts,
             allow_private_fetch,
+            r2_enabled,
+            r2_bucket,
+            r2_endpoint,
+            r2_public_base_url,
+            r2_access_key,
+            r2_secret_key,
+            r2_max_bytes,
+            r2_max_hot_files,
+            r2_max_promote_bytes,
+            promo_interval_secs,
+            promo_min_views,
+            promo_min_views_per_min,
+            promo_min_ttl_remaining_secs,
+            promo_dry_run,
         })
     }
 }
 
 fn clean_url(s: String) -> String {
     s.trim_end_matches('/').to_string()
+}
+
+pub const DEFAULT_PASSWORD_MIN_LEN: usize = 8;
+
+pub const PASSWORD_MAX_LEN: usize = 256;
+const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
+const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
+const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
+
+fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
+    let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
+    if bytes.len() != 32 {
+        return Err(storage_key_error());
+    }
+    Ok(())
+}
+
+fn storage_key_error() -> String {
+    "STORAGE_ENCRYPTION_KEY must be 64 hex chars encoding exactly 32 bytes".to_string()
+}
+
+fn parse_env_usize(name: &str, default: usize) -> Result<usize, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_u32(name: &str, default: u32) -> Result<u32, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_u64(name: &str, default: u64) -> Result<u64, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_bool(name: &str, default: bool) -> Result<bool, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(format!("{name} must be a boolean (true/false/1/0)")),
+        },
+        _ => Ok(default),
+    }
+}
+
+pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), String> {
+    if password.len() < min_len {
+        return Err(format!("password must be at least {min_len} characters"));
+    }
+    if password.len() > PASSWORD_MAX_LEN {
+        return Err(format!(
+            "password must be at most {PASSWORD_MAX_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
+impl Config {
+    pub fn storage_file_key(
+        &self,
+    ) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
+        crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
+    }
+
+    pub fn check_upload_password(&self, password: &str) -> Result<(), String> {
+        validate_upload_password(password, self.password_min_len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_key_hex_validation() {
+        assert!(validate_storage_key_hex(&"ab".repeat(32)).is_ok());
+        assert!(validate_storage_key_hex(&format!("  {}  ", "ab".repeat(32))).is_ok());
+        assert!(validate_storage_key_hex("abc").is_err());
+        assert!(validate_storage_key_hex(&"ab".repeat(31)).is_err());
+        assert!(validate_storage_key_hex(&"zz".repeat(32)).is_err());
+        let err = validate_storage_key_hex("nope").unwrap_err();
+        assert!(!err.contains("nope"), "key material must not leak: {err}");
+    }
+
+    #[test]
+    fn upload_password_policy() {
+        assert!(validate_upload_password("12345678", 8).is_ok());
+        assert!(validate_upload_password("1234567", 8).is_err());
+        assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN), 8).is_ok());
+        assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN + 1), 8).is_err());
+        let err = validate_upload_password("short", 8).unwrap_err();
+        assert!(!err.contains("short"), "password must not leak: {err}");
+    }
 }

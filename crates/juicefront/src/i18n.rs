@@ -5,11 +5,12 @@ pub const LOCALES: &[(&str, &str)] = &[
     ("fr", "Français"),
     ("ru", "Русский"),
     ("es", "Español"),
+    ("ja", "日本語"),
 ];
 
 pub const DEFAULT_LOCALE: &str = "en";
 
-pub const LOCALE_PREFIXES: &[&str] = &["fr", "ru", "es"];
+pub const LOCALE_PREFIXES: &[&str] = &["fr", "ru", "es", "ja"];
 
 pub fn is_valid_locale(code: &str) -> bool {
     LOCALES.iter().any(|(c, _)| *c == code)
@@ -20,6 +21,7 @@ fn locale_static(code: &str) -> &'static str {
         "fr" => "fr",
         "ru" => "ru",
         "es" => "es",
+        "ja" => "ja",
         _ => "en",
     }
 }
@@ -32,6 +34,7 @@ pub fn locale_prefix(locale: &str) -> &str {
             "fr" => "/fr",
             "ru" => "/ru",
             "es" => "/es",
+            "ja" => "/ja",
             _ => "",
         }
     }
@@ -64,6 +67,7 @@ static BUNDLES: LazyLock<Bundles> = LazyLock::new(|| {
         ("fr", include_str!("../i18n/fr.json")),
         ("ru", include_str!("../i18n/ru.json")),
         ("es", include_str!("../i18n/es.json")),
+        ("ja", include_str!("../i18n/ja.json")),
     ] {
         let parsed: serde_json::Value = serde_json::from_str(text).expect("i18n JSON must parse");
         let dict = parsed
@@ -133,12 +137,13 @@ pub fn escape_html(text: &str) -> String {
 }
 
 pub fn pct_encode(text: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
             out.push(byte as char);
         } else {
-            out.push_str(&format!("%{byte:02X}"));
+            let _ = write!(out, "%{byte:02X}");
         }
     }
     out
@@ -156,6 +161,7 @@ mod tests {
         assert!(!is_valid_locale("xx"));
         assert_eq!(locale_prefix("en"), "");
         assert_eq!(locale_prefix("fr"), "/fr");
+        assert_eq!(locale_prefix("ja"), "/ja");
         assert_eq!(lp("fr", "/files"), "/fr/files");
         assert_eq!(lp("en", "/files"), "/files");
     }

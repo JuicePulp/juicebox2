@@ -219,125 +219,6 @@ form.upload-form {
   display: contents;
 }
 
-.rttoolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: var(--juice-900);
-  border: 1px solid var(--juice-700);
-  border-radius: 0.5rem;
-  padding: 0.75rem 1.25rem;
-  margin-bottom: 1rem;
-  gap: 1.25rem;
-  -webkit-tap-highlight-color: transparent;
-  flex-wrap: wrap;
-}
-
-.rtt-options[hidden] {
-  display: none !important;
-}
-
-.rtt-options {
-  display: flex;
-  width: 100%;
-  border-radius: 24px;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--juice-700);
-}
-
-.rtt-option {
-  flex: 1 1 0%;
-  position: relative;
-  background-color: transparent;
-}
-
-.rtt-option::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -1px;
-  right: -1px;
-  background-color: var(--juice-800);
-  transform: skewX(-20deg);
-  z-index: 1;
-  transition: background-color 0.15s ease;
-}
-
-.rtt-option:first-child::before {
-  left: -30px;
-}
-.rtt-option:last-child::before {
-  right: -30px;
-}
-
-.rtt-option:has(input:checked)::before,
-.rtt-option:has(~ .rtt-option input:checked)::before {
-  background-color: var(--orange-500);
-}
-
-.rtt-option input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.rtt-option span {
-  display: block;
-  position: relative;
-  z-index: 3;
-  text-align: center;
-  padding: 10px 4px;
-    font-size: 9px;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  color: var(--juice-400);
-  font-family: "Secondary", "Unifont", monospace;
-  transition: color 0.15s ease;
-}
-
-.rtt-option:hover span {
-  color: var(--juice-200);
-}
-
-.rtt-option:has(input:checked) span,
-.rtt-option:has(~ .rtt-option input:checked) span {
-  color: var(--juice-100);
-}
-
-@media (max-width: 768px) {
-  .rtt-options {
-    flex-wrap: wrap;
-    border-radius: 12px;
-  }
-
-  .rtt-option {
-    flex: 1 1 33%;
-    border-right: 1px solid var(--juice-900);
-    border-bottom: 1px solid var(--juice-900);
-  }
-
-  .rtt-option::before {
-    transform: none;
-  }
-
-  .rtt-option:first-child::before,
-  .rtt-option:last-child::before {
-    left: 0;
-    right: 0;
-  }
-}
-.rtt-option:has(input:checked) span {
-}
-.rtt-option input:focus-visible + span {
-  outline: 2px solid var(--orange-400);
-  outline-offset: -2px;
-}
-
 .upload-submit {
   position: relative;
   display: inline-flex;
@@ -489,9 +370,6 @@ html:not(.js) .upload-submit {
 html.js .upload-submit {
   display: none !important;
 }
-html.js .rtt-options {
-  display: none !important;
-}
 
 .select-backdrop {
   display: none;
@@ -553,11 +431,5 @@ html.js .rtt-options {
   }
   .select-close-btn:hover {
     color: var(--orange-400);
-  }
-}
-
-@media (max-width: 768px) {
-  .rttinfo {
-    width: 100%;
   }
 }

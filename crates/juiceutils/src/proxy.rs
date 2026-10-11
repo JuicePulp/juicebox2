@@ -37,7 +37,10 @@ impl FromStr for IpCidr {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (address, prefix) = value.trim().split_once('/').unwrap_or((value.trim(), ""));
+        let (address, prefix) = value
+            .trim()
+            .split_once('/')
+            .unwrap_or_else(|| (value.trim(), ""));
         let network = address
             .parse::<IpAddr>()
             .map_err(|_| format!("invalid IP address in CIDR: {value}"))?;

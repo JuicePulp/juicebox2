@@ -10,6 +10,7 @@ mod feature;
 mod limits;
 mod public;
 mod quic;
+mod r2;
 mod s3;
 mod secret;
 mod security;
@@ -22,6 +23,7 @@ use feature::FeatureSettings;
 use limits::LimitsSettings;
 use public::PublicSettings;
 use quic::QuicSettings;
+use r2::R2Settings;
 use s3::S3Settings;
 use secret::SecretSettings;
 use security::SecuritySettings;
@@ -79,6 +81,16 @@ pub struct Config {
 
     pub s3_secret_key: Option<String>,
 
+    pub r2_bucket: Option<String>,
+
+    pub r2_endpoint: Option<String>,
+
+    pub r2_region: String,
+
+    pub r2_access_key: Option<String>,
+
+    pub r2_secret_key: Option<String>,
+
     pub min_free_space_bytes: u64,
 
     pub max_file_size_bytes: u64,
@@ -115,10 +127,6 @@ pub struct Config {
 
     pub ban_list_file: Option<PathBuf>,
 
-    pub ban_sync_url: Option<String>,
-
-    pub ban_sync_interval: u64,
-
     pub sentry: juiceutils::config::SentrySettings,
 }
 
@@ -141,6 +149,9 @@ pub struct FileConfig {
 
     #[serde(default)]
     pub s3: S3File,
+
+    #[serde(default)]
+    pub r2: R2File,
 
     #[serde(default)]
     pub limits: LimitsFile,
@@ -332,6 +343,22 @@ pub struct S3File {
     pub allow_http: bool,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct R2File {
+    #[serde(default)]
+    pub bucket: Option<String>,
+
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    #[serde(default = "default_r2_region")]
+    pub region: String,
+}
+
+fn default_r2_region() -> String {
+    String::from("auto")
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LimitsFile {
     #[serde(default = "default_min_free_space_gb")]
@@ -474,26 +501,12 @@ fn default_allowed_ttls() -> Vec<f64> {
 pub struct BanFile {
     #[serde(default)]
     pub list_file: Option<PathBuf>,
-
-    #[serde(default)]
-    pub sync_url: Option<String>,
-
-    #[serde(default = "default_ban_sync_interval")]
-    pub sync_interval_secs: u64,
 }
 
 impl Default for BanFile {
     fn default() -> Self {
-        Self {
-            list_file: None,
-            sync_url: None,
-            sync_interval_secs: default_ban_sync_interval(),
-        }
+        Self { list_file: None }
     }
-}
-
-const fn default_ban_sync_interval() -> u64 {
-    BanSettings::DEFAULT_SYNC_INTERVAL
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -557,6 +570,7 @@ impl Config {
         let directories = DirectorySettings::load(&file.dirs);
         let security = SecuritySettings::load(&file.security, &directories)?;
         let s3 = S3Settings::load(&file.s3)?;
+        let r2 = R2Settings::load(&file.r2)?;
         let limits = LimitsSettings::load(&file.limits)?;
         let features = FeatureSettings::load(&file.features)?;
         let secrets = SecretSettings::load(&security)?;
@@ -589,6 +603,11 @@ impl Config {
             s3_allow_http: s3.allow_http(),
             s3_access_key: s3.access_key().map(str::to_owned),
             s3_secret_key: s3.secret_key().map(str::to_owned),
+            r2_bucket: r2.bucket().map(str::to_owned),
+            r2_endpoint: r2.endpoint().map(str::to_owned),
+            r2_region: r2.region().to_owned(),
+            r2_access_key: r2.access_key().map(str::to_owned),
+            r2_secret_key: r2.secret_key().map(str::to_owned),
             min_free_space_bytes: limits.min_free_space_bytes(),
             max_file_size_bytes: limits.max_file_size_bytes(),
             max_range_response_bytes: limits.max_range_response_bytes(),
@@ -607,8 +626,6 @@ impl Config {
             ticket_jwt_secret: secrets.ticket_jwt_secret().to_owned(),
             ip_pepper: secrets.ip_pepper().to_owned(),
             ban_list_file: ban.list_file().cloned(),
-            ban_sync_url: ban.sync_url().map(str::to_owned),
-            ban_sync_interval: ban.sync_interval(),
             sentry,
         })
     }
@@ -636,6 +653,8 @@ mod tests {
             "JWT_SECRET",
             "TICKET_JWT_SECRET",
             "IP_PEPPER",
+            "BACKEND_URL",
+            "FRONTEND_URL",
         ] {
             unsafe {
                 std::env::remove_var(name);
@@ -712,5 +731,38 @@ mod tests {
         assert!(!cfg.quick_link);
         assert!(!cfg.custom_id);
         assert_eq!(cfg.default_ttl_hours, 6.0);
+    }
+
+    #[test]
+    fn backend_url_env_overrides_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_juicehost_env();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
+        let file: FileConfig = toml::from_str(
+            "[dirs]\nbackend_url = \"http://file.example\"\nfrontend_url = \"http://front.example\"\n",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "http://env.example/");
+        }
+        let cfg = Config::try_load_from(&file).unwrap();
+        assert_eq!(cfg.backend_url.as_deref(), Some("http://env.example"));
+        assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
+
+        unsafe {
+            std::env::set_var("BACKEND_URL", "none");
+            std::env::remove_var("FRONTEND_URL");
+        }
+        let cfg = Config::try_load_from(&file).unwrap();
+        assert_eq!(cfg.backend_url, None);
+        assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
+
+        unsafe {
+            std::env::remove_var("BACKEND_URL");
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
     }
 }

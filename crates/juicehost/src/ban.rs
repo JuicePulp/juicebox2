@@ -1,60 +1,56 @@
-use std::{sync::Arc, time::Duration};
-
-use thiserror::Error;
+use std::sync::Arc;
 
 use crate::state::AppState;
 
-#[derive(Debug, Error)]
-enum BanSyncError {
-    #[error("JUICEHOST_API_KEY not set (needed to authenticate the ban sync)")]
-    MissingApiKey,
-    #[error("request failed: {0}")]
-    Request(#[source] reqwest::Error),
-    #[error("backend returned status {0}")]
-    Status(reqwest::StatusCode),
-    #[error("invalid response: {0}")]
-    InvalidResponse(#[source] reqwest::Error),
-    #[error("backend returned an empty pepper")]
-    EmptyPepper,
-}
-
-pub async fn refresh_ban_list(state: &Arc<AppState>) {
-    if let Some(ref url) = state.ban_sync_url
-        && let Err(e) = sync_from_backend(state, url).await
-    {
-        tracing::warn!("ban list sync from {url} failed: {e}");
-    }
+pub async fn load_ban_file(state: &Arc<AppState>) {
     let pepper = state.ban_list.pepper();
     if let Some(ref path) = state.ban_list_file {
         state.ban_list.load_file(path, &pepper);
     }
 }
 
-async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSyncError> {
+pub async fn fetch_snapshot_once(state: &Arc<AppState>) {
+    let Some(ref backend) = state.backend_url else {
+        return;
+    };
     if state.api_key.is_empty() {
-        return Err(BanSyncError::MissingApiKey);
+        return;
     }
-
-    let resp = state
+    let url = format!("{backend}/internal/ban-snapshot");
+    let resp = match state
         .backend_client
-        .get(format!("{url}/internal/ban-snapshot"))
+        .get(&url)
         .header("x-juicehost-api-key", &state.api_key)
-        .timeout(Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(BanSyncError::Request)?;
-
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::warn!("ban snapshot fetch from {url} failed: {e}");
+            return;
+        }
+    };
     if !resp.status().is_success() {
-        return Err(BanSyncError::Status(resp.status()));
+        tracing::warn!("ban snapshot fetch from {url} failed: {}", resp.status());
+        return;
     }
-
-    let body: serde_json::Value = resp.json().await.map_err(BanSyncError::InvalidResponse)?;
-
+    let body: serde_json::Value = match resp.json().await {
+        Ok(body) => body,
+        Err(e) => {
+            tracing::warn!("ban snapshot fetch from {url} invalid: {e}");
+            return;
+        }
+    };
     let pepper = body
         .get("pepper")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    if pepper.is_empty() {
+        tracing::warn!("ban snapshot fetch from {url} returned empty pepper");
+        return;
+    }
     let hashes: Vec<String> = body
         .get("hashes")
         .and_then(|v| v.as_array())
@@ -64,26 +60,6 @@ async fn sync_from_backend(state: &Arc<AppState>, url: &str) -> Result<(), BanSy
                 .collect()
         })
         .unwrap_or_default();
-
-    if pepper.is_empty() {
-        return Err(BanSyncError::EmptyPepper);
-    }
-
     state.ban_list.set_snapshot(&pepper, hashes);
-    tracing::info!("synced {} bans from {url}", state.ban_list.len());
-    Ok(())
-}
-
-pub async fn ban_refresh_loop(state: Arc<AppState>) {
-    let interval = state.ban_sync_interval.max(5);
-
-    refresh_ban_list(&state).await;
-
-    let mut ticker = tokio::time::interval(Duration::from_secs(interval));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        ticker.tick().await;
-        refresh_ban_list(&state).await;
-    }
+    tracing::info!("loaded {} bans from {url}", state.ban_list.len());
 }

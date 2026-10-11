@@ -1,42 +1,15 @@
-/**
- * The sound palette — layer/recipe types plus the fourteen canonical cues.
- * Each cue names an interface job, not a synthesis style, and has its own
- * distinct shape rather than being a volume/EQ tweak on the same click.
- * Retired v0.2 names live on as aliases until 1.0.
- */
-/**
- * Success and ready ring into the room 6 dB more than the rest, about 16 dB
- * under the sound itself: a result lands in the space without sounding far.
- */
 export const LANDED = 2;
-/** How far sharp a knock is struck, and how fast it drops to its pitch. */
 const KNOCK_DROP = 1.6;
 const KNOCK_DROP_TIME = 0.018;
-/**
- * A knock's body: a sine struck sharp that drops to `frequency` in 18 ms, the
- * way a small hollow part answers a tap. Heard as a soft "tok", never as a
- * slide. Measured from the keycap sounds in DawoodUI's Artasaka preview.
- */
 export const knock = (frequency, decay, peak, more = {}) => ({
     kind: "tone", waveform: "sine", frequency: frequency * KNOCK_DROP, glideTo: frequency, glideTime: KNOCK_DROP_TIME,
     attack: 0.001, decay, peak, ...more,
 });
-/** A free bar, glass or metal: modes at 1, 2.76 and 5.40 times the fundamental (euphonics.org, free-free bar). */
 export const BAR = [[1, 1], [2.76, 0.3], [5.4, 0.1]];
-/** A marimba bar, undercut so its second mode sits at 3.99x (STK ModalBar's marimba). Rounder than a free bar. */
 export const MALLET = [[1, 1], [3.99, 0.2]];
-/** Modes above this are left out: the register ceiling every theme keeps. */
 const MODE_CEILING = 5000;
-/** A struck tone swells in over 3 ms: short enough to strike, long enough not to click. */
 const STRIKE_ATTACK = 0.003;
-/** No mode dies faster than this, or it stops being heard as a pitch. */
 const SHORTEST_MODE = 0.015;
-/**
- * A struck note: one sine per mode of `material`. Each mode dies in inverse
- * proportion to its pitch, so the highs go first as on any real bar (decay
- * time falls as 1/f, van den Doel and Pai). Upper modes are ornament that
- * subtle leaves out; `from` moves the whole note to a higher emphasis.
- */
 export function struck(frequency, decay, peak, material, { from } = {}) {
     return material
         .filter(([ratio]) => frequency * ratio <= MODE_CEILING)
@@ -48,36 +21,11 @@ export function struck(frequency, decay, peak, material, { from } = {}) {
         };
     });
 }
-/** Lowpass Q in dB that gives a flat, unresonant corner. Web Audio reads a lowpass Q in dB. */
 const FLAT = -3;
-/**
- * The mallet meeting the bar: 3 ms of noise, low-passed at the mallet's
- * hardness. A soft felt mallet sits near 1 kHz, a hard one near 3 kHz. It
- * makes a chord a struck object rather than a test tone.
- */
 export const contact = (hardness, peak, more = {}) => ({
     kind: "noise", filterType: "lowpass", filterFrequency: hardness, filterQ: FLAT, attack: 0.001, decay: 0.003, peak, ...more,
 });
-// Each cue is arranged for three emphases: layers marked from "normal" are
-// ornament that subtle leaves out, and each cue has one layer of its own that
-// only strong plays.
-//
-// Every cue is one sound: all its layers strike together.
-//
-// Premium, not playful: clicks and knocks are filtered noise, tones are
-// struck objects (`struck`): a marimba bar for mallets, a free bar for glass,
-// each mode dying faster the higher it is, touched off by the mallet's
-// `contact`. Chords are spread so no two notes rub. Rooms are short enough
-// to hear as space rather than echo, and no audible tone slides in pitch: a
-// knock's 18 ms drop is heard as the body of a tap, not as a slide.
-// Nothing is centred above 5 kHz, so the palette holds up through a working day.
 export const RECIPES = {
-    /**
-     * A small glassy tap — buttons, links, nav. A nail's tick, a soft knock of
-     * body, then the glass ringing briefly: the fundamental is two near-identical modes that beat
-     * slowly, as real glass shimmers, and the upper mode sits at the glass-bar
-     * ratio 2.76x, dying faster than the fundamental.
-     */
     tap: {
         masterGain: 0.39,
         layers: [
@@ -91,11 +39,6 @@ export const RECIPES = {
         ],
         vary: { pitch: 0.012, level: 0.12 },
     },
-    /**
-     * One keyboard keystroke — the switch's click, the keycap's clack, and the
-     * thock of bottoming out, all in one strike. Every stroke
-     * lands at a slightly different pitch and weight, like different keys.
-     */
     type: {
         masterGain: 0.375,
         layers: [
@@ -106,7 +49,6 @@ export const RECIPES = {
         ],
         vary: { pitch: 0.07, level: 0.2 },
     },
-    /** A crisp detent over a small wooden knock — dropdowns, menus, lists. */
     select: {
         masterGain: 0.306,
         layers: [
@@ -115,7 +57,6 @@ export const RECIPES = {
             knock(208, 0.025, 0.025, { from: "strong" }),
         ],
     },
-    /** A switch snapping over: one crisp click with a small knock of body. Switching off knocks upward. */
     toggle: {
         masterGain: 0.24,
         layers: [
@@ -125,7 +66,6 @@ export const RECIPES = {
             knock(165, 0.03, 0.025, { from: "strong" }),
         ],
     },
-    /** Air drawing upward with a light note swelling inside it: one breath as a panel opens — menus, drawers, dialogs. */
     open: {
         masterGain: 0.335,
         layers: [
@@ -135,7 +75,6 @@ export const RECIPES = {
             { from: "strong", kind: "noise", filterType: "lowpass", filterFrequency: 250, filterQ: 0.7, attack: 0.04, decay: 0.08, peak: 0.12 },
         ],
     },
-    /** The same air falling shut over a low, damped mallet note — closing and dismissing. */
     close: {
         masterGain: 0.258,
         layers: [
@@ -145,7 +84,6 @@ export const RECIPES = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 165, filterQ: 2, attack: 0.001, decay: 0.04, peak: 0.3 },
         ],
     },
-    /** One soft mallet chord, C, G and E spread wide so no two notes rub, struck with felt in a small room — confirmed completion. */
     success: {
         masterGain: 0.566,
         layers: [
@@ -157,7 +95,6 @@ export const RECIPES = {
         ],
         room: LANDED,
     },
-    /** One muted low mallet chord, D with the F a tenth above, spread so it never rubs, short — a calm, recoverable refusal. */
     error: {
         masterGain: 0.501,
         layers: [
@@ -167,7 +104,6 @@ export const RECIPES = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 250, filterQ: 1.5, attack: 0.001, decay: 0.03, peak: 0.2 },
         ],
     },
-    /** A soft whoosh whose air rises as it passes — routes, pages, galleries, carousels. */
     navigate: {
         masterGain: 0.322,
         layers: [
@@ -176,7 +112,6 @@ export const RECIPES = {
             { from: "strong", kind: "noise", filterType: "lowpass", filterFrequency: 230, filterQ: 0.7, attack: 0.1, decay: 0.144, peak: 0.1 },
         ],
     },
-    /** One mallet fifth, A and E, neither bright nor low: between success and error. */
     warning: {
         masterGain: 0.437,
         layers: [
@@ -186,7 +121,6 @@ export const RECIPES = {
             ...struck(220, 0.2, 0.02, MALLET, { from: "strong" }),
         ],
     },
-    /** One low, muted note that swells in and fades away over about a second, never struck: work has begun, nothing has landed. */
     loading: {
         masterGain: 0.106,
         layers: [
@@ -196,11 +130,6 @@ export const RECIPES = {
             { from: "strong", kind: "tone", waveform: "sine", frequency: 98, attack: 0.35, decay: 0.8, peak: 0.02 },
         ],
     },
-    /**
-     * One warm glass note, G, below success, in its small room: a result is
-     * there. A second mode a hertz sharp lets the glass shimmer once as it
-     * rings, too slow to be heard as a wobble.
-     */
     ready: {
         masterGain: 0.467,
         layers: [
@@ -211,11 +140,6 @@ export const RECIPES = {
         ],
         room: LANDED,
     },
-    /**
-     * One high glass bell, A and E struck together, ringing longest: blocked
-     * until the user answers. The A's twin sits 2 Hz sharp, so the bell swells
-     * once rather than warbling.
-     */
     attention: {
         masterGain: 0.551,
         layers: [
@@ -226,11 +150,6 @@ export const RECIPES = {
             ...struck(440, 0.45, 0.012, BAR, { from: "strong" }),
         ],
     },
-    /**
-     * A number rolling to a new value: one breath of air that rises with the
-     * count (and falls counting down) over a soft glass note, lasting as long
-     * as the roll.
-     */
     count: {
         masterGain: 0.336,
         layers: [
@@ -242,9 +161,7 @@ export const RECIPES = {
         vary: { pitch: 0.02, level: 0.12 },
     },
 };
-/** All canonical cue names, derived from the recipe palette. */
 export const sounds = Object.keys(RECIPES);
-/** The v0.2 palette, mapped to the cue that now does each job. Removed in 1.0. */
 const ALIASES = {
     chime: "success",
     sparkle: "success",
@@ -260,7 +177,6 @@ const ALIASES = {
     arrival: "navigate",
 };
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
-/** Maps a canonical or deprecated name to its canonical cue; anything else is `null`. */
 export function resolveSound(value) {
     if (typeof value !== "string")
         return null;

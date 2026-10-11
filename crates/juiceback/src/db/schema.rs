@@ -36,6 +36,11 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("pairing_codes.ip_hash", m06_pairing_codes_ip_hash),
     ("fetch_jobs.progress", m07_fetch_jobs_progress),
     ("client_files.legacy_index", m08_client_files_legacy_index),
+    ("files.protected_links", m09_files_protected_links),
+    ("reports.password", m10_reports_password),
+    ("files.per_file_dek", m11_files_per_file_dek),
+    ("visitor_stats", m12_visitor_stats),
+    ("files.hot_tier", m13_files_hot_tier),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -143,6 +148,113 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
 
 fn m08_client_files_legacy_index(conn: &Connection) -> Result<()> {
     conn.execute("DROP INDEX IF EXISTS idx_client_files_client", [])?;
+    Ok(())
+}
+
+fn m09_files_protected_links(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "password_hash")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN password_hash TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "is_encrypted")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "enc_header")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN enc_header TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m10_reports_password(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "reports", "password")? {
+        conn.execute(
+            "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "dek_wrapped")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_wrapped TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_salt")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_salt TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_escrow")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_escrow TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "key_version")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN key_version INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m13_files_hot_tier(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "tier")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN tier TEXT NOT NULL DEFAULT 'standard'",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "r2_key")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN r2_key TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS promo_state (
+            file_id        TEXT PRIMARY KEY,
+            views_seen     INTEGER NOT NULL DEFAULT 0,
+            downloads_seen INTEGER NOT NULL DEFAULT 0,
+            checked_at     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_files_tier_status ON files(tier, status);",
+    )?;
+    Ok(())
+}
+
+fn m12_visitor_stats(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS file_stats (
+            file_id       TEXT NOT NULL,
+            ip_hash       TEXT NOT NULL,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            views         INTEGER NOT NULL DEFAULT 0,
+            downloads     INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (file_id, ip_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_stats_file ON file_stats(file_id);
+        CREATE TABLE IF NOT EXISTS site_visitors (
+            ip_hash       TEXT PRIMARY KEY,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            visits        INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
     Ok(())
 }
 

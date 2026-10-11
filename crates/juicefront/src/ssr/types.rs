@@ -18,4 +18,8 @@ pub struct ServerFile {
     #[serde(default)]
     pub delete_token: String,
     pub storage_host: Option<String>,
+    #[serde(default)]
+    pub protected: bool,
+    #[serde(default)]
+    pub is_encrypted: bool,
 }

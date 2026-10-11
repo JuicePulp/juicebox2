@@ -15,7 +15,6 @@ impl ProtectionLevel {
             "none" => Self::None,
             "low" => Self::Low,
             "medium" => Self::Medium,
-            "high" => Self::High,
             _ => Self::High,
         }
     }

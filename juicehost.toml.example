@@ -37,6 +37,15 @@ allow_no_auth = false
 # endpoint = "https://s3.example.com"
 allow_http = false
 
+[r2]
+# Hot-tier overflow (e.g. Cloudflare R2) for popular files. Promoted copies
+# are written here by juiceback's velocity promoter; serving redirects to
+# the public base URL. All unset = hot-tier disabled.
+# bucket = "juicebox-hot"
+# endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+# region = "auto"
+# R2 credentials. Env-only, no TOML keys: R2_ACCESS_KEY / R2_SECRET_KEY
+
 [limits]
 min_free_space_gb = 5
 max_file_size_mb = 500
@@ -57,9 +66,8 @@ default_ttl_hours = 24.0
 allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
 
 [ban]
+# Static ban list loaded once at startup. Runtime updates are pushed by juiceback.
 # list_file = "./bans.txt"
-# sync_url = "https://example.com/bans.txt"
-sync_interval_secs = 30
 
 [sentry]
 environment = "production"

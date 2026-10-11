@@ -47,7 +47,7 @@ pub async fn create_upload_handler(
         .ok_or_else(|| AppError::TusMissingLength)?;
 
     let (max_size, default_ttl, allowed_ttl, _danger) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.max_file_size_bytes,
             jh.default_ttl_hours,
@@ -107,6 +107,22 @@ pub async fn create_upload_handler(
     let total_parts = parse_parallel_number(find_meta(&metadata, "total_parts"))?;
     let parallel = validate_parallel_metadata(session_id.as_deref(), part_index, total_parts)?;
 
+    
+    
+    let password = find_meta(&metadata, "password")
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            state
+                .config
+                .check_upload_password(v)
+                .map(|()| v.to_string())
+                .map_err(AppError::BadRequest)
+        })
+        .transpose()?;
+    if password.is_some() && parallel.is_some() {
+        return Err(crate::routes::upload::protected::relay_required());
+    }
+
     let reserve_id = find_meta(&metadata, "reserve_id")
         .filter(|v| !v.is_empty())
         .map(|value| {
@@ -120,6 +136,7 @@ pub async fn create_upload_handler(
     let reservation_token = find_meta(&metadata, "delete_token")
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
+    let mut reservation_hash: Option<String> = None;
     if let Some(ref reserve_id) = reserve_id {
         let token = reservation_token
             .as_deref()
@@ -138,6 +155,14 @@ pub async fn create_upload_handler(
             return Err(AppError::Forbidden(
                 "invalid reservation delete token".into(),
             ));
+        }
+        if reservation.is_protected() {
+            
+            
+            if password.is_some() || parallel.is_some() {
+                return Err(crate::routes::upload::protected::relay_required());
+            }
+            reservation_hash = reservation.password_hash.clone();
         }
         storage_host = reservation.storage_host;
     }
@@ -223,6 +248,33 @@ pub async fn create_upload_handler(
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 
+    
+    
+    
+    let protection_setup = match reservation_hash {
+        Some(_) => None,
+        None => match password {
+            Some(password) => {
+                Some(crate::routes::upload::protected::prepare_protection(&state, &password).await?)
+            }
+            None => None,
+        },
+    };
+    let password_hash = match reservation_hash {
+        Some(hash) => Some(hash),
+        None => protection_setup
+            .as_ref()
+            .map(|setup| setup.password_hash.clone()),
+    };
+
+    
+    
+    let storage_upload_mode = if password_hash.is_some() && state.config.encrypted_force_relay {
+        crate::upload_mode::UploadMode::Standard
+    } else {
+        storage_upload_mode
+    };
+
     let upload = TusUpload {
         id: id.clone(),
         offset: 0,
@@ -244,6 +296,18 @@ pub async fn create_upload_handler(
         user_id,
         upload_mode: storage_upload_mode,
         push_rx: Some(rx),
+        password_hash,
+        dek: protection_setup.as_ref().map(|setup| setup.dek.clone()),
+        dek_wrapped: protection_setup
+            .as_ref()
+            .map(|setup| setup.wrapped_b64.clone()),
+        dek_salt: protection_setup
+            .as_ref()
+            .map(|setup| setup.salt_b64.clone()),
+        dek_escrow: protection_setup
+            .as_ref()
+            .map(|setup| setup.escrow_hex.clone()),
+        spool_path: None,
     };
 
     state.tus.insert(id.clone(), upload);

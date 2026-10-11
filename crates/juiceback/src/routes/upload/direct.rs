@@ -4,6 +4,7 @@ use axum::{
     Json,
     extract::{ConnectInfo, State},
     http::HeaderMap,
+    response::{IntoResponse, Response},
 };
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -19,7 +20,7 @@ use super::{
 use crate::{
     db::{self, FileRecord},
     error::AppError,
-    routes::UserId,
+    routes::{UserId, noscript},
     state::AppState,
 };
 
@@ -42,6 +43,11 @@ pub struct DirectUploadReserveRequest {
 
     #[serde(default)]
     pub device_id: Option<String>,
+
+    
+    
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -69,7 +75,7 @@ pub async fn direct_upload_reserve_handler(
     Json(body): Json<DirectUploadReserveRequest>,
 ) -> Result<Json<DirectUploadReserveResponse>, AppError> {
     let (default_ttl, allowed_ttl, danger, max_file_size, public_juicehost_url) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),
@@ -81,6 +87,9 @@ pub async fn direct_upload_reserve_handler(
 
     if body.file_size == 0 || body.file_size > max_file_size {
         return Err(AppError::PayloadTooLarge);
+    }
+    if body.password.as_deref().is_some_and(|p| !p.is_empty()) {
+        return Err(super::protected::relay_required());
     }
     reject_blocked_filename(&body.filename, danger)?;
 
@@ -212,8 +221,9 @@ pub async fn direct_upload_reserve_handler(
 pub async fn direct_upload_complete_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
+    headers: HeaderMap,
     Json(body): Json<DirectUploadCompleteRequest>,
-) -> Result<Json<UploadResponse>, AppError> {
+) -> Result<Response, AppError> {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode as jwt_decode};
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["exp"]);
@@ -253,6 +263,11 @@ pub async fn direct_upload_complete_handler(
     }
     if file.status != "uploading" {
         return Err(AppError::Conflict("upload is already complete".into()));
+    }
+    
+    
+    if file.is_protected() {
+        return Err(super::protected::relay_required());
     }
 
     let stored_size = crate::storage_client::stat_file_on_juicehost(
@@ -303,7 +318,16 @@ pub async fn direct_upload_complete_handler(
     }
 
     let public_url = public_url_for(&state, &file);
-    Ok(Json(UploadResponse {
+    let protected = file.is_protected();
+    let is_encrypted = file.is_encrypted;
+    let cookie_hdr = noscript::file_cookie_header(
+        &headers,
+        &noscript::FileCookieEntry {
+            id: file_id.clone(),
+            token: file.delete_token.clone(),
+        },
+    );
+    let mut resp = Json(UploadResponse {
         id: file_id,
         url: public_url,
         filename: file.filename,
@@ -312,5 +336,13 @@ pub async fn direct_upload_complete_handler(
         expires_at: file.expires_at,
         delete_token: String::new(),
         status: "ready".into(),
-    }))
+        protected,
+        is_encrypted,
+    })
+    .into_response();
+    resp.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        cookie_hdr,
+    );
+    Ok(resp)
 }

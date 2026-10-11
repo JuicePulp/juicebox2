@@ -8,7 +8,7 @@
 <section class="rpfcontainer" data-report-form="">
 <div class="rpfcontent">
 {% if submitted %}<div class="report-success-banner" role="alert"><p><strong>{{ shell.cx.t("feedback.success") }}</strong></p></div>{% endif %}
-<form class="report-form" method="POST" action="/api/feedback" data-astro-reload="">
+<form class="report-form" method="POST" action="/api/feedback">
 <div class="form-field">
 <label class="form-label" for="feedback-card-message">{{ shell.cx.t("feedback.label") }}<span class="required">*</span></label>
 <textarea id="feedback-card-message" data-cuelume-type class="form-textarea" name="message" rows="5" maxlength="1000" required placeholder="{{ shell.cx.t("feedback.placeholder") }}"></textarea>

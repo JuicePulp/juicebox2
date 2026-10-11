@@ -26,6 +26,8 @@ pub enum AppError {
     PayloadTooLarge,
     RateLimited,
 
+    RangeNotSatisfiable(String),
+
     TooManyRequests(String),
 
     BlockedFileType(String),
@@ -91,6 +93,11 @@ impl IntoResponse for AppError {
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMITED",
                 "Too many uploads!!! please wait before trying again",
+            ),
+            Self::RangeNotSatisfiable(ref msg) => (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "RANGE_NOT_SATISFIABLE",
+                msg.as_str(),
             ),
             Self::TooManyRequests(ref msg) => (
                 StatusCode::TOO_MANY_REQUESTS,

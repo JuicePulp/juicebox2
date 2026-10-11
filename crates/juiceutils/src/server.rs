@@ -15,6 +15,7 @@ use tokio::sync::{Notify, Semaphore};
 use tower::Service;
 
 #[must_use]
+
 pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
     let certified_key =
         generate_simple_self_signed(vec!["juicebox.local".into()]).expect("rcgen self-sign failed");
@@ -43,10 +44,10 @@ pub fn get_or_generate_cert(
     let key_der_bytes = certified_key.signing_key.serialize_der();
     let key_der =
         PrivateKeyDer::try_from(key_der_bytes.clone()).expect("failed to create PrivateKeyDer");
-    if let Some(parent) = cert_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!("failed to create cert directory {}: {e}", parent.display());
-        }
+    if let Some(parent) = cert_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!("failed to create cert directory {}: {e}", parent.display());
     }
     if let Err(e) = std::fs::write(cert_path, cert_der.as_ref()) {
         tracing::warn!("failed to save cert to {}: {e}", cert_path.display());
@@ -131,10 +132,9 @@ pub async fn start_quic_server_with_limits(
     cert_path: Option<std::path::PathBuf>,
     limits: QuicServerLimits,
 ) {
-    let (cert_der, key_der) = match cert_path.as_deref() {
-        Some(path) => get_or_generate_cert(path),
-        None => generate_self_signed_cert(),
-    };
+    let (cert_der, key_der) = cert_path
+        .as_deref()
+        .map_or_else(generate_self_signed_cert, get_or_generate_cert);
 
     let tls_config = {
         static INSTALL_CRYPTO_PROVIDER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -202,9 +202,8 @@ async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: Quic
     let connection_limit = Arc::new(Semaphore::new(limits.max_connections));
     let request_limit = Arc::new(Semaphore::new(limits.max_requests));
     loop {
-        let incoming = match endpoint.accept().await {
-            Some(conn) => conn,
-            None => break,
+        let Some(incoming) = endpoint.accept().await else {
+            break;
         };
         if !incoming.remote_address_validated() && incoming.may_retry() {
             if let Err(error) = incoming.retry() {
@@ -212,9 +211,7 @@ async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: Quic
             }
             continue;
         }
-        let permit = if let Ok(permit) = Arc::clone(&connection_limit).try_acquire_owned() {
-            permit
-        } else {
+        let Ok(permit) = Arc::clone(&connection_limit).try_acquire_owned() else {
             incoming.refuse();
             continue;
         };
@@ -274,9 +271,8 @@ async fn handle_h3_conn(
         };
 
         let mut router = router.clone();
-        let permit = match Arc::clone(&request_limit).try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => continue,
+        let Ok(permit) = Arc::clone(&request_limit).try_acquire_owned() else {
+            continue;
         };
         let request_timeout = limits.request_timeout;
         tokio::spawn(async move {

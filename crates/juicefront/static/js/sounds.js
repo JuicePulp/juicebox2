@@ -12,6 +12,10 @@ function storedEnabled() {
   return true;
 }
 
+export function soundEnabled() {
+  return storedEnabled();
+}
+
 function applyEnabled(on) {
   try {
     setEnabled(on);
@@ -42,12 +46,31 @@ function toggle() {
 }
 
 try {
+  document.addEventListener(
+    "pointerdown",
+    function warmup() {
+      document.removeEventListener("pointerdown", warmup, true);
+      if (!storedEnabled()) return;
+      try {
+        play("tap", { volume: 0 });
+      } catch {}
+    },
+    true,
+  );
+} catch {}
+
+try {
   bind();
 } catch {}
 applyEnabled(storedEnabled());
 
 export function playSound(name, opts) {
   sound(name, opts);
+}
+
+export function setSoundEnabled(on) {
+  applyEnabled(!!on);
+  if (on) sound("toggle");
 }
 
 window.JuiceSounds = {

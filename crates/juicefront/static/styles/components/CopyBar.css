@@ -153,6 +153,51 @@
   color: inherit;
 }
 
+/* QR button (qr-code icon) next to the copy bar -- same look as the edit button */
+.copy-bar-qr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 0.625rem;
+  flex-shrink: 0;
+  background-color: var(--juice-900);
+  border: 1px solid var(--juice-700);
+  border-left: none;
+  border-radius: 0;
+  color: var(--juice-400);
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
+  text-decoration: none;
+}
+
+/* QR is the last action when there is no edit button (e.g. rename disabled) */
+.copy-bar-wrapper .copy-bar-qr:last-child {
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.copy-bar-qr:hover {
+  border-color: var(--juice-600);
+  background-color: var(--juice-800);
+  color: var(--juice-200);
+}
+
+.copy-bar-qr:active {
+  background-color: var(--juice-950);
+}
+
+.copy-bar-qr:focus-visible {
+  outline: 2px solid var(--orange-400);
+  outline-offset: 2px;
+}
+
+.copy-bar-qr__icon {
+  color: inherit;
+}
+
 .rename-form {
   display: flex;
   flex-direction: column;

@@ -89,7 +89,7 @@ function startLocal(item, input) {
   localItems.set(item.id, { ...item });
   const handle = startUpload(item, input.file, {
     update: localUpsert,
-    onTusCreate: () => {},
+    onTusCreate: () => undefined,
     onTusDelete: (tusId) => {
       deleteTus(UPLOAD_URL, tusId);
     }
@@ -110,6 +110,7 @@ export function enqueueUpload(input) {
     quickLink: input.quickLink,
     customHost: input.customHost,
     uploadMode: input.uploadMode,
+    password: input.password || "",
     createdAt: Date.now()
   };
   upsertItem({ ...item });
@@ -120,7 +121,8 @@ export function enqueueUpload(input) {
         ttlHours: input.ttlHours,
         customHost: input.customHost,
         uploadMode: input.uploadMode,
-        quickLink: input.quickLink
+        quickLink: input.quickLink,
+        password: input.password || ""
       };
       p.postMessage({
         type: "enqueue",

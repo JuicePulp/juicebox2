@@ -5,6 +5,15 @@ pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
 pub mod urls;
+pub mod web;
+
+#[must_use]
+pub fn is_noisy_http_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/health" | "/api/config" | "/api/presence" | "/api/ip" | "/api/device/status"
+    )
+}
 
 #[cfg(feature = "quic")]
 pub mod server;
@@ -76,6 +85,7 @@ pub async fn add_security_headers(
     use axum::http::{HeaderValue, header};
 
     let is_file_route = req.uri().path().starts_with("/f/");
+    let is_preview_route = req.uri().path().starts_with("/v/");
 
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
@@ -94,18 +104,36 @@ pub async fn add_security_headers(
     );
 
     if is_file_route {
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
-            ),
-        );
+        
+        
+        
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+                ),
+            );
+        }
+    } else if is_preview_route {
+        
+        
+        
+        
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
+                ),
+            );
+        }
     } else {
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:",
             ),
         );
     }
@@ -145,5 +173,21 @@ mod tests {
         assert_eq!(extract_bearer_token(&headers), Some("token"));
         headers.insert("authorization", "Bearer token extra".parse().unwrap());
         assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn noisy_paths_cover_polling_and_sse() {
+        for path in [
+            "/api/health",
+            "/api/config",
+            "/api/presence",
+            "/api/ip",
+            "/api/device/status",
+        ] {
+            assert!(is_noisy_http_path(path), "{path} should be noisy");
+        }
+        for path in ["/api/owned-files", "/upload", "/file/abc/info", "/"] {
+            assert!(!is_noisy_http_path(path), "{path} should stay info");
+        }
     }
 }

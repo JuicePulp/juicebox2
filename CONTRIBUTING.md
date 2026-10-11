@@ -21,7 +21,16 @@ You can do a very rough live reload system while developing:
 
 Saving any `.rs` file, template, `static/` asset, or `i18n/` dict rebuilds and restarts the server + browser reloads automatically;
 
-Live reload is on by default for dev build, you can override it by toggling (0/1) the `JUICEFRONT_LIVE=1` env var. 
+Live reload is on by default for dev build, you can override it by toggling (0/1) the `JUICEFRONT_LIVE=1` env var.
+
+Running the full stack via `cargo run` (the `juicebox` supervisor) also
+watches workspace sources (`crates/*/src`, `templates/`, `static/`,
+`i18n/`, `icons/`, manifests): saving a file rebuilds and gracefully
+restarts all three services, and browsers reload on their own through the
+same live channel. Set `JUICEBOX_WATCH=0` to disable it, or
+`JUICEBOX_NO_BUILD=1` to skip builds entirely. Changing secrets in `.env`
+still needs a full `cargo run` restart (respawned services inherit the
+supervisor's original environment). 
 
 ## Pull requests
 

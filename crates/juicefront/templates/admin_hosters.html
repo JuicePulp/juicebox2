@@ -1,0 +1,23 @@
+{% extends "admin.html" %}
+{% block content %}
+<h1>Known Hosters</h1>
+<p><a href="/admin">Back to Admin Panel</a></p>
+<br>
+<div class="admin-toolbar">
+<input type="text" id="search-input" placeholder="Search host, status, error, ban reason..." aria-label="Search host, status, error, ban reason...">
+<select id="sort-select">
+<option value="last_seen_at">Last Seen</option>
+<option value="first_seen">First Seen</option>
+<option value="host">Host</option>
+<option value="last_status">Status</option>
+<option value="banned">Banned</option>
+</select>
+<select id="dir-select">
+<option value="desc">Newest first</option>
+<option value="asc">Oldest first</option>
+</select>
+<button class="btn btn-primary" id="search-btn">Search</button>
+</div>
+<div id="hosters-list"><p>Loading...</p></div>
+<div class="admin-status" id="hosters-status"></div>
+{% endblock %}

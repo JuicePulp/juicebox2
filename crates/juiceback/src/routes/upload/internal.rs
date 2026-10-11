@@ -44,11 +44,89 @@ pub async fn file_status_handler(
         .await;
 
     match file {
+        Ok(Some(record)) => {
+            let unlock_url = record.is_protected().then(|| {
+                crate::utils::share_link(
+                    &state.config,
+                    record.storage_host.as_deref(),
+                    &id,
+                    &record.filename,
+                )
+            });
+            let r2_url = r2_url_for(&state.config, &record);
+            Ok(Json(serde_json::json!({
+                "id": id,
+                "status": record.status,
+                "filename": record.filename,
+                "size_bytes": record.size_bytes,
+                "expires_at": record.expires_at,
+                "protected": record.is_protected(),
+                "is_encrypted": record.is_encrypted,
+                "unlock_url": unlock_url,
+                "key_version": record.key_version,
+                "gateway_origin": state.config.juiceback_origin,
+                "tier": record.tier,
+                "r2_url": r2_url,
+            })))
+        }
+        Ok(None) => Err(AppError::NotFound),
+        Err(e) => Err(e),
+    }
+}
+
+fn r2_url_for(config: &crate::config::Config, record: &db::FileRecord) -> Option<String> {
+    if record.tier != "hot" || record.r2_key.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}/{}",
+        config.r2_public_base_url.trim_end_matches('/'),
+        record.r2_key.trim_start_matches('/')
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/internal/resolve/{id}",
+    params(
+        ("id" = String, Path, description = "File ID")
+    ),
+    responses(
+        (status = 200, description = "Where the file lives (for edge routers)"),
+        (status = 401, description = "Invalid or missing API key"),
+        (status = 404, description = "File not found"),
+    ),
+    tag = "Internal",
+)]
+pub async fn resolve_file_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if state.config.juicehost_api_key.is_empty() {
+        return Err(AppError::Unauthorized("API key not configured".into()));
+    }
+    let provided = headers
+        .get("x-juicehost-api-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
+        return Err(AppError::Unauthorized("invalid API key".into()));
+    }
+
+    let id_clone = id.clone();
+    let file = state
+        .db_call("get_file", move |db| db::get_file(db, &id_clone))
+        .await;
+
+    match file {
         Ok(Some(record)) => Ok(Json(serde_json::json!({
             "id": id,
             "status": record.status,
+            "storage_host": record.storage_host,
+            "tier": record.tier,
+            "r2_url": r2_url_for(&state.config, &record),
             "filename": record.filename,
-            "expires_at": record.expires_at,
         }))),
         Ok(None) => Err(AppError::NotFound),
         Err(e) => Err(e),

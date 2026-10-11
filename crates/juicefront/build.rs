@@ -1,18 +1,41 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+fn git_head_path() -> Option<PathBuf> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(dir) = std::process::Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .current_dir(manifest_dir)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| PathBuf::from(text.trim().to_owned()))
+        .filter(|dir| dir.is_dir())
+    {
+        let head = dir.join("HEAD");
+        if head.is_file() {
+            return Some(head);
+        }
+    }
+    let fallback = manifest_dir.join("../../.git/HEAD");
+    fallback.is_file().then_some(fallback)
+}
 
 fn main() {
     println!("cargo:rerun-if-changed=icons/");
-    println!("cargo:rerun-if-changed=.git/HEAD");
+    if let Some(head) = git_head_path() {
+        println!("cargo:rerun-if-changed={}", head.display());
+    }
     println!("cargo:rerun-if-changed=build.rs");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let dest = Path::new(&out_dir).join("icon_data.rs");
 
     let mut entries = Vec::new();
-    let mut icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons");
-    if !icons_dir.exists() {
-        icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/src/icons");
-    }
+    let icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons");
     if let Ok(dir) = fs::read_dir(&icons_dir) {
         let mut names: Vec<String> = dir
             .filter_map(std::result::Result::ok)

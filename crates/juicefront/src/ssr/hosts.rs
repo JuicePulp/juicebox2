@@ -6,11 +6,19 @@ pub struct HostNode {
     pub url: String,
     pub region: String,
     pub official: bool,
+    #[serde(default = "default_host_kind")]
+    pub kind: String,
 }
 
-const OFFICIAL_DEFAULTS: &[(&str, &str)] = &[
-    ("Box", "https://box.juicey.dev"),
-    ("F", "https://f.juicey.dev"),
+fn default_host_kind() -> String {
+    String::from("storage")
+}
+
+const OFFICIAL_DEFAULTS: &[(&str, &str, &str, &str)] = &[
+    ("Default", "", "", "storage"),
+    ("Router", "https://f.juicey.dev", "", "router"),
+    ("Europe-1", "https://f-eu1.juicey.dev", "Europe", "storage"),
+    ("Europe-2", "https://f-eu2.juicey.dev", "Europe", "storage"),
 ];
 
 fn normalize_url(raw: &str) -> Option<String> {
@@ -40,6 +48,7 @@ fn parse_env_list(raw: Option<String>, official: bool) -> Vec<HostNode> {
         let name = parts.next().unwrap_or("");
         let url = parts.next().unwrap_or("");
         let region = parts.next().unwrap_or("").to_owned();
+        let kind = parts.next().unwrap_or("").to_owned();
         let Some(base) = normalize_url(url) else {
             continue;
         };
@@ -52,6 +61,11 @@ fn parse_env_list(raw: Option<String>, official: bool) -> Vec<HostNode> {
             url: base,
             region,
             official,
+            kind: if kind == "router" {
+                kind
+            } else {
+                default_host_kind()
+            },
         });
     }
     out
@@ -73,11 +87,12 @@ fn merge_nodes(base: Vec<HostNode>, extra: Vec<HostNode>) -> Vec<HostNode> {
 pub fn official_nodes() -> Vec<HostNode> {
     let base: Vec<HostNode> = OFFICIAL_DEFAULTS
         .iter()
-        .map(|(name, url)| HostNode {
+        .map(|(name, url, region, kind)| HostNode {
             name: (*name).to_owned(),
             url: (*url).to_owned(),
-            region: String::new(),
+            region: (*region).to_owned(),
             official: true,
+            kind: (*kind).to_owned(),
         })
         .collect();
     let extra = juiceutils::config::optional_secret("PUBLIC_OFFICIAL_HOSTS")

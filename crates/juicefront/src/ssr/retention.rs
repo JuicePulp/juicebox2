@@ -3,6 +3,7 @@ use crate::i18n;
 pub const DEFAULT_ALLOWED_TTL_HOURS: &[f64] = &[0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0];
 pub const DEFAULT_TTL_HOURS: f64 = 24.0;
 
+#[allow(clippy::float_cmp)]
 fn known_key(hours: f64) -> Option<&'static str> {
     if hours == 0.5 {
         Some("retention.30m")
@@ -12,8 +13,6 @@ fn known_key(hours: f64) -> Option<&'static str> {
         Some("retention.6h")
     } else if hours == 12.0 {
         Some("retention.12h")
-    } else if hours == 24.0 {
-        Some("retention.24h")
     } else if hours == 72.0 {
         Some("retention.3d")
     } else if hours == 168.0 {
@@ -21,6 +20,23 @@ fn known_key(hours: f64) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+pub fn ttl_tier(hours: f64) -> u8 {
+    let hours = if hours.is_finite() {
+        hours
+    } else {
+        DEFAULT_TTL_HOURS
+    };
+    if hours < 1.0 {
+        return 0;
+    }
+    
+    #[allow(clippy::float_cmp)]
+    if (hours / 24.0).fract() == 0.0 {
+        return 2;
+    }
+    1
 }
 
 pub fn ttl_label(locale: &str, hours: f64) -> String {
@@ -33,6 +49,9 @@ pub fn ttl_label(locale: &str, hours: f64) -> String {
         DEFAULT_TTL_HOURS
     };
     if hours < 1.0 {
+        
+        
+        #[allow(clippy::cast_possible_truncation)]
         let mins = (hours * 60.0).round() as i64;
         let key = if mins == 1 {
             "retention.minute"
@@ -42,6 +61,9 @@ pub fn ttl_label(locale: &str, hours: f64) -> String {
         return i18n::tv(locale, key, "count", &mins.to_string());
     }
     let days = hours / 24.0;
+    
+    
+    #[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
     if days.fract() == 0.0 {
         let days = days as i64;
         let key = if days == 1 {
@@ -51,6 +73,7 @@ pub fn ttl_label(locale: &str, hours: f64) -> String {
         };
         return i18n::tv(locale, key, "count", &days.to_string());
     }
+    #[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
     if hours.fract() == 0.0 {
         let whole = hours as i64;
         let key = if whole == 1 {

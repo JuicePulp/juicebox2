@@ -1,7 +1,3 @@
-/**
- * Themes — finished materials for the same fourteen cues. A theme changes how a
- * cue sounds, never what it means, so every theme carries every cue.
- */
 import { BUBBLE } from "./bubble.js";
 import { MECH } from "./mech.js";
 import { PRESS } from "./press.js";
@@ -12,7 +8,6 @@ export const THEMES = {
     bubble: BUBBLE,
     press: PRESS,
 };
-/** The built-in theme names. */
 export const themes = Object.keys(THEMES);
 export function isThemeName(value) {
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(THEMES, value);

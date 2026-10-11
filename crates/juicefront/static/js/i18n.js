@@ -35,7 +35,6 @@ var KNOWN_TTL = {
   1: "retention.1h",
   6: "retention.6h",
   12: "retention.12h",
-  24: "retention.24h",
   72: "retention.3d",
   168: "retention.7d",
 };

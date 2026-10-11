@@ -30,6 +30,41 @@ pub fn is_valid_id(id: &str) -> bool {
 
 pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
+#[must_use]
+pub fn is_official_host(config: &crate::config::Config, host: &str) -> bool {
+    let host = host.trim().trim_end_matches('/');
+    if host.is_empty() {
+        return true;
+    }
+    if host == config.juicehost_url.trim_end_matches('/') {
+        return true;
+    }
+    config
+        .region_public_juicehosts
+        .values()
+        .any(|u| u.trim().trim_end_matches('/') == host)
+}
+
+#[must_use]
+pub fn share_link(
+    config: &crate::config::Config,
+    storage_host: Option<&str>,
+    id: &str,
+    filename: &str,
+) -> String {
+    if let Some(router) = config
+        .router_base_url
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let official = storage_host.map_or(true, |h| is_official_host(config, h));
+        if official {
+            return public_url(router, None, id, filename);
+        }
+    }
+    public_url(&config.public_base_url, storage_host, id, filename)
+}
+
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {
     let throughput = if total.as_secs_f64() > 0.0 {
         size as f64 / total.as_secs_f64() / crate::constants::BYTES_PER_MIB
@@ -119,19 +154,19 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://files.example.com/f/abc123.gif");
+        assert_eq!(url, "https://files.example.com/v/abc123.gif");
     }
 
     #[test]
     fn public_url_without_storage_host() {
         let url = public_url("http://localhost:6402", None, "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
     fn public_url_empty_storage_host() {
         let url = public_url("http://localhost:6402", Some(""), "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
@@ -142,6 +177,6 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://fx.juicey.dev/f/abc123.gif");
+        assert_eq!(url, "https://fx.juicey.dev/v/abc123.gif");
     }
 }

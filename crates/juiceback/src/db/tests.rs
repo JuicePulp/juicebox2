@@ -614,6 +614,7 @@ fn test_insert_list_delete_report() {
         "details",
         Some("1.2.3.4"),
         Some("a@b.com"),
+        None,
     )
     .unwrap();
     assert!(id > 0);
@@ -834,7 +835,77 @@ fn legacy_files_table_gains_new_columns() {
         .unwrap();
     assert!(cols.contains(&"storage_host".to_string()));
     assert!(cols.contains(&"status".to_string()));
+    assert!(cols.contains(&"password_hash".to_string()));
+    assert!(cols.contains(&"is_encrypted".to_string()));
+    assert!(cols.contains(&"enc_header".to_string()));
     assert_eq!(schema_version(&conn).unwrap(), migration_count());
+}
+
+#[test]
+fn protected_record_roundtrips_with_defaults_for_plain() {
+    let conn = setup_db();
+
+    let mut shielded = FileRecord::new(
+        "locked".into(),
+        "secret.bin".into(),
+        "application/octet-stream".into(),
+        41,
+        "tok-lock".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    shielded.password_hash = Some("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$hash".into());
+    shielded.is_encrypted = true;
+    shielded.enc_header = Some("4a424331100000000000000000".into());
+    insert_file(&conn, &shielded).unwrap();
+
+    let got = get_file(&conn, "locked").unwrap().unwrap();
+    assert!(got.is_protected());
+    assert!(got.is_encrypted);
+    assert_eq!(
+        got.password_hash.as_deref(),
+        shielded.password_hash.as_deref()
+    );
+    assert_eq!(
+        got.enc_header.as_deref(),
+        Some("4a424331100000000000000000")
+    );
+
+    let plain = FileRecord::new(
+        "open".into(),
+        "file.txt".into(),
+        "text/plain".into(),
+        100,
+        "tok-open".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    insert_file(&conn, &plain).unwrap();
+    let got = get_file(&conn, "open").unwrap().unwrap();
+    assert!(!got.is_protected());
+    assert!(!got.is_encrypted);
+    assert_eq!(got.password_hash, None);
+    assert_eq!(got.enc_header, None);
+}
+
+#[test]
+fn file_id_from_report_urls() {
+    use super::reports::file_id_from_url;
+    assert_eq!(
+        file_id_from_url("https://box.example/f/Ab3dEf9Q.txt").as_deref(),
+        Some("Ab3dEf9Q")
+    );
+    assert_eq!(
+        file_id_from_url("https://box.example/f/Ab3dEf9Q").as_deref(),
+        Some("Ab3dEf9Q")
+    );
+    assert_eq!(file_id_from_url("https://box.example/f/"), None);
+    assert_eq!(file_id_from_url("not a url at all !!"), None);
+    assert_eq!(file_id_from_url(""), None);
 }
 
 #[test]
@@ -863,4 +934,53 @@ fn renew_ids_are_atomic_in_transaction() {
         .unwrap_err();
     tx.rollback().unwrap();
     assert!(resolve_alias(&conn, "new").unwrap().is_none());
+}
+
+#[test]
+fn hot_tier_migration_and_promo_flow() {
+    let conn = setup_db();
+    assert!(schema_version(&conn).unwrap() >= 13);
+
+    let rec = FileRecord::new(
+        "hot1".into(),
+        "movie.mp4".into(),
+        "video/mp4".into(),
+        1024,
+        "tok-hot".into(),
+        1000,
+        9_999_999_999,
+        None,
+        Some("https://f-eu1.juicey.dev".into()),
+    );
+    insert_file(&conn, &rec).unwrap();
+    let got = get_file(&conn, "hot1").unwrap().unwrap();
+    assert_eq!(got.tier, "standard");
+    assert!(got.r2_key.is_empty());
+
+    let (count, bytes) = hot_usage(&conn).unwrap();
+    assert_eq!((count, bytes), (0, 0));
+
+    let candidates = list_promo_candidates(&conn, 9_999_999_000, 500).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, "hot1");
+
+    set_file_tier(&conn, "hot1", "hot", "hot/hot1.mp4").unwrap();
+    let got = get_file(&conn, "hot1").unwrap().unwrap();
+    assert_eq!(got.tier, "hot");
+    assert_eq!(got.r2_key, "hot/hot1.mp4");
+
+    let (count, bytes) = hot_usage(&conn).unwrap();
+    assert_eq!((count, bytes), (1, 1024));
+
+    let candidates = list_promo_candidates(&conn, 9_999_999_000, 500).unwrap();
+    assert!(candidates.is_empty());
+
+    upsert_promo_state(&conn, &[("hot1".to_string(), 60, 5, 2000)]).unwrap();
+    let seen = read_promo_state(&conn, &["hot1".to_string()]).unwrap();
+    assert_eq!(seen.get("hot1"), Some(&(60, 5, 2000)));
+
+    assert_eq!(prune_promo_state(&conn).unwrap(), 0);
+    conn.execute("DELETE FROM files WHERE id = 'hot1'", [])
+        .unwrap();
+    assert_eq!(prune_promo_state(&conn).unwrap(), 1);
 }

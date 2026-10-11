@@ -44,7 +44,10 @@ fn hreflang_links_absolute(headers: &HeaderMap, stripped: &str) -> Vec<Hreflang>
     hreflang_links_absolute_inner(stripped, &|href| absolute_url(headers, &href))
 }
 
-fn hreflang_links_absolute_inner(stripped: &str, resolve: &dyn Fn(String) -> String) -> Vec<Hreflang> {
+fn hreflang_links_absolute_inner(
+    stripped: &str,
+    resolve: &dyn Fn(String) -> String,
+) -> Vec<Hreflang> {
     i18n::LOCALES
         .iter()
         .map(|(code, _)| {
@@ -60,6 +63,7 @@ fn hreflang_links_absolute_inner(stripped: &str, resolve: &dyn Fn(String) -> Str
                     "fr" => "fr",
                     "ru" => "ru",
                     "es" => "es",
+                    "ja" => "ja",
                     _ => "en",
                 },
                 href: resolve(href),
@@ -210,6 +214,7 @@ fn modals_html(
                     "fr" => "fr",
                     "ru" => "ru",
                     "es" => "es",
+                    "ja" => "ja",
                     _ => "en",
                 },
                 label: (*label).to_owned(),
@@ -239,6 +244,9 @@ fn modals_html(
             .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec())
             .iter()
             .map(|hours| {
+                
+                
+                #[allow(clippy::cast_possible_truncation)]
                 if hours.fract() == 0.0 {
                     format!("{}", *hours as i64)
                 } else {
@@ -273,7 +281,7 @@ fn modals_html(
             shortcut("shortcuts.open_settings", &["G", "T"]),
         ],
         lang_links,
-        locale_codes_json: "[\"en\",\"fr\",\"ru\",\"es\"]".to_owned(),
+        locale_codes_json: "[\"en\",\"fr\",\"ru\",\"es\",\"ja\"]".to_owned(),
     }
     .render()
     .unwrap_or_default()
@@ -325,7 +333,7 @@ fn ad_zones() -> std::collections::HashMap<String, AdZone> {
         if let Some(key) = juiceutils::config::optional_secret(env)
             && !key.is_empty()
         {
-            for holder in holders.iter() {
+            for holder in *holders {
                 zones.insert(
                     (*holder).to_owned(),
                     AdZone {
@@ -405,7 +413,7 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
     }
 }
 
-fn no_extra() -> Vec<String> {
+const fn no_extra() -> Vec<String> {
     Vec::new()
 }
 
@@ -437,6 +445,7 @@ fn og_locale_for(locale: &'static str) -> &'static str {
         "fr" => "fr_FR",
         "ru" => "ru_RU",
         "es" => "es_ES",
+        "ja" => "ja_JP",
         _ => "en_US",
     }
 }
@@ -521,6 +530,8 @@ const CSS_BUNDLE: &str = concat!(
     "\n",
     include_str!("../static/styles/components/CopyBar.css"),
     "\n",
+    include_str!("../static/styles/components/QrModal.css"),
+    "\n",
     include_str!("../static/styles/components/NoJs.css"),
     "\n",
     include_str!("../static/styles/components/AnnouncementBanner.css"),
@@ -538,6 +549,10 @@ const CSS_BUNDLE: &str = concat!(
     include_str!("../static/styles/components/HostSelector.css"),
     "\n",
     include_str!("../static/styles/components/Modals.css"),
+    "\n",
+    include_str!("../static/styles/components/SettingsTabs.css"),
+    "\n",
+    include_str!("../static/styles/components/FullTab.css"),
     "\n",
     include_str!("../static/styles/components/NetDebug.css"),
     "\n",
@@ -559,6 +574,7 @@ fn locale_from_path(path: Option<Path<String>>) -> Option<&'static str> {
             "fr" => Some("fr"),
             "ru" => Some("ru"),
             "es" => Some("es"),
+            "ja" => Some("ja"),
             _ => None,
         },
         None => Some("en"),
@@ -579,12 +595,14 @@ struct HostselTpl {
     cx: Cx,
     official: Vec<HostRow>,
     unofficial: Vec<HostRow>,
+    version: &'static str,
 }
 
 struct HostRow {
     url: String,
     name: String,
     region: String,
+    kind: String,
     selected: bool,
 }
 
@@ -606,6 +624,7 @@ struct RetentionOpt {
     hours: f64,
     label: String,
     checked: bool,
+    divider_before: bool,
 }
 
 struct UploadedFile {
@@ -632,6 +651,7 @@ fn json_str(value: &serde_json::Value, key: &str, max_len: usize) -> String {
         .unwrap_or_default()
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn json_num(value: &serde_json::Value, key: &str) -> i64 {
     value
         .get(key)
@@ -644,6 +664,9 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
     let bytes = base64url_decode(param)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let mime = json_str(&value, "mime_type", 200);
+    
+    
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let size = json_num(&value, "size_bytes") as u64;
     Some(UploadedFile {
         id: json_str(&value, "id", 50),
@@ -723,7 +746,14 @@ pub async fn index(
         .unwrap_or(retention::DEFAULT_TTL_HOURS);
     let default_index = allowed
         .iter()
-        .position(|hours| *hours == default_ttl)
+        
+        
+        .position(|hours| {
+            #[allow(clippy::float_cmp)]
+            {
+                *hours == default_ttl
+            }
+        })
         .unwrap_or(0);
     let max_bytes = data.eff.config.max_file_size_bytes.unwrap_or(524_288_000);
     let cobalt = data.eff.config.cobalt.unwrap_or(false);
@@ -746,15 +776,25 @@ pub async fn index(
         cobalt,
         cobalt_services: services.join(","),
         services,
-        retention: allowed
-            .into_iter()
-            .enumerate()
-            .map(|(index, hours)| RetentionOpt {
-                hours,
-                label: cx.ttl(hours),
-                checked: index == default_index,
-            })
-            .collect(),
+        retention: {
+            let mut prev_tier: Option<u8> = None;
+            allowed
+                .into_iter()
+                .enumerate()
+                .map(|(index, hours)| {
+                    let tier = retention::ttl_tier(hours);
+                    let divider_before =
+                        prev_tier.is_some_and(|prev| prev != tier);
+                    prev_tier = Some(tier);
+                    RetentionOpt {
+                        hours,
+                        label: cx.ttl(hours),
+                        checked: index == default_index,
+                        divider_before,
+                    }
+                })
+                .collect()
+        },
         drop_max_html,
         uploaded,
         repo_url: metadata::REPO_URL.to_owned(),
@@ -782,6 +822,7 @@ pub async fn index(
             url: node.url,
             name: node.name,
             region: node.region,
+            kind: node.kind,
         })
         .collect();
     let unofficial: Vec<HostRow> = hosts::unofficial_nodes()
@@ -791,12 +832,14 @@ pub async fn index(
             url: node.url,
             name: node.name,
             region: node.region,
+            kind: node.kind,
         })
         .collect();
     let hostsel_html = HostselTpl {
         cx: cx.clone(),
         official,
         unofficial,
+        version: env!("CARGO_PKG_VERSION"),
     }
     .render()
     .unwrap_or_default();
@@ -835,6 +878,7 @@ struct FilesTpl {
     footer_message: String,
     footer_repo: String,
     empty_message: String,
+    notice: String,
     actions: Vec<CardAction>,
     has_actions: bool,
     files: Vec<FileRow>,
@@ -859,6 +903,7 @@ struct FileRow {
     ttl_pct: u64,
     short_id: String,
     index: usize,
+    protected: bool,
 }
 
 fn extract_short_id(url: &str) -> String {
@@ -909,7 +954,7 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
     if pairs.is_empty() {
         return Vec::new();
     }
-    let files = match tokio::time::timeout(Duration::from_secs(5), async {
+    let Ok(Some(files)) = tokio::time::timeout(Duration::from_secs(5), async {
         let response = state
             .http
             .post(format!("{}/api/owned-files", state.config.juiceback_url))
@@ -923,9 +968,8 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         response.json::<serde_json::Value>().await.ok()
     })
     .await
-    {
-        Ok(Some(data)) => data,
-        _ => return Vec::new(),
+    else {
+        return Vec::new();
     };
     let now = chrono_now();
     files
@@ -935,19 +979,17 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         .into_iter()
         .filter_map(|file| serde_json::from_value::<ServerFile>(file).ok())
         .filter(|file| file.expires_at > now)
-        .map(|mut file| {
-            file.delete_token = String::new();
-            file
-        })
         .collect()
 }
 
+#[allow(clippy::cast_possible_wrap)]
 fn chrono_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs() as i64)
 }
 
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -979,6 +1021,7 @@ pub async fn files_page(
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str)
         .to_owned();
+    let query = query_map(&uri);
     let head = HeadTpl {
         head: head_ctx(
             locale,
@@ -996,6 +1039,17 @@ pub async fn files_page(
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let data = shared(&state, &headers, peer.ip()).await;
+        let notice = query
+            .get("deleted")
+            .filter(|value| !value.is_empty())
+            .map(|_| cx.t("sr.file_deleted"))
+            .or_else(|| {
+                query
+                    .get("renamed")
+                    .filter(|value| value.as_str() == "1")
+                    .map(|_| cx.t("files.rename_success"))
+            })
+            .unwrap_or_default();
 
     let server_files = if data.offline {
         Vec::new()
@@ -1039,6 +1093,7 @@ pub async fn files_page(
                 delete_token: file.delete_token,
                 storage_host: host,
                 index,
+                protected: file.protected,
             }
         })
         .collect();
@@ -1061,10 +1116,11 @@ pub async fn files_page(
         actions_id: "files-card-actions".to_owned(),
         title: cx.t("files.fallback_title"),
         subtitle: cx.t("files.fallback_subtitle"),
-        footer_commit: metadata::commit_label(),
-        footer_message: "juicebox2-epsilon".to_owned(),
+        footer_commit: metadata::commit_short_hash(),
+        footer_message: String::new(),
         footer_repo: metadata::REPO_URL.to_owned(),
         empty_message: cx.t("files.fallback_empty"),
+        notice,
         has_actions: !actions.is_empty(),
         actions,
         files: rows,
@@ -1265,8 +1321,8 @@ pub async fn download_page(
             actions_id: "content-card-actions".to_owned(),
             title: "Download Juicebox+".to_owned(),
             subtitle: "The desktop app for UltraFast uploads".to_owned(),
-            footer_commit: metadata::commit_label(),
-            footer_message: "juicebox2-epsilon".to_owned(),
+            footer_commit: metadata::commit_short_hash(),
+            footer_message: String::new(),
             footer_repo: metadata::REPO_URL.to_owned(),
             actions: content_actions(locale, &cx),
             body_html,
@@ -1424,7 +1480,7 @@ pub async fn report_page(
         subtitle: cx.t("report.subtitle"),
         submitted: query.get("submitted").is_some_and(|value| value == "1"),
         footer_commit: metadata::commit_short_hash(),
-        footer_message: "juicebox2-epsilon".to_owned(),
+        footer_message: String::new(),
         footer_repo: metadata::REPO_URL.to_owned(),
         actions: content_actions(locale, &cx),
         }
@@ -1484,7 +1540,7 @@ pub async fn feedback_page(
         subtitle: cx.t("feedback.subtitle"),
         submitted: query.get("submitted").is_some_and(|value| value == "1"),
         footer_commit: metadata::commit_short_hash(),
-        footer_message: "juicebox2-epsilon".to_owned(),
+        footer_message: String::new(),
         footer_repo: metadata::REPO_URL.to_owned(),
         actions: content_actions(locale, &cx),
         }
@@ -1560,8 +1616,8 @@ pub async fn faq_page(
             actions_id: "content-card-actions".to_owned(),
             title: cx.t("faq.title"),
             subtitle: cx.t("faq.subtitle"),
-            footer_commit: metadata::commit_label(),
-            footer_message: "juicebox2-epsilon".to_owned(),
+            footer_commit: metadata::commit_short_hash(),
+            footer_message: String::new(),
             footer_repo: metadata::REPO_URL.to_owned(),
             actions: content_actions(locale, &cx),
             body_html,
@@ -1626,8 +1682,8 @@ pub async fn docs_page(
                 actions_id: "content-card-actions".to_owned(),
                 title: cx.t("docs.title"),
                 subtitle: cx.t("docs.description"),
-                footer_commit: metadata::commit_label(),
-                footer_message: "juicebox2-epsilon".to_owned(),
+                footer_commit: metadata::commit_short_hash(),
+                footer_message: String::new(),
                 footer_repo: metadata::REPO_URL.to_owned(),
                 actions: content_actions(locale, &cx),
                 body_html,
@@ -1639,6 +1695,7 @@ pub async fn docs_page(
     stream_page(StatusCode::OK, stream)
 }
 
+#[allow(clippy::unused_async)]
 async fn legal_page(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -1664,8 +1721,8 @@ async fn legal_page(
                 actions_id: "content-card-actions".to_owned(),
                 title: cx.t(title_key),
                 subtitle: cx.t(subtitle_key),
-                footer_commit: metadata::commit_label(),
-                footer_message: "juicebox2-epsilon".to_owned(),
+                footer_commit: metadata::commit_short_hash(),
+                footer_message: String::new(),
                 footer_repo: metadata::REPO_URL.to_owned(),
                 actions: content_actions(locale, &cx),
                 body_html: legal_html,
@@ -1776,6 +1833,7 @@ struct NotFoundTpl {
     flags_html: String,
 }
 
+#[allow(clippy::unused_async)]
 pub async fn not_found_page(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -1848,6 +1906,13 @@ struct AdminFilesTpl {
 #[derive(Template)]
 #[template(path = "admin_bans.html")]
 struct AdminBansTpl {
+    title: String,
+    scripts: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "admin_hosters.html")]
+struct AdminHostersTpl {
     title: String,
     scripts: Vec<String>,
 }
@@ -1926,6 +1991,18 @@ pub async fn admin_bans() -> Response<Body> {
         AdminBansTpl {
             title: "Banned IPs - Admin - Juicebox".to_owned(),
             scripts: vec!["/static/js/admin-bans.js".to_owned()],
+        }
+        .render()
+        .unwrap_or_default(),
+    )
+}
+
+pub async fn admin_hosters() -> Response<Body> {
+    admin_html(
+        StatusCode::OK,
+        AdminHostersTpl {
+            title: "Hosters - Admin - Juicebox".to_owned(),
+            scripts: vec!["/static/js/admin-hosters.js".to_owned()],
         }
         .render()
         .unwrap_or_default(),

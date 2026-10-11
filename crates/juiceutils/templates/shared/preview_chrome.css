@@ -1,0 +1,95 @@
+    .fsize{color:#a29188;font-size:.85rem;white-space:nowrap}
+    .actions{display:flex;gap:.5rem;flex:none}
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      gap:.35rem;
+      padding:.45rem .9rem;
+      border:1px solid #4a3d33;
+      border-radius:.5rem;
+      background:#241d17;
+      color:#e8ded4;
+      text-decoration:none;
+      font-size:.85rem;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .btn:hover{background:#2e251d;border-color:#f97316}
+    .btn--primary{background:#f97316;border-color:#f97316;color:#0a0908}
+    .btn--primary:hover{background:#fb923c}
+    .stage{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      padding:1rem;
+      gap:1rem;
+    }
+    video#media,img#media{
+      max-width:100%;
+      max-height:100%;
+      object-fit:contain;
+      border-radius:.5rem;
+      background:#000;
+    }
+    video#media{width:100%;height:100%}
+    img#media{width:auto;height:auto}
+    .pdf-frame{width:100%;height:100%;border:0;border-radius:.5rem;background:#fff}
+    .audio-hero{
+      font-size:5rem;
+      line-height:1;
+      color:#f97316;
+      background:#241d17;
+      border:1px solid #4a3d33;
+      border-radius:1rem;
+      width:10rem;
+      height:10rem;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    audio#media{width:100%}
+    .audio-hero + audio#media{width:min(28rem,100%)}
+    .text-view{
+      width:min(60rem,100%);
+      height:100%;
+      overflow:auto;
+      background:#100d0a;
+      border:1px solid #2e2620;
+      border-radius:.5rem;
+      padding:1rem 1.25rem;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:.85rem;
+      line-height:1.55;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .fallback-note{color:#a29188;font-size:.9rem}
+    .fallback-note a{color:#f97316}
+    .dl-hero{display:flex;flex-direction:column;align-items:center;gap:.75rem;text-align:center}
+    .dl-icon{
+      font-size:3.5rem;
+      color:#f97316;
+      background:#241d17;
+      border:1px solid #4a3d33;
+      border-radius:1rem;
+      width:7rem;
+      height:7rem;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .dl-name{font-size:1.1rem;font-weight:700;word-break:break-all}
+    .dl-meta{color:#a29188;font-size:.9rem}
+    .dl-btn{
+      margin-top:.5rem;
+      padding:.7rem 2rem;
+      background:#f97316;
+      color:#0a0908;
+      border-radius:.5rem;
+      text-decoration:none;
+      font-weight:700;
+    }
+    .dl-btn:hover{background:#fb923c}

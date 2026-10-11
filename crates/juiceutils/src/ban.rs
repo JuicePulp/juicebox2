@@ -6,11 +6,11 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 #[must_use]
+
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
     let ip = ip
         .parse::<IpAddr>()
-        .map(|parsed| parsed.to_string())
-        .unwrap_or_else(|_| ip.to_owned());
+        .map_or_else(|_| ip.to_owned(), |parsed| parsed.to_string());
     let mut mac = <HmacSha256 as KeyInit>::new_from_slice(pepper.as_bytes())
         .expect("HMAC accepts any key length");
     mac.update(ip.as_bytes());
@@ -117,6 +117,22 @@ impl BanList {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .hashes
             .extend(hashes);
+    }
+
+    pub fn add_hash(&self, hash: &str) -> bool {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .hashes
+            .insert(hash.to_string())
+    }
+
+    pub fn remove_hash(&self, hash: &str) -> bool {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .hashes
+            .remove(hash)
     }
 
     pub fn load_file(&self, path: &Path, config_pepper: &str) -> (usize, usize) {
