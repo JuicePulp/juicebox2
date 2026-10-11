@@ -1,6 +1,7 @@
 import { announce, esc, formatSize } from "./util.js";
 import { playSound } from "./sounds.js";
 import { iconHTML, iconForMime } from "./copy.js";
+import { openQrModal } from "./qr.js";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
 
@@ -34,6 +35,31 @@ function isDefaultHost(host, def) {
   if (s === "localhost:6402" || s === "127.0.0.1:6402" || s === "localhost:6400" || s === "127.0.0.1:6400") return true;
   if (def) return s === stripHost(def);
   return false;
+}
+
+function qrLabelsFor(locale) {
+  return {
+    title: t(locale, "files.qr_title"),
+    hint: t(locale, "files.qr_hint"),
+    copy: t(locale, "files.qr_copy"),
+    copied: t(locale, "files.qr_copied"),
+    download: t(locale, "files.qr_download"),
+    close: t(locale, "modal.close"),
+  };
+}
+
+function makeQrButton(url, locale) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "copy-bar-qr";
+  btn.title = t(locale, "files.qr");
+  btn.setAttribute("aria-label", t(locale, "files.qr_aria"));
+  btn.setAttribute("data-qr-url", url);
+  btn.innerHTML = "<span>" + iconHTML("qr-code", 24, "copy-bar-qr__icon") + "</span>";
+  btn.addEventListener("click", () => {
+    openQrModal(btn.getAttribute("data-qr-url") || url, qrLabelsFor(locale));
+  });
+  return btn;
 }
 
 
@@ -201,14 +227,24 @@ function flipRemove(el, card) {
   });
 }
 
-function makeDeleteBtn(card, el, f, locale) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "file-action-btn file-action-btn--danger";
+function makeDeleteBtn(card, el, f, locale, existing) {
+  const btn = existing || document.createElement("button");
+  if (!existing) {
+    btn.type = "button";
+    btn.className = "file-action-btn file-action-btn--danger";
+    btn.innerHTML = trashIconHtml() + '<span class="confirm-text"></span>';
+  }
+  if (btn.dataset.wired) return btn;
+  btn.dataset.wired = "1";
   btn.title = t(locale, "files.delete");
   btn.setAttribute("aria-label", t(locale, "files.delete") + " file");
-  btn.innerHTML = trashIconHtml() + '<span class="confirm-text"></span>';
-  btn.addEventListener("click", async (e) => {
+  if (!btn.querySelector(".confirm-text")) {
+    const span = document.createElement("span");
+    span.className = "confirm-text";
+    btn.append(span);
+  }
+  const activate = async (e) => {
+    if (e) e.preventDefault();
     if (e.shiftKey) {
       btn.dataset.confirming = "true";
       btn.classList.add("confirming");
@@ -242,7 +278,13 @@ function makeDeleteBtn(card, el, f, locale) {
       btn.innerHTML = trashIconHtml() + '<span class="confirm-text"></span>';
       alert(t(locale, "files.delete_error"));
     }
-  });
+  };
+  btn.addEventListener("click", activate);
+  const form = btn.closest("form");
+  if (form && !form.dataset.wired) {
+    form.dataset.wired = "1";
+    form.addEventListener("submit", activate);
+  }
   return btn;
 }
 
@@ -283,9 +325,9 @@ function wireRenameModal(card, modal, f, locale) {
         return;
       }
       const data = await res.json();
+      const host = card.querySelector('[data-file-id="' + CSS.escape(f.id) + '"]');
       f.id = data.id;
       f.url = data.url;
-      const host = modal.closest(".file-card");
       if (host) {
         host.setAttribute("data-file-id", data.id);
         host.setAttribute("data-url", data.url);
@@ -295,6 +337,8 @@ function wireRenameModal(card, modal, f, locale) {
         if (link) link.setAttribute("aria-label", t(locale, "upload.copy_bar_aria"));
         const editLink = host.querySelector(".copy-bar-edit");
         if (editLink) editLink.href = "#rename-" + data.id;
+        const qrBtn = host.querySelector(".copy-bar-qr");
+        if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
       }
       modal.remove();
       if (location.hash.startsWith("#rename-")) history.replaceState(null, "", location.pathname + location.search);
@@ -313,8 +357,12 @@ function showRenameModal(card, f, locale) {
   if (!modal) {
     const host = card.querySelector('[data-file-id="' + CSS.escape(f.id) + '"]');
     if (!host) return;
-    host.insertAdjacentHTML("beforeend", renameModalHtml(f, locale));
-    modal = document.getElementById("rename-" + f.id);
+    const wrap = document.createElement("div");
+    wrap.innerHTML = renameModalHtml(f, locale);
+    modal = wrap.firstElementChild;
+    // Portal to <body>: inside .file-card the fixed overlay would scroll
+    // with .upldfs and clip on transformed ancestors.
+    document.body.appendChild(modal);
     if (modal) wireRenameModal(card, modal, f, locale);
   }
   location.hash = "#rename-" + f.id;
@@ -356,6 +404,19 @@ function enhanceCard(card, el, f, locale) {
     w.append(copyBar);
     headerEl?.after(w);
   }
+  const qrUrl = f.url || el.getAttribute("data-url") || "";
+  const qrWrap = el.querySelector(".copy-bar-wrapper");
+  if (qrWrap && qrUrl) {
+    let qrBtn = qrWrap.querySelector(".copy-bar-qr");
+    if (!qrBtn) {
+      qrBtn = makeQrButton(qrUrl, locale);
+      const editEl = qrWrap.querySelector(".copy-bar-edit");
+      if (editEl) editEl.before(qrBtn);
+      else qrWrap.append(qrBtn);
+    } else {
+      qrBtn.setAttribute("data-qr-url", qrUrl);
+    }
+  }
   if (customIdEnabled() && f.delete_token) {
     const w = el.querySelector(".copy-bar-wrapper");
     if (w && !w.querySelector(".copy-bar-edit")) {
@@ -372,16 +433,25 @@ function enhanceCard(card, el, f, locale) {
       editBtn.dataset.wired = "1";
       editBtn.addEventListener("click", (e) => { e.preventDefault(); showRenameModal(card, f, locale); });
     }
-    if (!el.querySelector("#rename-" + CSS.escape(f.id))) {
-      el.insertAdjacentHTML("beforeend", renameModalHtml(f, locale));
+    if (!el.querySelector("#rename-" + CSS.escape(f.id)) && !document.getElementById("rename-" + f.id)) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = renameModalHtml(f, locale);
+      const fresh = wrap.firstElementChild;
+      if (fresh) {
+        document.body.appendChild(fresh);
+        wireRenameModal(card, fresh, f, locale);
+      }
+    } else {
+      const modal = document.getElementById("rename-" + f.id);
+      if (modal) wireRenameModal(card, modal, f, locale);
     }
-    const modal = el.querySelector("#rename-" + CSS.escape(f.id));
-    if (modal) wireRenameModal(card, modal, f, locale);
   }
   const existingBtn = el.querySelector(".file-action-btn--danger");
-  const fresh = makeDeleteBtn(card, el, f, locale);
-  if (existingBtn) existingBtn.replaceWith(fresh);
-  else el.querySelector(".file-card-buttons")?.append(fresh);
+  if (existingBtn) makeDeleteBtn(card, el, f, locale, existingBtn);
+  else {
+    const fresh = makeDeleteBtn(card, el, f, locale);
+    el.querySelector(".file-card-buttons")?.append(fresh);
+  }
   const ttlLabel = el.querySelector(".file-card-ttl-label");
   const ttlEl = el.querySelector(".file-card-ttl");
   const fill = el.querySelector(".file-card-ttl-fill");
@@ -431,6 +501,15 @@ export function initFilesCard() {
   const card = document.querySelector("[data-files-card]");
   if (!card || card.hasAttribute("data-enhanced")) return;
   card.setAttribute("data-enhanced", "");
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.has("deleted") || url.searchParams.has("renamed")) {
+      url.searchParams.delete("deleted");
+      url.searchParams.delete("renamed");
+      const qs = url.searchParams.toString();
+      history.replaceState(null, "", url.pathname + (qs ? "?" + qs : "") + url.hash);
+    }
+  } catch {}
   const locale = loc();
   const grid = card.querySelector("[data-files-grid]");
   if (!grid) return;

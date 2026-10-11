@@ -1,3 +1,4 @@
+pub mod bun;
 pub mod handlers;
 pub mod job;
 pub mod store;

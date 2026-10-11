@@ -220,6 +220,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 header::HeaderName::from_static("upload-metadata"),
                 header::HeaderName::from_static("tus-resumable"),
                 header::HeaderName::from_static("x-delete-token"),
+                // Unlock shells on the storage hosts call the gateway and
+                // content endpoints cross-origin with these headers; without
+                // them every password fetch dies in preflight and the shell
+                // never dismisses.
+                header::HeaderName::from_static("x-file-password"),
+                header::RANGE,
             ])
     };
 
@@ -241,6 +247,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/direct/complete",
             post(upload::direct_upload_complete_handler),
+        )
+        .route(
+            "/direct/parallel/reserve",
+            post(upload::direct_parallel_reserve_handler),
+        )
+        .route(
+            "/direct/parallel/complete",
+            post(upload::direct_parallel_complete_handler),
         )
         .layer(GovernorLayer::new(upload_governor_conf.clone()))
         .layer(middleware::from_fn(rate_limit_error_mapper))

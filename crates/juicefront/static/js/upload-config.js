@@ -97,6 +97,11 @@ export const RESERVE_URL = `${UPLOAD_URL}/upload/reserve`;
 export const ULTRAFAST_RESERVE_URL = `${UPLOAD_URL}/upload/ultrafast/reserve`;
 export const DIRECT_RESERVE_URL = `${UPLOAD_URL}/upload/direct/reserve`;
 export const DIRECT_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/complete`;
+export const DIRECT_PARALLEL_RESERVE_URL = `${UPLOAD_URL}/upload/direct/parallel/reserve`;
+export const DIRECT_PARALLEL_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/parallel/complete`;
+export const DIRECT_PARALLEL_THRESHOLD = 16 * 1024 * 1024;
+export const DIRECT_PART_TARGET = 32 * 1024 * 1024;
+export const DIRECT_MAX_PARTS = 32;
 export const TEXT_LIKE_RE = /\.(txt|json|csv|tsv|xml|html|css|js|ts|jsx|tsx|md|yaml|yml|toml|ini|conf|sh|bash|zsh|fish|py|rb|pl|php|java|c|h|cpp|hpp|rs|go|swift|kt|sql|log|diff|patch|srt|vtt|sub|cfg|env|gitignore|dockerignore|editorconfig|prettierrc|eslintrc|babelrc|Makefile|CMakeLists|Gemfile|Podfile|Dockerfile|svg|wasm|epub|tex|rst|graphql|proto)$/i;
 const TEXT_MIME_RE = /^text\/|application\/(json|xml|javascript|x-yaml|yaml|svg\+xml|wasm)/i;
 export function gzipEligible(filename, mimeType) {

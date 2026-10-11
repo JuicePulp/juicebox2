@@ -63,6 +63,7 @@ fn hreflang_links_absolute_inner(
                     "fr" => "fr",
                     "ru" => "ru",
                     "es" => "es",
+                    "ja" => "ja",
                     _ => "en",
                 },
                 href: resolve(href),
@@ -213,6 +214,7 @@ fn modals_html(
                     "fr" => "fr",
                     "ru" => "ru",
                     "es" => "es",
+                    "ja" => "ja",
                     _ => "en",
                 },
                 label: (*label).to_owned(),
@@ -279,7 +281,7 @@ fn modals_html(
             shortcut("shortcuts.open_settings", &["G", "T"]),
         ],
         lang_links,
-        locale_codes_json: "[\"en\",\"fr\",\"ru\",\"es\"]".to_owned(),
+        locale_codes_json: "[\"en\",\"fr\",\"ru\",\"es\",\"ja\"]".to_owned(),
     }
     .render()
     .unwrap_or_default()
@@ -443,6 +445,7 @@ fn og_locale_for(locale: &'static str) -> &'static str {
         "fr" => "fr_FR",
         "ru" => "ru_RU",
         "es" => "es_ES",
+        "ja" => "ja_JP",
         _ => "en_US",
     }
 }
@@ -527,6 +530,8 @@ const CSS_BUNDLE: &str = concat!(
     "\n",
     include_str!("../static/styles/components/CopyBar.css"),
     "\n",
+    include_str!("../static/styles/components/QrModal.css"),
+    "\n",
     include_str!("../static/styles/components/NoJs.css"),
     "\n",
     include_str!("../static/styles/components/AnnouncementBanner.css"),
@@ -569,6 +574,7 @@ fn locale_from_path(path: Option<Path<String>>) -> Option<&'static str> {
             "fr" => Some("fr"),
             "ru" => Some("ru"),
             "es" => Some("es"),
+            "ja" => Some("ja"),
             _ => None,
         },
         None => Some("en"),
@@ -874,6 +880,7 @@ struct FilesTpl {
     footer_message: String,
     footer_repo: String,
     empty_message: String,
+    notice: String,
     actions: Vec<CardAction>,
     has_actions: bool,
     files: Vec<FileRow>,
@@ -974,10 +981,6 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         .into_iter()
         .filter_map(|file| serde_json::from_value::<ServerFile>(file).ok())
         .filter(|file| file.expires_at > now)
-        .map(|mut file| {
-            file.delete_token = String::new();
-            file
-        })
         .collect()
 }
 
@@ -1022,6 +1025,7 @@ pub async fn files_page(
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str)
         .to_owned();
+    let query = query_map(&uri);
     let head = HeadTpl {
         head: head_ctx(
             locale,
@@ -1039,6 +1043,17 @@ pub async fn files_page(
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let data = shared(&state, &headers, peer.ip()).await;
+        let notice = query
+            .get("deleted")
+            .filter(|value| !value.is_empty())
+            .map(|_| cx.t("sr.file_deleted"))
+            .or_else(|| {
+                query
+                    .get("renamed")
+                    .filter(|value| value.as_str() == "1")
+                    .map(|_| cx.t("files.rename_success"))
+            })
+            .unwrap_or_default();
 
     let server_files = if data.offline {
         Vec::new()
@@ -1109,6 +1124,7 @@ pub async fn files_page(
         footer_message: String::new(),
         footer_repo: metadata::REPO_URL.to_owned(),
         empty_message: cx.t("files.fallback_empty"),
+        notice,
         has_actions: !actions.is_empty(),
         actions,
         files: rows,
@@ -1906,6 +1922,13 @@ struct AdminBansTpl {
 }
 
 #[derive(Template)]
+#[template(path = "admin_hosters.html")]
+struct AdminHostersTpl {
+    title: String,
+    scripts: Vec<String>,
+}
+
+#[derive(Template)]
 #[template(path = "admin_reports.html")]
 struct AdminReportsTpl {
     title: String,
@@ -1979,6 +2002,18 @@ pub async fn admin_bans() -> Response<Body> {
         AdminBansTpl {
             title: "Banned IPs - Admin - Juicebox".to_owned(),
             scripts: vec!["/static/js/admin-bans.js".to_owned()],
+        }
+        .render()
+        .unwrap_or_default(),
+    )
+}
+
+pub async fn admin_hosters() -> Response<Body> {
+    admin_html(
+        StatusCode::OK,
+        AdminHostersTpl {
+            title: "Hosters - Admin - Juicebox".to_owned(),
+            scripts: vec!["/static/js/admin-hosters.js".to_owned()],
         }
         .render()
         .unwrap_or_default(),

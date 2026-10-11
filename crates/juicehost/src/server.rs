@@ -250,6 +250,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                     .allow_headers([
                         axum::http::header::CONTENT_TYPE,
                         axum::http::header::AUTHORIZATION,
+                        axum::http::header::RANGE,
                         axum::http::header::HeaderName::from_static("x-juicehost-api-key"),
                         axum::http::header::HeaderName::from_static("x-juiceback-origin"),
                         axum::http::header::HeaderName::from_static("x-mime-type"),

@@ -100,6 +100,12 @@ const BLOCKED_TYPES_I18N = {
     low: "Блокирует исполняемые файлы, установщики, DLL и образы дисков.",
     medium: "Блокирует исполняемые файлы, установщики, DLL, образы дисков, shell-скрипты, bat-файлы и PowerShell-скрипты.",
     high: "Блокирует исполняемые файлы, установщики, DLL, образы дисков, shell-скрипты, bat-файлы, PowerShell-скрипты, JavaScript, HTML/SVG, PHP и Python."
+  },
+  ja: {
+    none: "すべてのファイル形式OK。",
+    low: "実行ファイル、インストーラー、DLL、ディスクイメージをブロック。",
+    medium: "実行ファイル、インストーラー、DLL、ディスクイメージ、シェルスクリプト、バッチファイル、PowerShellスクリプトをブロック。",
+    high: "実行ファイル、インストーラー、DLL、ディスクイメージ、シェルスクリプト、バッチファイル、PowerShellスクリプト、JavaScript、HTML/SVG、PHP、Pythonファイルをブロック。"
   }
 };
 function updateDangerLevelDisplay(level, locale) {

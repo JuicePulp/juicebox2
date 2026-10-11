@@ -83,6 +83,8 @@ fn test_state() -> Arc<AppState> {
         cobalt_api_key: "cobalt_key".into(),
         cobalt_session_api_url: None,
         cobalt_session_api_key: None,
+        bun_fetch_url: None,
+        bun_fetch_key: None,
         fetch_empty_retry_delay_secs: 0,
         dte_enabled: false,
         dte_assumed_bps: crate::constants::DTE_ASSUMED_BPS,

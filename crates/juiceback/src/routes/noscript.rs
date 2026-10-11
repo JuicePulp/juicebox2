@@ -323,10 +323,10 @@ pub fn remove_file_cookie_header(existing: &HeaderMap, id: &str) -> HeaderValue 
 )]
 #[must_use]
 pub fn upload_redirect(
-    _headers: &HeaderMap,
+    headers: &HeaderMap,
     public_url: &str,
     filename: &str,
-    _delete_token: &str,
+    delete_token: &str,
     file_id: &str,
     mime_type: &str,
     size_bytes: i64,
@@ -343,10 +343,23 @@ pub fn upload_redirect(
         "expires_at": expires_at,
     });
     let location = format!(
-        "/index.html?uploaded={}",
+        "/?uploaded={}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
     );
-    Redirect::to(&location).into_response()
+    let mut response = Redirect::to(&location).into_response();
+    // No-JS uploads never run the client JS that maintains jb_files, so the
+    // cookie must be set here — otherwise /files has no record of the file.
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        file_cookie_header(
+            headers,
+            &FileCookieEntry {
+                id: file_id.to_string(),
+                token: delete_token.to_string(),
+            },
+        ),
+    );
+    response
 }
 
 #[must_use]

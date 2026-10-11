@@ -33,6 +33,11 @@ pub struct FileInfoResponse {
     pub uploaded_at: i64,
     pub expires_at: i64,
     pub url: String,
+    /// Delete token. Only populated where the caller already proved
+    /// ownership (e.g. /api/owned-files); empty elsewhere so the
+    /// unauthenticated /file/{id}/info endpoint cannot leak it.
+    #[serde(default)]
+    pub delete_token: String,
     pub storage_host: Option<String>,
     pub status: String,
     #[serde(default)]
@@ -60,6 +65,7 @@ impl FileInfoResponse {
             uploaded_at: record.uploaded_at,
             expires_at: record.expires_at,
             url,
+            delete_token: String::new(),
             storage_host: record.storage_host,
             status: record.status,
             protected,
@@ -136,7 +142,7 @@ pub async fn file_info_handler(
     ),
     request_body(content_type = "application/x-www-form-urlencoded", description = "Form with a 'token' field containing the delete token"),
     responses(
-        (status = 302, description = "Redirects to /files.html?deleted={id}"),
+        (status = 302, description = "Redirects to /files?deleted={id}"),
         (status = 403, description = "Invalid delete token"),
         (status = 404, description = "File not found"),
     ),
@@ -150,7 +156,7 @@ pub async fn delete_file_form_handler(
     Form(_params): Form<noscript::DeleteRequest>,
 ) -> Result<Response, AppError> {
     delete_file_inner(&state, &user_id, &id, None).await?;
-    let mut response = Redirect::to(&format!("/files.html?deleted={id}")).into_response();
+    let mut response = Redirect::to(&format!("/files?deleted={id}")).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
         noscript::remove_file_cookie_header(&headers, &id),
@@ -410,7 +416,7 @@ pub async fn rename_file_form_handler(
         noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token);
 
     tracing::info!("rename form: old_id={id} new_id={new_id}");
-    let mut response = Redirect::to("/files.html?renamed=1").into_response();
+    let mut response = Redirect::to("/files?renamed=1").into_response();
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie_hdr);

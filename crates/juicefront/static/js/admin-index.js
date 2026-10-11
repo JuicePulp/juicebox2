@@ -31,6 +31,7 @@
                 '<p><a href="/admin/feedback">View feedback</a></p><br />' +
                 '<p><a href="/admin/announcement">Site announcement</a></p><br />' +
                 '<p><a href="/admin/bans">Manage banned IPs</a></p>' +
+                '<p><a href="/admin/hosters">Manage known hosters</a></p>' +
                 "<br /><hr><br />" +
                 '<p><a href="/">Back to upload</a> - <a href="/admin/logout" id="logout-link">Logout</a></p>';
             const logoutEl = document.getElementById("logout-link");

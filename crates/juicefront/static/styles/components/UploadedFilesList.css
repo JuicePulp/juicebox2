@@ -276,6 +276,10 @@ html[data-banned] [data-files-empty] {
   justify-content: flex-end;
 }
 
+.delete-form {
+  display: contents;
+}
+
 .file-card-ttl {
   display: flex;
   flex-direction: row;
@@ -369,6 +373,18 @@ html[data-banned] [data-files-empty] {
   color: white;
 }
 
+.files-notice {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--juice-700);
+  border-radius: 0.5rem;
+  background-color: var(--juice-800);
+  color: var(--juice-200);
+  font-family: "General", "Unifont", monospace;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
 .file-action-btn--danger:hover {
   background-color: var(--red-600);
   border-color: var(--red-500);
@@ -413,7 +429,9 @@ html[data-banned] [data-files-empty] {
 .file-card-link {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  width: auto;
   background-color: var(--juice-900);
   border: 1px solid var(--juice-700);
   border-radius: 0.5rem;
@@ -433,6 +451,14 @@ html[data-banned] [data-files-empty] {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--juice-400);
+  font-size: 16px;
+}
+
+.copy-bar-wrapper > .file-card-link {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+  border-radius: 0.5rem 0 0 0.5rem;
 }
 
 @media (max-width: 768px) {
@@ -472,17 +498,6 @@ html[data-banned] [data-files-empty] {
 
   .file-card-meta {
     font-size: 0.75rem;
-  }
-
-  .file-card-link {
-    padding: 0.5rem 0.65rem;
-  }
-
-  .file-card-link-text {
-    font-size: 0.75rem;
-    white-space: normal;
-    word-break: break-all;
-    overflow-wrap: anywhere;
   }
 
   .file-card-actions {

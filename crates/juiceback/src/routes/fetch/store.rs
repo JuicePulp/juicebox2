@@ -232,6 +232,51 @@ async fn transfer_to_juicehost(
                 len,
             )
         }
+        ByteSource::BunService {
+            fetch_url,
+            api_key,
+            payload_url,
+            audio_only,
+            max_height,
+        } => {
+            let client = state.http.clone();
+            let resp = client
+                .post(fetch_url.as_str())
+                .bearer_auth(api_key.as_str())
+                .timeout(std::time::Duration::from_secs(
+                    crate::constants::FETCH_JOB_TIMEOUT_SECS,
+                ))
+                .json(&serde_json::json!({
+                    "url": payload_url,
+                    "audio_only": audio_only,
+                    "max_height": max_height,
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("bun-fetch request failed: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!(
+                    "bun-fetch returned status {}",
+                    resp.status()
+                ));
+            }
+            let len = resp.content_length().map(|l| l as u64);
+            if len == Some(0) {
+                return Err(empty_stream_message(source_url));
+            }
+            if let Some(l) = len {
+                if l > max_size {
+                    return Err("file exceeds this server's maximum file size".into());
+                }
+            }
+            (
+                Box::pin(
+                    resp.bytes_stream()
+                        .map(|c| c.map_err(|e| format!("media download failed mid-stream: {e}"))),
+                ),
+                len,
+            )
+        }
         ByteSource::LocalFile(path) => {
             let meta = tokio::fs::metadata(path)
                 .await

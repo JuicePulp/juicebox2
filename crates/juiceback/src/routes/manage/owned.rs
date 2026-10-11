@@ -60,7 +60,13 @@ pub async fn owned_files_handler(
                     .get(&r.id)
                     .is_some_and(|t| constant_time_eq(&r.delete_token, t))
         })
-        .map(|r| FileInfoResponse::from_record(r, &state.config))
+        .map(|r| {
+            let mut info = FileInfoResponse::from_record(r, &state.config);
+            if let Some(token) = token_map.get(&info.id) {
+                info.delete_token = (*token).to_string();
+            }
+            info
+        })
         .collect();
 
     Ok(Json(OwnedFilesResponse { files }))

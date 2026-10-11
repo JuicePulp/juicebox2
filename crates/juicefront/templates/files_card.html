@@ -7,6 +7,7 @@
 <div class="scroll-element scroll-cover-top" aria-hidden="true"></div>
 <div class="scroll-element sticky-shadow-top" aria-hidden="true"></div>
 <div class="uploaded-files-content">
+{% if notice != "" %}<div class="files-notice" data-files-notice="" role="status">{{ notice }}</div>{% endif %}
 <div class="files-offline" data-files-offline="" hidden><span>{{ cx.icon("x", 48)|safe }}</span><p class="offline-primary">{{ cx.t("files.offline") }}</p><p class="offline-secondary">{{ cx.t("files.offline_desc") }}</p></div>
 {% if files.is_empty() %}<div class="nothin" data-files-empty=""><span class="nothin-icon">{{ cx.icon("file", 48)|safe }}</span><p class="nothin-text">{{ empty_message }}</p><p class="nothin-hint"><a data-cuelume-navigate href="{{ cx.lp("/") }}">{{ cx.t("files.upload_hint") }}</a></p></div>{% else %}<div class="nothin" data-files-empty="" hidden><span class="nothin-icon">{{ cx.icon("file", 48)|safe }}</span><p class="nothin-text">{{ empty_message }}</p><p class="nothin-hint"><a data-cuelume-navigate href="{{ cx.lp("/") }}">{{ cx.t("files.upload_hint") }}</a></p></div>{% endif %}
 <div class="files-grid" role="list" data-files-grid=""{% if files.is_empty() %} hidden{% endif %}>
@@ -17,12 +18,19 @@
 {% if f.protected %}<span class="storage-host-tag storage-host-tag--locked" title="{{ cx.t("files.protected") }}">{{ cx.icon("key", 24)|safe }}</span>{% endif %}
 {% if f.show_host %}<span class="storage-host-tag">{{ cx.tv("files.stored_on", "host", f.host_short.as_str()) }}</span>{% endif %}
 </div>
-{% if f.url != "" %}<div class="copy-bar-wrapper"><a href="{{ f.url }}" data-cuelume-navigate data-cuelume-emphasis="subtle" class="file-card-link" target="_blank" rel="noopener"><span class="file-card-link-text">{{ f.url }}</span></a>{% if f.can_rename %}<a href="#rename-{{ f.id }}" data-cuelume-open data-cuelume-emphasis="subtle" class="copy-bar-edit" title="{{ cx.t("files.rename") }}" aria-label="{{ cx.t("files.rename_aria") }}"><span>{{ cx.icon("edit", 24)|safe }}</span></a>{% endif %}</div>{% endif %}
+{% if f.url != "" %}<div class="copy-bar-wrapper"><a href="{{ f.url }}" data-cuelume-navigate data-cuelume-emphasis="subtle" class="file-card-link" target="_blank" rel="noopener"><span class="file-card-link-text">{{ f.url }}</span></a><button type="button" class="copy-bar-qr" data-qr-url="{{ f.url }}" title="{{ cx.t("files.qr") }}" aria-label="{{ cx.t("files.qr_aria") }}"><span>{{ cx.icon("qr-code", 24)|safe }}</span></button>{% if f.can_rename %}<a href="#rename-{{ f.id }}" data-cuelume-open data-cuelume-emphasis="subtle" class="copy-bar-edit" title="{{ cx.t("files.rename") }}" aria-label="{{ cx.t("files.rename_aria") }}"><span>{{ cx.icon("edit", 24)|safe }}</span></a>{% endif %}</div>{% endif %}
 <div class="file-card-actions">
 <div class="file-card-ttl{% if f.expired %} expired{% endif %}" title="{{ cx.t("files.time_remaining") }}"><span class="file-card-ttl-label">{{ f.ttl_label }}</span><span class="file-card-ttl-bar"><span class="file-card-ttl-fill" style="width:{{ f.ttl_pct }}%"></span></span></div>
-<div class="file-card-buttons"><noscript><form method="POST" action="/file/{{ f.id }}/delete"><input type="hidden" name="token" value="{{ f.delete_token }}"><button type="submit" data-cuelume-close data-cuelume-emphasis="strong" class="file-action-btn file-action-btn--danger" aria-label="{{ cx.t("files.delete") }}">{{ cx.icon("trash", 24)|safe }}</button></form></noscript></div>
+<div class="file-card-buttons"><form class="delete-form" method="POST" action="/file/{{ f.id }}/delete" data-delete-form=""><input type="hidden" name="token" value="{{ f.delete_token }}"><button type="submit" class="file-action-btn file-action-btn--danger" data-delete-btn="" aria-label="{{ cx.t("files.delete") }}">{{ cx.icon("trash", 24)|safe }}<span class="confirm-text"></span></button></form></div>
 </div>
-{% if f.can_rename %}<div id="rename-{{ f.id }}" class="mdloverlay mdl-target rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title-{{ f.id }}">
+</div>
+{% endfor %}
+</div>
+</div>
+<div class="scroll-element sticky-shadow-bottom" aria-hidden="true"></div>
+<div class="scroll-element scroll-cover-bottom" aria-hidden="true"></div>
+</section>
+{% for f in files %}{% if f.can_rename %}<div id="rename-{{ f.id }}" class="mdloverlay mdl-target rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title-{{ f.id }}">
 <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop"></a>
 <div class="mdlcontent">
 <div class="mdlheader"><h2 id="rename-title-{{ f.id }}" class="mdltitle">{{ cx.icon("edit", 24)|safe }}{{ cx.t("files.rename") }}</h2><a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label="{{ cx.t("sr.close_btn") }}">{{ cx.icon("close", 24)|safe }}</a></div>
@@ -36,14 +44,7 @@
 <div class="mdlfooter rename-actions"><a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{{ cx.t("files.rename_cancel") }}</a><button type="submit" data-cuelume-tap class="mdlbtn mdlbtn--primary">{{ cx.t("files.rename_save") }}</button></div>
 </form>
 </div>
-</div>{% endif %}
-</div>
-{% endfor %}
-</div>
-</div>
-<div class="scroll-element sticky-shadow-bottom" aria-hidden="true"></div>
-<div class="scroll-element scroll-cover-bottom" aria-hidden="true"></div>
-</section>
+</div>{% endif %}{% endfor %}
 {% if has_actions %}<span id="actions-area" tabindex="-1" style="position:absolute"></span>
 <nav id="{{ actions_id }}" class="act" aria-label="{{ cx.t("actions.file_actions") }}" data-act="">
 {% for a in actions %}{% if a.id == "more" %}<details class="select-details" data-cuelume-emphasis="subtle" data-select-details="">

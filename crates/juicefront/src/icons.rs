@@ -48,6 +48,7 @@ pub const RUNTIME_ICONS: &[&str] = &[
     "flag",
     "key",
     "clock",
+    "qr-code",
 ];
 
 pub fn bundle_json(names: &[&str]) -> String {

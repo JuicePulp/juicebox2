@@ -20,6 +20,11 @@ import {
   RESERVE_URL,
   DIRECT_RESERVE_URL,
   DIRECT_COMPLETE_URL,
+  DIRECT_PARALLEL_RESERVE_URL,
+  DIRECT_PARALLEL_COMPLETE_URL,
+  DIRECT_PARALLEL_THRESHOLD,
+  DIRECT_PART_TARGET,
+  DIRECT_MAX_PARTS,
   readUploadMode
 } from "./upload-config.js";
 import { tryAcquireStream, releaseStream } from "./stream-limiter.js";
@@ -133,7 +138,7 @@ export function startUpload(item, file, controls) {
     return startDirectUpload(item, file, controls);
   }
   if (readUploadMode() === "direct-prefer") {
-    return startDirectTicketUpload(item, file, controls);
+    return file.size >= DIRECT_PARALLEL_THRESHOLD ? startDirectParallelUpload(item, file, controls) : startDirectTicketUpload(item, file, controls);
   }
   return file.size > TUS_THRESHOLD ? startTusUpload(item, file, controls) : startDirectUpload(item, file, controls);
 }
@@ -531,6 +536,187 @@ function startDirectTicketUpload(item, file, controls) {
     abort: () => {
       runState.cancelled = true;
       xhrRef.current?.abort();
+    }
+  };
+}
+function startDirectParallelUpload(item, file, controls) {
+  const { update } = controls;
+  const runState = { cancelled: false };
+  const liveXhrs = new Set;
+  const run = (async () => {
+    let hintBps = 0;
+    try {
+      const stored = Number(localStorage.getItem(LAST_SPEED_KEY));
+      if (Number.isFinite(stored) && stored > 0)
+        hintBps = stored;
+    } catch {}
+    const partTarget = hintBps > 0 ? Math.min(DIRECT_PART_TARGET, Math.max(4 * 1024 * 1024, hintBps * 30)) : DIRECT_PART_TARGET;
+    const numParts = Math.max(2, Math.min(DIRECT_MAX_PARTS, Math.ceil(file.size / partTarget)));
+    const reserveRes = await fetchWithTimeout(DIRECT_PARALLEL_RESERVE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: item.filename,
+        mime_type: item.mimeType || "application/octet-stream",
+        file_size: file.size,
+        ttl_hours: Number(item.ttlHours),
+        num_parts: numParts
+      })
+    });
+    if (runState.cancelled)
+      throw new Error("Upload cancelled");
+    if (!reserveRes.ok) {
+      let code;
+      let msg;
+      try {
+        const err = await reserveRes.json();
+        if (err.error)
+          code = err.error;
+        if (err.message)
+          msg = err.message;
+      } catch {}
+      update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
+      return;
+    }
+    const reserve = await reserveRes.json();
+    const ticket = reserve.ticket || "";
+    const fileId = reserve.file_id || "";
+    const shareUrl = reserve.url || "";
+    const parts = Array.isArray(reserve.parts) ? reserve.parts : [];
+    const step = parts.length ? Math.ceil(file.size / parts.length) : 0;
+    let splitOk = ticket && fileId && parts.length >= 2;
+    let splitSum = 0;
+    for (let i = 0; i < parts.length && splitOk; i++) {
+      const p = parts[i];
+      const want = Math.min(step, file.size - i * step);
+      if (!p || p.part_size !== want || !p.part_id || !p.ticket || !p.upload_url)
+        splitOk = false;
+      else
+        splitSum += p.part_size;
+    }
+    if (!splitOk || splitSum !== file.size) {
+      update({ id: item.id, errorCode: "RESERVE_FAILED", state: "error" });
+      return;
+    }
+    if (shareUrl)
+      update({ id: item.id, reserveUrl: shareUrl, serverId: fileId });
+    update({ id: item.id, state: "uploading", progress: 0 });
+    const loaded = new Array(parts.length).fill(0);
+    const progress = new LiveProgress((pct) => {
+      update({ id: item.id, progress: Math.min(pct, 99.4) });
+    });
+    progress.begin(file.size);
+    const report = () => progress.set(loaded.reduce((a, b) => a + b, 0));
+    const putPart = async (index) => {
+      const p = parts[index];
+      const blob = file.slice(index * step, Math.min((index + 1) * step, file.size));
+      for (let attemptNum = 0; attemptNum < 3; attemptNum++) {
+        if (runState.cancelled)
+          throw new Error("Upload cancelled");
+        const xhrRef = {};
+        liveXhrs.add(xhrRef);
+        try {
+          const st = await xhrSendBytes(p.upload_url, blob, p.ticket, (n) => {
+            loaded[index] = n;
+            report();
+          }, runState, xhrRef);
+          if (st.ok || st.status === 409) {
+            loaded[index] = p.part_size;
+            report();
+            return;
+          }
+          throw new Error(`part ${index} failed: ${st.status}`);
+        } catch (err) {
+          if (runState.cancelled)
+            throw err;
+          if (attemptNum === 2)
+            throw err;
+          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attemptNum)));
+        } finally {
+          liveXhrs.delete(xhrRef);
+        }
+      }
+    };
+    const workers = Math.min(parts.length, streamsForRate(hintBps));
+    let next = 0;
+    const runWorker = async () => {
+      while (next < parts.length) {
+        const i = next++;
+        await putPart(i);
+      }
+    };
+    const crew = [];
+    for (let w = 0; w < workers; w++)
+      crew.push(runWorker());
+    await Promise.all(crew);
+    progress.destroy();
+    if (runState.cancelled)
+      throw new Error("Upload cancelled");
+    update({ id: item.id, state: "finalizing" });
+    const partIds = parts.map((p) => p.part_id);
+    let data = null;
+    for (let a = 0; a < 3 && !data; a++) {
+      try {
+        const completeRes = await fetchWithTimeout(DIRECT_PARALLEL_COMPLETE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: fileId, ticket, part_ids: partIds })
+        });
+        if (runState.cancelled)
+          throw new Error("Upload cancelled");
+        if (completeRes.ok) {
+          data = await completeRes.json();
+          break;
+        }
+        let code;
+        let msg;
+        try {
+          const err = await completeRes.json();
+          if (err.error)
+            code = err.error;
+          if (err.message)
+            msg = err.message;
+        } catch {}
+        update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
+        return;
+      } catch (err) {
+        if (runState.cancelled)
+          throw err;
+        if (a === 2)
+          throw err;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    if (!data) {
+      update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
+      return;
+    }
+    update({
+      id: item.id,
+      serverId: data.id || fileId,
+      url: data.url || shareUrl,
+      deleteToken: data.delete_token || "",
+      expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+      protected: !!data.protected,
+      state: "done",
+      progress: 100
+    });
+  })().catch((err) => {
+    update({
+      id: item.id,
+      state: runState.cancelled ? "cancelled" : "error",
+      errorCode: runState.cancelled ? undefined : "NETWORK_ERROR",
+      errorMessage: err?.message
+    });
+  });
+  return {
+    abort: () => {
+      runState.cancelled = true;
+      liveXhrs.forEach((r) => {
+        try {
+          r.current?.abort();
+        } catch {}
+      });
     }
   };
 }

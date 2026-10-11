@@ -77,6 +77,10 @@ pub struct Config {
 
     pub cobalt_session_api_key: Option<String>,
 
+    pub bun_fetch_url: Option<String>,
+
+    pub bun_fetch_key: Option<String>,
+
     pub fetch_empty_retry_delay_secs: u64,
     pub dte_enabled: bool,
     pub dte_assumed_bps: f64,
@@ -170,6 +174,11 @@ impl std::fmt::Debug for Config {
                 "cobalt_session_api_key",
                 &self.cobalt_session_api_key.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("bun_fetch_url", &self.bun_fetch_url)
+            .field(
+                "bun_fetch_key",
+                &self.bun_fetch_key.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("dte_enabled", &self.dte_enabled)
             .field("dte_assumed_bps", &self.dte_assumed_bps)
             .field("dte_safety_mult", &self.dte_safety_mult)
@@ -216,6 +225,14 @@ impl Config {
         let cobalt_api_key =
             juiceutils::config::optional_secret("COBALT_API_KEY").unwrap_or_default();
         let cobalt_session_api_key = juiceutils::config::optional_secret("COBALT_SESSION_API_KEY");
+        let bun_fetch_url = std::env::var("BUN_FETCH_URL")
+            .ok()
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
+        let bun_fetch_key = std::env::var("BUN_FETCH_KEY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let cf_api_token = juiceutils::config::optional_secret("CF_API_TOKEN");
 
         let encryption_key_bytes = hex::decode(&ip_encryption_key)
@@ -354,6 +371,14 @@ impl Config {
             );
         }
 
+        if bun_fetch_url.is_some() != bun_fetch_key.is_some() {
+            return Err(
+                "BUN_FETCH_URL and BUN_FETCH_KEY must be set together \
+                 (or both left unset)."
+                    .to_string(),
+            );
+        }
+
         if juiceutils::config::is_placeholder_secret(&jwt_secret) {
             return Err(
                 "JWT_SECRET is set to a placeholder value. Generate a real secret before starting."
@@ -416,6 +441,8 @@ impl Config {
             cobalt_api_key,
             cobalt_session_api_url,
             cobalt_session_api_key,
+            bun_fetch_url,
+            bun_fetch_key,
             fetch_empty_retry_delay_secs,
             dte_enabled,
             dte_assumed_bps,

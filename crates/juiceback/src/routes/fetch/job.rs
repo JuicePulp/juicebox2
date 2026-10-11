@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::{
+    bun::{bun_fetch_configured, run_bun_tier},
     store::download_and_store,
     types::{ByteSource, FetchResult},
     ytdlp::{run_ytdlp_tier, ytdlp_enabled},
@@ -227,23 +228,49 @@ pub(crate) async fn run_fetch_job_inner(
         )
         .await;
 
-        if matches!(&session_result, Err(e) if is_rescue_err(e)) && ytdlp_enabled() {
-            tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
-            match run_ytdlp_tier(
-                state,
-                job_id,
-                user_id,
-                source_url,
-                opts,
-                max_size,
-                default_ttl_hours,
-                encrypted_ip.clone(),
-                password.clone(),
-            )
-            .await
-            {
-                Ok(r) => return Ok(r),
-                Err(e3) => last = Err(e3),
+        if matches!(&session_result, Err(e) if is_rescue_err(e)) {
+            if bun_fetch_configured(state) {
+                tracing::info!("cobalt tiers exhausted; falling back to bun-fetch");
+                match run_bun_tier(
+                    state,
+                    job_id,
+                    user_id,
+                    source_url,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
+                {
+                    Ok(r) => return Ok(r),
+                    Err(e3) => {
+                        tracing::warn!("bun-fetch tier failed, trying local yt-dlp: {e3}");
+                        last = Err(e3);
+                    }
+                }
+            } else {
+                last = session_result;
+            }
+            if ytdlp_enabled() {
+                tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
+                match run_ytdlp_tier(
+                    state,
+                    job_id,
+                    user_id,
+                    source_url,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
+                {
+                    Ok(r) => return Ok(r),
+                    Err(e3) => last = Err(e3),
+                }
             }
         } else {
             last = session_result;
