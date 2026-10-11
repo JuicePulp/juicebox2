@@ -1,7 +1,7 @@
 ---
-// Network/device debug visualizer. Hidden by default; toggle by shaking the
-// device (mobile) or Ctrl+Shift+D (desktop). Semi-transparent black panel,
-// top-left, pointer-events:none so it never intercepts input.
+
+
+
 ---
 
 <div id="jb-net-debug" hidden aria-hidden="true">
@@ -112,10 +112,10 @@
   let liveItems: LiveItem[] = [];
   let lastTuner: TunerDbg | null = null;
 
-  // Speed history for the graph. Sampled on a FIXED cadence by its own
-  // interval - never per network message, so the graph never accelerates.
+  
+  
   const SAMPLE_MS = 500;
-  const HIST = 110; // ~55s window
+  const HIST = 110; 
   const hist: number[] = [];
 
   const elText = () => document.getElementById("jb-net-text");
@@ -144,9 +144,9 @@
     return [label, ...lines.map((l) => "  " + l)].join("\n");
   }
 
-  // Datapoint recorder.
-  // Fixed 1s cadence, independent of panel visibility, so cold-start bursts
-  // are captured even when the overlay is closed. Ring buffer ~2h.
+  
+  
+  
   interface RecFile {
     n: string;
     s: string;
@@ -155,8 +155,8 @@
     z: number;
   }
   interface Sample {
-    t: number; // wall clock, unix seconds
-    up_s: number | null; // seconds since first active upload
+    t: number; 
+    up_s: number | null; 
     now_bps: number;
     peak_bps: number;
     done_mb: number;
@@ -373,8 +373,8 @@
     ];
   }
 
-  // Smooth graph: DPR-aware canvas, stroked line with area fill. Canvas
-  // anti-aliasing keeps the line clean at any scale.
+  
+  
   function drawGraph(): void {
     const cv = elCanvas();
     if (!cv) return;
@@ -459,8 +459,8 @@
     prevDone = lastSample.done;
     prevTime = now;
 
-    // Prefer telemetry from an ACTIVE tus item; ignore stale dbg shapes from
-    // persisted tray items (older deploys lacked k/g fields).
+    
+    
     const fresh =
       liveItems.find(
         (i) =>
@@ -494,8 +494,8 @@
     drawGraph();
   }
 
-  // Fixed-cadence sampler: one histogram point every SAMPLE_MS no matter how
-  // chatty the network gets.
+  
+  
   setInterval(() => {
     hist.push(activeCount > 0 ? rateEma : 0);
     if (hist.length > HIST) hist.shift();
@@ -530,21 +530,21 @@
     } catch {}
   }
 
-  // Shake to toggle: three acceleration spikes within ~900ms.
-  //
-  // Engine reality check: Chrome samples at ~60 Hz with batched/bursty
-  // delivery and sensor-fused data, Firefox at ~10-20 Hz unbatched, and the
-  // axis frames differ between them. An absolute-magnitude gate alone
-  // misfires across engines, so detection combines an absolute jolt with
-  // inter-sample delta and uses whichever acceleration source reports data.
+  
+  
+  
+  
+  
+  
+  
   let spikes = 0;
   let lastSpike = 0;
   let lastMag: number | null = null;
 
-  // Two shakes toggle: the first arms it, a second within
-  // DOUBLE_SHAKE_MS confirms. A short cooldown after a gesture keeps
-  // one long shake from counting twice, and raised gates cut
-  // accidental arming (pocket, jog).
+  
+  
+  
+  
   const DOUBLE_SHAKE_MS = 1400;
   const GESTURE_COOLDOWN_MS = 600;
   let armed = false;
@@ -561,7 +561,7 @@
       ? Math.hypot(o.x, o.y, o.z)
       : null;
 
-  /** Remote-debug handle: inspect from chrome://inspect / about:debugging. */
+  
   (window as unknown as { __jbMotion?: object }).__jbMotion = {
     evs: 0,
     lastMag: null,
@@ -571,15 +571,15 @@
   };
 
   window.addEventListener("devicemotion", (e) => {
-    // Desktops use the Ctrl+Shift+D hotkey; skip motion processing there.
+    
     if (!("ontouchstart" in window)) return;
 
     const dbg = (window as unknown as { __jbMotion?: { evs: number; lastMag: unknown; src: string; state: string; gestures: number } })
       .__jbMotion!;
     dbg.evs++;
 
-    // Some engines null gravity-included data (no gyro) while `acceleration`
-    // carries values, and vice versa - prefer whichever actually reports.
+    
+    
     const incl = magOf(e.accelerationIncludingGravity);
     const mag = incl ?? magOf(e.acceleration);
     dbg.lastMag = mag?.toFixed(1) ?? null;
@@ -587,16 +587,16 @@
     if (mag == null) return;
 
     const now = Date.now();
-    // Spike = hard jolt past the gravity baseline OR a sharp swing between
-    // consecutive samples (fast samplers smooth absolute peaks; deltas don't).
+    
+    
     const delta = lastMag == null ? 0 : Math.abs(mag - lastMag);
     lastMag = mag;
     if (mag < 23 && delta < 17) return;
-    // Ignore the tail of a gesture that just fired so its trailing wobbles
-    // don't immediately re-arm; lastMag above still updates for continuity.
+    
+    
     if (now < suppressUntil) return;
-    // Debounce below real shake oscillation spacing (~50-100ms per swing)
-    // so batched delivery still yields three counted peaks per shake.
+    
+    
     if (now - lastSpike > 80) {
       spikes++;
       lastSpike = now;
@@ -614,7 +614,7 @@
         } catch {}
         toggle();
       } else {
-        // First shake or stale arm: set armed and vibrate 15ms.
+        
         armed = true;
         armedAt = now;
         dbg.state = "armed";
@@ -640,7 +640,7 @@
     }
   }, 500);
 
-  // iOS requires arming motion access inside a user gesture.
+  
   window.addEventListener(
     "touchend",
     () => {
@@ -661,14 +661,14 @@
     }
   });
 
-  // Text refresh cadence (graph samples are separate).
+  
   setInterval(() => {
     if (!open) return;
     probe();
     render();
   }, 400);
 
-  // ClientRouter swaps body content on navigation.
+  
   document.addEventListener("astro:page-load", () => {
     const node = document.getElementById("jb-net-debug");
     if (node) node.hidden = !open;

@@ -242,8 +242,8 @@ fn modals_html(
             .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec())
             .iter()
             .map(|hours| {
-                // Whole configured hour values only; `as` saturates rather
-                // than wrapping, and magnitudes here are tiny.
+                
+                
                 #[allow(clippy::cast_possible_truncation)]
                 if hours.fract() == 0.0 {
                     format!("{}", *hours as i64)
@@ -644,8 +644,8 @@ fn json_str(value: &serde_json::Value, key: &str, max_len: usize) -> String {
         .unwrap_or_default()
 }
 
-/// Finite f64 → i64 saturates (never wraps); untrusted magnitudes clamp
-/// instead of corrupting memory sizes.
+
+
 #[allow(clippy::cast_possible_truncation)]
 fn json_num(value: &serde_json::Value, key: &str) -> i64 {
     value
@@ -659,8 +659,8 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
     let bytes = base64url_decode(param)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let mime = json_str(&value, "mime_type", 200);
-    // Non-negative sizes only in practice; a hostile negative saturates to
-    // zero via `as` instead of wrapping.
+    
+    
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let size = json_num(&value, "size_bytes") as u64;
     Some(UploadedFile {
@@ -741,8 +741,8 @@ pub async fn index(
         .unwrap_or(retention::DEFAULT_TTL_HOURS);
     let default_index = allowed
         .iter()
-        // Exact match on discrete configured values (all exactly
-        // representable); an epsilon here could misclassify tiers.
+        
+        
         .position(|hours| {
             #[allow(clippy::float_cmp)]
             {
@@ -978,8 +978,8 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         .collect()
 }
 
-// Unix timestamps are non-negative for any real clock; `as` saturates
-// rather than wrapping on hypothetical far-future dates.
+
+
 #[allow(clippy::cast_possible_wrap)]
 fn chrono_now() -> i64 {
     std::time::SystemTime::now()
@@ -1680,10 +1680,10 @@ pub async fn docs_page(
     stream_page(StatusCode::OK, stream)
 }
 
-/// Shared renderer for the Terms and Privacy pages.
-///
-/// Async for consistency with the calling handlers, even though this body
-/// awaits only inside the streamed response (see `unused_async` exemption).
+
+
+
+
 #[allow(clippy::unused_async)]
 async fn legal_page(
     state: Arc<AppState>,
@@ -1822,9 +1822,9 @@ struct NotFoundTpl {
     flags_html: String,
 }
 
-/// Shared 404 renderer. Async for consistency with the calling handlers,
-/// even though this body awaits only inside the streamed response
-/// (see `unused_async` exemption).
+
+
+
 #[allow(clippy::unused_async)]
 pub async fn not_found_page(
     state: Arc<AppState>,

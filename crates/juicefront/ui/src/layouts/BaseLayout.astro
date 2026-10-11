@@ -189,7 +189,7 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
 
       const API_URL = import.meta.env.PUBLIC_API_URL || "";
       async function checkHealth() {
-        // Skip background polls when the tab is hidden; the
+        
         if (document.hidden) return;
         try {
           const res = await fetch(`${API_URL}/api/health`);
@@ -242,9 +242,9 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
     <NetDebug />
 
     <script is:inline>
-      // Automation courtesy notice. navigator.webdriver is set by default
-      // under Puppeteer/Playwright/Selenium - real users never trip it, and
-      // server-side crawler filtering stays Cloudflare's job.
+      
+      
+      
       try {
         if (navigator.webdriver === true && window.top === window) {
           document.documentElement.innerHTML =

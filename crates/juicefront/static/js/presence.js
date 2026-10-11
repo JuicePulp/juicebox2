@@ -49,8 +49,8 @@ export function connectPresence() {
     return;
   if (typeof document !== "undefined" && document.hidden)
     return;
-  // Anonymous tabs can never have devices (UserId falls back to a random
-  // UUID with no sessions). Don't hold an SSE stream per anonymous tab.
+  
+  
   if (!hasSessionCookie())
     return;
   wireVisibilityHandler();

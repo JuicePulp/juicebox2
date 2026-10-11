@@ -1,8 +1,8 @@
 import * as Sentry from "@sentry/node";
 import { createRequire } from "node:module";
 
-// Single source of truth for the Sentry release; keep package.json in sync
-// (same derivation as astro.config.mjs).
+
+
 const require = createRequire(import.meta.url);
 const pkg = require("./package.json") as { name: string; version: string };
 

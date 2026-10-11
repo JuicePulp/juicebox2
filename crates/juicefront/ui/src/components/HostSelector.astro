@@ -242,18 +242,65 @@ const renderRow = (n: HostNode) => (
   }
   .hostsel-badges {
     display: flex;
-    gap: 0.3rem;
-    margin-top: 0.1rem;
+    align-items: center;
+    gap: 0.5rem;
   }
   .hostsel-badges:empty {
     display: none;
   }
   .hostsel-cell--caps {
-    width: 34%;
+    width: 45%;
   }
-  .hostsel-cell--caps .hostsel-badges {
+  .hostsel-chips {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+  }
+  .hostsel-chips .hostsel-badge {
+    flex-shrink: 0;
+  }
+  .hostsel-more {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .hostsel-more summary {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    border: 1px dashed var(--juice-600);
+    color: var(--juice-300);
+    cursor: pointer;
+    list-style: none;
+    white-space: nowrap;
+  }
+  .hostsel-more summary::-webkit-details-marker {
+    display: none;
+  }
+  .hostsel-more summary:hover {
+    color: var(--juice-100);
+    border-color: var(--juice-400);
+  }
+  .hostsel-more__menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 60;
+    display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    gap: 0.4rem;
+    min-width: 10rem;
+    max-width: min(16rem, 70vw);
+    padding: 0.55rem 0.65rem;
+    background: var(--juice-900);
+    border: 1px solid var(--juice-700);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
   .hostsel-badge {
     font-size: 0.75rem;

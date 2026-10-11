@@ -236,10 +236,10 @@ export function enhanceHostSelector(locale) {
       localStorage.setItem("juicebox_quick_link", quickLinkToggle.checked ? "true" : "false");
     });
   }
-  // Upload password lives in Storage Host settings and persists like the
-  // other host options. Note the tradeoff: the gate password is stored in
-  // plain text in this browser's localStorage so uploads stay protected
-  // without retyping. Clear the field to go back to public links.
+  
+  
+  
+  
   const pwInput = document.querySelector("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
   var syncPwState = null;
@@ -455,8 +455,8 @@ export function enhanceHostSelector(locale) {
     }
   });
 
-  // Done applies too, then closes the dialog. Same validation as Apply so
-  // leaving via Done never silently keeps a stale host.
+  
+  
   const doneBtn = document.querySelector("[data-host-done]");
   if (doneBtn) {
     doneBtn.addEventListener("click", async (e) => {
@@ -471,8 +471,8 @@ export function enhanceHostSelector(locale) {
     });
   }
 
-  // Live-gate Apply: only an actually-reachable host can be applied. Quiet
-  // re-checks (no status text) run debounced while typing and once at open.
+  
+  
   let gateTimer = 0;
   const refreshApplyGate = async () => {
     const host = input.value.trim();

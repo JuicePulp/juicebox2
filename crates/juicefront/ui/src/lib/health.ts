@@ -1,4 +1,4 @@
-/** SSR health check, so NOJS users see the offline state too. */
+
 import { apiHealth } from "./api";
 
 export async function checkBackendHealth(): Promise<boolean> {

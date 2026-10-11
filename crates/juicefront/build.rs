@@ -3,14 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Absolute path of the current checkout's git HEAD, if discoverable.
-///
-/// `rerun-if-changed` paths are resolved against the *package* directory, so
-/// a workspace-relative `.git/HEAD` would watch
-/// `crates/juicefront/.git/HEAD` — a file that never exists. Cargo treats a
-/// missing watched file as permanently dirty, rerunning this script (and
-/// recompiling juicefront) on every single build. Resolve the real git dir
-/// instead; `None` means "don't watch HEAD at all".
+
+
+
+
+
+
+
+
 fn git_head_path() -> Option<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     if let Some(dir) = std::process::Command::new("git")

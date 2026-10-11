@@ -1,7 +1,7 @@
-/**
- * Shared retention helpers used both at SSR time (UploadCard.astro) and on
- * the client (enhance-retention.ts). Kept isomorphic: no Node/browser APIs.
- */
+
+
+
+
 import { t, type Locale } from "../i18n";
 
 export const DEFAULT_ALLOWED_TTL_HOURS = [0.5, 1, 6, 12, 24, 72, 168];
@@ -16,7 +16,7 @@ const KNOWN_KEYS: Record<number, `retention.${string}`> = {
   168: "retention.7d",
 };
 
-/** Tier index derived from the hour value: 0 = minutes, 1 = hours, 2 = days. */
+
 export function ttlTier(hours: number): number {
   const h = Number.isFinite(hours) ? hours : DEFAULT_TTL_HOURS;
   if (h < 1) return 0;
@@ -24,7 +24,7 @@ export function ttlTier(hours: number): number {
   return 1;
 }
 
-/** Localized label for an arbitrary allowed-TTL hour value. */
+
 export function ttlLabel(locale: Locale, hours: number): string {
   const known = KNOWN_KEYS[hours];
   if (known) return t(locale, known);

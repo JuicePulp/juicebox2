@@ -1,13 +1,13 @@
-/**
- * Server-side (SSR) resolution of juicehost configs with caching.
- *
- * The default provider (juiceback) and any configured known juicehost are
- * fetched on the server and cached, so a returning user with a saved
- * custom host (juicebox_host cookie) gets that host's settings in the
- * server-rendered HTML without pressing Apply each visit.
- *
- * Only reachable from `.astro` frontmatter (never shipped to the browser).
- */
+
+
+
+
+
+
+
+
+
+
 
 export interface HostConfig {
   max_file_size_bytes?: number;
@@ -20,7 +20,7 @@ export interface HostConfig {
   ultrafast?: boolean;
   quic?: boolean;
   cobalt?: boolean;
-  /** "direct-prefer" routes uploads through direct tickets; "standard" uses TUS/multipart. */
+  
   upload_mode?: string;
   fetch_rate_limit_per_minute?: number;
   public_base_url?: string;
@@ -52,10 +52,10 @@ function juicebackUrl(): string {
   );
 }
 
-/**
- * Fetch the cobalt service-domain list from juiceback (server-side).
- * Returns [] when cobalt is disabled or unreachable; never throws.
- */
+
+
+
+
 export async function fetchCobaltServices(): Promise<string[]> {
   try {
     const res = await fetch(`${juicebackUrl()}/api/fetch/services`, {
@@ -73,7 +73,7 @@ export async function fetchCobaltServices(): Promise<string[]> {
   }
 }
 
-/** Normalize a user-supplied host into a base URL, or null when invalid. */
+
 export function normalizeHost(host: string): string | null {
   let h = host.trim();
   if (!h) return null;
@@ -94,7 +94,7 @@ export function normalizeHost(host: string): string | null {
 const PRIVATE_HOSTNAME_RE =
   /^(localhost|.*\.local|.*\.internal|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+)$/i;
 
-/** Guard against SSR fetches to loopback / link-local / private addresses. */
+
 function isBlockedHost(base: string): boolean {
   try {
     const url = new URL(base);
@@ -142,10 +142,10 @@ function sanitizeConfig(raw: unknown): HostConfig | null {
   return cfg;
 }
 
-/**
- * Fetch (with cache) `/api/config` from a juicehost. `allowPrivate` is only
- * set for the configured default provider; user-supplied hosts must be public.
- */
+
+
+
+
 export async function fetchHostConfig(
   host: string,
   allowPrivate = false,
@@ -172,7 +172,7 @@ export async function fetchHostConfig(
   }
 }
 
-/** Read the saved custom juicehost from the request's Cookie header. */
+
 export function readCookieHost(cookieHeader?: string | null): string | null {
   if (!cookieHeader) return null;
   for (const part of cookieHeader.split(";")) {
@@ -191,10 +191,10 @@ export function readCookieHost(cookieHeader?: string | null): string | null {
   return null;
 }
 
-/**
- * Resolve the config that should drive SSR: the user's saved custom juicehost
- * when available, otherwise the default juiceback provider.
- */
+
+
+
+
 export async function resolveEffectiveConfig(
   cookieHost?: string | null,
 ): Promise<EffectiveHostConfig> {
@@ -202,10 +202,10 @@ export async function resolveEffectiveConfig(
   if (cookieHost) {
     const custom = await fetchHostConfig(cookieHost);
     if (custom) {
-      // Cobalt transcoding is a service of THIS box (juiceback /api/fetch), not
-      // of the storage host. When a custom host's config omits the flag, inherit
-      // the default provider's value instead of silently dropping the feature
-      // (which hid the Video Upload tab for users with a saved host cookie).
+      
+      
+      
+      
       if (custom.cobalt === undefined && def?.cobalt !== undefined) {
         custom.cobalt = def.cobalt;
       }
@@ -227,15 +227,15 @@ const KNOWN_PROVIDERS: string[] = (() => {
   return [...new Set([juicebackUrl(), ...extras])];
 })();
 
-/** Warm the cache for known providers (called once at server boot). */
+
 function prewarmKnownProviders(): void {
   void Promise.allSettled(
     KNOWN_PROVIDERS.map((host) => fetchHostConfig(host, true)),
   );
 }
 
-// Fire-and-forget prewarm when this module loads inside the Node server
-// (it is never imported on the client, and never executed at build time).
+
+
 if (typeof window === "undefined") {
   prewarmKnownProviders();
 }

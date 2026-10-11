@@ -1,6 +1,6 @@
 import { TEXT_LIKE_RE } from "./upload-config";
 
-/** Gzip-compress a file using the Streams API if it's large and text-like. */
+
 export async function compressFile(
     file: File,
 ): Promise<{ file: File; isGzip: boolean }> {

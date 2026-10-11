@@ -1,6 +1,6 @@
-/// Human-size formatting (`512 B`, `1.5 KB`). Float math is display-only:
-/// magnitudes are clamped before casting, so the `as` conversions below
-/// cannot misbehave.
+
+
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -22,8 +22,8 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// Max-size label (`500 MB`, `1.5 GB`). Same display-only float math as
-/// [`format_size`].
+
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
@@ -106,9 +106,9 @@ pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     crate::i18n::tv(locale, "files.expires", "time", &time)
 }
 
-/// Percentage of TTL remaining, clamped to `0..=100` by construction
-/// (`left` is floored at zero, `total` is positive): the float ratio and
-/// final cast cannot overflow.
+
+
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,

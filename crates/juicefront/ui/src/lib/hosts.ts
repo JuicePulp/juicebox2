@@ -1,16 +1,16 @@
-/**
- * Curated storage-node lists for the host selector modal.
- *
- * Official nodes are run by the Juicebox team; unofficial (community) nodes
- * are run by volunteers. Both lists can be extended without a code change:
- *
- *   PUBLIC_OFFICIAL_HOSTS="Box EU|https://box.juicey.dev|EU,..."
- *   PUBLIC_UNOFFICIAL_HOSTS="Alice|https://alice.example.com|US,..."
- *
- * Entries are `Name|https://url|Region`; region is optional. Invalid entries
- * are ignored. Imported by `.astro` frontmatter only (never shipped as-is;
- * the component embeds the resolved lists as data attributes).
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export interface HostNode {
   name: string;
@@ -67,7 +67,7 @@ function mergeNodes(base: HostNode[], extra: HostNode[]): HostNode[] {
   return out;
 }
 
-/** SSR-safe: reads env at render time (works in Astro frontmatter). */
+
 export function getOfficialNodes(): HostNode[] {
   const env =
     typeof process !== "undefined"
@@ -78,7 +78,7 @@ export function getOfficialNodes(): HostNode[] {
   return mergeNodes(OFFICIAL_DEFAULTS, parseEnvList(clientEnv, true));
 }
 
-/** SSR-safe: reads env at render time (works in Astro frontmatter). */
+
 export function getUnofficialNodes(): HostNode[] {
   const env =
     typeof process !== "undefined"

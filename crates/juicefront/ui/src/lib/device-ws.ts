@@ -1,9 +1,9 @@
-/**
- * SSE client for device presence.
- *
- * Connects to /api/presence and tracks connected devices.
- * Dispatches custom events so other parts of the UI can react.
- */
+
+
+
+
+
+
 
 import { apiPresence } from "./api";
 
@@ -17,10 +17,10 @@ let eventSource: EventSource | null = null;
 let connected = false;
 let devices: Array<{ device_id: string; device_name: string }> = [];
 
-// Reconnect state: exponential backoff so a dead backend doesn't get
-// hammered (and doesn't flood the dev proxy log with ECONNREFUSED).
-// After sustained failures (e.g. 429 storms from too many presence streams)
-// park at SUSTAINED_RETRY_MS instead of retrying every minute forever.
+
+
+
+
 const INITIAL_RETRY_MS = 5000;
 const MAX_RETRY_MS = 60000;
 const SUSTAINED_RETRY_MS = 300000;
@@ -39,12 +39,12 @@ function hasSessionCookie(): boolean {
   }
 }
 
-/** Whether juicebox-plus is currently connected. */
+
 export function isAppMode(): boolean {
   return connected && devices.length > 0;
 }
 
-/** Check if glow should be shown (device connected since last clear). */
+
 export function shouldGlowHost(): boolean {
   if (!isAppMode()) return false;
   const cleared = localStorage.getItem("juicebox_host_glow_cleared");
@@ -52,13 +52,13 @@ export function shouldGlowHost(): boolean {
   return true;
 }
 
-/** Mark the host glow as cleared (called when user opens host settings). */
+
 export function clearHostGlow(): void {
   localStorage.setItem("juicebox_host_glow_cleared", "true");
   document.querySelector("[data-host-btn]")?.classList.remove("host-btn--glow");
 }
 
-/** Mark that a new device has connected. */
+
 export function onDeviceConnected(): void {
   window.__juiceboxAppMode = true;
   if (shouldGlowHost()) {
@@ -67,18 +67,18 @@ export function onDeviceConnected(): void {
   window.dispatchEvent(new CustomEvent("juicebox-app-mode", { detail: { connected: true, devices: [...devices] } }));
 }
 
-/** Mark that devices have disconnected. */
+
 export function onDeviceDisconnected(): void {
   window.__juiceboxAppMode = devices.length > 0;
   window.dispatchEvent(new CustomEvent("juicebox-app-mode", { detail: { connected: isAppMode(), devices: [...devices] } }));
 }
 
-/** Connect to the SSE presence stream. */
+
 export function connectPresence(): void {
   if (eventSource || typeof window === "undefined") return;
-  // Don't poll in background tabs; the visibility handler reconnects.
+  
   if (typeof document !== "undefined" && document.hidden) return;
-  // Anonymous tabs can never have devices; don't hold an SSE stream each.
+  
   if (!hasSessionCookie()) return;
 
   wireVisibilityHandler();
@@ -119,16 +119,16 @@ export function connectPresence(): void {
 
   eventSource.onerror = () => {
     connected = false;
-    // Close the dead source: otherwise its native retry loop keeps firing
-    // alongside our scheduled reconnect (duplicate streams + log spam).
+    
+    
     try {
       eventSource?.close();
     } catch {}
     eventSource = null;
     if (retryTimer) clearTimeout(retryTimer);
-    // EventSource hides the HTTP status, so a 429 (too many presence
-    // streams) looks like any other error. After 5 consecutive failures
-    // assume sustained rejection and park at 5min instead of hammering.
+    
+    
+    
     consecutiveFailures++;
     const delay = consecutiveFailures >= 5 ? SUSTAINED_RETRY_MS : retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
@@ -139,7 +139,7 @@ export function connectPresence(): void {
   };
 }
 
-/** Pause polling while the tab is hidden; resume on return. */
+
 function wireVisibilityHandler(): void {
   if (visibilityWired || typeof document === "undefined") return;
   visibilityWired = true;

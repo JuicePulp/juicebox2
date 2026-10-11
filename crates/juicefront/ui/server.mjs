@@ -1,15 +1,15 @@
-// Production server entry for the Juicebox² frontend.
-//
-// Wraps the @astrojs/node standalone server and adds a WebSocket proxy for
-// /api/device/ws -> juiceback (used by juicebox-plus device pairing). Astro
-// middleware is HTTP-only and cannot forward WS upgrades, so we hook the raw
-// Node http.Server `upgrade` event and pipe bytes straight through (same as
-// the dev-mode Vite proxy's `ws: true`).
+
+
+
+
+
+
+
 
 process.env.ASTRO_NODE_AUTOSTART = "disabled";
 
-// Prefer the CI-bundled, self-contained entry (single-file, no node_modules).
-// Falls back to the raw Astro build for local source-tree runs.
+
+
 const { startServer } = await import("./dist/server/entry.bundle.mjs").catch(
   () => import("./dist/server/entry.mjs")
 );

@@ -10,8 +10,8 @@ const BACKEND_URL =
 
 type Announcement = { message: string; link_url: string; mode: string };
 
-// Short in-memory TTL so every SSR request does not hit juiceback.
-// Module state is per-worker; cold starts simply refetch once.
+
+
 let cachedAnnouncement: Announcement | null = null;
 let cachedAt = 0;
 const ANNOUNCEMENT_TTL_MS = 60 * 1000;
@@ -34,7 +34,7 @@ try {
   }
   announcement = cachedAnnouncement;
 } catch {
-  // Serve stale cache if the refresh failed, else render nothing.
+  
   announcement = cachedAnnouncement;
 }
 

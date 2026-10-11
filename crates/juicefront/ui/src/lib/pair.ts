@@ -1,7 +1,7 @@
-/**
- * juicebox-plus device pairing: code generation, status polling, unpairing.
- * Drives the pair modal; all endpoints live under /api/pair and /api/device.
- */
+
+
+
+
 import { UPLOAD_URL } from "./upload-config";
 import { playSound } from "./sounds";
 import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api";

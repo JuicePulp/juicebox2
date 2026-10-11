@@ -128,16 +128,16 @@ function removeItem(item) {
     setEmpty(!listContentRef || !listContentRef.querySelector(".file-item:not(.exiting)"));
   }, 300);
 }
-// Dismiss a queued/uploading/errored row boundedly: drop the DOM row AND
-// purge the upload store, otherwise the subscribe loop re-adopts the row on
-// the next store tick and deleted rows come back from the dead.
+
+
+
 function dismissRow(item) {
   var id = item.getAttribute("data-upload-id");
   if (id) removeUpload(id);
   removeItem(item);
 }
-// Key badge before the filename for protected rows (before, so filename
-// ellipsis can never push it out). Idempotent.
+
+
 function markRowProtected(row) {
   if (!row || row.querySelector(".file-protected")) return;
   var nameEl = row.querySelector(".file-name");

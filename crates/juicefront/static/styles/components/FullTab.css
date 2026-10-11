@@ -1,13 +1,13 @@
-/* Full-bleed, square tab strip that bolts directly onto a modal title.
- * Place as the first child of .mdlbody: the negative margins cancel the
- * body padding so the strip spans edge to edge and sits flush under the
- * header, with zero rounding anywhere.
- *
- * Generic across modals: reuse .full-tab / .full-tab__tab anywhere. The
- * checked-highlight rule is per-instance (radio ids differ per modal) and
- * lives with the instance styles — see SettingsTabs.css for an example.
- * Radios stay siblings ahead of the strip so `#x:checked ~ .full-tab`
- * selectors keep working with and without JS. */
+
+
+
+
+
+
+
+
+
+
 
 .full-tab {
   display: flex;

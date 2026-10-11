@@ -1,9 +1,9 @@
-/**
- * Shared API path builders for bundled client code. Bases (`UPLOAD_URL`
- * etc.) stay in `upload-config.ts`; these are path-only, resolved
- * same-origin through the Astro proxy in browsers. Admin pages still use
- * inline URLs in classic scripts; migrate them here when touched.
- */
+
+
+
+
+
+
 
 const enc = encodeURIComponent;
 

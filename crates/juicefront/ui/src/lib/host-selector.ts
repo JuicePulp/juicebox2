@@ -1,17 +1,12 @@
-/**
- * Host selector modal logic (main page only).
- *
- * Pings every listed node via its `/api/config`, shows STATUS + LATENCY,
- * filters/sorts the two lists, and persists the chosen node to the same
- * `juicebox_host` cookie + localStorage keys the settings modal uses.
- * Selecting dispatches `juicehost-config-updated` so UploadCard rebuilds
- * retention options without a reload.
- */
 
-interface NodeFeatures {
-  quic: boolean;
-  cobalt: boolean;
-}
+
+
+
+
+
+
+
+
 
 type NodeState = "unknown" | "checking" | "online" | "offline";
 
@@ -25,6 +20,8 @@ interface RowState {
 }
 
 const PING_TIMEOUT_MS = 6000;
+const PING_ROUNDS = 3;
+const PING_MAX_CONSECUTIVE_FAILURES = 2;
 
 function str(root: HTMLElement, key: string, fallback: string): string {
   return root.getAttribute(`data-str-${key}`) || fallback;
@@ -59,7 +56,7 @@ function saveHost(url: string): void {
   if (input) input.value = url;
 }
 
-/** Mirror the persisted config bits the settings modal keeps in sync. */
+
 function syncConfigBits(cfg: Record<string, unknown>): void {
   const serverCfg = document.getElementById("server-config");
   if (serverCfg) {
@@ -105,8 +102,37 @@ function capsOf(cfg: Record<string, unknown>): string[] {
   if (cfg.quic === true) caps.push("QUIC");
   if (cfg.cobalt === true) caps.push("Cobalt");
   if (cfg.quick_link === true) caps.push("Quick link");
-  if (cfg.ultrafast === true) caps.push("Ultrafast");
+  if (cfg.ultrafast === true) caps.push("Plus");
+  if (cfg.encrypted === true) caps.push("Encrypted");
   return caps;
+}
+
+function addChip(parent: Element, text: string, cls: string): void {
+  const b = document.createElement("span");
+  b.className = cls;
+  b.textContent = text;
+  parent.appendChild(b);
+}
+
+function layoutBadges(badges: Element): void {
+  const chips = badges.querySelector("[data-hostsel-chips]");
+  const more = badges.querySelector<HTMLDetailsElement>("[data-hostsel-more]");
+  const menu = badges.querySelector("[data-hostsel-more-menu]");
+  const label = badges.querySelector("[data-hostsel-more-label]");
+  if (!chips || !more || !menu || !label) return;
+  while (menu.firstChild) chips.appendChild(menu.firstChild);
+  more.hidden = true;
+  more.open = false;
+  let guard = chips.children.length;
+  while (
+    guard-- > 0 &&
+    chips.children.length > 1 &&
+    chips.scrollWidth > chips.clientWidth + 1
+  )
+    menu.insertBefore(chips.lastChild as Node, menu.firstChild);
+  const n = menu.children.length;
+  label.textContent = `+${n}`;
+  more.hidden = n === 0;
 }
 
 function versionParts(v: string): number[] {
@@ -114,8 +140,9 @@ function versionParts(v: string): number[] {
 }
 
 function isLegacyVersion(cfg: Record<string, unknown>, current: string): boolean {
+  if (!current) return false;
   const theirs = typeof cfg.version === "string" ? cfg.version : "";
-  if (!theirs || !current) return false;
+  if (!theirs) return true;
   const a = versionParts(theirs);
   const b = versionParts(current);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -192,22 +219,30 @@ export function initHostSelector(): void {
               : "";
     if (badges) {
       badges.innerHTML = "";
+      const chips = document.createElement("span");
+      chips.className = "hostsel-chips";
+      chips.setAttribute("data-hostsel-chips", "");
+      const more = document.createElement("details");
+      more.className = "hostsel-more";
+      more.setAttribute("data-hostsel-more", "");
+      more.hidden = true;
+      const summary = document.createElement("summary");
+      summary.setAttribute("data-hostsel-more-label", "");
+      const menu = document.createElement("div");
+      menu.className = "hostsel-more__menu";
+      menu.setAttribute("data-hostsel-more-menu", "");
+      more.appendChild(summary);
+      more.appendChild(menu);
+      badges.appendChild(chips);
+      badges.appendChild(more);
       if (s.state === "online" && s.cfg) {
-        for (const cap of capsOf(s.cfg)) {
-          const b = document.createElement("span");
-          b.className = "hostsel-badge";
-          b.textContent = cap;
-          badges.appendChild(b);
-        }
+        for (const cap of capsOf(s.cfg)) addChip(chips, cap, "hostsel-badge");
         if (
           isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || "")
-        ) {
-          const b = document.createElement("span");
-          b.className = "hostsel-badge hostsel-badge--legacy";
-          b.textContent = "Legacy";
-          badges.appendChild(b);
-        }
+        )
+          addChip(chips, "Legacy", "hostsel-badge hostsel-badge--legacy");
       }
+      layoutBadges(badges);
     }
     if (pingBtn) {
       pingBtn.disabled = s.state === "checking";
@@ -242,20 +277,18 @@ export function initHostSelector(): void {
     }
   }
 
-  async function pingRow(s: RowState): Promise<void> {
-    if (s.state === "checking") return;
-    // Mixed-content pages can't probe http:// nodes; don't spam console.
-    if (
-      s.url.startsWith("http://") &&
-      window.location.protocol === "https:"
-    ) {
-      s.state = "offline";
-      s.latencyMs = null;
-      renderRow(s);
-      return;
-    }
-    s.state = "checking";
-    renderRow(s);
+  function medianMs(samples: number[]): number | null {
+    if (samples.length === 0) return null;
+    const sorted = [...samples].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 1
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  async function pingOnce(
+    s: RowState,
+  ): Promise<{ ms: number; cfg: Record<string, unknown> } | null> {
     const t0 = performance.now();
     try {
       const res = await fetch(`${s.url}/api/config`, {
@@ -272,13 +305,50 @@ export function initHostSelector(): void {
       ) {
         throw new Error("not a JuiceHost node");
       }
-      s.cfg = cfg as Record<string, unknown>;
-      s.state = "online";
-      s.latencyMs = performance.now() - t0;
+      return { ms: performance.now() - t0, cfg: cfg as Record<string, unknown> };
     } catch {
+      return null;
+    }
+  }
+
+  async function pingRow(s: RowState): Promise<void> {
+    if (s.state === "checking") return;
+    
+    if (
+      s.url.startsWith("http://") &&
+      window.location.protocol === "https:"
+    ) {
+      s.state = "offline";
+      s.latencyMs = null;
+      renderRow(s);
+      return;
+    }
+    s.state = "checking";
+    renderRow(s);
+    const samples: number[] = [];
+    let failures = 0;
+    let cfg: Record<string, unknown> | null = null;
+    for (let round = 0; round < PING_ROUNDS; round++) {
+      const sample = await pingOnce(s);
+      if (sample === null) {
+        failures++;
+        if (failures >= PING_MAX_CONSECUTIVE_FAILURES) break;
+        continue;
+      }
+      failures = 0;
+      cfg = sample.cfg;
+      samples.push(sample.ms);
+      s.latencyMs = medianMs(samples);
+      renderRow(s);
+    }
+    if (samples.length === 0) {
       s.state = "offline";
       s.latencyMs = null;
       s.cfg = null;
+    } else {
+      s.cfg = cfg;
+      s.state = "online";
+      s.latencyMs = medianMs(samples);
     }
     renderRow(s);
     if (pendingSelect === s) {
@@ -361,7 +431,7 @@ export function initHostSelector(): void {
 
   root.addEventListener("click", (e) => {
     const t = e.target as HTMLElement | null;
-    if (!t || t.closest("a, button, input, select, textarea")) return;
+    if (!t || t.closest("a, button, input, select, textarea, details")) return;
     const row = t.closest<HTMLElement>("[data-hostsel-row]");
     if (!row) return;
     const s = rows.find((r) => r.row === row);
@@ -370,7 +440,9 @@ export function initHostSelector(): void {
 
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const row = (e.target as HTMLElement | null)?.closest?.(
+    const target = e.target as HTMLElement | null;
+    if (!target || target.closest("details")) return;
+    const row = target.closest?.(
       "[data-hostsel-row]",
     ) as HTMLElement | null | undefined;
     if (!row) return;
@@ -383,17 +455,29 @@ export function initHostSelector(): void {
   onlineOnly?.addEventListener("change", applyFilters);
   sortSel?.addEventListener("change", applyFilters);
   pingAllBtn?.addEventListener("click", pingAll);
+  let resizeTimer = 0;
+  const relayoutBadges = (): void => {
+    for (const el of root.querySelectorAll("[data-hostsel-badges]"))
+      layoutBadges(el);
+  };
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(relayoutBadges, 150);
+  });
 
   markSelected(readSavedHost());
   rows.forEach(renderRow);
   applyFilters();
 
-  // Ping once when the modal first opens (and on init if already open).
+  
   let pinged = false;
   const maybePing = () => {
-    if (location.hash === "#host-selector-modal" && !pinged) {
-      pinged = true;
-      pingAll();
+    if (location.hash === "#host-selector-modal") {
+      relayoutBadges();
+      if (!pinged) {
+        pinged = true;
+        pingAll();
+      }
     }
   };
   window.addEventListener("hashchange", maybePing);
@@ -401,6 +485,8 @@ export function initHostSelector(): void {
     pinged = false;
     maybePing();
   });
+  if (document.fonts && document.fonts.ready)
+    document.fonts.ready.then(() => relayoutBadges());
   maybePing();
 }
 

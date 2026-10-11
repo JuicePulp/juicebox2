@@ -1,13 +1,13 @@
-// Port of AdSlots.astro ad-injection script (vanilla ES2020, no framework).
-//
-// Zone config: the Astro build passed `adZones` via `define:vars`. There is
-// no build-time injection here, so zones are read from data attributes:
-//   1. <div data-ad-zones='[{"holder":"box-zone-160-600-l","key":"...",
-//        "format":"iframe","width":160,"height":600}]'> (JSON array), and/or
-//   2. per-holder attributes on the slot itself:
-//        data-box-key="..." data-box-format="iframe"
-//        (width/height fall back to data-box-w / data-box-h).
-// If no zones are configured, this module does nothing.
+
+
+
+
+
+
+
+
+
+
 
 (function () {
   var BLOCKED_GRACE_MS = 4000;
@@ -24,7 +24,7 @@
       seen[zone.holder] = true;
       zones.push(zone);
     }
-    // 1. JSON blob: <div data-ad-zones='[...]'>
+    
     try {
       var cfg = document.querySelector("[data-ad-zones]");
       if (cfg) {
@@ -46,7 +46,7 @@
         }
       }
     } catch (e) {}
-    // 2. Per-holder attributes: data-box-key / data-box-format + data-box-w/h.
+    
     try {
       document.querySelectorAll("[data-box-key]").forEach(function (el) {
         var key = el.getAttribute("data-box-key");
@@ -62,7 +62,7 @@
         });
       });
     } catch (e) {}
-    // Keep only zones whose holder exists in the DOM.
+    
     return zones.filter(function (z) {
       if (!z.holder || !document.getElementById(z.holder)) return false;
       return true;
@@ -109,7 +109,7 @@
     if (done) {
       invoke.onload = done;
       invoke.onerror = function () {
-        // invoke.js failed (adblock, VPN, or offline): fail the whole cascade.
+        
         cascadeFailed = true;
         markAllBlocked(zones);
         done();

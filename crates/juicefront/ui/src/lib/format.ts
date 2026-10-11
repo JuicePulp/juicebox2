@@ -1,14 +1,14 @@
-/**
- * Shared utility functions for formatting, icons, and UI components.
- * Used by both SSR (Astro frontmatter) and client-side scripts.
- */
+
+
+
+
 
 import { iconSvgHtml } from "./icons";
 import { playSound } from "./sounds";
 
 let _announcer: HTMLElement | null = null;
 
-/** Announce a message to screen readers via a live region. */
+
 export function announce(message: string): void {
   if (typeof document === "undefined") return;
   if (!_announcer) {
@@ -23,7 +23,7 @@ export function announce(message: string): void {
   _announcer.textContent = message;
 }
 
-/** Format bytes into a human-readable string (e.g. "1.5 MB"). */
+
 export function formatSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -35,7 +35,7 @@ export function formatSize(bytes: number): string {
   return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
-/** Format a max upload size (bytes) as whole MB/GB (e.g. "500 MB", "5 GB"). */
+
 export function formatMaxSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb >= 1024) {
@@ -45,7 +45,7 @@ export function formatMaxSize(bytes: number): string {
   return mb % 1 === 0 ? `${mb} MB` : `${mb.toFixed(1)} MB`;
 }
 
-/** Map a MIME type to an icon name. */
+
 export function iconForMime(mime: string): string {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
@@ -63,7 +63,7 @@ export function iconHTML(name: string, size = 18): string {
   return iconSvgHtml(name, size);
 }
 
-/** Percentage of TTL remaining (0-100). */
+
 export function pctRemaining(expiresAt: number, uploadedAt: number): number {
   const total = (expiresAt - uploadedAt) * 1000;
   if (total <= 0) return 0;
@@ -82,7 +82,7 @@ function stripHost(host: string): string {
   return host.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-/** Whether a storage host is one of this instance's default hosts. */
+
 export function isDefaultHost(host: string, defaultHost?: string): boolean {
   if (!host) return true;
   const stripped = stripHost(host);
@@ -91,7 +91,7 @@ export function isDefaultHost(host: string, defaultHost?: string): boolean {
   return false;
 }
 
-/** Localized strings for the copy-to-clipboard button. */
+
 export interface CopyBarStrings {
   title: string;
   aria: string;
@@ -99,7 +99,7 @@ export interface CopyBarStrings {
   announceMsg: string;
 }
 
-/** Create a copy-to-clipboard button for a URL. */
+
 export function makeCopyBar(url: string, strings?: CopyBarStrings): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";

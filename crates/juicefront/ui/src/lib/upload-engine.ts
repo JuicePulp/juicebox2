@@ -47,16 +47,16 @@ export interface UploadOptions {
   password?: string;
 }
 
-/** Live tuner telemetry attached by the TUS orchestrator (debug overlay). */
+
 export interface TunerDbg {
-  w: number; // active workers
-  t: number; // target workers
-  sat: boolean; // link saturated?
-  r: number; // last tuner window rate, bytes/sec
-  c: number; // parts claimed so far
-  n: number; // total parts
-  k: number; // chunk size currently in effect, bytes
-  g: boolean | null; // gzip active? null while first-chunk probe undecided
+  w: number; 
+  t: number; 
+  sat: boolean; 
+  r: number; 
+  c: number; 
+  n: number; 
+  k: number; 
+  g: boolean | null; 
 }
 
 export interface UploadItem {
@@ -134,8 +134,8 @@ async function fetchWithRetry(
   throw lastErr;
 }
 
-/** Create a TUS session; retries once past a stale "part index already
- * exists" rejection and reports whether the part is already registered. */
+
+
 async function createTusSession(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -149,7 +149,7 @@ async function createTusSession(
     if (!/already exists/i.test(text)) {
       return { res: echo(res, text), alreadyExists: false };
     }
-    // Server releases dead slots asynchronously; one short retry wins that race.
+    
     await new Promise((r) => setTimeout(r, 500));
     res = await fetch(input, init);
     if (res.status === 400) {
@@ -189,8 +189,8 @@ export function startUpload(
 const _raf = typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : (cb: FrameRequestCallback) => setTimeout(cb, 16) as unknown as number;
 const _caf = typeof cancelAnimationFrame !== "undefined" ? cancelAnimationFrame : clearTimeout;
 
-/** Progress ticks each frame from measured throughput, so the bar keeps
- * moving between backend reports. */
+
+
 class LiveProgress {
   private loaded = 0;
   private total = 0;
@@ -204,7 +204,7 @@ class LiveProgress {
     this.callback = callback;
   }
 
-  /** Start tracking with the total byte count. */
+  
   begin(totalBytes: number) {
     this.total = totalBytes;
     this.loaded = 0;
@@ -215,20 +215,20 @@ class LiveProgress {
     if (this.raf === null) this.startLoop();
   }
 
-  /** Refine the total (e.g. estimated compressed size). The monotonic
-   * shown-guard keeps the displayed percentage from ever regressing. */
+  
+
   setTotal(bytes: number) {
     if (bytes > 0 && Number.isFinite(bytes)) this.total = bytes;
   }
 
-  /** Feed the real cumulative byte count whenever the network reports. */
+  
   set(bytes: number) {
     const now = performance.now();
     const dt = (now - this.lastTime) / 1000;
     if (dt >= 0.15 && bytes > this.loaded) {
       const inst = (bytes - this.loaded) / dt;
-      // Clamp bursts (parallel chunk acks landing together) so one sample
-      // can't inflate the estimate and launch the bar to 100%.
+      
+      
       const clamped = Math.min(inst, Math.max(this.speed * 3, 64 * 1024 * 1024));
       this.speed = this.speed ? this.speed * 0.7 + clamped * 0.3 : clamped;
     }
@@ -251,8 +251,8 @@ class LiveProgress {
     const tick = () => {
       const dt = (performance.now() - this.lastTime) / 1000;
       if (this.speed > 0 && this.total > 0) {
-        // Project at measured speed, capped ~2s past the last real report,
-        // so a stalled connection leaves the bar still.
+        
+        
         const projected = Math.min(
           this.loaded + this.speed * dt,
           this.loaded + this.speed * 2,
@@ -318,7 +318,7 @@ function startDirectUpload(
           if (reserveUrl) update({ id: item.id, reserveUrl, serverId: reserveId });
         }
       } catch {
-        // nonreserved upload
+        
       }
       if (runState.cancelled) throw new Error("Upload cancelled");
     }
@@ -337,9 +337,9 @@ function startDirectUpload(
     fd.append("file", uploadFile);
 
     const progress = new LiveProgress((pct: number) => {
-      // Hold just under 100% until the server responds: onprogress counts
-      // socket-buffered bytes, and finalize work happens after the last one.
-      // The done-state update sets exactly 100.
+      
+      
+      
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     });
     progress.begin(uploadFile.size);
@@ -477,7 +477,7 @@ function startDirectTicketUpload(
 
   const run = (async () => {
     const attempt = async (isRetry: boolean): Promise<void> => {
-      // 1. Reserve a direct upload ticket (size-based TTL under DTE).
+      
       const reserveRes = await fetch(DIRECT_RESERVE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -535,7 +535,7 @@ function startDirectTicketUpload(
       progress.destroy();
       if (runState.cancelled) throw new Error("Upload cancelled");
 
-      // Ticket expired between reserve and upload start: re-reserve + retry once.
+      
       if ((uploadStatus.status === 401 || uploadStatus.status === 403) && !isRetry) {
         attempt(true);
         return;
@@ -552,7 +552,7 @@ function startDirectTicketUpload(
         return;
       }
 
-      // 3. Complete: resolve ownership server-side.
+      
       update({ id: item.id, state: "finalizing" });
       const completeRes = await fetch(DIRECT_COMPLETE_URL, {
         method: "POST",
@@ -561,7 +561,7 @@ function startDirectTicketUpload(
       });
       if (runState.cancelled) throw new Error("Upload cancelled");
 
-      // Complete-side ticket rejection: re-run the whole flow once.
+      
       if ((completeRes.status === 401 || completeRes.status === 403) && !isRetry) {
         attempt(true);
         return;
@@ -623,11 +623,11 @@ async function uploadTusPart(
     onReset: () => void;
     onChunk?: (size: number) => void;
     onGzip?: (on: boolean) => void;
-    /** Called before dispatching each chunk; may delay for pacing. */
+    
     beforeChunk?: () => Promise<void>;
-    /** Bytes queued to the wire for a freshly dispatched chunk. */
+    
     onDispatch?: (bytes: number) => void;
-    /** Current smoothed aggregate rate estimate, bytes/sec. */
+    
     rateHint?: () => number;
   },
   reserveReady: Promise<void>,
@@ -641,11 +641,11 @@ async function uploadTusPart(
   const end = Math.min(start + partSize, file.size);
   const partFile = file.slice(start, end);
 
-  // Gzip policy: text-like ext/mime are known winners and compress every
-  // chunk. Media/archives are already compressed: skip the probe and send
-  // chunk 0 raw immediately. Unknown types run a first-chunk probe - if the
-  // compressed body saved <10% vs raw, remaining chunks go raw. Offsets stay
-  // logical either way.
+  
+  
+  
+  
+  
   const knownText = gzipEligible(item.filename, item.mimeType);
   const knownCompressed = !knownText && isKnownCompressed(item.filename, item.mimeType);
   let probeDone = knownText || knownCompressed || probeShared.done;
@@ -663,12 +663,12 @@ async function uploadTusPart(
   meta.upload_mode = item.uploadMode;
   const metadata = encodeTusMeta(meta);
 
-  /** One full create + chunk-loop lifecycle for this part. */
+  
   const runSession = async (): Promise<{ status: number; data?: any }> => {
-    // Local kill switch for this session attempt: when one chunk fails hard,
-    // pipelined siblings get aborted so they stop burning bandwidth. Kept
-    // distinct from the user-cancel signal so internal aborts never read
-    // as cancellations downstream.
+    
+    
+    
+    
     const partCtrl = new AbortController();
     const partSignal = partCtrl.signal;
     const relayCancel = () => partCtrl.abort();
@@ -692,8 +692,8 @@ async function uploadTusPart(
         signal,
       });
       if (created.alreadyExists) {
-        // A prior attempt already registered (and almost certainly stored)
-        // this part; let the final concat use it instead of failing.
+        
+        
         return { status: 202 };
       }
       if (!created.res.ok) throw new Error(`TUS create failed: ${created.res.status}`);
@@ -704,8 +704,8 @@ async function uploadTusPart(
       const tusIdMatch = location.match(/\/api\/tus\/(.+)$/);
       if (tusIdMatch) controls.onTusCreate(tusIdMatch[1]);
 
-      /** PATCH one chunk via XHR for real-time upload.onprogress bytes.
-       * Retries transient failures with backoff. */
+      
+
       const patchChunk = (
         body: Blob,
         chunkOffset: number,
@@ -750,9 +750,9 @@ async function uploadTusPart(
               cleanup();
               const transient =
                 x.status === 0 || x.status === 408 || x.status === 429 || x.status >= 500;
-              // 409 = offset race: with a pipelined window a chunk can reach
-              // the server before its predecessor commits its offset. A short
-              // retry wins that race; the offset itself is still valid.
+              
+              
+              
               const offsetRace = x.status === 409 && tries < 6;
               if ((transient && tries < 3) || offsetRace) {
                 if (!partSignal.aborted) {
@@ -780,14 +780,14 @@ async function uploadTusPart(
           attempt(0);
         });
 
-      // Adaptive chunk size: chunks resize so each takes ~TUS_TARGET_CHUNK_SECS
-      // at the measured wire rate, bounded by this connection tier's profile.
-      // With a pipelined window, per-chunk timing underestimates link rate
-      // (siblings share bandwidth), so resizing samples aggregate acked bytes
-      // over time instead of one chunk's round trip.
+      
+      
+      
+      
+      
       const profile = TIER_CHUNK[netTier];
-      // Keep >=4 resize points per part so adaptation stays live and no
-      // single chunk hogs a thin pipe for tens of seconds.
+      
+      
       const partMaxChunk = Math.max(
         TUS_MIN_CHUNK,
         Math.min(profile.max, Math.ceil(partFile.size / 4)),
@@ -818,10 +818,10 @@ async function uploadTusPart(
       let offset = 0;
       while (offset < partFile.size || inflight.size > 0) {
         if (signal.aborted) throw new Error("Upload cancelled");
-        // The first chunk flies solo so the gzip probe verdict settles before
-        // any sibling has to pick a codec; afterwards keep a window of chunks
-        // on the wire so one uploads while the previous ack round-trips.
-        // Thin pipes stay at 1: pipelining there only feeds bufferbloat.
+        
+        
+        
+        
         const windowSize =
           probeDone && (hooks.rateHint?.() ?? 0) > 4 * 1024 * 1024
             ? PIPELINE_WINDOW
@@ -835,8 +835,8 @@ async function uploadTusPart(
             probeDone = true;
             useGzip = probeShared.use;
           }
-          // Compress before sending so retries reuse the same wire body.
-          // Unknown types always compress their FIRST chunk as a probe.
+          
+          
           let wireSize = chunk.size;
           hooks.onDispatch?.(chunk.size);
           const bodyP =
@@ -859,7 +859,7 @@ async function uploadTusPart(
         }
 
         if (r.status === 204) {
-          // Probe verdict once the first chunk lands.
+          
           if (!probeDone) {
             probeDone = true;
             useGzip = slot.wireSize <= slot.rawSize * 0.9;
@@ -870,7 +870,7 @@ async function uploadTusPart(
           noteAcked(slot.rawSize);
         } else if (r.status >= 200 && r.status < 300) {
           noteAcked(slot.rawSize);
-          // Completion response: drain still-unacked siblings, then finish.
+          
           const pending = [...inflight.values()];
           inflight.clear();
           await Promise.allSettled(pending.map((s) => s.p));
@@ -884,7 +884,7 @@ async function uploadTusPart(
         }
       }
 
-      // Final patch to signal completion
+      
       await reserveReady;
       const finalReserveId = getReserveId();
       const finalRes = await fetchWithRetry(uploadUrl, {
@@ -903,21 +903,21 @@ async function uploadTusPart(
         const data = await finalRes.json();
         return { status: 200, data };
       }
-      // 202 = part complete, waiting for others
+      
       return { status: finalRes.status };
     } finally {
       signal.removeEventListener("abort", relayCancel);
       partCtrl.abort();
-      // Swallow sibling rejections so an aborted pipeline never surfaces as
-      // an unhandled rejection; the real error (or success) is already in flight.
+      
+      
       for (const s of inflight.values()) s.p.catch(() => {});
     }
   };
 
-  // Session-level resilience: servers restart and background tabs stall, so
-  // sessions vanish mid-upload (404) or connections die ("Failed to fetch").
-  // Rebuild the session from scratch and resend this whole part; counters are
-  // reset first so progress stays truthful.
+  
+  
+  
+  
   let lastError: unknown;
   for (let attemptNo = 0; attemptNo < 3; attemptNo++) {
     try {
@@ -953,14 +953,14 @@ function startTusUpload(
 
   const run = (async () => {
     const sessionId = generateId();
-    // Shared across parts: once an unknown-type first chunk settles the gzip
-    // verdict, sibling parts adopt it instead of re-running their own probe.
+    
+    
     const probeState = { done: false, use: false };
-    // Actual gzip decision arrives per-part via onGzip after the probe.
+    
     let curGzip: boolean | null = null;
 
-    // Adaptive stream count. Cold start: connection tier estimate (mobile
-    // / wifi / ethernet). Warm: last upload's measured rate wins.
+    
+    
     const tier = detectNetTier();
     let hintBps = 0;
     try {
@@ -974,9 +974,9 @@ function startTusUpload(
       }
     } catch {}
     const wantedStreams = streamsForRate(hintBps || TIER_DEFAULT_BPS[tier]);
-    // Parts are pre-sliced (backend contract: indexed sessions, ordered
-    // concat), but we create MORE parts than starting streams so the
-    // realtime tuner can promote idle parts to live workers mid-upload.
+    
+    
+    
     const numParts = Math.max(
       1,
       Math.min(
@@ -989,14 +989,14 @@ function startTusUpload(
     const uploadStart = performance.now();
 
     const progress = new LiveProgress((pct: number) => {
-      // Hold under 100% until the merge response lands; the done-state
-      // update sets exactly 100.
+      
+      
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     });
     progress.begin(file.size);
 
-    // Per-part wire/logical byte trackers; wire bytes drive progress, the
-    // acked ratio shrinks the estimated compressed total as evidence lands.
+    
+    
     const partSent = new Array<number>(numParts).fill(0);
     const partAcked = new Array<number>(numParts).fill(0);
     let learnedAcked = 0;
@@ -1028,17 +1028,17 @@ function startTusUpload(
               update({ id: item.id, reserveUrl, serverId: reserveId });
           }
         } catch {
-          // nonreserved upload
+          
         }
       })();
     }
 
     const getReserveId = () => reserveId;
 
-    // Adaptive worker pool:
-    // Workers claim the next unstarted part index; the tuner promotes spare
-    // parts to live workers while aggregate ACKED throughput is still
-    // climbing, and lets surplus workers exit when the link backs off.
+    
+    
+    
+    
     const results: ({ status: number; data?: any } | undefined)[] = new Array(
       numParts,
     );
@@ -1053,8 +1053,8 @@ function startTusUpload(
     let workerError: unknown;
     let curChunk = 0;
     let respawnTimer: ReturnType<typeof setTimeout> | null = null;
-    // Pacing: bytes queued to the wire but not acked yet, capped at ~6s of
-    // measured bandwidth so bursts never outrun the pipe's drain rate.
+    
+    
     let inflightEst = 0;
     let rateNow = 0;
     const paceGate = async () => {
@@ -1092,11 +1092,11 @@ function startTusUpload(
               {
                 onWire: (bytes) => {
                   partSent[i] += bytes;
-                  // Drive the bar from bytes leaving the client. onWire fires
-                  // continuously via XHR upload.onprogress, so progress moves
-                  // smoothly instead of snapping whole parts at a time. The
-                  // denominator is refined by refreshTotal() for gzip, and
-                  // onAcked stays as a monotonic backstop near the end.
+                  
+                  
+                  
+                  
+                  
                   progress.set(sum(partSent));
                 },
                 onAcked: (bytes) => {
@@ -1105,9 +1105,9 @@ function startTusUpload(
                   learnedAcked += bytes;
                   inflightEst = Math.max(0, inflightEst - bytes);
                   refreshTotal();
-                  // Progress tracks SERVER-CONFIRMED bytes: wire bytes hit
-                  // Cloudflare's buffer instantly and then freeze, which read
-                  // as a stuck percentage while the real transfer continued.
+                  
+                  
+                  
                   progress.set(sum(partAcked));
                 },
                 onReset: () => {
@@ -1192,15 +1192,15 @@ function startTusUpload(
     );
     for (let k = 0; k < initialWorkers; k++) spawnWorker();
 
-    // Realtime tuner: samples aggregate ACKED byte rate (server-confirmed
-    // offsets - immune to socket-buffer bursts), grows the pool while the
-    // EWMA holds near baseline, sheds workers after a sustained collapse,
-    // and periodically probes for spare capacity once saturated. A new
-    // stream costs a little at first (TCP slow start, shared buffers), so
-    // each addition skips one tick before it's judged.
-    const PROBE_EVERY_TICKS = 10; // ~12s between trials while saturated
-    const SHRINK_TICKS = 3; // sustained collapse before shedding a worker
-    const WARMUP_TICKS = 2; // a fresh stream is judged only after this many
+    
+    
+    
+    
+    
+    
+    const PROBE_EVERY_TICKS = 10; 
+    const SHRINK_TICKS = 3; 
+    const WARMUP_TICKS = 2; 
     let probeTicks = 0;
     let shrinkTicks = 0;
     let preTrialRate = 0;
@@ -1217,7 +1217,7 @@ function startTusUpload(
       if (recentRates.length > 3) recentRates.shift();
       if (baselineRate === 0 && rateEwma > 0) baselineRate = rateEwma;
 
-      // A freshly spawned stream gets a couple of ticks to ramp up.
+      
       if (ticksSinceAdd < WARMUP_TICKS) {
         ticksSinceAdd++;
         lastWindowRate = rateEwma;
@@ -1227,15 +1227,15 @@ function startTusUpload(
 
       const maxConc = Math.min(PARALLEL_STREAMS, numParts);
       const workLeft = cursor < numParts || retryQueue.length > 0;
-      // Grow only if the slowest of the last few windows held up; this
-      // ignores short buffer-drain spikes.
+      
+      
       const steadyMin =
         recentRates.length >= 3 ? Math.min(...recentRates) : rateEwma;
 
       if (evaluatingTrial) {
-        // Trial verdict: keep the extra stream only if it bought real
-        // throughput (>5% over pre-trial); otherwise shed it and stay
-        // saturated until the next probe.
+        
+        
+        
         evaluatingTrial = false;
         probeTicks = 0;
         if (rateEwma >= preTrialRate * 1.05) {
@@ -1257,7 +1257,7 @@ function startTusUpload(
         baselineRate > 0 &&
         steadyMin >= baselineRate * 0.9
       ) {
-        // Climbing or holding near baseline: promote one more stream.
+        
         shrinkTicks = 0;
         if (spawnWorker()) {
           saturated = false;
@@ -1265,7 +1265,7 @@ function startTusUpload(
           ticksSinceAdd = 0;
           baselineRate = rateEwma;
         } else {
-          // Another upload holds the global permits; back off quietly.
+          
           saturated = true;
           probeTicks = 0;
         }
@@ -1274,8 +1274,8 @@ function startTusUpload(
         rateEwma < baselineRate * 0.7 &&
         activeWorkers > 1
       ) {
-        // Sustained drop: remove one worker every few ticks so the
-        // remaining workers each get more bandwidth.
+        
+        
         saturated = true;
         if (++shrinkTicks >= SHRINK_TICKS) {
           shrinkTicks = 0;
@@ -1283,8 +1283,8 @@ function startTusUpload(
           baselineRate = rateEwma;
         }
       } else {
-        // Flat or idle: mark saturated, but schedule periodic probes so a
-        // conservative verdict never caps growth for the rest of the upload.
+        
+        
         shrinkTicks = 0;
         if (
           workLeft &&
@@ -1324,8 +1324,8 @@ function startTusUpload(
 
     const settled = results.filter((r): r is { status: number; data?: any } => !!r);
 
-    // Learn: persist aggregate ACKED rate so the next upload starts with a
-    // near-optimal stream count (wire bytes would bake in buffer bursts).
+    
+    
     const elapsedSec = (performance.now() - uploadStart) / 1000;
     if (elapsedSec > 1 && learnedAcked > 0) {
       try {
@@ -1354,7 +1354,7 @@ function startTusUpload(
       return;
     }
 
-    // All returned 202..... which shouldn't happen if the server works correctly.
+    
     update({
       id: item.id,
       errorCode: "UPLOAD_FAILED",

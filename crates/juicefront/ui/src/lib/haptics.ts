@@ -1,17 +1,17 @@
-// Subtle haptic feedback tuned for modern LRA motors (Pixel-class devices):
-// all patterns use short 8-40ms ticks.
-// Web Vibration API only fires on Android; iOS ignores it silently.
+
+
+
 
 const KEY = "jb_haptics_v1";
 
 export type HapticName = "tick" | "tap" | "send" | "success" | "error";
 
-/** Durations in ms; arrays are vibrate/pause/vibrate... */
+
 const PATTERNS: Record<HapticName, number | number[]> = {
   tick: 8,
   tap: 16,
   send: [12, 30, 16],
-  success: [14, 60, 14], // two short pulses on finished uploads
+  success: [14, 60, 14], 
   error: [26, 70, 26, 70, 40],
 };
 
@@ -34,14 +34,14 @@ export function haptic(name: HapticName): void {
   } catch {}
 }
 
-/** Wire global press feedback + upload lifecycle cues. */
+
 export function initHaptics(): void {
   if (!hapticsSupported() || (window as unknown as { __jbBuzz?: boolean }).__jbBuzz)
     return;
   (window as unknown as { __jbBuzz?: boolean }).__jbBuzz = true;
 
-  // Crisp press feedback via capture-phase pointerdown (fires before focus,
-  // works for dynamically rendered cards, and can't be blocked by overlays).
+  
+  
   const INTERACTIVE =
     'button:not(:disabled),a[href],[role="button"],summary,label,input[type="checkbox"],input[type="radio"],select';
   document.addEventListener(
@@ -55,7 +55,7 @@ export function initHaptics(): void {
     { capture: true, passive: true },
   );
 
-  // Upload outcomes: fire once per state transition to success/error.
+  
   const seen = new Map<string, string>();
   window.addEventListener("jb-net-sample", (ev) => {
     const detail = (ev as CustomEvent).detail as {

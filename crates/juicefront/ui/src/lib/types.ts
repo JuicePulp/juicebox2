@@ -1,4 +1,4 @@
-/** A file record returned by the backend API. */
+
 export interface ServerFile {
   id: string;
   filename: string;

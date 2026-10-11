@@ -5,7 +5,7 @@ import node from "@astrojs/node";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-// Single source of truth for the Sentry release; keep package.json in sync.
+
 const pkg = require("./package.json");
 const release = `${pkg.name}@${pkg.version}`;
 
@@ -51,6 +51,7 @@ integrations.push((await import("@playform/compress")).default({
   JSON: true,
 }));
 
+
 /** @param {string} target */
 const proxyTo = (target) => ({
   target,
@@ -90,12 +91,12 @@ const proxyTo = (target) => ({
 
 export default defineConfig({
   output: "server",
-  // Astro's built-in origin check compares the Origin header against the
-  // request URL. Behind a TLS-terminating proxy the standalone node adapter
-  // reconstructs the URL with an http:// scheme (socket is plain HTTP), so
-  // every browser Origin (https://...) is treated as cross-site and all
-  // POSTs to the /api proxy would be rejected with a 403. The API endpoints
-  // perform their own auth/IP checks, so the CSRF check is disabled here.
+  
+  
+  
+  
+  
+  
   security: { checkOrigin: false },
   integrations,
   adapter: node({ mode: "standalone" }),

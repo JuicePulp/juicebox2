@@ -21,7 +21,7 @@ if (uploadedParam) {
     const json = JSON.parse(
       atob(uploadedParam.replace(/-/g, "+").replace(/_/g, "/")),
     );
-    // Validate each field is a string/number and truncate strings to prevent XSS
+    
     const sanitize = (v: unknown, maxLen = 500): string => {
       if (typeof v !== "string") return String(v ?? "");
       return v.length > maxLen ? v.slice(0, maxLen) : v;

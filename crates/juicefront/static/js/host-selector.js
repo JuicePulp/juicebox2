@@ -1,4 +1,6 @@
 const PING_TIMEOUT_MS = 6000;
+const PING_ROUNDS = 3;
+const PING_MAX_CONSECUTIVE_FAILURES = 2;
 function str(root, key, fallback) {
   return root.getAttribute(`data-str-${key}`) || fallback;
 }
@@ -62,16 +64,20 @@ function capsOf(cfg) {
   if (cfg.quick_link === true)
     caps.push("Quick link");
   if (cfg.ultrafast === true)
-    caps.push("Ultrafast");
+    caps.push("Plus");
+  if (cfg.encrypted === true)
+    caps.push("Encrypted");
   return caps;
 }
 function versionParts(v) {
   return String(v || "").split(".").map((p) => parseInt(p, 10));
 }
 function isLegacyVersion(cfg, current) {
-  const theirs = typeof cfg.version === "string" ? cfg.version : "";
-  if (!theirs || !current)
+  if (!current)
     return false;
+  const theirs = typeof cfg.version === "string" ? cfg.version : "";
+  if (!theirs)
+    return true;
   const a = versionParts(theirs);
   const b = versionParts(current);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -81,6 +87,31 @@ function isLegacyVersion(cfg, current) {
       return x < y;
   }
   return false;
+}
+function addChip(parent, text, cls) {
+  const b = document.createElement("span");
+  b.className = cls;
+  b.textContent = text;
+  parent.appendChild(b);
+  return b;
+}
+function layoutBadges(badges) {
+  const chips = badges.querySelector("[data-hostsel-chips]");
+  const more = badges.querySelector("[data-hostsel-more]");
+  const menu = badges.querySelector("[data-hostsel-more-menu]");
+  const label = badges.querySelector("[data-hostsel-more-label]");
+  if (!chips || !more || !menu || !label)
+    return;
+  while (menu.firstChild)
+    chips.appendChild(menu.firstChild);
+  more.hidden = true;
+  more.open = false;
+  let guard = chips.children.length;
+  while (guard-- > 0 && chips.children.length > 1 && chips.scrollWidth > chips.clientWidth + 1)
+    menu.insertBefore(chips.lastChild, menu.firstChild);
+  const n = menu.children.length;
+  label.textContent = `+${n}`;
+  more.hidden = n === 0;
 }
 export function initHostSelector() {
   const rootEl = document.getElementById("host-selector-modal");
@@ -119,20 +150,29 @@ export function initHostSelector() {
       status.textContent = s.state === "online" ? str(root, "online", "Online") : s.state === "offline" ? str(root, "offline", "Offline") : s.state === "checking" ? str(root, "checking", "Pinging...") : "";
     if (badges) {
       badges.innerHTML = "";
+      const chips = document.createElement("span");
+      chips.className = "hostsel-chips";
+      chips.setAttribute("data-hostsel-chips", "");
+      const more = document.createElement("details");
+      more.className = "hostsel-more";
+      more.setAttribute("data-hostsel-more", "");
+      more.hidden = true;
+      const summary = document.createElement("summary");
+      summary.setAttribute("data-hostsel-more-label", "");
+      const menu = document.createElement("div");
+      menu.className = "hostsel-more__menu";
+      menu.setAttribute("data-hostsel-more-menu", "");
+      more.appendChild(summary);
+      more.appendChild(menu);
+      badges.appendChild(chips);
+      badges.appendChild(more);
       if (s.state === "online" && s.cfg) {
-        for (const cap of capsOf(s.cfg)) {
-          const b = document.createElement("span");
-          b.className = "hostsel-badge";
-          b.textContent = cap;
-          badges.appendChild(b);
-        }
-        if (isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || "")) {
-          const b = document.createElement("span");
-          b.className = "hostsel-badge hostsel-badge--legacy";
-          b.textContent = "Legacy";
-          badges.appendChild(b);
-        }
+        for (const cap of capsOf(s.cfg))
+          addChip(chips, cap, "hostsel-badge");
+        if (isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || ""))
+          addChip(chips, "Legacy", "hostsel-badge hostsel-badge--legacy");
       }
+      layoutBadges(badges);
     }
     if (pingBtn) {
       pingBtn.disabled = s.state === "checking";
@@ -157,6 +197,31 @@ export function initHostSelector() {
       }
     }
   }
+function medianMs(samples) {
+  if (samples.length === 0)
+    return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+async function pingOnce(s) {
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`${s.url}/api/config`, {
+      signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+      headers: { Accept: "application/json" }
+    });
+    if (!res.ok)
+      throw new Error(`status ${res.status}`);
+    const cfg = await res.json();
+    if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg) || !("max_file_size_bytes" in cfg)) {
+      throw new Error("not a JuiceHost node");
+    }
+    return { ms: performance.now() - t0, cfg };
+  } catch {
+    return null;
+  }
+}
   async function pingRow(s) {
     if (s.state === "checking")
       return;
@@ -168,25 +233,31 @@ export function initHostSelector() {
     }
     s.state = "checking";
     renderRow(s);
-    const t0 = performance.now();
-    try {
-      const res = await fetch(`${s.url}/api/config`, {
-        signal: AbortSignal.timeout(PING_TIMEOUT_MS),
-        headers: { Accept: "application/json" }
-      });
-      if (!res.ok)
-        throw new Error(`status ${res.status}`);
-      const cfg = await res.json();
-      if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg) || !("max_file_size_bytes" in cfg)) {
-        throw new Error("not a JuiceHost node");
+    const samples = [];
+    let failures = 0;
+    let cfg = null;
+    for (let round = 0; round < PING_ROUNDS; round++) {
+      const sample = await pingOnce(s);
+      if (sample === null) {
+        failures++;
+        if (failures >= PING_MAX_CONSECUTIVE_FAILURES)
+          break;
+        continue;
       }
-      s.cfg = cfg;
-      s.state = "online";
-      s.latencyMs = performance.now() - t0;
-    } catch {
+      failures = 0;
+      cfg = sample.cfg;
+      samples.push(sample.ms);
+      s.latencyMs = medianMs(samples);
+      renderRow(s);
+    }
+    if (samples.length === 0) {
       s.state = "offline";
       s.latencyMs = null;
       s.cfg = null;
+    } else {
+      s.cfg = cfg;
+      s.state = "online";
+      s.latencyMs = medianMs(samples);
     }
     renderRow(s);
     if (pendingSelect === s) {
@@ -257,7 +328,7 @@ export function initHostSelector() {
   }
   root.addEventListener("click", (e) => {
     const t = e.target;
-    if (!t || (t.closest && t.closest("a, button, input, select, textarea")))
+    if (!t || (t.closest && t.closest("a, button, input, select, textarea, details")))
       return;
     const row = t.closest ? t.closest("[data-hostsel-row]") : null;
     if (!row)
@@ -271,7 +342,7 @@ export function initHostSelector() {
       return;
     const target = e.target;
     const row = target && target.closest ? target.closest("[data-hostsel-row]") : null;
-    if (!row)
+    if (!row || (target.closest && target.closest("details")))
       return;
     e.preventDefault();
     const s = rows.find((r) => r.row === row);
@@ -282,14 +353,26 @@ export function initHostSelector() {
   onlineOnly?.addEventListener("change", applyFilters);
   sortSel?.addEventListener("change", applyFilters);
   pingAllBtn?.addEventListener("click", pingAll);
+  let resizeTimer = 0;
+  const relayoutBadges = () => {
+    for (const el of root.querySelectorAll("[data-hostsel-badges]"))
+      layoutBadges(el);
+  };
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(relayoutBadges, 150);
+  });
   markSelected(readSavedHost());
   rows.forEach(renderRow);
   applyFilters();
   let pinged = false;
   const maybePing = () => {
-    if (location.hash === "#host-selector-modal" && !pinged) {
-      pinged = true;
-      pingAll();
+    if (location.hash === "#host-selector-modal") {
+      relayoutBadges();
+      if (!pinged) {
+        pinged = true;
+        pingAll();
+      }
     }
   };
   window.addEventListener("hashchange", maybePing);
@@ -297,6 +380,8 @@ export function initHostSelector() {
     pinged = false;
     maybePing();
   });
+  if (document.fonts && document.fonts.ready)
+    document.fonts.ready.then(relayoutBadges);
   maybePing();
 }
 document.addEventListener("DOMContentLoaded", initHostSelector);

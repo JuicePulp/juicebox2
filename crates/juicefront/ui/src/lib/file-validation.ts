@@ -1,5 +1,5 @@
-/** Client-side file type validation with tiered danger levels.
- *  Mirrors the server's validation so users see rejections immediately. */
+
+
 
 export type ProtectionLevel = "none" | "low" | "medium" | "high";
 
@@ -59,8 +59,8 @@ export interface FileValidationResult {
   tier?: DangerTier;
 }
 
-/** Validate a file client-side before upload.
- *  `level` is the server's configured danger_level from /api/config. */
+
+
 export function validateFileClient(
   filename: string,
   level: ProtectionLevel,

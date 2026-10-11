@@ -1,9 +1,9 @@
 ---
-/**
- * Modals for Share, Shortcuts, Language, and Host.
- * Works without JS via CSS :target pseudo-class.
- * JS adds Esc close, focus trap, copy/share, and locale redirect.
- */
+
+
+
+
+
 import { iconSvgHtml } from "../lib/icons";
 import { LOCALES, LOCALE_PREFIX_RE, resolveLocale, t } from "../i18n";
 import { readCookieHost, resolveEffectiveConfig } from "../lib/server-host";
@@ -661,8 +661,8 @@ const shortcuts = [
       );
       if (first) first.focus();
       var handler = function(e) { trapFocus(e, modal); };
-      // Store the handler on the modal so it can be removed deterministically
-      // when the modal closes, even if no CSS transition runs.
+      
+      
       modal._focusTrapHandler = handler;
       document.addEventListener("keydown", handler);
       modal.addEventListener("transitionend", function() {
@@ -813,8 +813,8 @@ const shortcuts = [
 
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onClick);
-  // The settings dialog moved from #host-modal to #settings-modal; old
-  // hashes (bookmarks, other tabs) land here instead of nowhere.
+  
+  
   function retargetLegacySettingsHash() {
     if (location.hash === "#host-modal") {
       history.replaceState(null, "", "#settings-modal");

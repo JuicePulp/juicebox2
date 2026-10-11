@@ -65,8 +65,8 @@ fn is_blocked_host(base: &str) -> bool {
     let host = parsed.host_str().unwrap_or("").to_lowercase();
     let host = host.strip_prefix('[').unwrap_or(&host);
     let host = host.strip_suffix(']').unwrap_or(host);
-    // DNS suffix check, not a file-extension comparison: `host` is already
-    // lowercased above, so this is intentionally case-sensitive.
+    
+    
     #[allow(clippy::case_sensitive_file_extension_comparisons)]
     if host == "localhost" || host.ends_with(".local") || host.ends_with(".internal") {
         return true;

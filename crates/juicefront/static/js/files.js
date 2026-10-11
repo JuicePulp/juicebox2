@@ -36,7 +36,7 @@ function isDefaultHost(host, def) {
   return false;
 }
 
-/** Percentage of TTL remaining (0-100). */
+
 function pctRemaining(expiresAt, uploadedAt) {
   const total = (expiresAt - uploadedAt) * 1000;
   if (total <= 0) return 0;

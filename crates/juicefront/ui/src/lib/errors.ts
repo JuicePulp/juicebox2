@@ -18,7 +18,7 @@ const VANITY_ERROR_KEYS: Record<string, keyof TranslationKeys> = {
   UNKNOWN: "error.unknown",
 };
 
-/** Resolve a user-facing error message from a code or raw message. */
+
 export function vanityMsg(locale: Locale, errorCode?: string, rawMessage?: string): string {
   if (rawMessage) return rawMessage;
   if (errorCode && VANITY_ERROR_KEYS[errorCode]) return t(locale, VANITY_ERROR_KEYS[errorCode]);

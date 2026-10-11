@@ -1,9 +1,9 @@
-/**
- * Keeps the server-rendered retention radios in sync with the effective
- * host config. The radios themselves are the single unified selector used
- * with and without JS; this module only persists the choice and rebuilds
- * options (with data-driven tier dividers) when the host changes.
- */
+
+
+
+
+
+
 import type { Locale } from "../i18n";
 import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config";
 import { ttlLabel, ttlTier } from "./retention";
@@ -97,10 +97,10 @@ export function enhanceRetention(card: Element, locale: Locale = "en"): { destro
     const radios = resolveOptions(card, locale);
     if (!radios || radios.length === 0) return;
 
-    // The radios intentionally carry no data-cuelume-select: cuelume would
-    // tick on its own terms, but retention ticks are played here instead —
-    // one per change, spammable like every other sound (the shared burst
-    // gate in playSound is the only throttle).
+    
+    
+    
+    
     let lastTicked: string | null = radios.find((r) => r.checked)?.value ?? null;
     const orderOf = (value: string | null): number => radios.findIndex((r) => r.value === value);
     const onChange = (e: Event) => {

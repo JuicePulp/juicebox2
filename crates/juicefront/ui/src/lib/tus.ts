@@ -1,4 +1,4 @@
-/** Base64-encode TUS metadata per the TUS protocol spec. */
+
 import { tusSession } from "./api";
 
 export function encodeTusMeta(obj: Record<string, string>): string {
@@ -7,7 +7,7 @@ export function encodeTusMeta(obj: Record<string, string>): string {
         .join(",");
 }
 
-/** Best-effort DELETE of a TUS upload by id. */
+
 export function deleteTus(baseUrl: string, tusId: string): void {
   fetch(`${baseUrl}${tusSession(tusId)}`, { method: "DELETE" }).catch(() => {});
 }

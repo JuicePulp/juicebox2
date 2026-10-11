@@ -189,8 +189,8 @@ import { playSound } from "./sounds.js";
       );
       if (first) first.focus();
       var handler = function (e) { trapFocus(e, modal); };
-      // Store the handler on the modal so it can be removed deterministically
-      // when the modal closes, even if no CSS transition runs.
+      
+      
       modal._focusTrapHandler = handler;
       document.addEventListener("keydown", handler);
       modal.addEventListener("transitionend", function () {
@@ -340,8 +340,8 @@ import { playSound } from "./sounds.js";
     updateFocus();
   }
 
-  // The settings dialog moved from #host-modal to #settings-modal; old
-  // hashes (bookmarks, other tabs) land here instead of nowhere.
+  
+  
   function retargetLegacySettingsHash() {
     if (location.hash === "#host-modal") {
       history.replaceState(null, "", "#settings-modal");

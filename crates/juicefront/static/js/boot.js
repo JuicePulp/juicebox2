@@ -1,8 +1,8 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
-// Apply the stored motion preference before first paint so opting out of
-// animation never flashes animated content. Mirrors data-motion-toggle.
+
+
 try {
   if (localStorage.getItem("juicebox_reduce_motion") === "1") {
     document.documentElement.setAttribute("data-motion-reduce", "");

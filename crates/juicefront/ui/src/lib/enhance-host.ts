@@ -1,4 +1,4 @@
-/** Reads the currently selected custom host from the DOM. */
+
 import { formatMaxSize } from "./format";
 import { clearHostGlow, shouldGlowHost } from "./device-ws";
 import { applySoundEnabled, playSound } from "./sounds";
@@ -39,32 +39,32 @@ export function readSelectedHost(): string {
   return "";
 }
 
-/** Reads the selected upload mode from localStorage. */
+
 export function readSelectedUploadMode(): string {
   return localStorage.getItem("juicebox_upload_mode") || "standard";
 }
 
-/** Reads whether Quick Link is enabled from localStorage. */
+
 export function readQuickLinkEnabled(): boolean {
   return localStorage.getItem("juicebox_quick_link") === "true";
 }
 
-/** Reads the server's danger_level from localStorage (set by enhanceHostSelector). */
+
 export function readDangerLevel(): string {
   return localStorage.getItem("juicebox_danger_level") || "high";
 }
 
-/** Reads whether UltraFast direct upload is enabled from localStorage. */
+
 export function readUltraFastEnabled(): boolean {
   return localStorage.getItem("juicebox_ultrafast_enabled") === "true";
 }
 
-/** Reads whether the backend supports UltraFast from localStorage. */
+
 export function readUltraFastSupported(): boolean {
   return localStorage.getItem("juicebox_ultrafast_supported") === "true";
 }
 
-/** Initialize the host button glow state. */
+
 export function initHostGlow(): void {
   const btn = document.querySelector("[data-host-btn]");
   if (!btn) return;
@@ -126,7 +126,7 @@ const BLOCKED_TYPES_I18N: Record<string, Record<string, string>> = {
   },
 };
 
-/** Update the blocked-types hint text for the current danger level. */
+
 function updateDangerLevelDisplay(level: string, locale?: string) {
   const el = document.querySelector(
     "[data-blocked-types-text]",
@@ -137,7 +137,7 @@ function updateDangerLevelDisplay(level: string, locale?: string) {
   el.textContent = text;
 }
 
-/** Re-render the drop-zone "Max upload size" text from the server config template. */
+
 function updateDropMaxSize(bytes: number) {
   const el = document.querySelector(
     "[data-drop-max-template]",
@@ -196,7 +196,7 @@ function parseHostUrl(
   return { base: url.origin, scheme: url.protocol };
 }
 
-/** Reads the custom host config from the given host's /api/config. */
+
 async function fetchHostConfig(host: string): Promise<HostCheck> {
   const parsed = parseHostUrl(host);
   if (typeof parsed === "string") {
@@ -243,10 +243,10 @@ async function fetchHostConfig(host: string): Promise<HostCheck> {
   }
 }
 
-/**
- * Sets up the custom host selector: saves host input, binds the Check
- * and Apply buttons, and toggles QUIC and Quick Link from backend support.
- */
+
+
+
+
 export function enhanceHostSelector(locale?: string) {
   const input = document.querySelector(
     "[data-host-input]",
@@ -262,7 +262,7 @@ export function enhanceHostSelector(locale?: string) {
   ) as HTMLElement | null;
   if (!input || !checkBtn || !applyBtn || !status) return;
 
-  // Read host from cookie first (works without JS), then localStorage
+  
   const cookieHost = document.cookie.split("; ").find(c => c.startsWith("juicebox_host="))?.split("=")[1];
   const saved = localStorage.getItem("juicebox_host") || (cookieHost ? decodeURIComponent(cookieHost) : "");
   if (saved) input.value = saved;
@@ -321,10 +321,10 @@ export function enhanceHostSelector(locale?: string) {
     });
   }
 
-  // Upload password lives in Storage Host settings and persists like the
-  // other host options. Note the tradeoff: the gate password is stored in
-  // plain text in this browser's localStorage so uploads stay protected
-  // without retyping. Clear the field to go back to public links.
+  
+  
+  
+  
   const pwInput = document.querySelector<HTMLInputElement>("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
   let syncPwState: (() => void) | null = null;
@@ -379,11 +379,11 @@ export function enhanceHostSelector(locale?: string) {
 
     syncQuicFromUltrafast();
 
-    // Initial state based on server config
+    
     const serverSupported = readUltraFastSupported();
     ultrafastToggle.disabled = !serverSupported;
 
-    // Re-check after SSE has had time to connect (handles first-pair race)
+    
     setTimeout(() => {
       updateUltrafastState();
     }, 2000);
@@ -412,9 +412,9 @@ export function enhanceHostSelector(locale?: string) {
 
   updateDangerLevelDisplay(readDangerLevel(), locale);
 
-  // Prefer SSR-provided config from data attributes (embedded by Modals.astro).
-  // This avoids a client-side /api/config round trip so the toggles render
-  // correctly on first paint, even offline.
+  
+  
+  
   const serverCfg = document.getElementById("server-config");
   if (serverCfg) {
     const ql = serverCfg.getAttribute("data-quick-link");
@@ -426,7 +426,7 @@ export function enhanceHostSelector(locale?: string) {
       localStorage.setItem("juicebox_quick_link", "false");
     } else if (ql === "true" && quickLinkToggle) {
       quickLinkToggle.disabled = false;
-      // Sync localStorage with server availability
+      
       if (localStorage.getItem("juicebox_quick_link") === null) {
         localStorage.setItem("juicebox_quick_link", "false");
       }
@@ -445,7 +445,7 @@ export function enhanceHostSelector(locale?: string) {
       updateDangerLevelDisplay(dl, locale);
     }
   } else {
-    // Fallback: fetch from API (works in dev mode via Vite proxy)
+    
     fetch("/api/config", { signal: AbortSignal.timeout(5000) })
       .then((r) => r.json())
       .then((cfg) => {
@@ -474,12 +474,12 @@ export function enhanceHostSelector(locale?: string) {
         if (quickLinkToggle) {
           quickLinkToggle.disabled = true;
         }
-        // Show default danger level on error
+        
         updateDangerLevelDisplay(readDangerLevel(), locale);
       });
   }
 
-  /** Applies a validated host config to the page UI and persisted state. */
+  
   const applyConfig = (cfg: Record<string, unknown>) => {
     const serverCfg = document.getElementById("server-config");
     if (serverCfg) {
@@ -534,7 +534,7 @@ export function enhanceHostSelector(locale?: string) {
       }
     }
 
-    // Dispatch event so UploadCard.tsx can rebuild retention options
+    
     window.dispatchEvent(new CustomEvent("juicehost-config-updated", { detail: cfg }));
   };
 
@@ -581,8 +581,8 @@ export function enhanceHostSelector(locale?: string) {
     }
   });
 
-  // Done applies too, then closes the dialog. Same validation as Apply so
-  // leaving via Done never silently keeps a stale host.
+  
+  
   const doneBtn = document.querySelector("[data-host-done]");
   if (doneBtn) {
     doneBtn.addEventListener("click", async (e) => {
@@ -597,8 +597,8 @@ export function enhanceHostSelector(locale?: string) {
     });
   }
 
-  // Live-gate Apply: only an actually-reachable host can be applied. Quiet
-  // re-checks (no status text) run debounced while typing and once at open.
+  
+  
   let gateTimer = 0;
   const refreshApplyGate = async (): Promise<void> => {
     const host = input.value.trim();

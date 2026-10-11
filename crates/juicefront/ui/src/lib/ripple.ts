@@ -1,13 +1,13 @@
-/**
- * Adds a material-style ripple effect to buttons on click.
- * - Starts contracting on mousedown (pinch/hold), expands on mouseup.
- * - Ripple color adapts to the element's `color` CSS property.
- * - Noise overlay stays fixed-size (doesn't scale with the ripple).
- * - Skips action buttons (which have their own 3D press animation).
- * - Only active when <html> has the .js class.
- * Re-injects styles on Astro View Transitions via astro:page-load.
- * Call once per page.
- */
+
+
+
+
+
+
+
+
+
+
 export function initRipple() {
     const NOISE_BG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.18'/%3E%3C/svg%3E")`;
 
@@ -153,7 +153,7 @@ export function initRipple() {
         releaseRipple();
     });
 
-    // Release ripple if cursor leaves the button while held
+    
     document.addEventListener("mouseleave", (e) => {
         if (!isJsActive() || !currentBtn) return;
         const related = e.relatedTarget as HTMLElement | null;
@@ -162,13 +162,13 @@ export function initRipple() {
         }
     });
 
-    // Release ripple if a drag starts (text selection, native drag)
+    
     document.addEventListener("dragstart", () => {
         if (!isJsActive()) return;
         releaseRipple();
     });
 
-    // Release ripple on pointer cancel (touch interruption, etc.)
+    
     document.addEventListener("pointercancel", () => {
         if (!isJsActive()) return;
         releaseRipple();

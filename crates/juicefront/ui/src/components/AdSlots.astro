@@ -92,8 +92,8 @@ const belowZones = [
 )}
 
 <script define:vars={{ adZones }}>
-  // Zones load sequentially so invoke.js always reads its own atOptions
-  // before the next zone overwrites the global.
+  
+  
   const ZONES = adZones;
 
   const BLOCKED_GRACE_MS = 4000;
@@ -139,7 +139,7 @@ const belowZones = [
     if (done) {
       invoke.onload = done;
       invoke.onerror = () => {
-        // invoke.js failed (adblock, VPN, or offline): fail the whole cascade.
+        
         cascadeFailed = true;
         markAllBlocked();
         done();

@@ -88,10 +88,10 @@ export function enhanceRetention(card, locale = "en") {
   if (!toolbar || !fieldset) return;
   const radios = resolveOptions(card, locale);
   if (!radios || radios.length === 0) return;
-  // The radios intentionally carry no data-cuelume-select: cuelume would
-  // tick on its own terms, but retention ticks are played here instead —
-  // one per change, spammable like every other sound (the shared burst
-  // gate in playSound is the only throttle).
+  
+  
+  
+  
   let lastTicked = radios.find((r) => r.checked)?.value ?? null;
   const orderOf = (value) => radios.findIndex((r) => r.value === value);
   const onChange = (e) => {

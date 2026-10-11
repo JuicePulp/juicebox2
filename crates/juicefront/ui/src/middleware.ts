@@ -4,7 +4,7 @@ const API_INTERNAL = process.env.API_INTERNAL_URL || "http://127.0.0.1:6401";
 const JUICEBACK_URL = process.env.JUICEBACK_URL || "http://127.0.0.1:6401";
 const JUICEHOST_URL = process.env.JUICEHOST_URL || "http://127.0.0.1:6402";
 
-// Hop-by-hop headers that must not be forwarded through a proxy.
+
 const HOP_BY_HOP = new Set([
   "connection",
   "keep-alive",
@@ -18,8 +18,8 @@ const HOP_BY_HOP = new Set([
   "content-length",
 ]);
 
-// Proxies whose X-Forwarded-For we believe, beyond loopback.
-// Same format as the backends' TRUSTED_PROXY_CIDRS (comma-separated IPs/CIDRs).
+
+
 const TRUSTED_PROXY_CIDRS = (process.env.TRUSTED_PROXY_CIDRS || "")
   .split(",")
   .map((s) => s.trim())
@@ -39,11 +39,11 @@ function ipv4ToU32(ip: string): number | null {
 }
 
 function normalizePeer(peer: string): string {
-  // Node reports IPv4 peers as ::ffff:a.b.c.d on dual-stack sockets.
+  
   return peer.startsWith("::ffff:") ? peer.slice("::ffff:".length) : peer;
 }
 
-/** True when `peer` may supply X-Forwarded-For (loopback always trusted). */
+
 function isTrustedProxy(peer: string): boolean {
   const ip = normalizePeer(peer);
   if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
@@ -85,7 +85,7 @@ function cleanHeaders(headers: Headers): Headers {
     if (lower === "set-cookie") continue;
     out.append(key, value);
   }
-  // Set-Cookie must be copied per-value so multiple cookies survive.
+  
   for (const cookie of headers.getSetCookie()) {
     out.append("Set-Cookie", cookie);
   }
@@ -93,8 +93,8 @@ function cleanHeaders(headers: Headers): Headers {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  // Pages read JUICEBACK_URL at render time; give it a local default so
-  // server-side fetches work even when the var isn't set in the shell.
+  
+  
   process.env.JUICEBACK_URL ||= JUICEBACK_URL;
 
   const { request, redirect } = context;
@@ -119,8 +119,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   const target = proxyTarget(url.pathname);
   if (!target) {
-    // Clickjacking protection must be a real header: CSP frame-ancestors
-    // is ignored when delivered via a <meta> element.
+    
+    
     const res = await next();
     res.headers.set("X-Frame-Options", "DENY");
     return res;
@@ -129,9 +129,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const headers = cleanHeaders(request.headers);
   headers.set("x-forwarded-host", url.host);
   headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
-  // Never blindly forward client-supplied X-Forwarded-For: only a trusted
-  // proxy (loopback, TRUSTED_PROXY_CIDRS) may vouch for it. Otherwise stamp
-  // the direct peer address so downstream IP decisions can't be spoofed.
+  
+  
+  
   headers.delete("x-forwarded-for");
   const peer = context.clientAddress || "";
   const incomingXff = request.headers.get("x-forwarded-for");

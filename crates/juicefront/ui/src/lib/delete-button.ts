@@ -5,19 +5,19 @@ export interface DeleteButtonOpts {
     fileId: string;
     deleteToken: string;
     apiBase: string;
-    /** Called after successful delete to remove the item from the DOM and check empty state. */
+    
     onDeleted: (item: HTMLElement) => void;
-    /** If true, skip the confirmation step and delete immediately on first click. */
+    
     immediate?: boolean;
 }
 
 const confirmTimers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
 
-/**
- * Creates a delete button with shift-to-confirm behavior.
- * First click enters "confirming" state (3s timeout), second click (or shift+click) deletes.
- * If `immediate` is set, deletes on first click without confirmation.
- */
+
+
+
+
+
 export function createDeleteButton(opts: DeleteButtonOpts): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
