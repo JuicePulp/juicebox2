@@ -20,8 +20,10 @@ export interface HostNode {
 }
 
 const OFFICIAL_DEFAULTS: HostNode[] = [
-  { name: "Box", url: "https://box.juicey.dev", region: "", official: true },
-  { name: "F", url: "https://f.juicey.dev", region: "", official: true },
+  { name: "Default", url: "", region: "", official: true },
+  { name: "Legacy Router", url: "https://f.juicey.dev", region: "", official: true },
+  { name: "Europe-1", url: "https://f-eu1.juicey.dev", region: "Europe", official: true },
+  { name: "Europe-2", url: "https://f-eu2.juicey.dev", region: "Europe", official: true },
 ];
 
 const UNOFFICIAL_DEFAULTS: HostNode[] = [];

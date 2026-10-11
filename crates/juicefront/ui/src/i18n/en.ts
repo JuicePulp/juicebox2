@@ -357,7 +357,7 @@ const en = {
   "hostsel.checking": "Pinging...",
   "hostsel.applied": "Host applied",
   "hostsel.add_title": "Run a node?",
-  "hostsel.add_desc": "Host your own Juicebox node and get it listed here.",
+  "hostsel.add_desc": "Host your own JuiceHost node and get it listed here.",
   "hostsel.add_btn": "Add your own",
 } as const;
 

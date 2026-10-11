@@ -292,7 +292,7 @@ const es: TranslationKeys = {
   "hostsel.checking": "Haciendo ping...",
   "hostsel.applied": "Host aplicado",
   "hostsel.add_title": "¿Tienes un nodo?",
-  "hostsel.add_desc": "Aloja tu propio nodo de Juicebox y haz que aparezca aquí.",
+  "hostsel.add_desc": "Aloja tu propio nodo de JuiceHost y haz que aparezca aquí.",
   "hostsel.add_btn": "Añade el tuyo",
 
   "not_found.title": "404 - Página no encontrada",
