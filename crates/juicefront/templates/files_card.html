@@ -30,7 +30,7 @@
 <div class="mdlbody">
 <input type="hidden" name="token" value="{{ f.delete_token }}">
 <div class="form-field"><label class="form-label" for="rename-input-{{ f.id }}">{{ cx.t("files.rename_placeholder") }}</label>
-<div class="rename-input-group"><span class="rename-input-prefix">/f/</span><input data-cuelume-type id="rename-input-{{ f.id }}" name="custom_id" class="form-input rename-input" value="{{ f.short_id }}" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false"></div>
+<div class="rename-input-group"><span class="rename-input-prefix">/v/</span><input data-cuelume-type id="rename-input-{{ f.id }}" name="custom_id" class="form-input rename-input" value="{{ f.short_id }}" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false"></div>
 </div>
 </div>
 <div class="mdlfooter rename-actions"><a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{{ cx.t("files.rename_cancel") }}</a><button type="submit" data-cuelume-tap class="mdlbtn mdlbtn--primary">{{ cx.t("files.rename_save") }}</button></div>

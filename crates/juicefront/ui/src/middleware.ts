@@ -65,12 +65,15 @@ function isTrustedProxy(peer: string): boolean {
   return false;
 }
 
-/** Map a request path to the upstream service it should hit, or null for frontend routes. */
+
 function proxyTarget(pathname: string): string | null {
   if (pathname.startsWith("/api/")) return JUICEBACK_URL;
   if (pathname === "/upload" || pathname.startsWith("/upload/")) return JUICEBACK_URL;
   if (pathname.startsWith("/file/")) return JUICEBACK_URL;
   if (pathname.startsWith("/f/")) return JUICEHOST_URL;
+  if (pathname.startsWith("/v/")) return JUICEHOST_URL;
+  if (pathname.startsWith("/d/")) return JUICEHOST_URL;
+  if (pathname.startsWith("/c/")) return JUICEHOST_URL;
   return null;
 }
 

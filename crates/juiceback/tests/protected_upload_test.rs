@@ -728,11 +728,11 @@ async fn unlock_page_and_cookie_flow() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        location.ends_with(&format!("/f/{id}.txt")),
+        location.ends_with(&format!("/v/{id}.txt")),
         "unexpected redirect: {location}"
     );
 
-    // Content without credentials: 403.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1015,9 +1015,9 @@ async fn report_password_enables_admin_preview() {
     let state = test_state(server.uri());
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "reportpreview1").await;
-    let file_url = format!("http://localhost:6402/f/{id}.txt");
+    let file_url = format!("http://localhost:6402/v/{id}.txt");
 
-    // Report with the gate password.
+    
     let body = format!(
         "file_url={}&reason=spam&details=test&password={}",
         urlencode(&file_url),
@@ -1152,7 +1152,7 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
         info["url"]
             .as_str()
             .unwrap_or_default()
-            .ends_with(&format!("/f/{id}.txt")),
+            .ends_with(&format!("/v/{id}.txt")),
         "unexpected url: {}",
         info["url"]
     );

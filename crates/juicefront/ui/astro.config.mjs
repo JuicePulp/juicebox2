@@ -136,6 +136,9 @@ export default defineConfig({
         "^/file/": proxyTo("http://127.0.0.1:6401"),
         "^/api/": proxyTo("http://127.0.0.1:6401"),
         "^/f/": proxyTo("http://127.0.0.1:6402"),
+        "^/v/": proxyTo("http://127.0.0.1:6402"),
+        "^/d/": proxyTo("http://127.0.0.1:6402"),
+        "^/c/": proxyTo("http://127.0.0.1:6402"),
       },
       // @ts-ignore -- Vite's preview server config
       preview: {

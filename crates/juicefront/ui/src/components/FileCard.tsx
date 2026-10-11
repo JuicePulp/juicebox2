@@ -523,7 +523,7 @@ export default function FileCard(props: FileCardProps) {
                     {t(locale(), "files.rename_placeholder")}
                   </label>
                   <div class="rename-input-group">
-                    <span class="rename-input-prefix">/f/</span>
+                    <span class="rename-input-prefix">/v/</span>
                     <input
                       ref={renameInput}
                       type="text"

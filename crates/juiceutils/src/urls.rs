@@ -10,8 +10,8 @@ pub fn public_url(base_url: &str, storage_host: Option<&str>, id: &str, filename
         format!("https://{host}")
     };
     match filename.rsplit('.').next() {
-        Some(ext) if !ext.is_empty() && ext != filename => format!("{host}/f/{id}.{ext}"),
-        _ => format!("{host}/f/{id}"),
+        Some(ext) if !ext.is_empty() && ext != filename => format!("{host}/v/{id}.{ext}"),
+        _ => format!("{host}/v/{id}"),
     }
 }
 
@@ -27,19 +27,19 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://files.example.com/f/abc123.gif");
+        assert_eq!(url, "https://files.example.com/v/abc123.gif");
     }
 
     #[test]
     fn without_storage_host() {
         let url = public_url("http://localhost:6402", None, "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
     fn empty_storage_host() {
         let url = public_url("http://localhost:6402", Some(""), "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
@@ -50,12 +50,12 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://fx.juicey.dev/f/abc123.gif");
+        assert_eq!(url, "https://fx.juicey.dev/v/abc123.gif");
     }
 
     #[test]
     fn filename_without_extension() {
         let url = public_url("http://localhost:6402", None, "abc123", "README");
-        assert_eq!(url, "http://localhost:6402/f/abc123");
+        assert_eq!(url, "http://localhost:6402/v/abc123");
     }
 }
