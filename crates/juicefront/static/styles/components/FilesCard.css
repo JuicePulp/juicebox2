@@ -16,7 +16,7 @@
 
 @media (max-width: 768px) {
   .files-page {
-    padding: 1rem;
+    padding: 0;
   }
 
   .upload-card {
