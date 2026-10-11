@@ -412,6 +412,12 @@ function enhanceCard(card, el, f, locale) {
       else qrWrap.append(qrBtn);
     } else {
       qrBtn.setAttribute("data-qr-url", qrUrl);
+      if (!qrBtn.dataset.wired) {
+        qrBtn.dataset.wired = "1";
+        qrBtn.addEventListener("click", () => {
+          openQrModal(qrBtn.getAttribute("data-qr-url") || qrUrl, qrLabelsFor(locale));
+        });
+      }
     }
   }
   if (customIdEnabled() && f.delete_token) {
