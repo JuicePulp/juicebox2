@@ -1675,7 +1675,8 @@ async fn preview_renders_by_media_kind() {
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("/d/zip00001.zip") && page.contains("Download"));
-    assert!(!page.contains("card"));
+    assert!(!page.contains("preview-card"));
+    assert!(page.contains("discord:component-embed"));
 }
 
 #[tokio::test]
@@ -1694,11 +1695,18 @@ async fn preview_bots_redirect_to_raw() {
     );
     assert!(body.is_empty());
 
-    // Unfurlers also go raw.
+    
     let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
-    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(status, StatusCode::OK);
 
-    // API-style Accept without text/html goes raw even with a neutral UA.
+    let (status, _, body) =
+        get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("discord:component-embed"));
+    assert!(page.contains("og:title"));
+
+    
     let resp = app
         .clone()
         .oneshot(

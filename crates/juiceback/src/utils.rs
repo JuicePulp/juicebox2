@@ -133,19 +133,19 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://files.example.com/f/abc123.gif");
+        assert_eq!(url, "https://files.example.com/v/abc123.gif");
     }
 
     #[test]
     fn public_url_without_storage_host() {
         let url = public_url("http://localhost:6402", None, "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
     fn public_url_empty_storage_host() {
         let url = public_url("http://localhost:6402", Some(""), "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/f/abc123.gif");
+        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
     }
 
     #[test]
@@ -156,6 +156,6 @@ mod tests {
             "abc123",
             "cute.gif",
         );
-        assert_eq!(url, "https://fx.juicey.dev/f/abc123.gif");
+        assert_eq!(url, "https://fx.juicey.dev/v/abc123.gif");
     }
 }

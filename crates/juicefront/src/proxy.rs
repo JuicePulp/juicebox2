@@ -35,7 +35,10 @@ pub fn proxy_target(path: &str) -> Option<Upstream> {
         || path.starts_with("/file/")
     {
         Some(Upstream::Juiceback)
-    } else if path.starts_with("/f/") {
+    } else if path.starts_with("/f/")
+        || path.starts_with("/v/")
+        || path.starts_with("/d/")
+        || path.starts_with("/c/") {
         Some(Upstream::Juicehost)
     } else {
         None
@@ -234,6 +237,9 @@ mod tests {
             Some(Upstream::Juiceback)
         ));
         assert!(matches!(proxy_target("/f/xyz"), Some(Upstream::Juicehost)));
+        assert!(matches!(proxy_target("/v/xyz"), Some(Upstream::Juicehost)));
+        assert!(matches!(proxy_target("/d/xyz"), Some(Upstream::Juicehost)));
+        assert!(matches!(proxy_target("/c/xyz"), Some(Upstream::Juicehost)));
         assert!(proxy_target("/").is_none());
         assert!(proxy_target("/admin").is_none());
         assert!(proxy_target("/files").is_none());

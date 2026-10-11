@@ -183,13 +183,48 @@ const BOT_UA_TOKENS: &[&str] = &[
     "archiver",
 ];
 
-/// Layered bot check for the preview page (humans keep the HTML, anything
-/// else gets the raw bytes):
-/// 1. `Sec-Fetch-Mode: navigate` is only ever sent by browsers on page loads -
-///    always a user.
-/// 2. Known bot/crawler/curler User-Agent tokens.
-/// 3. `Accept` without `text/html` (curl `*/*`, API clients), or neither header
-///    at all (browsers navigating always send both).
+
+
+
+
+
+
+
+fn is_discordbot(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("discordbot")
+}
+
+fn request_base_url(headers: &HeaderMap) -> Option<String> {
+    let host = headers
+        .get("x-forwarded-host")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| headers.get(header::HOST).and_then(|v| v.to_str().ok()))?;
+    let host = host.split(',').next()?.trim().trim_end_matches('/');
+    if host.is_empty() {
+        return None;
+    }
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| s == "http" || s == "https")
+        .unwrap_or_else(|| "https".to_owned());
+    Some(format!("{proto}://{host}"))
+}
+
+fn absolute_for(base: Option<&str>, path: &str) -> String {
+    match base {
+        Some(b) => format!("{}{path}", b.trim_end_matches('/')),
+        None => path.to_string(),
+    }
+}
+
 fn is_bot(headers: &HeaderMap) -> bool {
     if headers
         .get("sec-fetch-mode")
@@ -219,21 +254,122 @@ struct PreviewPage {
     size_label: String,
     raw_url: String,
     download_url: String,
+    page_url: String,
     mime: String,
+    extension: String,
 }
 
-fn og_tags(page: &PreviewPage) -> String {
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let truncated: String = value.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{truncated}…")
+}
+
+fn embed_gallery_supported(kind: PreviewKind, extension: &str) -> bool {
+    let ext = extension.to_ascii_lowercase();
+    match kind {
+        PreviewKind::Image => matches!(
+            ext.as_str(),
+            "png" | "gif" | "jpg" | "jpeg" | "webp" | "avif"
+        ),
+        PreviewKind::Video => matches!(ext.as_str(), "mp4" | "webm" | "mov"),
+        _ => false,
+    }
+}
+
+fn component_embed_payload(
+    page: &PreviewPage,
+    abs_raw: &str,
+    abs_page: &str,
+    abs_download: &str,
+) -> serde_json::Value {
+    let name = truncate_chars(&page.filename, 80);
+    let meta = truncate_chars(&format!("{} · {}", page.mime, page.size_label), 160);
+    let heading = format!("## [{name}]({abs_page})\n{meta}");
+    let mut container: Vec<serde_json::Value> = Vec::new();
+    container.push(serde_json::json!({
+        "type": 10,
+        "content": heading,
+    }));
+    if embed_gallery_supported(page.kind, &page.extension) {
+        container.push(serde_json::json!({
+            "type": 12,
+            "items": [{ "media": { "url": abs_raw }, "description": name }],
+        }));
+    } else {
+        let hint = match page.kind {
+            PreviewKind::Audio => "Audio file — open the preview page to listen.",
+            PreviewKind::Pdf => "PDF file — open the preview page to read it.",
+            PreviewKind::Text => "Text file — open the preview page to read it.",
+            _ => "File ready — open the preview page or download it.",
+        };
+        container.push(serde_json::json!({
+            "type": 10,
+            "content": hint,
+        }));
+    }
+    if abs_page.len() <= 512 && abs_download.len() <= 512 {
+        container.push(serde_json::json!({
+            "type": 1,
+            "components": [
+                { "type": 2, "style": 5, "url": abs_page, "label": "Open" },
+                { "type": 2, "style": 5, "url": abs_download, "label": "Download" },
+            ],
+        }));
+    }
+    serde_json::json!({
+        "component": {
+            "type": 17,
+            "accent_color": 5793266,
+            "components": container,
+        }
+    })
+}
+
+fn component_embed_script(
+    page: &PreviewPage,
+    abs_raw: &str,
+    abs_page: &str,
+    abs_download: &str,
+) -> String {
+    let mut payload = component_embed_payload(page, abs_raw, abs_page, abs_download);
+    let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
+    if serialized.len() > 3000 {
+        let name = truncate_chars(&page.filename, 40);
+        let meta = truncate_chars(&format!("{} · {}", page.mime, page.size_label), 80);
+        payload = serde_json::json!({
+            "component": {
+                "type": 17,
+                "components": [{ "type": 10, "content": format!("## [{name}]({abs_page})\n{meta}") }],
+            }
+        });
+        serialized = serde_json::to_string(&payload).unwrap_or_default();
+    }
+    if serialized.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<script id=\"discord:component-embed\" type=\"application/json\">\n{serialized}\n</script>"
+    )
+}
+
+fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     use std::fmt::Write as _;
+    let description = format!("{} · {}", page.mime, page.size_label);
     let mut tags = format!(
-        "<meta property=\"og:title\" content=\"{title}\">\n<meta property=\"og:description\" content=\"Preview on Juicebox\">",
+        "<meta property=\"og:title\" content=\"{title}\">\n<meta property=\"og:description\" content=\"{desc}\">\n<meta property=\"og:url\" content=\"{url}\">\n<meta property=\"og:type\" content=\"website\">",
         title = escape_html(&page.filename),
+        desc = escape_html(&description),
+        url = escape_html(abs_page),
     );
     match page.kind {
         PreviewKind::Video => {
             let _ = write!(
                 tags,
                 "\n<meta property=\"og:video\" content=\"{url}\">\n<meta property=\"og:video:type\" content=\"{mime}\">",
-                url = escape_html(&page.raw_url),
+                url = escape_html(abs_raw),
                 mime = escape_html(&page.mime),
             );
         }
@@ -241,7 +377,7 @@ fn og_tags(page: &PreviewPage) -> String {
             let _ = write!(
                 tags,
                 "\n<meta property=\"og:audio\" content=\"{url}\">\n<meta property=\"og:audio:type\" content=\"{mime}\">",
-                url = escape_html(&page.raw_url),
+                url = escape_html(abs_raw),
                 mime = escape_html(&page.mime),
             );
         }
@@ -249,11 +385,16 @@ fn og_tags(page: &PreviewPage) -> String {
             let _ = write!(
                 tags,
                 "\n<meta property=\"og:image\" content=\"{url}\">",
-                url = escape_html(&page.raw_url),
+                url = escape_html(abs_raw),
             );
         }
         _ => {}
     }
+    let card = match page.kind {
+        PreviewKind::Image | PreviewKind::Video => "summary_large_image",
+        _ => "summary",
+    };
+    let _ = write!(tags, "\n<meta name=\"twitter:card\" content=\"{card}\">");
     tags
 }
 
@@ -288,11 +429,15 @@ fn stage_html(page: &PreviewPage) -> String {
     }
 }
 
-fn render_preview(page: &PreviewPage) -> String {
+fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
     let notice = format!(
         " Juicebox preview page for {} - this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
         page.filename, page.raw_url,
     );
+    let base = request_base_url(headers);
+    let abs_raw = absolute_for(base.as_deref(), &page.raw_url);
+    let abs_page = absolute_for(base.as_deref(), &page.page_url);
+    let abs_download = absolute_for(base.as_deref(), &page.download_url);
     PREVIEW_TEMPLATE
         .replace("__CURL_NOTICE__", &notice)
         .replace("__HEAD_META__", juiceutils::web::HEAD_META.trim_end())
@@ -310,7 +455,11 @@ fn render_preview(page: &PreviewPage) -> String {
         .replace("__APP_JS__", PREVIEW_APP_JS.trim_end())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
-        .replace("__OG_TAGS__", &og_tags(page))
+        .replace("__OG_TAGS__", &og_tags(page, &abs_raw, &abs_page))
+        .replace(
+            "__DISCORD_EMBED__",
+            &component_embed_script(page, &abs_raw, &abs_page, &abs_download),
+        )
         .replace("__FILENAME__", &escape_html(&page.filename))
         .replace("__SIZE__", &escape_html(&page.size_label))
         .replace("__RAW_URL__", &escape_html(&page.raw_url))
@@ -388,9 +537,10 @@ async fn preview_file_inner(
         format!("{id}.{extension}")
     };
     let raw_url = format!("/f/{filename}");
-    // Non-interactive clients (curl, unfurlers, crawlers) get the raw bytes
-    // instead of the preview page. Humans keep the HTML.
-    if is_bot(&headers) {
+    let page_url = format!("/v/{filename}");
+    let download_url = format!("/d/{filename}");
+
+    if is_bot(&headers) && !is_discordbot(&headers) {
         return Response::builder()
             .status(axum::http::StatusCode::FOUND)
             .header(header::LOCATION, &raw_url)
@@ -400,7 +550,6 @@ async fn preview_file_inner(
     }
     let mime = storage::guess_mime(&extension);
     let title = format!("{filename} - Juicebox");
-    let download_url = format!("/d/{filename}");
     let page = PreviewPage {
         kind: preview_kind(&mime),
         title,
@@ -408,17 +557,19 @@ async fn preview_file_inner(
         size_label: human_size(meta.size),
         raw_url,
         download_url,
+        page_url,
         mime,
+        extension,
     };
     let response = Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, NO_STORE)
-        .body(Body::from(render_preview(&page)))
+        .body(Body::from(render_preview(&page, &headers)))
         .map_err(|_| JuicehostError::Internal)?;
-    // Reaching the HTML page means a human opened the file: the bot
-    // branch above already redirected crawlers to raw bytes (counted on
-    // `/f/` if fetched).
+    
+    
+    
     if method == Method::GET
         && let Some(ip) = viewer_ip.as_deref()
     {
@@ -468,11 +619,15 @@ mod tests {
             size_label: "1.0 MB".into(),
             raw_url: "/f/a.mp4".into(),
             download_url: "/d/a.mp4".into(),
+            page_url: "/v/a.mp4".into(),
             mime: "video/mp4".into(),
+            extension: "mp4".into(),
         };
-        let html = render_preview(&page);
+        let html = render_preview(&page, &HeaderMap::new());
         assert!(html.contains("<video"));
         assert!(html.contains("/f/a.mp4"));
-        assert!(!html.contains("card"));
+        assert!(!html.contains("preview-card"));
+        assert!(html.contains("discord:component-embed"));
+        assert!(html.contains("twitter:card"));
     }
 }

@@ -417,7 +417,7 @@ export default function FilesCard(props: Props) {
               <div class="form-field">
                 <label class="form-label" for="rename-input-${esc(f.id)}">${t(locale, "files.rename_placeholder")}</label>
                 <div class="rename-input-group">
-                  <span class="rename-input-prefix">/f/</span>
+                  <span class="rename-input-prefix">/v/</span>
                   <input type="text" id="rename-input-${esc(f.id)}" name="custom_id" class="form-input rename-input" value="${esc(currentId)}" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false" />
                 </div>
                 <p class="rename-error" hidden></p>

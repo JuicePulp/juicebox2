@@ -127,7 +127,7 @@ function renameModalHtml(f, locale) {
     '<form class="rename-form" method="POST" action="/file/' + esc(f.id) + '/rename"><div class="mdlbody">' +
     '<input type="hidden" name="token" value="' + esc(f.delete_token) + '">' +
     '<div class="form-field"><label class="form-label" for="rename-input-' + esc(f.id) + '">' + esc(t(locale, "files.rename_placeholder")) + '</label>' +
-    '<div class="rename-input-group"><span class="rename-input-prefix">/f/</span>' +
+    '<div class="rename-input-group"><span class="rename-input-prefix">/v/</span>' +
     '<input id="rename-input-' + esc(f.id) + '" name="custom_id" class="form-input rename-input" value="' + esc(currentId) + '" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false"></div>' +
     '<p class="rename-error" hidden></p></div></div>' +
     '<div class="mdlfooter rename-actions"><a href="#!" class="mdlbtn mdlbtn--secondary">' + esc(t(locale, "files.rename_cancel")) + '</a>' +
