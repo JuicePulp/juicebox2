@@ -292,7 +292,7 @@ const fr: TranslationKeys = {
   "hostsel.checking": "Ping en cours...",
   "hostsel.applied": "Hébergeur appliqué",
   "hostsel.add_title": "Vous gérez un nœud ?",
-  "hostsel.add_desc": "Hébergez votre propre nœud Juicebox et faites-le lister ici.",
+  "hostsel.add_desc": "Hébergez votre propre nœud JuiceHost et faites-le lister ici.",
   "hostsel.add_btn": "Ajoutez le vôtre",
 
   "not_found.title": "404 - Page introuvable",

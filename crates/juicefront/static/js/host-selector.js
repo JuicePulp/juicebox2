@@ -53,8 +53,34 @@ function syncConfigBits(cfg) {
     } catch {}
   }
 }
-function featuresOf(cfg) {
-  return { quic: cfg.quic === true, cobalt: cfg.cobalt === true };
+function capsOf(cfg) {
+  const caps = [];
+  if (cfg.quic === true)
+    caps.push("QUIC");
+  if (cfg.cobalt === true)
+    caps.push("Cobalt");
+  if (cfg.quick_link === true)
+    caps.push("Quick link");
+  if (cfg.ultrafast === true)
+    caps.push("Ultrafast");
+  return caps;
+}
+function versionParts(v) {
+  return String(v || "").split(".").map((p) => parseInt(p, 10));
+}
+function isLegacyVersion(cfg, current) {
+  const theirs = typeof cfg.version === "string" ? cfg.version : "";
+  if (!theirs || !current)
+    return false;
+  const a = versionParts(theirs);
+  const b = versionParts(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = Number.isFinite(a[i]) ? a[i] : 0;
+    const y = Number.isFinite(b[i]) ? b[i] : 0;
+    if (x !== y)
+      return x < y;
+  }
+  return false;
 }
 export function initHostSelector() {
   const rootEl = document.getElementById("host-selector-modal");
@@ -94,17 +120,16 @@ export function initHostSelector() {
     if (badges) {
       badges.innerHTML = "";
       if (s.state === "online" && s.cfg) {
-        const f = featuresOf(s.cfg);
-        if (f.quic) {
+        for (const cap of capsOf(s.cfg)) {
           const b = document.createElement("span");
           b.className = "hostsel-badge";
-          b.textContent = "QUIC";
+          b.textContent = cap;
           badges.appendChild(b);
         }
-        if (f.cobalt) {
+        if (isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || "")) {
           const b = document.createElement("span");
-          b.className = "hostsel-badge";
-          b.textContent = "Cobalt";
+          b.className = "hostsel-badge hostsel-badge--legacy";
+          b.textContent = "Legacy";
           badges.appendChild(b);
         }
       }
@@ -153,7 +178,7 @@ export function initHostSelector() {
         throw new Error(`status ${res.status}`);
       const cfg = await res.json();
       if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg) || !("max_file_size_bytes" in cfg)) {
-        throw new Error("not a juicebox node");
+        throw new Error("not a JuiceHost node");
       }
       s.cfg = cfg;
       s.state = "online";
@@ -164,6 +189,11 @@ export function initHostSelector() {
       s.cfg = null;
     }
     renderRow(s);
+    if (pendingSelect === s) {
+      pendingSelect = null;
+      if (s.state === "online")
+        selectRow(s);
+    }
     applyFilters();
   }
   function pingAll() {
@@ -214,27 +244,39 @@ export function initHostSelector() {
     window.dispatchEvent(new CustomEvent("juicehost-config-updated", { detail: s.cfg }));
     markSelected(s.url);
     setStatusLine(str(root, "applied", "Host applied"));
-    location.hash = "#!";
+    location.hash = "#settings-modal";
+  }
+  let pendingSelect = null;
+  function activateRow(s) {
+    if (s.state === "online") {
+      selectRow(s);
+      return;
+    }
+    pendingSelect = s;
+    pingRow(s);
   }
   root.addEventListener("click", (e) => {
     const t = e.target;
-    if (!t)
+    if (!t || (t.closest && t.closest("a, button, input, select, textarea")))
       return;
-    const pingBtn = t.closest("[data-hostsel-ping]");
-    if (pingBtn) {
-      const row = pingBtn.closest("[data-hostsel-row]");
-      const s = rows.find((r) => r.row === row);
-      if (s)
-        pingRow(s);
+    const row = t.closest ? t.closest("[data-hostsel-row]") : null;
+    if (!row)
       return;
-    }
-    const useBtn = t.closest("[data-hostsel-use]");
-    if (useBtn) {
-      const row = useBtn.closest("[data-hostsel-row]");
-      const s = rows.find((r) => r.row === row);
-      if (s)
-        selectRow(s);
-    }
+    const s = rows.find((r) => r.row === row);
+    if (s)
+      activateRow(s);
+  });
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ")
+      return;
+    const target = e.target;
+    const row = target && target.closest ? target.closest("[data-hostsel-row]") : null;
+    if (!row)
+      return;
+    e.preventDefault();
+    const s = rows.find((r) => r.row === row);
+    if (s)
+      activateRow(s);
   });
   search?.addEventListener("input", applyFilters);
   onlineOnly?.addEventListener("change", applyFilters);

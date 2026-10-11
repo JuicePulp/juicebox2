@@ -99,6 +99,7 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
     let danger_level_str = state.danger_level.as_str();
     Json(serde_json::json!({
         "max_file_size_bytes": state.max_file_size_bytes,
+        "version": env!("CARGO_PKG_VERSION"),
         "default_ttl_hours": state.default_ttl_hours,
         "allowed_ttl_hours": state.allowed_ttl_hours,
         "danger_level": danger_level_str,

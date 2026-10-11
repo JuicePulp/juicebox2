@@ -327,7 +327,7 @@ const ru = {
   "hostsel.checking": "Пингуем...",
   "hostsel.applied": "Хост применён",
   "hostsel.add_title": "Держишь свой узел?",
-  "hostsel.add_desc": "Подними свой узел Juicebox и попади в этот список.",
+  "hostsel.add_desc": "Подними свой узел JuiceHost и попади в этот список.",
   "hostsel.add_btn": "Добавь свой",
 
   "validate.low": "Файлы запуска, инсталлеры, и образы дисков запрещены",
