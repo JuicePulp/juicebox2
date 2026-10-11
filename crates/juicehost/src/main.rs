@@ -98,11 +98,12 @@ fn main() {
 
         let state = Arc::new(AppState::new(&config, storage));
 
-        if !config.ip_pepper.is_empty()
-            || config.ban_list_file.is_some()
-            || config.ban_sync_url.is_some()
-        {
-            tokio::spawn(juicehost::ban::ban_refresh_loop(Arc::clone(&state)));
+        if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {
+            let ban_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                juicehost::ban::load_ban_file(&ban_state).await;
+                juicehost::ban::fetch_snapshot_once(&ban_state).await;
+            });
         }
 
         let app = build_router(Arc::clone(&state));

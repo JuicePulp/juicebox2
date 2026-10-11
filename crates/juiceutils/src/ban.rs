@@ -125,6 +125,22 @@ impl BanList {
             .extend(hashes);
     }
 
+    pub fn add_hash(&self, hash: &str) -> bool {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .hashes
+            .insert(hash.to_string())
+    }
+
+    pub fn remove_hash(&self, hash: &str) -> bool {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .hashes
+            .remove(hash)
+    }
+
     pub fn load_file(&self, path: &Path, config_pepper: &str) -> (usize, usize) {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,

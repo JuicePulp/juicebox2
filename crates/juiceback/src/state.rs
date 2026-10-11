@@ -229,6 +229,7 @@ impl AppState {
         })
         .await?;
         self.banned_ips.insert(ip.to_string(), ());
+        crate::ban_push::push_ban(self, ip);
         Ok(())
     }
 
@@ -239,6 +240,7 @@ impl AppState {
             .await?;
         if deleted {
             self.banned_ips.remove(ip);
+            crate::ban_push::push_unban(self, ip);
         }
         Ok(deleted)
     }
@@ -256,6 +258,7 @@ impl AppState {
         for h in hashes {
             self.banned_ips.insert(h, ());
         }
+        crate::ban_push::push_snapshot(self);
         Ok(count)
     }
 

@@ -58,8 +58,6 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         ticket_jwt_secret: ticket_secret.into(),
         ip_pepper: String::new(),
         ban_list_file: None,
-        ban_sync_url: None,
-        ban_sync_interval: 30,
         sentry: juiceutils::config::SentrySettings::default(),
     }
 }

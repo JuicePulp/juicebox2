@@ -115,10 +115,6 @@ pub struct Config {
 
     pub ban_list_file: Option<PathBuf>,
 
-    pub ban_sync_url: Option<String>,
-
-    pub ban_sync_interval: u64,
-
     pub sentry: juiceutils::config::SentrySettings,
 }
 
@@ -474,26 +470,12 @@ fn default_allowed_ttls() -> Vec<f64> {
 pub struct BanFile {
     #[serde(default)]
     pub list_file: Option<PathBuf>,
-
-    #[serde(default)]
-    pub sync_url: Option<String>,
-
-    #[serde(default = "default_ban_sync_interval")]
-    pub sync_interval_secs: u64,
 }
 
 impl Default for BanFile {
     fn default() -> Self {
-        Self {
-            list_file: None,
-            sync_url: None,
-            sync_interval_secs: default_ban_sync_interval(),
-        }
+        Self { list_file: None }
     }
-}
-
-const fn default_ban_sync_interval() -> u64 {
-    BanSettings::DEFAULT_SYNC_INTERVAL
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -607,8 +589,6 @@ impl Config {
             ticket_jwt_secret: secrets.ticket_jwt_secret().to_owned(),
             ip_pepper: secrets.ip_pepper().to_owned(),
             ban_list_file: ban.list_file().cloned(),
-            ban_sync_url: ban.sync_url().map(str::to_owned),
-            ban_sync_interval: ban.sync_interval(),
             sentry,
         })
     }

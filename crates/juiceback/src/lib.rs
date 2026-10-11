@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod ban;
+pub mod ban_push;
 pub mod cloudflare;
 pub mod cobalt;
 pub mod config;

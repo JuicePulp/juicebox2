@@ -38,9 +38,6 @@ pub struct AppState {
 
     pub ban_list_file: Option<std::path::PathBuf>,
 
-    pub ban_sync_url: Option<String>,
-
-    pub ban_sync_interval: u64,
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
     pub max_range_response_bytes: u64,
     pub max_concat_parts: usize,
@@ -74,8 +71,6 @@ impl AppState {
             ticket_jwt_secret: config.ticket_jwt_secret.clone(),
             ban_list: Arc::new(juiceutils::ban::BanList::new(config.ip_pepper.clone())),
             ban_list_file: config.ban_list_file.clone(),
-            ban_sync_url: config.ban_sync_url.clone(),
-            ban_sync_interval: config.ban_sync_interval,
             trusted_proxy_cidrs: config.trusted_proxy_cidrs.clone(),
             max_range_response_bytes: config.max_range_response_bytes,
             max_concat_parts: config.max_concat_parts,

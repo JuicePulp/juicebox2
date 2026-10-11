@@ -1,3 +1,4 @@
+pub mod bans;
 pub mod common;
 pub mod concat;
 pub mod delete;
@@ -13,6 +14,7 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 
+pub use bans::{BanHashRequest, BanSnapshotRequest, push_ban, push_snapshot, push_unban};
 pub(crate) use common::deadline_body;
 pub use concat::{ConcatRequest, concat_files};
 pub use delete::delete_file;

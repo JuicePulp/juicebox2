@@ -57,9 +57,8 @@ default_ttl_hours = 24.0
 allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
 
 [ban]
+# Static ban list loaded once at startup. Runtime updates are pushed by juiceback.
 # list_file = "./bans.txt"
-# sync_url = "https://example.com/bans.txt"
-sync_interval_secs = 30
 
 [sentry]
 environment = "production"

@@ -167,6 +167,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/internal/file/{id}/ciphertext",
             get(handlers::ciphertext_file),
         )
+        .route("/internal/bans/ban", post(handlers::push_ban))
+        .route("/internal/bans/unban", post(handlers::push_unban))
+        .route("/internal/bans/snapshot", post(handlers::push_snapshot))
         .merge(concat)
         .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
         .layer(middleware::from_fn_with_state(
