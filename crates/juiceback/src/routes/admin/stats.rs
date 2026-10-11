@@ -7,8 +7,6 @@ use utoipa::ToSchema;
 use super::common::AdminUser;
 use crate::{db, error::AppError, state::AppState};
 
-
-
 #[derive(Serialize, ToSchema)]
 pub struct AdminStatsOverview {
     

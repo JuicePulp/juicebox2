@@ -651,8 +651,6 @@ fn json_str(value: &serde_json::Value, key: &str, max_len: usize) -> String {
         .unwrap_or_default()
 }
 
-
-
 #[allow(clippy::cast_possible_truncation)]
 fn json_num(value: &serde_json::Value, key: &str) -> i64 {
     value
@@ -983,8 +981,6 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         .filter(|file| file.expires_at > now)
         .collect()
 }
-
-
 
 #[allow(clippy::cast_possible_wrap)]
 fn chrono_now() -> i64 {
@@ -1699,10 +1695,6 @@ pub async fn docs_page(
     stream_page(StatusCode::OK, stream)
 }
 
-
-
-
-
 #[allow(clippy::unused_async)]
 async fn legal_page(
     state: Arc<AppState>,
@@ -1840,9 +1832,6 @@ struct NotFoundTpl {
     shell: Shell,
     flags_html: String,
 }
-
-
-
 
 #[allow(clippy::unused_async)]
 pub async fn not_found_page(

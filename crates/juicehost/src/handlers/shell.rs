@@ -1,11 +1,5 @@
 
 
-
-
-
-
-
-
 use axum::{
     body::Body,
     http::{StatusCode, header},
@@ -19,7 +13,6 @@ const SHELL_TEMPLATE: &str = include_str!("../templates/unlock_shell.html");
 const SHELL_APP_JS: &str = include_str!("../templates/shell_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
-
 
 pub(crate) enum BackendStatus {
     
@@ -70,14 +63,12 @@ pub(crate) async fn remaining_ttl_secs(state: &AppState, id: &str) -> Option<u64
         .map(ttl_from_expires_at)
 }
 
-
 fn ttl_from_expires_at(expires_at: i64) -> u64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
     (expires_at - now).max(0) as u64
 }
-
 
 #[derive(Clone, Copy)]
 pub(crate) enum ShellMode {
@@ -95,13 +86,6 @@ impl ShellMode {
         }
     }
 }
-
-
-
-
-
-
-
 
 pub(crate) enum GateDecision {
     Respond(Response<Body>),

@@ -3,9 +3,6 @@ use crate::i18n;
 pub const DEFAULT_ALLOWED_TTL_HOURS: &[f64] = &[0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0];
 pub const DEFAULT_TTL_HOURS: f64 = 24.0;
 
-
-
-
 #[allow(clippy::float_cmp)]
 fn known_key(hours: f64) -> Option<&'static str> {
     if hours == 0.5 {

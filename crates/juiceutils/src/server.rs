@@ -16,12 +16,6 @@ use tower::Service;
 
 #[must_use]
 
-
-
-
-
-
-
 pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
     let certified_key =
         generate_simple_self_signed(vec!["juicebox.local".into()]).expect("rcgen self-sign failed");
@@ -30,14 +24,6 @@ pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'s
         .expect("rcgen key is valid PKCS#8");
     (cert_der, key_der)
 }
-
-
-
-
-
-
-
-
 
 pub fn get_or_generate_cert(
     cert_path: &std::path::Path,
@@ -86,11 +72,6 @@ fn write_private_key(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
     }
     std::io::Write::write_all(&mut options.open(path)?, bytes)
 }
-
-
-
-
-
 
 pub fn load_cert_for_pinning(
     cert_path: &std::path::Path,
@@ -142,13 +123,6 @@ pub async fn start_quic_server(
     )
     .await;
 }
-
-
-
-
-
-
-
 
 pub async fn start_quic_server_with_limits(
     router: axum::Router,

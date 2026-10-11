@@ -1,10 +1,5 @@
 
 
-
-
-
-
-
 use std::{path::PathBuf, sync::Arc};
 
 use base64::Engine as _;
@@ -18,19 +13,13 @@ use crate::{
     state::AppState,
 };
 
-
-
 pub const USE_RELAY_FOR_PROTECTED: &str =
     "USE_RELAY_FOR_PROTECTED: password-protected uploads must use relay upload, not direct upload";
-
 
 #[must_use]
 pub fn relay_required() -> AppError {
     AppError::BadRequest(USE_RELAY_FOR_PROTECTED.into())
 }
-
-
-
 
 #[derive(Clone)]
 pub struct ProtectionSetup {
@@ -56,15 +45,6 @@ impl ProtectionSetup {
         }
     }
 }
-
-
-
-
-
-
-
-
-
 
 pub async fn prepare_protection(
     state: &Arc<AppState>,
@@ -101,13 +81,6 @@ pub async fn prepare_protection(
     .map_err(|_| AppError::Internal("protection setup panicked".into()))?
 }
 
-
-
-
-
-
-
-
 pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey, AppError> {
     let key = state
         .config
@@ -119,11 +92,6 @@ pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey,
         .map_err(|_| AppError::Internal("bad key escrow".into()))?;
     FileKey::from_bytes(&plain).map_err(|_| AppError::Internal("bad key escrow".into()))
 }
-
-
-
-
-
 
 pub enum UploadProtection {
     Fresh(ProtectionSetup),
@@ -171,10 +139,6 @@ impl UploadProtection {
     }
 }
 
-
-
-
-
 pub async fn resolve_multipart_protection(
     state: &Arc<AppState>,
     password: Option<String>,
@@ -198,8 +162,6 @@ pub async fn resolve_multipart_protection(
         prepare_protection(state, &password).await?,
     )))
 }
-
-
 
 pub fn spawn_spool_task(
     max_size: i64,
@@ -235,14 +197,6 @@ pub fn spawn_spool_task(
     });
     (tx, handle)
 }
-
-
-
-
-
-
-
-
 
 #[expect(
     clippy::too_many_arguments,
@@ -315,11 +269,6 @@ pub async fn push_encrypted_file(
     Ok(header)
 }
 
-
-
-
-
-
 pub async fn mark_protected(
     state: &Arc<AppState>,
     file_id: &str,
@@ -337,8 +286,6 @@ pub async fn mark_protected(
     }
     Ok(())
 }
-
-
 
 #[must_use]
 pub fn tus_spool_path(id: &str) -> PathBuf {

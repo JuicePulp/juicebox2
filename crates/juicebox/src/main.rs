@@ -12,8 +12,6 @@ use tokio::{
 
 const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
-
-
 const DEFAULT_LOCAL_BACKEND_URL: &str = "http://127.0.0.1:6401";
 
 const MIN_HEALTHY_SECS: u64 = 10;
@@ -33,8 +31,6 @@ fn sibling_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-
-
 fn workspace_dir() -> Option<PathBuf> {
     let dir = sibling_dir();
     let profile = dir.file_name()?.to_str()?;
@@ -51,15 +47,6 @@ fn workspace_dir() -> Option<PathBuf> {
     }
     Some(root.to_path_buf())
 }
-
-
-
-
-
-
-
-
-
 
 fn ensure_services_built() -> bool {
     if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
@@ -105,12 +92,6 @@ fn ensure_services_built() -> bool {
     }
 }
 
-
-
-
-
-
-
 fn watch_enabled() -> bool {
     if let Some(v) = juiceutils::config::optional_secret("JUICEBOX_WATCH") {
         return v == "1" || v.eq_ignore_ascii_case("true");
@@ -118,8 +99,6 @@ fn watch_enabled() -> bool {
     !juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
-
-
 
 fn watchable_file(path: &Path) -> bool {
     let visible = path
@@ -152,12 +131,6 @@ fn watchable_file(path: &Path) -> bool {
             )
         })
 }
-
-
-
-
-
-
 
 fn watch_roots(root: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
@@ -219,9 +192,6 @@ fn scan_dir(dir: &Path, out: &mut HashMap<PathBuf, SystemTime>) {
     }
 }
 
-
-
-
 struct FsWatcher {
     roots: Vec<PathBuf>,
     last: HashMap<PathBuf, SystemTime>,
@@ -282,14 +252,9 @@ impl FsWatcher {
     }
 }
 
-
-
 fn load_dotenv() {
     juiceutils::config::load_dotenv();
 }
-
-
-
 
 fn host_backend_default() -> Option<&'static str> {
     if std::env::var("BACKEND_URL").is_ok_and(|v| !v.trim().is_empty()) {

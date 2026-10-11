@@ -7,11 +7,6 @@ pub mod proxy;
 pub mod urls;
 pub mod web;
 
-
-
-
-
-
 #[must_use]
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(
@@ -54,12 +49,6 @@ pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
         None
     }
 }
-
-
-
-
-
-
 
 pub async fn shutdown_signal(service_name: &str) {
     let ctrl_c = async {

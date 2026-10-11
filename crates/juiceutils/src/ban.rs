@@ -7,12 +7,6 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[must_use]
 
-
-
-
-
-
-
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
     let ip = ip
         .parse::<IpAddr>()

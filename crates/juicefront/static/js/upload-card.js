@@ -129,14 +129,11 @@ function removeItem(item) {
   }, 300);
 }
 
-
-
 function dismissRow(item) {
   var id = item.getAttribute("data-upload-id");
   if (id) removeUpload(id);
   removeItem(item);
 }
-
 
 function markRowProtected(row) {
   if (!row || row.querySelector(".file-protected")) return;

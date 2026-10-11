@@ -1,11 +1,5 @@
 
 
-
-
-
-
-
-
 use std::sync::Arc;
 
 use axum::{
@@ -98,9 +92,6 @@ const PREVIEW_APP_JS: &str = include_str!("../templates/preview_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
-
-
-
 const BOT_UA_TOKENS: &[&str] = &[
     "curl",
     "wget",
@@ -182,13 +173,6 @@ const BOT_UA_TOKENS: &[&str] = &[
     "scrape",
     "archiver",
 ];
-
-
-
-
-
-
-
 
 fn is_discordbot(headers: &HeaderMap) -> bool {
     headers
@@ -468,12 +452,6 @@ fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
 }
 
 #[tracing::instrument(skip_all)]
-
-
-
-
-
-
 
 pub async fn preview_file_wildcard(
     State(state): State<Arc<AppState>>,

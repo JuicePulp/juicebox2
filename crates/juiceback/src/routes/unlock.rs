@@ -1,13 +1,5 @@
 
 
-
-
-
-
-
-
-
-
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
@@ -152,8 +144,6 @@ pub struct UnlockQuery {
     password: Option<String>,
 }
 
-
-
 fn request_password(headers: &HeaderMap, query: &UnlockQuery) -> Option<String> {
     if let Some(pw) = query.password.as_deref().filter(|p| !p.is_empty()) {
         return Some(pw.to_string());
@@ -186,9 +176,6 @@ async fn verify_password_blocking(password: String, hash: String) -> Result<bool
         .map_err(|_| AppError::Internal("password check panicked".into()))?
         .map_err(AppError::Internal)
 }
-
-
-
 
 async fn credentials_ok(
     state: &Arc<AppState>,
@@ -294,8 +281,6 @@ pub async fn unlock_submit_handler(
     Ok(resp)
 }
 
-
-
 fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> {
     let spec = value.trim().strip_prefix("bytes=").unwrap_or("");
     if spec.is_empty() {
@@ -334,13 +319,6 @@ fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> 
     }
     Ok(Some((start, end)))
 }
-
-
-
-
-
-
-
 
 fn decrypt_cipher_stream(
     key: FileKey,
@@ -460,15 +438,6 @@ pub async fn content_handler(
     }
     Ok(response)
 }
-
-
-
-
-
-
-
-
-
 
 pub(crate) async fn serve_protected_bytes(
     state: &Arc<AppState>,

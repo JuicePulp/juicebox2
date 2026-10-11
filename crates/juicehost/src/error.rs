@@ -71,9 +71,6 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
     )
 }
 
-
-
-
 pub fn frozen_html() -> (StatusCode, Html<String>) {
     (
         StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,

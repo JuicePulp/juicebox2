@@ -89,8 +89,6 @@ function startLocal(item, input) {
   localItems.set(item.id, { ...item });
   const handle = startUpload(item, input.file, {
     update: localUpsert,
-    // TUS session ids are only surfaced by the tray/queue callers; a direct
-    // local upload has nothing to track one against.
     onTusCreate: () => undefined,
     onTusDelete: (tusId) => {
       deleteTus(UPLOAD_URL, tusId);

@@ -59,7 +59,6 @@ pub async fn serve_file_wildcard(
     serve_file_inner(state, headers, method, id, false, viewer.0).await
 }
 
-
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_download(
     State(state): State<Arc<AppState>>,

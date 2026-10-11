@@ -220,10 +220,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 header::HeaderName::from_static("upload-metadata"),
                 header::HeaderName::from_static("tus-resumable"),
                 header::HeaderName::from_static("x-delete-token"),
-                // Unlock shells on the storage hosts call the gateway and
-                // content endpoints cross-origin with these headers; without
-                // them every password fetch dies in preflight and the shell
-                // never dismisses.
                 header::HeaderName::from_static("x-file-password"),
                 header::RANGE,
             ])

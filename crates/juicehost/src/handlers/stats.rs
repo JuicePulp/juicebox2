@@ -10,11 +10,6 @@ use axum::{
 
 use crate::state::AppState;
 
-
-
-
-
-
 #[derive(Clone)]
 pub struct ViewerIp(pub Option<String>);
 
@@ -34,10 +29,6 @@ pub(crate) async fn viewer_ip_middleware(
     req.extensions_mut().insert(ViewerIp(ip));
     next.run(req).await
 }
-
-
-
-
 
 pub(crate) fn report_file_hit(state: &AppState, file_id: &str, kind: &'static str, ip: &str) {
     let Some(ref backend_url) = state.backend_url else {

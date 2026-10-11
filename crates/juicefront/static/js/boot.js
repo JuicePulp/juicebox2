@@ -1,8 +1,6 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
-
-
 try {
   if (localStorage.getItem("juicebox_reduce_motion") === "1") {
     document.documentElement.setAttribute("data-motion-reduce", "");

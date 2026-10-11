@@ -1,49 +1,24 @@
-/**
- * QR codes for file URLs.
- *
- * Generated fully client-side (no external API, so file URLs never leak
- * to a third party). The QR payload is the file **URL** in Byte mode,
- * rendered with high error correction so the Juicebox logo can sit in
- * the middle without breaking scans.
- */
 import { iconHTML } from "./copy.js";
 import { announce } from "./util.js";
 
-/**
- * Lazily loaded on first use (dynamic import) so the QR library is never
- * pulled in until the modal actually opens.
- */
 async function qrFactory() {
   const mod = await import("./vendor/qrcode.mjs");
   return mod.default ?? mod.qrcode ?? globalThis.qrcode;
 }
 
 export const QR_CANVAS_SIZE = 512;
-/** Fraction of the QR side used for the centered logo. */
 const LOGO_RATIO = 0.25;
-/** Png used in the middle of the QR. `logo_big.png` (256px) stays crisp. */
 const LOGO_SRC = "/static/assets/logo_big.png";
 
-/**
- * Wide-gamut 2D context where supported. For black-and-white QR content
- * P3 white has the same peak luminance as sRGB white (white is already
- * 100% brightness either way), but this renders correctly on P3 displays
- * and keeps the center logo in its full-gamut colors. Falls back to sRGB.
- */
 function qrContext(canvas) {
   try {
     const p3 = canvas.getContext("2d", { colorSpace: "display-p3" });
     if (p3) return p3;
   } catch {
-    /* older browsers: fall through to sRGB */
   }
   return canvas.getContext("2d");
 }
 
-/**
- * Screen wake lock held while the QR modal is open so the display never
- * auto-dims -- this is what actually keeps the code at FULL brightness.
- */
 let wakeLock = null;
 async function holdFullBrightness() {
   if (wakeLock) return;
@@ -59,17 +34,10 @@ function releaseFullBrightness() {
   try {
     if (wakeLock) void wakeLock.release();
   } catch {
-    /* noop */
   }
   wakeLock = null;
 }
 
-/**
- * Compact payload for the QR: drop the scheme and the cosmetic file
- * extension (`host/f/<id>`). juicehost ignores the extension for lookup,
- * and scanners prepend `https://` to schemeless links -- so the code
- * stays smaller while scanning to the same file.
- */
 export function compactQrPayload(url) {
   const trimmed = String(url || "").trim();
   try {
@@ -88,11 +56,6 @@ export function compactQrPayload(url) {
   }
 }
 
-/**
- * Build the QR module matrix for a URL.
- * Type number 0 = automatic version, "H" = ~30% error correction
- * (required for the center logo overlay).
- */
 export async function qrMatrix(text) {
   const qrcode = await qrFactory();
   const qr = qrcode(0, "H");
@@ -104,7 +67,6 @@ export async function qrMatrix(text) {
   };
 }
 
-/** Paint the black-on-white QR modules (quiet zone included). */
 function paintModules(ctx, matrix, size) {
   const quiet = 4;
   const total = matrix.count + quiet * 2;
@@ -127,7 +89,6 @@ function paintModules(ctx, matrix, size) {
   return cell;
 }
 
-/** Overlay just the Juicebox logo in the center (no margins, no backing). */
 function paintLogo(ctx, size, logo) {
   const logoSize = Math.round(size * LOGO_RATIO);
   const x = Math.round((size - logoSize) / 2);
@@ -154,18 +115,12 @@ function loadLogo() {
     img.onload = () => done(true);
     img.onerror = () => done(false);
     img.src = LOGO_SRC;
-    // `decode()` rejects on some browsers for cached images; fall back to onload.
     if (typeof img.decode === "function") {
       img.decode().catch(() => {});
     }
   });
 }
 
-/**
- * Render a file-URL QR code (with centered Juicebox logo) into a canvas.
- * The base QR paints synchronously so something is visible immediately;
- * the logo is composited on top once the logo loads.
- */
 export async function renderQrWithLogo(canvas, url, size) {
   size = size || QR_CANVAS_SIZE;
   const text = compactQrPayload(url);
@@ -177,18 +132,15 @@ export async function renderQrWithLogo(canvas, url, size) {
   paintModules(ctx, await qrMatrix(text), size);
   const logo = await loadLogo();
   if (!logo) return;
-  // The canvas may have been reused for another URL while loading.
   paintLogo(ctx, size, logo);
 }
 
-/** Derive a download filename like `juicebox-<id>.png` from a file URL. */
 export function qrFilenameForUrl(url) {
   try {
     const segment = new URL(url).pathname.split("/").pop() || "";
     const clean = segment.replace(/\.[A-Za-z0-9]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "");
     if (clean) return `juicebox-${clean}.png`;
   } catch {
-    /* fall through */
   }
   const parts = String(url || "").split("/");
   const last = parts.pop() || "";
@@ -196,7 +148,6 @@ export function qrFilenameForUrl(url) {
   return fallback ? `juicebox-${fallback}.png` : "juicebox-qr.png";
 }
 
-/** Download the rendered QR canvas as a PNG file. */
 export function downloadQrCanvas(canvas, url) {
   canvas.toBlob((blob) => {
     if (!blob) return;
@@ -274,8 +225,6 @@ function ensureModal() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && modalEl && !modalEl.hidden) closeQrModal();
   });
-  // The OS can drop the wake lock (e.g. tab hidden); re-acquire it when
-  // the user comes back while the QR modal is still open.
   document.addEventListener("visibilitychange", () => {
     if (modalEl && !modalEl.hidden && !wakeLock) void holdFullBrightness();
   });
@@ -289,7 +238,6 @@ async function copyCurrentUrl(root) {
   try {
     await navigator.clipboard.writeText(currentUrl);
   } catch {
-    /* clipboard may be unavailable; still show feedback */
   }
   const btn = root.querySelector("[data-qr-copy]");
   if (btn) {
@@ -314,15 +262,9 @@ export function closeQrModal() {
   lastFocused = null;
 }
 
-/**
- * Open the shared QR modal for a file URL.
- * `labels` = { title, hint, copy, copied, download, close }.
- */
 export function openQrModal(url, labels) {
   if (!url) return;
   labels = labels || {};
-  // What you scan is what you see (and copy): the compact schemeless,
-  // extensionless form.
   currentUrl = compactQrPayload(url);
   const el = ensureModal();
   const title = el.querySelector("[data-qr-title]");

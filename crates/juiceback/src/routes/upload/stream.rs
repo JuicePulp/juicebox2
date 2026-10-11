@@ -319,9 +319,6 @@ pub async fn stream_gzip_upload_to_juicehost(
     Ok((total_bytes, read_time, push_wait))
 }
 
-
-
-
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -397,8 +394,6 @@ pub async fn stream_protected_upload_to_juicehost(
         i64::try_from(total).map_err(|_| AppError::Internal("file too large".into()))?;
     Ok((total_bytes, header))
 }
-
-
 
 #[expect(
     clippy::too_many_arguments,

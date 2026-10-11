@@ -1,21 +1,5 @@
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use std::{
     fmt,
     io::{Read, Write},
@@ -24,7 +8,6 @@ use std::{
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
 use zeroize::Zeroizing;
-
 
 pub const PLAINTEXT_CHUNK_LEN: usize = 64 * 1024;
 
@@ -44,19 +27,13 @@ pub const DEK_SALT_LEN: usize = 16;
 
 pub const WRAPPED_DEK_LEN: usize = NONCE_LEN + DEK_LEN + TAG_LEN;
 
-
 pub const KEY_VERSION_V1: i64 = 1;
-
 
 pub const KDF_MEM_KIB: u32 = 19456;
 
 pub const KDF_TIME: u32 = 2;
 
 pub const KDF_LANES: u32 = 1;
-
-
-
-
 
 #[derive(Clone)]
 pub struct FileKey(Zeroizing<[u8; 32]>);
@@ -109,23 +86,12 @@ impl FileKey {
     }
 }
 
-
 #[must_use]
 pub fn random_salt() -> [u8; DEK_SALT_LEN] {
     let mut salt = [0_u8; DEK_SALT_LEN];
     rand::rng().fill_bytes(&mut salt);
     salt
 }
-
-
-
-
-
-
-
-
-
-
 
 pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
     use argon2::{Algorithm, Argon2, Params, Version};
@@ -138,12 +104,6 @@ pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
         .map_err(|_| CryptoError::Kdf)?;
     Ok(FileKey(Zeroizing::new(out)))
 }
-
-
-
-
-
-
 
 pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
     let mut nonce = [0_u8; NONCE_LEN];
@@ -158,13 +118,6 @@ pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
     Ok(out)
 }
 
-
-
-
-
-
-
-
 pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError> {
     if wrapped.len() != WRAPPED_DEK_LEN {
         return Err(CryptoError::Truncated);
@@ -177,8 +130,6 @@ pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError>
         .map_err(|_| CryptoError::Decrypt)?;
     FileKey::from_bytes(&plain)
 }
-
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CryptoError {
@@ -223,34 +174,20 @@ impl From<std::io::Error> for CryptoError {
     }
 }
 
-
-
 #[must_use]
 pub const fn chunk_count(plain_len: u64) -> u64 {
     let chunks = plain_len.div_ceil(PLAINTEXT_CHUNK_LEN as u64);
     if chunks == 0 { 1 } else { chunks }
 }
 
-
-
 #[must_use]
 pub const fn ciphertext_len(plain_len: u64) -> u64 {
     HEADER_LEN as u64 + plain_len + chunk_count(plain_len) * (NONCE_LEN as u64 + TAG_LEN as u64)
 }
 
-
 const fn stored_chunk_len(plain_len: usize) -> usize {
     NONCE_LEN + plain_len + TAG_LEN
 }
-
-
-
-
-
-
-
-
-
 
 pub fn cipher_range_for_plain(
     start: u64,
@@ -280,7 +217,6 @@ fn write_header(out: &mut Vec<u8>, plain_len: u64) {
     out.extend_from_slice(&encode_header(plain_len));
 }
 
-
 #[must_use]
 pub const fn encode_header(plain_len: u64) -> [u8; 13] {
     let size = plain_len.to_le_bytes();
@@ -301,13 +237,6 @@ pub const fn encode_header(plain_len: u64) -> [u8; 13] {
     ]
 }
 
-
-
-
-
-
-
-
 pub fn parse_header(data: &[u8]) -> Result<u64, CryptoError> {
     let header = data.get(..HEADER_LEN).ok_or(CryptoError::Truncated)?;
     if &header[..4] != MAGIC || header[4] != CHUNK_SHIFT {
@@ -317,12 +246,6 @@ pub fn parse_header(data: &[u8]) -> Result<u64, CryptoError> {
     size.copy_from_slice(&header[5..13]);
     Ok(u64::from_le_bytes(size))
 }
-
-
-
-
-
-
 
 pub fn encrypt_chunk(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if plaintext.len() > PLAINTEXT_CHUNK_LEN {
@@ -340,12 +263,6 @@ pub fn encrypt_chunk(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CryptoE
     Ok(out)
 }
 
-
-
-
-
-
-
 pub fn decrypt_chunk(key: &FileKey, chunk: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if chunk.len() < NONCE_LEN + TAG_LEN || chunk.len() > stored_chunk_len(PLAINTEXT_CHUNK_LEN) {
         return Err(CryptoError::Truncated);
@@ -356,12 +273,6 @@ pub fn decrypt_chunk(key: &FileKey, chunk: &[u8]) -> Result<Vec<u8>, CryptoError
         .decrypt(&nonce, body)
         .map_err(|_| CryptoError::Decrypt)
 }
-
-
-
-
-
-
 
 pub fn encrypt_reader(
     key: &FileKey,
@@ -400,11 +311,6 @@ pub fn encrypt_reader(
     Ok(out)
 }
 
-
-
-
-
-
 pub fn decrypt_to_writer(
     key: &FileKey,
     data: &[u8],
@@ -435,13 +341,6 @@ pub fn decrypt_to_writer(
     }
     Ok(plain_len)
 }
-
-
-
-
-
-
-
 
 pub fn decrypt_range(
     key: &FileKey,

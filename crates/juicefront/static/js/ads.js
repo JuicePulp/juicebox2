@@ -1,14 +1,5 @@
 
 
-
-
-
-
-
-
-
-
-
 (function () {
   var BLOCKED_GRACE_MS = 4000;
   var WATCH_MAX_MS = BLOCKED_GRACE_MS + 30000;

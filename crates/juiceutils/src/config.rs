@@ -59,10 +59,6 @@ where
     }
 }
 
-
-
-
-
 pub fn load_dotenv() {
     let Ok(text) = std::fs::read_to_string(".env") else {
         return;
@@ -87,11 +83,6 @@ pub fn load_dotenv() {
     }
 }
 
-
-
-
-
-
 pub fn required_secret(name: &str) -> anyhow::Result<String> {
     std::env::var(name)
         .map_err(|_| anyhow::anyhow!("{name} is not set"))
@@ -112,12 +103,6 @@ pub fn optional_secret(name: &str) -> Option<String> {
         .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty())
 }
-
-
-
-
-
-
 
 #[must_use]
 pub fn is_placeholder_secret(value: &str) -> bool {

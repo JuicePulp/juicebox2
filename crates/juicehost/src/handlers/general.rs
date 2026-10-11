@@ -178,9 +178,6 @@ pub async fn ciphertext_file(
     serve_stored_bytes(&state, &headers, &id).await
 }
 
-
-
-
 #[tracing::instrument(skip_all)]
 pub async fn ciphertext_public(
     State(state): State<Arc<AppState>>,

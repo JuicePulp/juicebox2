@@ -45,9 +45,6 @@ function toggle() {
   return next;
 }
 
-
-
-
 try {
   document.addEventListener(
     "pointerdown",

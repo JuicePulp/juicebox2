@@ -15,8 +15,6 @@ use crate::{db, error::AppError, notify, state::AppState, utils::ClientIp};
 const COOKIE_NAME: &str = "jb_files";
 const COOKIE_MAX_AGE: &str = "2592000";
 
-/// Browsers cap cookies around 4KB; one entry is ~130B once encoded, so this
-/// keeps the newest entries parseable instead of letting the cookie rot.
 pub const MAX_FILE_COOKIE_ENTRIES: usize = 25;
 
 #[derive(Deserialize, ToSchema)]
@@ -347,8 +345,6 @@ pub fn upload_redirect(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
     );
     let mut response = Redirect::to(&location).into_response();
-    // No-JS uploads never run the client JS that maintains jb_files, so the
-    // cookie must be set here — otherwise /files has no record of the file.
     response.headers_mut().insert(
         header::SET_COOKIE,
         file_cookie_header(

@@ -773,16 +773,6 @@ impl LocalBackend {
     }
 }
 
-/// Move `src` onto `dst` without ever overwriting an existing `dst`.
-///
-/// A hard link is tried first: it is atomic and reports `AlreadyExists`,
-/// so concurrent writers can never clobber each other. Not every
-/// filesystem allows hard links though -- Android app-private storage
-/// rejects them with `EPERM` (so every upload failed on Termux), and
-/// overlay/`EXDEV` layouts fail too. When linking is unavailable we fall
-/// back to `rename`, which is still atomic because `src` and `dst` live
-/// in the same directory. That fallback has to check existence itself,
-/// since `rename` silently replaces the destination.
 pub(super) async fn link_or_rename(src: &Path, dst: &Path) -> Result<(), StorageError> {
     match tokio::fs::hard_link(src, dst).await {
         Ok(()) => {

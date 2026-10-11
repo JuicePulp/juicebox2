@@ -33,9 +33,6 @@ pub struct FileInfoResponse {
     pub uploaded_at: i64,
     pub expires_at: i64,
     pub url: String,
-    /// Delete token. Only populated where the caller already proved
-    /// ownership (e.g. /api/owned-files); empty elsewhere so the
-    /// unauthenticated /file/{id}/info endpoint cannot leak it.
     #[serde(default)]
     pub delete_token: String,
     pub storage_host: Option<String>,

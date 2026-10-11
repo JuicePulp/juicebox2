@@ -1,40 +1,16 @@
-/**
- * The `bubble` theme: the same fourteen cues, made of water. Playful and
- * opt-in: an app switches to it with `setTheme`, or uses it for one moment with
- * `play()`'s `theme` option or `data-cuelume-theme`.
- *
- * Every cue is its own gesture, and one sound: a knock for tap and type, a drip
- * for select, a cork for toggle, a balloon for open, a gulp for close, and so
- * on. The only theme whose tones slide. Nothing
- * is centred above 5 kHz, outcomes say what they mean in one glide (success rises,
- * error sinks, warning stays level, attention bends up), and levels match the
- * default palette on the loudest 30 ms.
- *
- * Arranged for emphasis like the other themes: layers marked from "normal"
- * are ornament that subtle leaves out, and each cue has a layer only strong
- * plays.
- */
 import { knock, LANDED } from "./recipes.js";
-/** A sine that slides from `from` to `to` Hz in `time` seconds. */
 const slide = (from, to, time, decay, peak, more = {}) => ({
     kind: "tone", waveform: "sine", frequency: from, glideTo: to, glideTime: time, attack: 0.002, decay, peak, ...more,
 });
-/** A bubble surfacing: a sine that rises by half in 40 ms. */
 const bloop = (frequency, decay, peak, more = {}) => slide(frequency, frequency * 1.5, 0.04, decay, peak, more);
-/** A drop falling from a tap: a quick flick upward, done in 12 ms. */
 const drip = (frequency, decay, peak, more = {}) => slide(frequency, frequency * 1.5, 0.012, decay, peak, { attack: 0.001, ...more });
-/** A struck note that settles a third down onto its pitch, like a kalimba tine. */
 const pluck = (frequency, decay, peak, more = {}) => slide(frequency * 1.3, frequency, 0.012, decay, peak, { attack: 0.001, ...more });
-/** A bubble bursting: 3 ms of low-passed noise. */
 const pop = (filterFrequency, peak, more = {}) => ({
     kind: "noise", filterType: "lowpass", filterFrequency, filterQ: 0.9, attack: 0.001, decay: 0.003, peak, ...more,
 });
-/** Input and surface cues: no two plays match. */
 const LIVELY = { pitch: 0.06, level: 0.1 };
-/** Outcome and progress cues vary in level only, so a rise stays a rise and a level note stays level. */
 const STEADY = { pitch: 0, level: 0.08 };
 export const BUBBLE = {
-    /** A keycap landing on water: a soft knock that blooms into a small bubble. A little different every time. */
     tap: {
         masterGain: 0.349,
         layers: [
@@ -45,7 +21,6 @@ export const BUBBLE = {
         ],
         vary: { pitch: 0.08, level: 0.1 },
     },
-    /** A keycap popping up: a higher, shorter knock, pitched differently every stroke. */
     type: {
         masterGain: 0.281,
         layers: [
@@ -55,7 +30,6 @@ export const BUBBLE = {
         ],
         vary: { pitch: 0.1, level: 0.2 },
     },
-    /** A drip: the only quick flick upward. A later option drips higher, an earlier one lower. */
     select: {
         masterGain: 0.278,
         layers: [
@@ -65,7 +39,6 @@ export const BUBBLE = {
         ],
         vary: { pitch: 0.03, level: 0.1 },
     },
-    /** A cork: a soft thup as the air rushes up an octave. Switching off sinks it. */
     toggle: {
         masterGain: 0.153,
         layers: [
@@ -76,7 +49,6 @@ export const BUBBLE = {
         ],
         vary: { pitch: 0.04, level: 0.1 },
     },
-    /** A balloon filling: one slow swell that rises a ninth. */
     open: {
         masterGain: 0.211,
         layers: [
@@ -86,7 +58,6 @@ export const BUBBLE = {
         ],
         vary: LIVELY,
     },
-    /** A gulp: one fast fall. */
     close: {
         masterGain: 0.28,
         layers: [
@@ -96,7 +67,6 @@ export const BUBBLE = {
         ],
         vary: LIVELY,
     },
-    /** One bubble rising a fifth, C to G, in a small room. */
     success: {
         masterGain: 0.48,
         layers: [
@@ -107,7 +77,6 @@ export const BUBBLE = {
         room: LANDED,
         vary: STEADY,
     },
-    /** One bubble sinking a fourth, F to C: a soft "uh-oh". */
     error: {
         masterGain: 0.42,
         layers: [
@@ -117,7 +86,6 @@ export const BUBBLE = {
         ],
         vary: STEADY,
     },
-    /** A zip: one bubble shooting up through fizz. Going back, it dives. */
     navigate: {
         masterGain: 0.406,
         layers: [
@@ -127,7 +95,6 @@ export const BUBBLE = {
         ],
         vary: LIVELY,
     },
-    /** One round note with a small wobble, settling where it started: level. */
     warning: {
         masterGain: 0.468,
         layers: [
@@ -137,7 +104,6 @@ export const BUBBLE = {
         ],
         vary: STEADY,
     },
-    /** A simmer: one slow bubble rising through soft fizz, gone within about a second. Nothing lands. */
     loading: {
         masterGain: 0.191,
         layers: [
@@ -148,7 +114,6 @@ export const BUBBLE = {
         ],
         vary: STEADY,
     },
-    /** A drop into water: the plip and the round bubble it leaves, one sound, in a small room. */
     ready: {
         masterGain: 0.477,
         layers: [
@@ -160,7 +125,6 @@ export const BUBBLE = {
         room: LANDED,
         vary: STEADY,
     },
-    /** "Hm?": one note that bends up a fourth like a question. */
     attention: {
         masterGain: 0.561,
         layers: [
@@ -170,7 +134,6 @@ export const BUBBLE = {
         ],
         vary: STEADY,
     },
-    /** A number rolling: fizz and one bubble rising together for as long as the roll (sinking counting down). */
     count: {
         masterGain: 0.238,
         layers: [

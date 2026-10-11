@@ -10,14 +10,10 @@ use crate::{
     state::AppState,
 };
 
-/// Tier gate: the Bun SABR-fetch sidecar (BUN_FETCH_URL + BUN_FETCH_KEY).
-/// Best-effort middle rung — every failure falls through to yt-dlp.
 pub(crate) fn bun_fetch_configured(state: &AppState) -> bool {
     state.config.bun_fetch_url.is_some() && state.config.bun_fetch_key.is_some()
 }
 
-/// Map the requested cobalt quality cap to a sidecar height cap.
-/// "max" (and anything unparseable) means uncapped (0).
 fn bun_max_height(video_quality: &str) -> u32 {
     if video_quality == "max" {
         return 0;
@@ -25,10 +21,6 @@ fn bun_max_height(video_quality: &str) -> u32 {
     video_quality.parse::<u32>().ok().filter(|h| *h > 0).unwrap_or(0)
 }
 
-/// Tier: POST the URL to the Bun SABR-fetch sidecar and store the
-/// returned file bytes exactly like a tunnel download. The sidecar runs
-/// yt-dlp with Bun JS challenges + per-video PO tokens — ideally on the
-/// residential secondary box, where no proxy hop is needed at all.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"

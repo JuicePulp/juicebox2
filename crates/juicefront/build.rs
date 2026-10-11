@@ -3,14 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-
-
-
-
-
-
-
-
 fn git_head_path() -> Option<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     if let Some(dir) = std::process::Command::new("git")

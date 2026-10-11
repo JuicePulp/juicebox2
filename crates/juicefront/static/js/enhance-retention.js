@@ -227,9 +227,6 @@ export function enhanceRetention(card, locale = "en") {
   };
   setValue(lastIndex);
 
-  // Lock the value display to the widest option so scrubbing between
-  // short and long labels ("1 hour" vs "30 minutes") never reflows the
-  // header around it.
   const stabilizeValueWidth = () => {
     if (!valueWrap) return;
     const wrapper = valueWrap.querySelector(".rttvalue-wrapper");
@@ -314,9 +311,6 @@ export function enhanceRetention(card, locale = "en") {
     if (drag || e.pointerType !== "mouse" || e.button !== 0) return;
     if (getComputedStyle(fieldset).flexDirection !== "row") return;
     drag = { id: e.pointerId, startX: e.clientX, moved: false };
-    // NOTE: no setPointerCapture here — capturing on down retargets the
-    // click to the fieldset and breaks native label activation (taps).
-    // Capture starts only once the drag threshold is crossed.
   };
   const ensureThumb = () => {
     let thumb = fieldset.querySelector(".rtt-dragthumb");
@@ -375,7 +369,6 @@ export function enhanceRetention(card, locale = "en") {
     fieldset.classList.remove("rtt-dragging");
     const thumb = fieldset.querySelector(".rtt-dragthumb");
     if (thumb && wasDrag) {
-      // Glide onto the final pill before fading out.
       thumb.style.transition = "left 0.18s ease-out, opacity 0.15s ease-out";
       moveThumbToSelection(thumb);
       window.setTimeout(() => {

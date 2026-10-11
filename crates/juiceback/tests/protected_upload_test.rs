@@ -34,12 +34,9 @@ fn test_state(juicehost_url: String) -> Arc<AppState> {
     common::state_from_config(test_config(juicehost_url))
 }
 
-
 fn captured_pushes() -> Arc<Mutex<Vec<Vec<u8>>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
-
-
 
 async fn mock_ciphertext_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>>>>) {
     Mock::given(method("GET"))
@@ -642,7 +639,6 @@ async fn fetch_with_password_stores_ciphertext_only() {
         "plaintext must not reach juicehost"
     );
 }
-
 
 async fn upload_protected(app: &axum::Router, state: &Arc<AppState>, boundary: &str) -> String {
     let body = multipart_body(
@@ -1300,8 +1296,6 @@ async fn gateway_params_and_unlock_release_working_dek() {
     let (status, _, _) = post_gateway_unlock(&app, &plain_id, PASSWORD).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
-
-
 
 async fn seed_legacy(state: &Arc<AppState>, captured: Arc<Mutex<Vec<Vec<u8>>>>) -> String {
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();

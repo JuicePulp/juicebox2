@@ -24,9 +24,6 @@ use crate::{
     state::AppState,
 };
 
-/// Split `total` bytes into `n` parts with ceil division. The browser
-/// client implements the identical formula; the reserve response carries
-/// the authoritative per-part sizes.
 pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
     let step = total.div_ceil(n.max(1) as u64);
     (0..n)
@@ -34,10 +31,7 @@ pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
         .collect()
 }
 
-/// Largest single part PUT juiceback will ticket. Keeps every part request
-/// comfortably under proxied upload caps.
 pub(crate) const DIRECT_MAX_PART_BYTES: u64 = 128 * 1024 * 1024;
-/// Hard cap on parts per parallel upload (matches TUS parallel parts).
 pub(crate) const DIRECT_MAX_PARTS: usize = 64;
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -49,10 +43,6 @@ pub struct DirectParallelReserveRequest {
     pub num_parts: Option<usize>,
 }
 
-/// One part of a parallel direct upload. Sizes are authoritative: the
-/// browser must slice part `i` as bytes
-/// `[i*step, min((i+1)*step, file_size))` with `step = ceil(file_size /
-/// num_parts)`, matching `direct_part_sizes` above.
 #[derive(Serialize, ToSchema)]
 pub struct DirectParallelPart {
     pub part_index: usize,
@@ -62,9 +52,6 @@ pub struct DirectParallelPart {
     pub upload_url: String,
 }
 
-/// Reservation response for a parallel browser-direct upload. The browser
-/// PUTs each part straight to juicehost (no bytes via juiceback), then
-/// calls `/upload/direct/parallel/complete` to concat + finalize.
 #[derive(Serialize, ToSchema)]
 pub struct DirectParallelReserveResponse {
     pub ticket: String,
@@ -116,9 +103,6 @@ pub async fn direct_parallel_reserve_handler(
     }
     reject_blocked_filename(&body.filename, danger)?;
 
-    // 2..=64 parts, each at most DIRECT_MAX_PART_BYTES so every part PUT
-    // fits proxied upload caps. Small files are rejected: use single-PUT
-    // direct or TUS below the parallel threshold instead.
     let min_parts = (body.file_size.div_ceil(DIRECT_MAX_PART_BYTES) as usize).max(2);
     if min_parts > DIRECT_MAX_PARTS {
         return Err(AppError::PayloadTooLarge);
@@ -182,8 +166,6 @@ pub async fn direct_parallel_reserve_handler(
         });
     }
 
-    // Parent ticket authorizes the complete call (same verification shape
-    // as single-PUT direct uploads).
     let parent_ticket = mint_ticket(
         &state,
         "browser",
@@ -207,10 +189,6 @@ pub async fn direct_parallel_reserve_handler(
     }))
 }
 
-/// Complete a parallel browser-direct upload: verify every part landed on
-/// juicehost with the reserved size, concat server-side, then finalize the
-/// parent record. Idempotent: a retried complete after success returns the
-/// existing URL instead of conflicting.
 #[utoipa::path(
     post,
     path = "/upload/direct/parallel/complete",
@@ -298,13 +276,9 @@ pub async fn direct_parallel_complete_handler(
         resp
     };
     if file.status != "uploading" {
-        // Already finalized (e.g. retried complete after a network blip):
-        // return the existing URL instead of failing.
         return Ok(ready_response());
     }
 
-    // The client echoes the part ids it stored; sizes come from storage and
-    // must sum to the reserved total with the deterministic split.
     if body.part_ids.len() < 2
         || body.part_ids.len() > DIRECT_MAX_PARTS
         || body.part_ids.iter().any(|id| !crate::utils::is_valid_id(id))

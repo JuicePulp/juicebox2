@@ -55,11 +55,6 @@ fn static_base() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Long-lived cache for font files served under `/static/assets`.
-///
-/// Fonts are referenced with a `?v=` query string (see the `@font-face`
-/// rules and the preload in `shell_head.html`); bump the version whenever
-/// a font file changes.
 async fn static_font_cache(req: Request<Body>, next: middleware::Next) -> Response<Body> {
     let is_font = req.uri().path().rsplit('.').next().is_some_and(|ext| {
         matches!(

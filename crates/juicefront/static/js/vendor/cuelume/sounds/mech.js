@@ -1,19 +1,5 @@
-/**
- * The `mech` theme: the same fourteen cues in a dry, precise, mechanical
- * material. Machined parts rather than glass, wood, and air. No room, no
- * ring beyond a struck part's own, and nothing harsh, industrial,
- * retro-computer, or sci-fi.
- *
- * Level-matched to the default palette on momentary loudness (the loudest
- * 30 ms), so switching themes changes the material, not the volume.
- *
- * Arranged for emphasis like the default palette: layers marked from
- * "normal" are ornament that subtle leaves out, and each cue has a layer only
- * strong plays.
- */
 import { BAR, contact, knock, struck } from "./recipes.js";
 export const MECH = {
-    /** A machined click, like a camera's shutter button, over the short knock of its housing. */
     tap: {
         masterGain: 0.661,
         layers: [
@@ -24,7 +10,6 @@ export const MECH = {
         ],
         vary: { pitch: 0.02, level: 0.1 },
     },
-    /** A tight low-profile switch: shorter and drier than a keycap, almost no body. */
     type: {
         masterGain: 0.421,
         layers: [
@@ -35,7 +20,6 @@ export const MECH = {
         ],
         vary: { pitch: 0.05, level: 0.15 },
     },
-    /** A ratchet detent: a precision dial clicking over one tooth, with a faint ring of the metal. */
     select: {
         masterGain: 0.495,
         layers: [
@@ -45,7 +29,6 @@ export const MECH = {
             knock(250, 0.015, 0.025, { from: "strong" }),
         ],
     },
-    /** A toggle switch's throw: the lever snaps over centre with the knock of its housing. */
     toggle: {
         masterGain: 0.294,
         layers: [
@@ -55,7 +38,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 250, filterQ: 2, attack: 0.001, decay: 0.03, peak: 0.3 },
         ],
     },
-    /** A latch releasing: the catch lets go as the bolt slides back, in one motion. */
     open: {
         masterGain: 0.854,
         layers: [
@@ -65,7 +47,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 290, filterQ: 2, attack: 0.001, decay: 0.03, peak: 0.25 },
         ],
     },
-    /** A latch catching: the bolt slides home into the catch, in one motion. */
     close: {
         masterGain: 0.627,
         layers: [
@@ -75,7 +56,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 180, filterQ: 2, attack: 0.001, decay: 0.035, peak: 0.3 },
         ],
     },
-    /** One dry struck bar, F, C and A at once, spread so no two notes rub, hit with something hard: a short chord, not a bell. */
     success: {
         masterGain: 0.597,
         layers: [
@@ -86,7 +66,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 4150, filterQ: 2, attack: 0.001, decay: 0.003, peak: 0.06 },
         ],
     },
-    /** One firm low knock with a dull D in it and the F a tenth above, like a handle that is locked. */
     error: {
         masterGain: 0.553,
         layers: [
@@ -97,7 +76,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 150, filterQ: 2, attack: 0.001, decay: 0.04, peak: 0.3 },
         ],
     },
-    /** A short carriage slide, rising as it passes. */
     navigate: {
         masterGain: 0.723,
         layers: [
@@ -106,7 +84,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 250, filterQ: 1.5, attack: 0.04, decay: 0.112, peak: 0.12 },
         ],
     },
-    /** One dry struck fifth, D and A: between success and error. */
     warning: {
         masterGain: 0.504,
         layers: [
@@ -116,7 +93,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 300, filterQ: 2, attack: 0.001, decay: 0.03, peak: 0.25 },
         ],
     },
-    /** A small motor spinning up and winding down: one soft, low whirr over about a second. */
     loading: {
         masterGain: 0.212,
         layers: [
@@ -126,7 +102,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "lowpass", filterFrequency: 250, filterQ: 0.7, attack: 0.35, decay: 0.7, peak: 0.04 },
         ],
     },
-    /** One dry struck bar, lower than success: a result is there. */
     ready: {
         masterGain: 0.434,
         layers: [
@@ -135,7 +110,6 @@ export const MECH = {
             ...struck(261.63, 0.2, 0.03, BAR, { from: "strong" }),
         ],
     },
-    /** One metal bell, A and E struck together, ringing longer than the rest. */
     attention: {
         masterGain: 0.414,
         layers: [
@@ -145,7 +119,6 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 300, filterQ: 2, attack: 0.001, decay: 0.03, peak: 0.25 },
         ],
     },
-    /** An odometer drum turning: one dry slide that rises with the count and lasts as long as the roll. */
     count: {
         masterGain: 0.72,
         layers: [

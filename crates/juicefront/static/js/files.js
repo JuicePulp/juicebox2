@@ -62,7 +62,6 @@ function makeQrButton(url, locale) {
   return btn;
 }
 
-
 function pctRemaining(expiresAt, uploadedAt) {
   const total = (expiresAt - uploadedAt) * 1000;
   if (total <= 0) return 0;
@@ -360,8 +359,6 @@ function showRenameModal(card, f, locale) {
     const wrap = document.createElement("div");
     wrap.innerHTML = renameModalHtml(f, locale);
     modal = wrap.firstElementChild;
-    // Portal to <body>: inside .file-card the fixed overlay would scroll
-    // with .upldfs and clip on transformed ancestors.
     document.body.appendChild(modal);
     if (modal) wireRenameModal(card, modal, f, locale);
   }

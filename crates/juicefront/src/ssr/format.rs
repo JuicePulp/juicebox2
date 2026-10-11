@@ -1,6 +1,5 @@
 
 
-
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -21,8 +20,6 @@ pub fn format_size(bytes: u64) -> String {
         format!("{value:.1} {}", units[index])
     }
 }
-
-
 
 #[allow(
     clippy::cast_possible_truncation,
@@ -105,9 +102,6 @@ pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     };
     crate::i18n::tv(locale, "files.expires", "time", &time)
 }
-
-
-
 
 #[allow(
     clippy::cast_possible_truncation,

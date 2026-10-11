@@ -12,13 +12,6 @@ use crate::{
     storage::{R2Store, valid_component as is_valid_id},
 };
 
-
-
-
-
-
-
-
 fn require_freeze_admin(headers: &HeaderMap, api_key: &str) -> Result<(), JuicehostError> {
     let provided = headers
         .get("x-juicehost-api-key")

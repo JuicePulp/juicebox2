@@ -399,8 +399,6 @@ async fn transfer_to_juicehost(
     Ok((total, None))
 }
 
-
-
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"

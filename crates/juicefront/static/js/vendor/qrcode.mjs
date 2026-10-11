@@ -1,29 +1,5 @@
-//---------------------------------------------------------------------
-//
-// QR Code Generator for JavaScript
-//
-// Copyright (c) 2009 Kazuhiko Arase
-//
-// URL: http://www.d-project.com/
-//
-// Licensed under the MIT license:
-//  http://www.opensource.org/licenses/mit-license.php
-//
-// The word 'QR Code' is registered trademark of
-// DENSO WAVE INCORPORATED
-//  http://www.denso-wave.com/qrcode/faqpatent-e.html
-//
-//---------------------------------------------------------------------
 
-//---------------------------------------------------------------------
-// qrcode
-//---------------------------------------------------------------------
 
-/**
- * qrcode
- * @param typeNumber 1 to 40
- * @param errorCorrectionLevel 'L','M','Q','H'
- */
 export const qrcode = function(typeNumber, errorCorrectionLevel) {
 
   const PAD0 = 0xEC;
@@ -179,7 +155,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
     const data = (_errorCorrectionLevel << 3) | maskPattern;
     const bits = QRUtil.getBCHTypeInfo(data);
 
-    // vertical
     for (let i = 0; i < 15; i += 1) {
 
       const mod = (!test && ( (bits >> i) & 1) == 1);
@@ -193,7 +168,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
       }
     }
 
-    // horizontal
     for (let i = 0; i < 15; i += 1) {
 
       const mod = (!test && ( (bits >> i) & 1) == 1);
@@ -207,7 +181,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
       }
     }
 
-    // fixed module
     _modules[_moduleCount - 8][8] = (!test);
   };
 
@@ -340,7 +313,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
       data.write(buffer);
     }
 
-    // calc num max data.
     let totalDataCount = 0;
     for (let i = 0; i < rsBlocks.length; i += 1) {
       totalDataCount += rsBlocks[i].dataCount;
@@ -354,17 +326,14 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
         + ')';
     }
 
-    // end code
     if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
       buffer.put(0, 4);
     }
 
-    // padding
     while (buffer.getLengthInBits() % 8 != 0) {
       buffer.putBit(false);
     }
 
-    // padding
     while (true) {
 
       if (buffer.getLengthInBits() >= totalDataCount * 8) {
@@ -494,9 +463,7 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
 
     let opts = {};
     if (typeof arguments[0] == 'object') {
-      // Called by options.
       opts = arguments[0];
-      // overwrite cellSize and margin.
       cellSize = opts.cellSize;
       margin = opts.margin;
       alt = opts.alt;
@@ -506,12 +473,10 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
     cellSize = cellSize || 2;
     margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
 
-    // Compose alt property surrogate
     alt = (typeof alt === 'string') ? {text: alt} : alt || {};
     alt.text = alt.text || null;
     alt.id = (alt.text) ? alt.id || 'qrcode-description' : null;
 
-    // Compose title property surrogate
     title = (typeof title === 'string') ? {text: title} : title || {};
     title.text = title.text || null;
     title.id = (title.text) ? title.id || 'qrcode-title' : null;
@@ -657,7 +622,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
           p += '█';
         }
 
-        // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
         ascii += (margin < 1 && y+1 >= max) ? blocksLastLineNoMargin[p] : blocks[p];
       }
 
@@ -702,7 +666,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
           p = 0;
         }
 
-        // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
         line += p ? white : black;
       }
 
@@ -728,10 +691,6 @@ export const qrcode = function(typeNumber, errorCorrectionLevel) {
   return _this;
 };
 
-//---------------------------------------------------------------------
-// qrcode.stringToBytes
-//---------------------------------------------------------------------
-
 qrcode.stringToBytes = function(s) {
   const bytes = [];
   for (let i = 0; i < s.length; i += 1) {
@@ -741,18 +700,7 @@ qrcode.stringToBytes = function(s) {
   return bytes;
 };
 
-//---------------------------------------------------------------------
-// qrcode.createStringToBytes
-//---------------------------------------------------------------------
-
-/**
- * @param unicodeData base64 string of byte array.
- * [16bit Unicode],[16bit Bytes], ...
- * @param numChars
- */
 qrcode.createStringToBytes = function(unicodeData, numChars) {
-
-  // create conversion map.
 
   const unicodeMap = function() {
 
@@ -795,10 +743,8 @@ qrcode.createStringToBytes = function(unicodeData, numChars) {
         const b = unicodeMap[s.charAt(i)];
         if (typeof b == 'number') {
           if ( (b & 0xff) == b) {
-            // 1byte
             bytes.push(b);
           } else {
-            // 2bytes
             bytes.push(b >>> 8);
             bytes.push(b & 0xff);
           }
@@ -811,10 +757,6 @@ qrcode.createStringToBytes = function(unicodeData, numChars) {
   };
 };
 
-//---------------------------------------------------------------------
-// QRMode
-//---------------------------------------------------------------------
-
 const QRMode = {
   MODE_NUMBER :    1 << 0,
   MODE_ALPHA_NUM : 1 << 1,
@@ -822,20 +764,12 @@ const QRMode = {
   MODE_KANJI :     1 << 3
 };
 
-//---------------------------------------------------------------------
-// QRErrorCorrectionLevel
-//---------------------------------------------------------------------
-
 const QRErrorCorrectionLevel = {
   L : 1,
   M : 0,
   Q : 3,
   H : 2
 };
-
-//---------------------------------------------------------------------
-// QRMaskPattern
-//---------------------------------------------------------------------
 
 const QRMaskPattern = {
   PATTERN000 : 0,
@@ -847,10 +781,6 @@ const QRMaskPattern = {
   PATTERN110 : 6,
   PATTERN111 : 7
 };
-
-//---------------------------------------------------------------------
-// QRUtil
-//---------------------------------------------------------------------
 
 const QRUtil = function() {
 
@@ -969,8 +899,6 @@ const QRUtil = function() {
 
     if (1 <= type && type < 10) {
 
-      // 1 - 9
-
       switch(mode) {
       case QRMode.MODE_NUMBER    : return 10;
       case QRMode.MODE_ALPHA_NUM : return 9;
@@ -982,8 +910,6 @@ const QRUtil = function() {
 
     } else if (type < 27) {
 
-      // 10 - 26
-
       switch(mode) {
       case QRMode.MODE_NUMBER    : return 12;
       case QRMode.MODE_ALPHA_NUM : return 11;
@@ -994,8 +920,6 @@ const QRUtil = function() {
       }
 
     } else if (type < 41) {
-
-      // 27 - 40
 
       switch(mode) {
       case QRMode.MODE_NUMBER    : return 14;
@@ -1016,8 +940,6 @@ const QRUtil = function() {
     const moduleCount = qrcode.getModuleCount();
 
     let lostPoint = 0;
-
-    // LEVEL1
 
     for (let row = 0; row < moduleCount; row += 1) {
       for (let col = 0; col < moduleCount; col += 1) {
@@ -1053,8 +975,6 @@ const QRUtil = function() {
       }
     };
 
-    // LEVEL2
-
     for (let row = 0; row < moduleCount - 1; row += 1) {
       for (let col = 0; col < moduleCount - 1; col += 1) {
         let count = 0;
@@ -1067,8 +987,6 @@ const QRUtil = function() {
         }
       }
     }
-
-    // LEVEL3
 
     for (let row = 0; row < moduleCount; row += 1) {
       for (let col = 0; col < moduleCount - 6; col += 1) {
@@ -1098,8 +1016,6 @@ const QRUtil = function() {
       }
     }
 
-    // LEVEL4
-
     let darkCount = 0;
 
     for (let col = 0; col < moduleCount; col += 1) {
@@ -1119,16 +1035,11 @@ const QRUtil = function() {
   return _this;
 }();
 
-//---------------------------------------------------------------------
-// QRMath
-//---------------------------------------------------------------------
-
 const QRMath = function() {
 
   const EXP_TABLE = new Array(256);
   const LOG_TABLE = new Array(256);
 
-  // initialize tables
   for (let i = 0; i < 8; i += 1) {
     EXP_TABLE[i] = 1 << i;
   }
@@ -1168,10 +1079,6 @@ const QRMath = function() {
 
   return _this;
 }();
-
-//---------------------------------------------------------------------
-// qrPolynomial
-//---------------------------------------------------------------------
 
 const qrPolynomial = function(num, shift) {
 
@@ -1231,261 +1138,211 @@ const qrPolynomial = function(num, shift) {
       num[i] ^= QRMath.gexp(QRMath.glog(e.getAt(i) ) + ratio);
     }
 
-    // recursive call
     return qrPolynomial(num, 0).mod(e);
   };
 
   return _this;
 };
 
-//---------------------------------------------------------------------
-// QRRSBlock
-//---------------------------------------------------------------------
-
 const QRRSBlock = function() {
 
   const RS_BLOCK_TABLE = [
 
-    // L
-    // M
-    // Q
-    // H
-
-    // 1
     [1, 26, 19],
     [1, 26, 16],
     [1, 26, 13],
     [1, 26, 9],
 
-    // 2
     [1, 44, 34],
     [1, 44, 28],
     [1, 44, 22],
     [1, 44, 16],
 
-    // 3
     [1, 70, 55],
     [1, 70, 44],
     [2, 35, 17],
     [2, 35, 13],
 
-    // 4
     [1, 100, 80],
     [2, 50, 32],
     [2, 50, 24],
     [4, 25, 9],
 
-    // 5
     [1, 134, 108],
     [2, 67, 43],
     [2, 33, 15, 2, 34, 16],
     [2, 33, 11, 2, 34, 12],
 
-    // 6
     [2, 86, 68],
     [4, 43, 27],
     [4, 43, 19],
     [4, 43, 15],
 
-    // 7
     [2, 98, 78],
     [4, 49, 31],
     [2, 32, 14, 4, 33, 15],
     [4, 39, 13, 1, 40, 14],
 
-    // 8
     [2, 121, 97],
     [2, 60, 38, 2, 61, 39],
     [4, 40, 18, 2, 41, 19],
     [4, 40, 14, 2, 41, 15],
 
-    // 9
     [2, 146, 116],
     [3, 58, 36, 2, 59, 37],
     [4, 36, 16, 4, 37, 17],
     [4, 36, 12, 4, 37, 13],
 
-    // 10
     [2, 86, 68, 2, 87, 69],
     [4, 69, 43, 1, 70, 44],
     [6, 43, 19, 2, 44, 20],
     [6, 43, 15, 2, 44, 16],
 
-    // 11
     [4, 101, 81],
     [1, 80, 50, 4, 81, 51],
     [4, 50, 22, 4, 51, 23],
     [3, 36, 12, 8, 37, 13],
 
-    // 12
     [2, 116, 92, 2, 117, 93],
     [6, 58, 36, 2, 59, 37],
     [4, 46, 20, 6, 47, 21],
     [7, 42, 14, 4, 43, 15],
 
-    // 13
     [4, 133, 107],
     [8, 59, 37, 1, 60, 38],
     [8, 44, 20, 4, 45, 21],
     [12, 33, 11, 4, 34, 12],
 
-    // 14
     [3, 145, 115, 1, 146, 116],
     [4, 64, 40, 5, 65, 41],
     [11, 36, 16, 5, 37, 17],
     [11, 36, 12, 5, 37, 13],
 
-    // 15
     [5, 109, 87, 1, 110, 88],
     [5, 65, 41, 5, 66, 42],
     [5, 54, 24, 7, 55, 25],
     [11, 36, 12, 7, 37, 13],
 
-    // 16
     [5, 122, 98, 1, 123, 99],
     [7, 73, 45, 3, 74, 46],
     [15, 43, 19, 2, 44, 20],
     [3, 45, 15, 13, 46, 16],
 
-    // 17
     [1, 135, 107, 5, 136, 108],
     [10, 74, 46, 1, 75, 47],
     [1, 50, 22, 15, 51, 23],
     [2, 42, 14, 17, 43, 15],
 
-    // 18
     [5, 150, 120, 1, 151, 121],
     [9, 69, 43, 4, 70, 44],
     [17, 50, 22, 1, 51, 23],
     [2, 42, 14, 19, 43, 15],
 
-    // 19
     [3, 141, 113, 4, 142, 114],
     [3, 70, 44, 11, 71, 45],
     [17, 47, 21, 4, 48, 22],
     [9, 39, 13, 16, 40, 14],
 
-    // 20
     [3, 135, 107, 5, 136, 108],
     [3, 67, 41, 13, 68, 42],
     [15, 54, 24, 5, 55, 25],
     [15, 43, 15, 10, 44, 16],
 
-    // 21
     [4, 144, 116, 4, 145, 117],
     [17, 68, 42],
     [17, 50, 22, 6, 51, 23],
     [19, 46, 16, 6, 47, 17],
 
-    // 22
     [2, 139, 111, 7, 140, 112],
     [17, 74, 46],
     [7, 54, 24, 16, 55, 25],
     [34, 37, 13],
 
-    // 23
     [4, 151, 121, 5, 152, 122],
     [4, 75, 47, 14, 76, 48],
     [11, 54, 24, 14, 55, 25],
     [16, 45, 15, 14, 46, 16],
 
-    // 24
     [6, 147, 117, 4, 148, 118],
     [6, 73, 45, 14, 74, 46],
     [11, 54, 24, 16, 55, 25],
     [30, 46, 16, 2, 47, 17],
 
-    // 25
     [8, 132, 106, 4, 133, 107],
     [8, 75, 47, 13, 76, 48],
     [7, 54, 24, 22, 55, 25],
     [22, 45, 15, 13, 46, 16],
 
-    // 26
     [10, 142, 114, 2, 143, 115],
     [19, 74, 46, 4, 75, 47],
     [28, 50, 22, 6, 51, 23],
     [33, 46, 16, 4, 47, 17],
 
-    // 27
     [8, 152, 122, 4, 153, 123],
     [22, 73, 45, 3, 74, 46],
     [8, 53, 23, 26, 54, 24],
     [12, 45, 15, 28, 46, 16],
 
-    // 28
     [3, 147, 117, 10, 148, 118],
     [3, 73, 45, 23, 74, 46],
     [4, 54, 24, 31, 55, 25],
     [11, 45, 15, 31, 46, 16],
 
-    // 29
     [7, 146, 116, 7, 147, 117],
     [21, 73, 45, 7, 74, 46],
     [1, 53, 23, 37, 54, 24],
     [19, 45, 15, 26, 46, 16],
 
-    // 30
     [5, 145, 115, 10, 146, 116],
     [19, 75, 47, 10, 76, 48],
     [15, 54, 24, 25, 55, 25],
     [23, 45, 15, 25, 46, 16],
 
-    // 31
     [13, 145, 115, 3, 146, 116],
     [2, 74, 46, 29, 75, 47],
     [42, 54, 24, 1, 55, 25],
     [23, 45, 15, 28, 46, 16],
 
-    // 32
     [17, 145, 115],
     [10, 74, 46, 23, 75, 47],
     [10, 54, 24, 35, 55, 25],
     [19, 45, 15, 35, 46, 16],
 
-    // 33
     [17, 145, 115, 1, 146, 116],
     [14, 74, 46, 21, 75, 47],
     [29, 54, 24, 19, 55, 25],
     [11, 45, 15, 46, 46, 16],
 
-    // 34
     [13, 145, 115, 6, 146, 116],
     [14, 74, 46, 23, 75, 47],
     [44, 54, 24, 7, 55, 25],
     [59, 46, 16, 1, 47, 17],
 
-    // 35
     [12, 151, 121, 7, 152, 122],
     [12, 75, 47, 26, 76, 48],
     [39, 54, 24, 14, 55, 25],
     [22, 45, 15, 41, 46, 16],
 
-    // 36
     [6, 151, 121, 14, 152, 122],
     [6, 75, 47, 34, 76, 48],
     [46, 54, 24, 10, 55, 25],
     [2, 45, 15, 64, 46, 16],
 
-    // 37
     [17, 152, 122, 4, 153, 123],
     [29, 74, 46, 14, 75, 47],
     [49, 54, 24, 10, 55, 25],
     [24, 45, 15, 46, 46, 16],
 
-    // 38
     [4, 152, 122, 18, 153, 123],
     [13, 74, 46, 32, 75, 47],
     [48, 54, 24, 14, 55, 25],
     [42, 45, 15, 32, 46, 16],
 
-    // 39
     [20, 147, 117, 4, 148, 118],
     [40, 75, 47, 7, 76, 48],
     [43, 54, 24, 22, 55, 25],
     [10, 45, 15, 67, 46, 16],
 
-    // 40
     [19, 148, 118, 6, 149, 119],
     [18, 75, 47, 31, 76, 48],
     [34, 54, 24, 34, 55, 25],
@@ -1547,10 +1404,6 @@ const QRRSBlock = function() {
   return _this;
 }();
 
-//---------------------------------------------------------------------
-// qrBitBuffer
-//---------------------------------------------------------------------
-
 const qrBitBuffer = function() {
 
   const _buffer = [];
@@ -1593,10 +1446,6 @@ const qrBitBuffer = function() {
 
   return _this;
 };
-
-//---------------------------------------------------------------------
-// qrNumber
-//---------------------------------------------------------------------
 
 const qrNumber = function(data) {
 
@@ -1650,10 +1499,6 @@ const qrNumber = function(data) {
 
   return _this;
 };
-
-//---------------------------------------------------------------------
-// qrAlphaNum
-//---------------------------------------------------------------------
 
 const qrAlphaNum = function(data) {
 
@@ -1714,10 +1559,6 @@ const qrAlphaNum = function(data) {
   return _this;
 };
 
-//---------------------------------------------------------------------
-// qr8BitByte
-//---------------------------------------------------------------------
-
 const qr8BitByte = function(data) {
 
   const _mode = QRMode.MODE_8BIT_BYTE;
@@ -1743,10 +1584,6 @@ const qr8BitByte = function(data) {
   return _this;
 };
 
-//---------------------------------------------------------------------
-// qrKanji
-//---------------------------------------------------------------------
-
 const qrKanji = function(data) {
 
   const _mode = QRMode.MODE_KANJI;
@@ -1754,7 +1591,6 @@ const qrKanji = function(data) {
 
   const stringToBytes = qrcode.stringToBytes;
   !function(c, code) {
-    // self test for sjis support.
     const test = stringToBytes(c);
     if (test.length != 2 || ( (test[0] << 8) | test[1]) != code) {
       throw 'sjis not supported.';
@@ -1806,14 +1642,6 @@ const qrKanji = function(data) {
   return _this;
 };
 
-//=====================================================================
-// GIF Support etc.
-//
-
-//---------------------------------------------------------------------
-// byteArrayOutputStream
-//---------------------------------------------------------------------
-
 const byteArrayOutputStream = function() {
 
   const _bytes = [];
@@ -1862,10 +1690,6 @@ const byteArrayOutputStream = function() {
 
   return _this;
 };
-
-//---------------------------------------------------------------------
-// base64EncodeOutputStream
-//---------------------------------------------------------------------
 
 const base64EncodeOutputStream = function() {
 
@@ -1919,7 +1743,6 @@ const base64EncodeOutputStream = function() {
     }
 
     if (_length % 3 != 0) {
-      // padding
       const padlen = 3 - _length % 3;
       for (let i = 0; i < padlen; i += 1) {
         _base64 += '=';
@@ -1933,10 +1756,6 @@ const base64EncodeOutputStream = function() {
 
   return _this;
 };
-
-//---------------------------------------------------------------------
-// base64DecodeInputStream
-//---------------------------------------------------------------------
 
 const base64DecodeInputStream = function(str) {
 
@@ -1965,7 +1784,6 @@ const base64DecodeInputStream = function(str) {
         _buflen = 0;
         return -1;
       } else if (c.match(/^\s$/) ) {
-        // ignore if whitespace.
         continue;
       }
 
@@ -1997,10 +1815,6 @@ const base64DecodeInputStream = function(str) {
   return _this;
 };
 
-//---------------------------------------------------------------------
-// gifImage (B/W)
-//---------------------------------------------------------------------
-
 const gifImage = function(width, height) {
 
   const _width = width;
@@ -2015,36 +1829,22 @@ const gifImage = function(width, height) {
 
   _this.write = function(out) {
 
-    //---------------------------------
-    // GIF Signature
-
     out.writeString('GIF87a');
-
-    //---------------------------------
-    // Screen Descriptor
 
     out.writeShort(_width);
     out.writeShort(_height);
 
-    out.writeByte(0x80); // 2bit
+    out.writeByte(0x80);
     out.writeByte(0);
     out.writeByte(0);
 
-    //---------------------------------
-    // Global Color Map
-
-    // black
     out.writeByte(0x00);
     out.writeByte(0x00);
     out.writeByte(0x00);
 
-    // white
     out.writeByte(0xff);
     out.writeByte(0xff);
     out.writeByte(0xff);
-
-    //---------------------------------
-    // Image Descriptor
 
     out.writeString(',');
     out.writeShort(0);
@@ -2052,12 +1852,6 @@ const gifImage = function(width, height) {
     out.writeShort(_width);
     out.writeShort(_height);
     out.writeByte(0);
-
-    //---------------------------------
-    // Local Color Map
-
-    //---------------------------------
-    // Raster Data
 
     const lzwMinCodeSize = 2;
     const raster = getLZWRaster(lzwMinCodeSize);
@@ -2076,8 +1870,6 @@ const gifImage = function(width, height) {
     out.writeBytes(raster, offset, raster.length - offset);
     out.writeByte(0x00);
 
-    //---------------------------------
-    // GIF Terminator
     out.writeString(';');
   };
 
@@ -2122,7 +1914,6 @@ const gifImage = function(width, height) {
     const endCode = (1 << lzwMinCodeSize) + 1;
     let bitLength = lzwMinCodeSize + 1;
 
-    // Setup LZWTable
     const table = lzwTable();
 
     for (let i = 0; i < clearCode; i += 1) {
@@ -2134,7 +1925,6 @@ const gifImage = function(width, height) {
     const byteOut = byteArrayOutputStream();
     const bitOut = bitOutputStream(byteOut);
 
-    // clear code
     bitOut.write(clearCode, bitLength);
 
     let dataIndex = 0;
@@ -2170,7 +1960,6 @@ const gifImage = function(width, height) {
 
     bitOut.write(table.indexOf(s), bitLength);
 
-    // end code
     bitOut.write(endCode, bitLength);
 
     bitOut.flush();
