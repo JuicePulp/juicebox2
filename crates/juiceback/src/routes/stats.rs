@@ -26,13 +26,13 @@ fn check_internal_key(state: &AppState, headers: &HeaderMap) -> Result<(), AppEr
 
 #[derive(Deserialize, ToSchema)]
 pub struct HitRequest {
-    /// File id that was served.
+    
     pub file_id: String,
-    /// `"view"` (inline bytes, preview page, protected content) or
-    /// `"download"` (forced attachment).
+    
+    
     pub kind: String,
-    /// Viewer IP as seen by the serving edge. Hashed with the ip_pepper
-    /// HMAC on receipt; the raw value is never stored.
+    
+    
     pub ip: String,
 }
 
@@ -71,7 +71,7 @@ pub async fn hit_handler(
 
 #[derive(Deserialize, ToSchema)]
 pub struct VisitRequest {
-    /// Visitor IP as seen by the edge. Hashed on receipt, never stored.
+    
     pub ip: String,
 }
 

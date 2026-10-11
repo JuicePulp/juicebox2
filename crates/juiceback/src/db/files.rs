@@ -193,11 +193,11 @@ pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     Ok(affected > 0)
 }
 
-/// Record password-gate and encryption metadata for a completed upload.
-///
-/// # Errors
-///
-/// Returns [`rusqlite::Error`] on database failure.
+
+
+
+
+
 pub fn set_protection(
     conn: &Connection,
     id: &str,
@@ -239,7 +239,7 @@ pub fn renew_file_id(
         params![new_id, new_storage_path, old_id],
     )?;
     if affected > 0 {
-        // Keep accumulated viewers on the new id (old URLs alias to it).
+        
         conn.execute(
             "UPDATE file_stats SET file_id = ?1 WHERE file_id = ?2",
             params![new_id, old_id],

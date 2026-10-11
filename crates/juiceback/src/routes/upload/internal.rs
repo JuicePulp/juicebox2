@@ -45,8 +45,8 @@ pub async fn file_status_handler(
 
     match file {
         Ok(Some(record)) => {
-            // The unlock shell lives on juicehost: this URL is the public
-            // `/f/` page, never a juiceback address.
+            
+            
             let unlock_url = record.is_protected().then(|| {
                 crate::utils::public_url(
                     &state.config.public_base_url,

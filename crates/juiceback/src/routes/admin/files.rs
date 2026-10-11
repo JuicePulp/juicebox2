@@ -31,19 +31,19 @@ pub struct AdminFileEntry {
 
     pub storage_host: Option<String>,
 
-    /// Unique people who viewed this file.
+    
     pub viewers: i64,
 
-    /// Total view hits for this file.
+    
     pub views: i64,
 
-    /// Unique people who downloaded this file.
+    
     pub downloaders: i64,
 
-    /// Total download hits for this file.
+    
     pub downloads: i64,
 
-    /// Last time anyone viewed or downloaded this file (unix seconds).
+    
     pub last_viewed_at: Option<i64>,
 }
 

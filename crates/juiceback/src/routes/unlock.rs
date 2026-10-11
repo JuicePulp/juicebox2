@@ -1,12 +1,12 @@
-//! Password-gated downloads for at-rest encrypted files.
-//!
-//! juicehost stores ciphertext only and redirects protected public links
-//! here. juiceback verifies the password (Argon2id, rate-limited), then
-//! fetches ciphertext over the API-key-authenticated internal endpoint and
-//! decrypts locally - streaming, never buffering a whole file.
-//!
-//! The cleartext password is accepted in memory only: it is never logged,
-//! never persisted, and never sent to juicehost.
+
+
+
+
+
+
+
+
+
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -136,9 +136,9 @@ pub async fn unlock_page_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    // Public viewing lives on juicehost only: the unlock shell is the
-    // host `/f/` page, which talks to the key-release gateway directly.
-    // Old backend-origin links land here and bounce to the shell.
+    
+    
+    
     let lookup = id.clone();
     let record = state
         .db_call("get_unlock_page", move |db| db::get_file(db, &lookup))
@@ -152,8 +152,8 @@ pub struct UnlockQuery {
     password: Option<String>,
 }
 
-/// Extract a candidate password from query, `X-File-Password`, or HTTP Basic
-/// (password part). Returns `None` when no credential was supplied.
+
+
 fn request_password(headers: &HeaderMap, query: &UnlockQuery) -> Option<String> {
     if let Some(pw) = query.password.as_deref().filter(|p| !p.is_empty()) {
         return Some(pw.to_string());
@@ -187,9 +187,9 @@ async fn verify_password_blocking(password: String, hash: String) -> Result<bool
         .map_err(AppError::Internal)
 }
 
-/// Check unlock credentials: valid cookie, or a verifiable password from
-/// query/header. Returns `true` when the download may proceed. Wrong and
-/// missing credentials are indistinguishable to callers.
+
+
+
 async fn credentials_ok(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -219,7 +219,7 @@ pub async fn unlock_submit_handler(
     body: axum::body::Bytes,
 ) -> Result<Response, AppError> {
     let record = protected_record(&state, &id).await?;
-    // POST bodies carry the password either as JSON (JS) or urlencoded (no-JS).
+    
     let mut password = query.password.clone().filter(|p| !p.is_empty());
     if password.is_none() && !body.is_empty() {
         let ctype = headers
@@ -294,8 +294,8 @@ pub async fn unlock_submit_handler(
     Ok(resp)
 }
 
-/// Parse `Range: bytes=S-`, `bytes=S-E`, or `bytes=-N` against `total`,
-/// returning `(start, end_exclusive)`. `None` means no usable header.
+
+
 fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> {
     let spec = value.trim().strip_prefix("bytes=").unwrap_or("");
     if spec.is_empty() {
@@ -335,13 +335,13 @@ fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> 
     Ok(Some((start, end)))
 }
 
-/// Decrypt a ciphertext byte stream chunk-by-chunk, yielding only plaintext
-/// `[plain_start, plain_end)`.
-///
-/// `cipher_skip` leading cipher bytes are dropped first (used when juicehost
-/// ignored our Range and answered 200); afterwards the stream must begin
-/// exactly at stored chunk `first_idx`. Chunk boundaries after that are
-/// deterministic, so framing needs no lookahead beyond one stored chunk.
+
+
+
+
+
+
+
 fn decrypt_cipher_stream(
     key: FileKey,
     cipher: impl futures::Stream<Item = Result<Bytes, String>> + Send + Unpin + 'static,
@@ -442,8 +442,8 @@ pub async fn content_handler(
         .unwrap_or((0, plain_len));
 
     let response = serve_protected_bytes(&state, &record, start, end, &method).await?;
-    // Count actual served bytes as a view (admin report previews bypass
-    // this handler, so moderator peeks never pollute the counters).
+    
+    
     if method == Method::GET && response.status().is_success() {
         let viewer_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
         let ip_hash = crate::utils::hash_ip_for_ban(&viewer_ip, &state.config.ip_pepper);
@@ -461,15 +461,15 @@ pub async fn content_handler(
     Ok(response)
 }
 
-/// Fetch ciphertext for `record`, decrypt the `[start, end)` plaintext span,
-/// and build the 200/206 response. Shared by the gated download and the
-/// admin decrypt preview (which bypasses the gate with the stored key).
-///
-/// # Errors
-///
-/// Returns [`AppError::RangeNotSatisfiable`] for out-of-bounds spans,
-/// [`AppError::JuicehostUnreachable`] when the backend fetch fails, and
-/// [`AppError::Internal`] when the storage key is unavailable.
+
+
+
+
+
+
+
+
+
 pub(crate) async fn serve_protected_bytes(
     state: &Arc<AppState>,
     record: &db::FileRecord,
@@ -486,10 +486,10 @@ pub(crate) async fn serve_protected_bytes(
     let partial = start != 0 || end != plain_len;
 
     let key = match record.dek_escrow.as_deref() {
-        // Per-file data key via the global-key escrow copy (server-side
-        // legacy/curl/admin path; the browser flow never touches this).
+        
+        
         Some(escrow) => crate::routes::upload::protected::unwrap_escrow(state, escrow)?,
-        // Legacy rows encrypted directly under the global storage key.
+        
         None => state
             .config
             .storage_file_key()

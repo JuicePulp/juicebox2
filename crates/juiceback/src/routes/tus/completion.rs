@@ -23,10 +23,10 @@ pub(crate) async fn finish_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
 ) -> Result<serde_json::Value, AppError> {
-    // Protected uploads land here with plaintext spooled locally and nothing
-    // pushed yet. Encrypt and push under the final id, skipping the rename.
-    // Fresh-password sessions carry their minted DEK; reservation-backed
-    // sessions reload the row material (legacy rows: global key).
+    
+    
+    
+    
     let protected: Option<(ProtectionMaterial, crate::crypto_file::FileKey)> =
         if meta.password_hash.is_some() {
             let target_id = meta.reserve_id.as_deref().unwrap_or(&meta.id);

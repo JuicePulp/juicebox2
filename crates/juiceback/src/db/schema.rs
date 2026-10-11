@@ -173,8 +173,8 @@ fn m09_files_protected_links(conn: &Connection) -> Result<()> {
 }
 
 fn m10_reports_password(conn: &Connection) -> Result<()> {
-    // Reporter-supplied file-gate password (not a user credential) so
-    // moderators can open protected reports. Never logged.
+    
+    
     if !has_column(conn, "reports", "password")? {
         conn.execute(
             "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
@@ -185,12 +185,12 @@ fn m10_reports_password(conn: &Connection) -> Result<()> {
 }
 
 fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
-    // Per-file data keys for password-gated files: the DEK wrapped by a
-    // password-derived KEK (`dek_wrapped`, base64) plus its salt
-    // (`dek_salt`, base64), and a global-key escrow copy (`dek_escrow`,
-    // hex) so admins/moderators can still preview reported files.
-    // `key_version` 0 = legacy single global key, 1 = per-file DEK.
-    // Existing protected rows keep working untouched (they stay version 0).
+    
+    
+    
+    
+    
+    
     if !has_column(conn, "files", "dek_wrapped")? {
         conn.execute(
             "ALTER TABLE files ADD COLUMN dek_wrapped TEXT DEFAULT NULL",
@@ -219,13 +219,13 @@ fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
 }
 
 fn m12_visitor_stats(conn: &Connection) -> Result<()> {
-    // Admin-only visitor analytics. IPs are never stored raw here: callers
-    // hash with the ip_pepper HMAC first, so rows only carry `ip_hash`.
-    // `file_stats` is keyed per (file, viewer): one row per person per
-    // file, with running view/download hit totals (range-request chunks
-    // from media streaming collapse into the same row instead of
-    // inflating the count). `site_visitors` is one row per person ever
-    // seen on the main site.
+    
+    
+    
+    
+    
+    
+    
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS file_stats (
             file_id       TEXT NOT NULL,

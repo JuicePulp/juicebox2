@@ -67,9 +67,9 @@ pub(crate) async fn finalize_concat(
     part_ids: &[String],
     full_size: u64,
 ) -> Result<serde_json::Value, AppError> {
-    // Defense in depth: parallel parts land as plaintext on juicehost, so a
-    // protected reservation must never complete through concat (creation
-    // already rejects it).
+    
+    
+    
     if let Some(reserve_id) = meta.reserve_id.as_deref() {
         let lookup = reserve_id.to_string();
         let reservation = state

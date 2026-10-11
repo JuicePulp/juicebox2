@@ -1,20 +1,20 @@
-//! At-rest encryption for files stored on untrusted juicehost backends.
-//!
-//! juicehost (local disk / S3) stores ciphertext only. The key lives only in
-//! juiceback, which encrypts on upload (after plaintext validation) and
-//! decrypts on gated download. This protects against a malicious host
-//! operator, stolen disk, or bucket leak. It does NOT protect against the
-//! juiceback operator.
-//!
-//! Wire format (v1), all integers little-endian:
-//!
-//! ```text
-//! header: magic "JBC1" (4B) | chunk_shift u8 (1B, always 16) | orig_size u64 (8B)
-//! body:   for each 64 KiB plaintext chunk: nonce (12B) | AES-256-GCM ct | tag (16B)
-//! ```
-//!
-//! Chunking preserves streaming and HTTP Range without full-file decrypt.
-//! Each chunk gets a fresh 96-bit random nonce from `OsRng`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 use std::{
     fmt,
@@ -25,39 +25,39 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
 use zeroize::Zeroizing;
 
-/// Plaintext bytes per chunk. `CHUNK_SHIFT` is its base-2 logarithm.
+
 pub const PLAINTEXT_CHUNK_LEN: usize = 64 * 1024;
-/// Value stored in the header's `chunk_shift` byte.
+
 pub const CHUNK_SHIFT: u8 = 16;
-/// GCM nonce bytes prepended to every stored chunk.
+
 pub const NONCE_LEN: usize = 12;
-/// GCM tag bytes appended to every stored chunk ciphertext.
+
 pub const TAG_LEN: usize = 16;
-/// Magic bytes identifying this container.
+
 pub const MAGIC: &[u8; 4] = b"JBC1";
-/// Header length: 4B magic + 1B shift + 8B original size.
+
 pub const HEADER_LEN: usize = 13;
-/// Per-file data-key length (AES-256).
+
 pub const DEK_LEN: usize = 32;
-/// Random salt length for the password-to-KEK derivation.
+
 pub const DEK_SALT_LEN: usize = 16;
-/// Wrapped DEK length: nonce (12B) + DEK (32B) + tag (16B).
+
 pub const WRAPPED_DEK_LEN: usize = NONCE_LEN + DEK_LEN + TAG_LEN;
-/// `key_version` for files encrypted under a per-file data key.
-/// Version 0 is the legacy single global storage key.
+
+
 pub const KEY_VERSION_V1: i64 = 1;
-/// Argon2id cost for password-to-KEK derivation (matches the password
-/// verifier defaults: ~19 MiB, 2 passes, single lane).
+
+
 pub const KDF_MEM_KIB: u32 = 19456;
-/// Argon2id time cost for password-to-KEK derivation.
+
 pub const KDF_TIME: u32 = 2;
-/// Argon2id parallelism for password-to-KEK derivation.
+
 pub const KDF_LANES: u32 = 1;
 
-/// 256-bit storage key. Zeroized on drop; never logged or Debug-printed.
-///
-/// Cloned only to hand a request-scoped copy to streaming decryptors; every
-/// copy is still zeroized on drop.
+
+
+
+
 #[derive(Clone)]
 pub struct FileKey(Zeroizing<[u8; 32]>);
 
@@ -68,21 +68,21 @@ impl fmt::Debug for FileKey {
 }
 
 impl FileKey {
-    /// Parse a 64-char hex string (e.g. from `STORAGE_ENCRYPTION_KEY`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError::BadKey`] when the input is not 64 hex chars.
+    
+    
+    
+    
+    
     pub fn from_hex(hex_str: &str) -> Result<Self, CryptoError> {
         let bytes = hex::decode(hex_str.trim()).map_err(|_| CryptoError::BadKey)?;
         Self::from_bytes(&bytes)
     }
 
-    /// Build from raw bytes. Fails unless exactly 32 bytes are given.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError::BadKey`] when `bytes.len() != 32`.
+    
+    
+    
+    
+    
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
         let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::BadKey)?;
         Ok(Self(Zeroizing::new(arr)))
@@ -93,14 +93,14 @@ impl FileKey {
         Aes256Gcm::new(&key)
     }
 
-    /// Raw key bytes for wrapping operations (escrow, DEK wrap). The
-    /// returned reference borrows the zeroized backing store.
+    
+    
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
-    /// Fresh random 256-bit key for one protected file.
+    
     #[must_use]
     pub fn generate() -> Self {
         let mut bytes = [0_u8; 32];
@@ -109,7 +109,7 @@ impl FileKey {
     }
 }
 
-/// Fresh random salt for one file's password-to-KEK derivation.
+
 #[must_use]
 pub fn random_salt() -> [u8; DEK_SALT_LEN] {
     let mut salt = [0_u8; DEK_SALT_LEN];
@@ -117,16 +117,16 @@ pub fn random_salt() -> [u8; DEK_SALT_LEN] {
     salt
 }
 
-/// Derive a 32-byte key-encryption key from `password` and `salt` with
-/// Argon2id at [`KDF_MEM_KIB`]/[`KDF_TIME`]/[`KDF_LANES`].
-///
-/// CPU-bound like password hashing: callers must run this on the blocking
-/// pool, never on async workers. The password never appears in errors.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::Kdf`] when the parameters are rejected or the
-/// salt has the wrong length.
+
+
+
+
+
+
+
+
+
+
 pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
     use argon2::{Algorithm, Argon2, Params, Version};
     let params = Params::new(KDF_MEM_KIB, KDF_TIME, KDF_LANES, Some(DEK_LEN))
@@ -139,12 +139,12 @@ pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
     Ok(FileKey(Zeroizing::new(out)))
 }
 
-/// Wrap `dek` under `kek`: `nonce (12B) || ct || tag (16B)`.
-///
-/// # Errors
-///
-/// GCM encryption cannot fail for valid inputs; the error arm only guards
-/// API misuse.
+
+
+
+
+
+
 pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
     let mut nonce = [0_u8; NONCE_LEN];
     rand::rng().fill_bytes(&mut nonce);
@@ -158,13 +158,13 @@ pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
     Ok(out)
 }
 
-/// Unwrap a [`wrap_dek`] blob back into the file's data key.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::Truncated`] on framing shortfall and
-/// [`CryptoError::Decrypt`] when the password (and therefore the KEK) is
-/// wrong or the bytes were tampered with.
+
+
+
+
+
+
+
 pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError> {
     if wrapped.len() != WRAPPED_DEK_LEN {
         return Err(CryptoError::Truncated);
@@ -178,25 +178,25 @@ pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError>
     FileKey::from_bytes(&plain)
 }
 
-/// Failures for [`encrypt_reader`], [`decrypt_to_writer`], [`decrypt_range`],
-/// and header/key parsing. Messages never include key material.
+
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CryptoError {
-    /// Key is not 32 bytes (or not 64 hex chars).
+    
     BadKey,
-    /// Container magic or chunk shift does not match v1.
+    
     BadFormat,
-    /// Ciphertext shorter than the header, chunk framing, or declared size.
+    
     Truncated,
-    /// Plaintext reader yielded a different byte count than declared.
+    
     LengthMismatch,
-    /// Requested byte range is outside `[0, orig_size]`.
+    
     RangeOutOfBounds,
-    /// GCM authentication failed (wrong key or tampered bytes).
+    
     Decrypt,
-    /// Password-to-key derivation failed (bad parameters, never key material).
+    
     Kdf,
-    /// Underlying I/O failed.
+    
     Io(String),
 }
 
@@ -223,35 +223,35 @@ impl From<std::io::Error> for CryptoError {
     }
 }
 
-/// Number of 64 KiB chunks covering `plain_len` bytes (at least one, so even
-/// an empty file has a single empty chunk to authenticate).
+
+
 #[must_use]
 pub const fn chunk_count(plain_len: u64) -> u64 {
     let chunks = plain_len.div_ceil(PLAINTEXT_CHUNK_LEN as u64);
     if chunks == 0 { 1 } else { chunks }
 }
 
-/// Exact stored size for `plain_len` plaintext bytes:
-/// header + plaintext + per-chunk nonce/tag overhead.
+
+
 #[must_use]
 pub const fn ciphertext_len(plain_len: u64) -> u64 {
     HEADER_LEN as u64 + plain_len + chunk_count(plain_len) * (NONCE_LEN as u64 + TAG_LEN as u64)
 }
 
-/// Stored length of one chunk holding `plain_len` plaintext bytes.
+
 const fn stored_chunk_len(plain_len: usize) -> usize {
     NONCE_LEN + plain_len + TAG_LEN
 }
 
-/// Stored byte range covering plaintext `[start, end)` (end exclusive).
-///
-/// Lets callers issue a single Range GET for exactly the chunks overlapping
-/// the requested plaintext, then decrypt and slice locally.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::RangeOutOfBounds`] when `start > end` or
-/// `end > plain_len`.
+
+
+
+
+
+
+
+
+
 pub fn cipher_range_for_plain(
     start: u64,
     end: u64,
@@ -267,8 +267,8 @@ pub fn cipher_range_for_plain(
     let full_stored = NONCE_LEN as u64 + chunk + TAG_LEN as u64;
     let first = start / chunk;
     let last = (end - 1) / chunk;
-    // Only the final chunk overall can be short, so every chunk before
-    // `last` is full and offsets are closed-form.
+    
+    
     let cipher_start = HEADER_LEN as u64 + first * full_stored;
     let last_plain = (plain_len - last * chunk).min(chunk);
     let cipher_len =
@@ -280,7 +280,7 @@ fn write_header(out: &mut Vec<u8>, plain_len: u64) {
     out.extend_from_slice(&encode_header(plain_len));
 }
 
-/// The 13-byte container header for `plain_len` plaintext bytes.
+
 #[must_use]
 pub const fn encode_header(plain_len: u64) -> [u8; 13] {
     let size = plain_len.to_le_bytes();
@@ -301,13 +301,13 @@ pub const fn encode_header(plain_len: u64) -> [u8; 13] {
     ]
 }
 
-/// Parse and validate the 13-byte header, returning the original plaintext
-/// size.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::Truncated`] when fewer than 13 bytes are given and
-/// [`CryptoError::BadFormat`] on magic/shift mismatch.
+
+
+
+
+
+
+
 pub fn parse_header(data: &[u8]) -> Result<u64, CryptoError> {
     let header = data.get(..HEADER_LEN).ok_or(CryptoError::Truncated)?;
     if &header[..4] != MAGIC || header[4] != CHUNK_SHIFT {
@@ -318,12 +318,12 @@ pub fn parse_header(data: &[u8]) -> Result<u64, CryptoError> {
     Ok(u64::from_le_bytes(size))
 }
 
-/// Encrypt one chunk (`plaintext.len() <= 64 KiB`) to `nonce || ct || tag`.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::LengthMismatch`] when the chunk is oversized. GCM
-/// encryption itself cannot fail for valid inputs.
+
+
+
+
+
+
 pub fn encrypt_chunk(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if plaintext.len() > PLAINTEXT_CHUNK_LEN {
         return Err(CryptoError::LengthMismatch);
@@ -340,12 +340,12 @@ pub fn encrypt_chunk(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CryptoE
     Ok(out)
 }
 
-/// Decrypt one stored `nonce || ct || tag` chunk.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::Truncated`] on framing shortfall and
-/// [`CryptoError::Decrypt`] on authentication failure.
+
+
+
+
+
+
 pub fn decrypt_chunk(key: &FileKey, chunk: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if chunk.len() < NONCE_LEN + TAG_LEN || chunk.len() > stored_chunk_len(PLAINTEXT_CHUNK_LEN) {
         return Err(CryptoError::Truncated);
@@ -357,12 +357,12 @@ pub fn decrypt_chunk(key: &FileKey, chunk: &[u8]) -> Result<Vec<u8>, CryptoError
         .map_err(|_| CryptoError::Decrypt)
 }
 
-/// Encrypt exactly `plain_len` bytes from `reader` into a complete container.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::LengthMismatch`] when the reader yields more or
-/// fewer bytes than declared, plus I/O errors.
+
+
+
+
+
+
 pub fn encrypt_reader(
     key: &FileKey,
     plain_len: u64,
@@ -392,7 +392,7 @@ pub fn encrypt_reader(
     if plain_len == 0 {
         out.extend_from_slice(&encrypt_chunk(key, &[])?);
     }
-    // A longer-than-declared reader is a caller bug; refuse silently wrong output.
+    
     let mut extra = [0_u8; 1];
     if reader.read(&mut extra)? != 0 {
         return Err(CryptoError::LengthMismatch);
@@ -400,11 +400,11 @@ pub fn encrypt_reader(
     Ok(out)
 }
 
-/// Decrypt a full container into `writer`, returning the plaintext size.
-///
-/// # Errors
-///
-/// Returns framing, authentication, and I/O errors; see [`CryptoError`].
+
+
+
+
+
 pub fn decrypt_to_writer(
     key: &FileKey,
     data: &[u8],
@@ -436,13 +436,13 @@ pub fn decrypt_to_writer(
     Ok(plain_len)
 }
 
-/// Decrypt `data[start..end]` (plaintext offsets, end exclusive), touching
-/// only the overlapping chunks.
-///
-/// # Errors
-///
-/// Returns [`CryptoError::RangeOutOfBounds`] when `start > end` or
-/// `end > orig_size`, plus framing/authentication errors.
+
+
+
+
+
+
+
 pub fn decrypt_range(
     key: &FileKey,
     data: &[u8],
@@ -457,8 +457,8 @@ pub fn decrypt_range(
         return Ok(Vec::new());
     }
     let body = &data[HEADER_LEN..];
-    // Walk stored chunks with a cursor instead of precomputing offsets so a
-    // short/truncated tail surfaces as Truncated rather than panicking.
+    
+    
     let mut out = Vec::with_capacity(
         usize::try_from(end - start).map_err(|_| CryptoError::RangeOutOfBounds)?,
     );
@@ -603,7 +603,7 @@ mod tests {
         let key = test_key();
         let plain = pattern(200_000);
         let data = encrypt_reader(&key, 200_000, &plain[..]).unwrap();
-        // Full, head, tail, cross-chunk middle, single byte, empty.
+        
         for (start, end) in [
             (0, 200_000),
             (0, 10),
@@ -619,7 +619,7 @@ mod tests {
                 "range {start}..{end}"
             );
         }
-        // Out of bounds.
+        
         for (start, end) in [(0, 200_001), (200_001, 200_001), (10, 5)] {
             assert_eq!(
                 decrypt_range(&key, &data, start, end).unwrap_err(),
@@ -627,7 +627,7 @@ mod tests {
                 "range {start}..{end}"
             );
         }
-        // Wrong key on a range still authenticates.
+        
         assert_eq!(
             decrypt_range(&other_key(), &data, 0, 10).unwrap_err(),
             CryptoError::Decrypt
@@ -636,24 +636,24 @@ mod tests {
 
     #[test]
     fn cipher_range_covers_exact_chunks() {
-        // Single-chunk file.
+        
         assert_eq!(
             cipher_range_for_plain(0, 100, 100).unwrap(),
             (13, 12 + 100 + 16)
         );
-        // Empty range.
+        
         assert_eq!(cipher_range_for_plain(5, 5, 100).unwrap(), (13, 0));
-        // Two full chunks + short tail: range inside second chunk only.
+        
         let len = 65_536 * 2 + 7;
         let (off, n) = cipher_range_for_plain(65_536, 65_540, len).unwrap();
         assert_eq!(off, 13 + (12 + 65_536 + 16));
         assert_eq!(n, 12 + 65_536 + 16);
-        // Spanning chunks 0..2 (tail short): covers all three stored chunks.
+        
         let (off, n) = cipher_range_for_plain(0, len, len).unwrap();
         assert_eq!(off, 13);
         assert_eq!(n, 2 * (12 + 65_536 + 16) + (12 + 7 + 16));
         assert_eq!(off + n, ciphertext_len(len));
-        // Out of bounds.
+        
         assert_eq!(
             cipher_range_for_plain(0, len + 1, len).unwrap_err(),
             CryptoError::RangeOutOfBounds

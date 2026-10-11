@@ -27,10 +27,10 @@ pub struct UploadParams {
     pub(crate) ttl_seconds: i64,
     pub(crate) reservation: Option<FileRecord>,
     pub(crate) file_capability: String,
-    /// Container header emitted by the protected push, if any.
+    
     pub(crate) enc_header: Option<[u8; crate::crypto_file::HEADER_LEN]>,
-    /// Resolved key material for a protected upload (fresh or reservation).
-    /// Carries the in-memory data key; never logged.
+    
+    
     pub(crate) protection: Option<super::protected::UploadProtection>,
 }
 
@@ -84,8 +84,8 @@ pub async fn parse_multipart(
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().trim_end_matches('/').to_string();
             if !text.is_empty() {
-                // Surface the concrete reason (DNS, blocked range, ...):
-                // a generic INVALID_MULTIPART here cost real debugging time.
+                
+                
                 let checked = crate::storage_client::check_storage_host(
                     &text,
                     state.config.allow_private_fetch,
@@ -156,9 +156,9 @@ pub async fn parse_multipart(
 
             let protected =
                 password.is_some() || reservation.as_ref().is_some_and(|r| r.is_protected());
-            // Protected uploads always relay through juiceback; the flag
-            // additionally pins them to the standard relay even when the
-            // client asked for QUIC.
+            
+            
+            
             let push_mode = if protected && state.config.encrypted_force_relay {
                 UploadMode::Standard
             } else {

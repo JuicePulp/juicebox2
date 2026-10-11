@@ -19,11 +19,11 @@ use crate::{error::AppError, routes::api_doc::ApiDoc, state::AppState};
     tag = "General",
 )]
 pub async fn health_handler() -> Json<serde_json::Value> {
-    // Static liveness only: no downstream probe, no per-request metric.
-    // Dependency status is not health; monitors that need it hit each
-    // service directly. Previously every call probed juicehost over HTTP
-    // (10s cache) plus a sentry counter, so 137 pollers meant constant
-    // cross-service traffic for an offline banner.
+    
+    
+    
+    
+    
     Json(json!({
         "status": "ok",
         "juiceback": "ok",
@@ -39,10 +39,10 @@ pub async fn health_handler() -> Json<serde_json::Value> {
     tag = "General",
 )]
 pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    // Serve from cache; refetch on demand when empty (degraded recovery).
-    // When the cached value goes stale, serve it anyway and revalidate in
-    // the background so juicehost changes are picked up without any poll
-    // loop and without blocking this request on a fetch.
+    
+    
+    
+    
     let jh = match state.juicehost_config() {
         Ok(cfg) => {
             if state.juicehost_config_stale() {
@@ -80,6 +80,7 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
                     "standard"
                 },
                 "cobalt": state.config.cobalt_enabled,
+                "encrypted": state.config.storage_file_key().is_ok(),
                 "fetch_rate_limit_per_minute": crate::constants::COBALT_FETCH_RATE_LIMIT_PER_MINUTE,
                 "public_base_url": state.config.public_base_url,
                 "rate_limit_per_minute": state.config.rate_limit_per_minute,

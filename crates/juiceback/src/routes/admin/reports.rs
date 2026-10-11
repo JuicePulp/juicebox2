@@ -27,8 +27,8 @@ pub struct AdminReportEntry {
 
     pub created_at: i64,
 
-    /// Whether the reporter supplied a gate password (preview available).
-    /// The password itself is never exposed; preview decrypts server-side.
+    
+    
     pub has_password: bool,
 }
 

@@ -237,8 +237,8 @@ async fn patch_upload_handler_impl(
         .is_some();
 
     if protected {
-        // Protected sessions spool plaintext locally; ciphertext is produced
-        // once at completion. Offsets still advance so resume works.
+        
+        
         let spool = crate::routes::upload::protected::tus_spool_path(&id);
         tokio::fs::OpenOptions::new()
             .create(true)

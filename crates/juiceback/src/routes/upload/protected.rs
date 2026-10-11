@@ -1,9 +1,9 @@
-//! Password-gated (at-rest encrypted) uploads through the relay path.
-//!
-//! The browser posts plaintext to juiceback, which validates it, encrypts it
-//! with [`crate::crypto_file`], and pushes ciphertext to juicehost. Plaintext
-//! never reaches juicehost. Direct/ticket/parallel paths bypass juiceback
-//! bytes and are rejected for protected files (see [`relay_required`]).
+
+
+
+
+
+
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -18,20 +18,20 @@ use crate::{
     state::AppState,
 };
 
-/// Marker returned with 400 when a protected upload arrives on a path that
-/// bypasses juiceback-side encryption (direct ticket PUT, TUS parallel).
+
+
 pub const USE_RELAY_FOR_PROTECTED: &str =
     "USE_RELAY_FOR_PROTECTED: password-protected uploads must use relay upload, not direct upload";
 
-/// 400 rejection for protected uploads on non-relay paths.
+
 #[must_use]
 pub fn relay_required() -> AppError {
     AppError::BadRequest(USE_RELAY_FOR_PROTECTED.into())
 }
 
-/// A minted per-file data key plus everything needed to persist it.
-/// The `dek` lives in memory only and must never be logged or stored.
-/// Everything else is hashes/wrapped keys, safe for the database.
+
+
+
 #[derive(Clone)]
 pub struct ProtectionSetup {
     pub password_hash: String,
@@ -42,7 +42,7 @@ pub struct ProtectionSetup {
 }
 
 impl ProtectionSetup {
-    /// Database row material for this setup plus the container header.
+    
     #[must_use]
     pub fn material(&self, header_hex: String) -> ProtectionMaterial {
         ProtectionMaterial {
@@ -57,15 +57,15 @@ impl ProtectionSetup {
     }
 }
 
-/// Mint a per-file data key for `password`: Argon2id verifier, random salt,
-/// password-wrapped DEK, and a global-key escrow copy (for admin/report
-/// preview). Both Argon2id runs happen in one blocking task; the cleartext
-/// password never leaves this call.
-///
-/// # Errors
-///
-/// Returns [`AppError::BadRequest`] on policy violation and
-/// [`AppError::Internal`] when hashing, derivation, or escrow fails.
+
+
+
+
+
+
+
+
+
 pub async fn prepare_protection(
     state: &Arc<AppState>,
     password: &str,
@@ -101,13 +101,13 @@ pub async fn prepare_protection(
     .map_err(|_| AppError::Internal("protection setup panicked".into()))?
 }
 
-/// Recover a file's data key through the global-key escrow copy (admin and
-/// reservation-completion paths). Fast symmetric crypto, safe inline.
-///
-/// # Errors
-///
-/// Returns [`AppError::Internal`] when the escrow blob is malformed or the
-/// storage key is unavailable.
+
+
+
+
+
+
+
 pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey, AppError> {
     let key = state
         .config
@@ -120,18 +120,18 @@ pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey,
     FileKey::from_bytes(&plain).map_err(|_| AppError::Internal("bad key escrow".into()))
 }
 
-/// The encryption key plus row material for one protected upload.
-/// `Fresh` mints from a form password; `Reserved` reuses the reservation
-/// row (whose verifier and wraps already correspond to one password - a
-/// form password is never mixed in). Legacy reservation rows without key
-/// material fall back to the global storage key.
+
+
+
+
+
 pub enum UploadProtection {
     Fresh(ProtectionSetup),
     Reserved(ProtectionMaterial),
 }
 
 impl UploadProtection {
-    /// Data key for chunk encryption (memory only).
+    
     pub fn dek(&self, state: &Arc<AppState>) -> Result<FileKey, AppError> {
         let global = || {
             state
@@ -148,7 +148,7 @@ impl UploadProtection {
         }
     }
 
-    /// Row material with the container header filled in.
+    
     #[must_use]
     pub fn material(&self, header_hex: String) -> ProtectionMaterial {
         match self {
@@ -161,7 +161,7 @@ impl UploadProtection {
         }
     }
 
-    /// Verifier for response flags.
+    
     #[must_use]
     pub fn password_hash(&self) -> Option<String> {
         match self {
@@ -171,10 +171,10 @@ impl UploadProtection {
     }
 }
 
-/// Resolve protection for a multipart completion: a protected reservation
-/// reuses its row material (v1) or the global key (legacy rows); otherwise
-/// a form password mints fresh v1 material. Returns `None` for public
-/// uploads.
+
+
+
+
 pub async fn resolve_multipart_protection(
     state: &Arc<AppState>,
     password: Option<String>,
@@ -199,8 +199,8 @@ pub async fn resolve_multipart_protection(
     )))
 }
 
-/// Spool one side of a plaintext byte stream into a temp file, enforcing the
-/// plaintext size cap. Returns the file and the spooled byte count.
+
+
 pub fn spawn_spool_task(
     max_size: i64,
 ) -> (
@@ -236,14 +236,14 @@ pub fn spawn_spool_task(
     (tx, handle)
 }
 
-/// Encrypt a spooled plaintext file and push the container (header + chunks)
-/// to juicehost through the standard relay channel. Returns the header bytes
-/// for the `enc_header` DB column.
-///
-/// # Errors
-///
-/// Returns an error when the spool cannot be read, encryption fails, or the
-/// juicehost push is rejected.
+
+
+
+
+
+
+
+
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -315,11 +315,11 @@ pub async fn push_encrypted_file(
     Ok(header)
 }
 
-/// Persist protection metadata after a relayed completion.
-///
-/// # Errors
-///
-/// Returns [`AppError::NotFound`] when the row vanished mid-completion.
+
+
+
+
+
 pub async fn mark_protected(
     state: &Arc<AppState>,
     file_id: &str,
@@ -338,8 +338,8 @@ pub async fn mark_protected(
     Ok(())
 }
 
-/// Absolute path of a TUS protected-upload spool file. Lives beside the
-/// process temp dir and is removed when the upload completes or aborts.
+
+
 #[must_use]
 pub fn tus_spool_path(id: &str) -> PathBuf {
     std::env::temp_dir().join(format!("juicebox-tus-protected-{id}"))

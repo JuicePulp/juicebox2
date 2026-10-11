@@ -29,8 +29,8 @@ pub struct ReportRequest {
     #[serde(default)]
     pub email: String,
 
-    /// Optional gate password for protected files, so moderators can open
-    /// them. Stored with the report; never logged.
+    
+    
     #[serde(default)]
     pub password: String,
 }

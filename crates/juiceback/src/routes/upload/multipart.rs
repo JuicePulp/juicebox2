@@ -23,8 +23,8 @@ pub struct ReserveUploadRequest {
     pub mime_type: Option<String>,
     pub ttl_hours: Option<f64>,
     pub host: Option<String>,
-    /// Optional password gate. Relay-only: complete via `POST /upload`,
-    /// never via direct/ticket PUT.
+    
+    
     pub password: Option<String>,
 }
 
@@ -86,9 +86,9 @@ pub async fn reserve_upload_handler(
 
     let encrypted_ip = super::ticket::encrypted_client_ip(&state, &headers, addr);
 
-    // A protected reservation mints its per-file data key now, while the
-    // password is in memory. Completion reuses the row material, so the
-    // form never needs to resend the password.
+    
+    
+    
     let setup = match body.password.filter(|p| !p.is_empty()) {
         Some(password) => Some(super::protected::prepare_protection(&state, &password).await?),
         None => None,
@@ -219,8 +219,8 @@ pub async fn upload_handler(
         .get("x-delete-token")
         .and_then(|value| value.to_str().ok());
     let fresh_capability = uuid::Uuid::new_v4().to_string();
-    // The multipart state machine is large; keep it on the heap so debug
-    // builds (2 MiB worker stacks) don't overflow while polling it.
+    
+    
     let params = Box::pin(parse_multipart(
         &mut multipart,
         &state,
@@ -233,9 +233,9 @@ pub async fn upload_handler(
 
     let now = chrono::Utc::now().timestamp();
 
-    // Protection was resolved while parsing (fresh setup from the form
-    // password, or the reservation row's material). The reservation's
-    // verifier wins when both exist - never mix a form password in.
+    
+    
+    
     let protection = params.protection;
     let protected = protection.is_some();
     if protected && params.enc_header.is_none() {

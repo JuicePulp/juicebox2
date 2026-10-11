@@ -107,8 +107,8 @@ pub async fn create_upload_handler(
     let total_parts = parse_parallel_number(find_meta(&metadata, "total_parts"))?;
     let parallel = validate_parallel_metadata(session_id.as_deref(), part_index, total_parts)?;
 
-    // Password gate: validated here, hashed below. Parallel (server-side
-    // concat of plaintext parts) can never be protected.
+    
+    
     let password = find_meta(&metadata, "password")
         .filter(|v| !v.is_empty())
         .map(|v| {
@@ -157,8 +157,8 @@ pub async fn create_upload_handler(
             ));
         }
         if reservation.is_protected() {
-            // The reservation already carries the verifier; a second password
-            // here would be ambiguous, and parallel parts would land plaintext.
+            
+            
             if password.is_some() || parallel.is_some() {
                 return Err(crate::routes::upload::protected::relay_required());
             }
@@ -248,9 +248,9 @@ pub async fn create_upload_handler(
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 
-    // The reservation's verifier is already hashed; only a fresh session
-    // password mints a per-file data key (blocking pool: two Argon2id runs).
-    // Reservation-backed sessions reuse the row material at completion.
+    
+    
+    
     let protection_setup = match reservation_hash {
         Some(_) => None,
         None => match password {
@@ -267,8 +267,8 @@ pub async fn create_upload_handler(
             .map(|setup| setup.password_hash.clone()),
     };
 
-    // Protected uploads always relay; pin standard relay unless the operator
-    // opted out (mirrors the multipart path).
+    
+    
     let storage_upload_mode = if password_hash.is_some() && state.config.encrypted_force_relay {
         crate::upload_mode::UploadMode::Standard
     } else {

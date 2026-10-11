@@ -42,11 +42,11 @@ pub fn delete_report(conn: &Connection, id: i64) -> Result<bool> {
     Ok(affected > 0)
 }
 
-/// Fetch one report row by id.
-///
-/// # Errors
-///
-/// Returns [`rusqlite::Error`] on database failure.
+
+
+
+
+
 pub fn get_report(conn: &Connection, id: i64) -> Result<Option<ReportRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, file_url, reason, details, reporter_ip, email, created_at, password FROM reports WHERE id = ?1",
@@ -66,7 +66,7 @@ pub fn get_report(conn: &Connection, id: i64) -> Result<Option<ReportRecord>> {
     rows.next().transpose()
 }
 
-/// File id from a `/f/<id>[.<ext>]` URL path, if present.
+
 #[must_use]
 pub fn file_id_from_url(file_url: &str) -> Option<String> {
     let path = file_url.split('?').next()?;

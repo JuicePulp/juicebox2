@@ -91,7 +91,7 @@ impl AppState {
             config.dte_mint_burst,
         ));
 
-        // Unlock attempts: a few quick tries, then paced over the window.
+        
         let unlock_limiter = Arc::new(crate::mint_limiter::MintLimiter::new(
             config.password_try_limit,
             config.password_try_window_secs,
@@ -148,9 +148,9 @@ impl AppState {
         })
     }
 
-    /// Fetch juicehost config now and swap it in. Used on demand when the
-    /// cache is empty (degraded recovery) or stale (change pickup), so no
-    /// background poll loop is needed.
+    
+    
+    
     pub async fn refresh_juicehost_config(&self) -> Result<Arc<JuicehostConfig>, String> {
         let cfg = crate::storage_client::fetch_juicehost_config(
             &self.http,
@@ -168,8 +168,8 @@ impl AppState {
         Ok(fresh)
     }
 
-    /// Cached config, refetching once when empty. Hot paths use this instead
-    /// of `juicehost_config()` so a degraded boot recovers on first use.
+    
+    
     pub async fn juicehost_config_or_refresh(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         if let Ok(cfg) = self.juicehost_config() {
             return Ok(cfg);
@@ -179,9 +179,9 @@ impl AppState {
             .map_err(AppError::ServiceUnavailable)
     }
 
-    /// Whether the cached config is older than the healthy refresh cadence.
-    /// `config_handler` uses this for stale-while-revalidate: serve stale,
-    /// refresh in the background.
+    
+    
+    
     pub fn juicehost_config_stale(&self) -> bool {
         let at = self
             .jh_config_updated_at

@@ -34,13 +34,13 @@ fn test_state(juicehost_url: String) -> Arc<AppState> {
     common::state_from_config(test_config(juicehost_url))
 }
 
-/// Captures every chunked push body the mock juicehost receives.
+
 fn captured_pushes() -> Arc<Mutex<Vec<Vec<u8>>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-/// Serves captured pushes back as the internal ciphertext endpoint,
-/// honoring a single `Range: bytes=A-B` header like juicehost does.
+
+
 async fn mock_ciphertext_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>>>>) {
     Mock::given(method("GET"))
         .and(path_regex("/internal/file/.*/ciphertext"))
@@ -167,7 +167,7 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     assert_eq!(json["is_encrypted"], true);
     let id = json["id"].as_str().unwrap().to_string();
 
-    // What reached juicehost must be a valid container, not plaintext.
+    
     let pushes = captured.lock().unwrap();
     assert_eq!(pushes.len(), 1);
     let stored: Vec<u8> = pushes.concat();
@@ -178,8 +178,8 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
         "plaintext must not appear in stored bytes"
     );
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
-    // New uploads use a per-file data key: recover it through the escrow
-    // copy (what the server does) and decrypt client-side with it.
+    
+    
     let record = db_record(&state, &id).await;
     let escrow = record.dek_escrow.clone().expect("v1 escrow material");
     let escrow_raw = hex::decode(&escrow).unwrap();
@@ -189,7 +189,7 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
     assert_eq!(plain, PLAINTEXT);
 
-    // DB carries verifier + flags + header, never the password.
+    
     let record = db_record(&state, &id).await;
     assert!(record.is_protected());
     assert!(record.is_encrypted);
@@ -442,7 +442,7 @@ async fn tus_protected_roundtrip_spools_then_encrypts() {
     assert_eq!(status, StatusCode::CREATED);
     let location = location.unwrap();
 
-    // Two PATCHes to prove offset bookkeeping works while spooling.
+    
     let mid = PLAINTEXT.len() / 2;
     let (status, _) = tus_patch(&app, &location, 0, &PLAINTEXT[..mid]).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -518,7 +518,7 @@ async fn tus_adopts_protected_reservation() {
     let id = reserve["id"].as_str().unwrap();
     let token = reserve["delete_token"].as_str().unwrap();
 
-    // No password in TUS metadata: the reservation carries the verifier.
+    
     let meta = tus_meta(&[
         ("filename", "secret.txt"),
         ("mimetype", "text/plain"),
@@ -643,7 +643,7 @@ async fn fetch_with_password_stores_ciphertext_only() {
     );
 }
 
-/// Upload a protected file through the relay and return its id.
+
 async fn upload_protected(app: &axum::Router, state: &Arc<AppState>, boundary: &str) -> String {
     let body = multipart_body(
         boundary,
@@ -708,7 +708,7 @@ async fn unlock_page_and_cookie_flow() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "unlockpage1").await;
 
-    // The backend unlock page is retired: old links bounce to the host shell.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -749,17 +749,17 @@ async fn unlock_page_and_cookie_flow() {
         .await
         .unwrap();
 
-    // Wrong password: identical 403 body (no oracle).
+    
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // Correct password: cookie + JSON ok.
+    
     let (status, headers, json) = post_unlock_json(&app, &id, PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let cookie = unlock_cookie(&headers, &id).expect("unlock cookie");
     assert!(cookie.starts_with(&format!("jb_unlock_{id}=")));
 
-    // Cookie grants the bytes.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -790,7 +790,7 @@ async fn unlock_page_and_cookie_flow() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    // The 403 bodies for missing vs wrong credentials match.
+    
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let _ = no_auth_body;
@@ -808,7 +808,7 @@ async fn content_password_transports_and_ranges() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "unlockrange1").await;
 
-    // ?password= query transport.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -829,7 +829,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    // X-File-Password transport.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -844,7 +844,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Byte range over the decrypted representation.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -871,7 +871,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), &PLAINTEXT[..10]);
 
-    // Open-ended range.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -891,7 +891,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), &PLAINTEXT[total - 5..]);
 
-    // Unsatisfiable range.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -907,7 +907,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
 
-    // HEAD mirrors headers with no body.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -932,7 +932,7 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert!(bytes.is_empty());
 
-    // Unprotected files redirect to their public URL instead.
+    
     let boundary = "plainunlock1";
     let body = multipart_body(boundary, &[], ("a.txt", PLAINTEXT));
     let (status, json) = post_upload(&app, body, boundary, None).await;
@@ -1044,7 +1044,7 @@ async fn report_password_enables_admin_preview() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].password.as_deref(), Some(PASSWORD));
 
-    // Admin list exposes availability, never the password.
+    
     let token = seed_admin(&state).await;
     let resp = app
         .clone()
@@ -1066,7 +1066,7 @@ async fn report_password_enables_admin_preview() {
     assert_eq!(list["items"][0]["has_password"], true);
     assert!(list["items"][0].get("password").is_none());
 
-    // Preview streams decrypted bytes using the stored password.
+    
     let report_id = reports[0].id;
     let resp = app
         .clone()
@@ -1086,7 +1086,7 @@ async fn report_password_enables_admin_preview() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    // Preview without auth is rejected.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1126,11 +1126,11 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "deletecleanup1").await;
 
-    // The completion response already points at the unlock page.
+    
     let record = db_record(&state, &id).await;
     assert!(record.is_protected());
 
-    // Info reports the unlock URL, not the raw storage URL.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1259,11 +1259,11 @@ async fn gateway_params_and_unlock_release_working_dek() {
     );
     assert_eq!(params["filename"], "secret.txt");
 
-    // Wrong password: 403, no key.
+    
     let (status, _, _) = post_gateway_unlock(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // Correct password: data key, no-store, decrypts the stored bytes.
+    
     let (status, headers, json) = post_gateway_unlock(&app, &id, PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(
@@ -1284,7 +1284,7 @@ async fn gateway_params_and_unlock_release_working_dek() {
     juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
     assert_eq!(plain, PLAINTEXT);
 
-    // Unknown ids and public files: 404, never a key.
+    
     let (status, _) = get_gateway_params(&app, "nope1234").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = post_gateway_unlock(&app, "nope1234", PASSWORD).await;
@@ -1301,8 +1301,8 @@ async fn gateway_params_and_unlock_release_working_dek() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// Seed a legacy (global-key, `key_version` 0) protected row with matching
-/// mock-host bytes, proving old files keep working read-only.
+
+
 async fn seed_legacy(state: &Arc<AppState>, captured: Arc<Mutex<Vec<Vec<u8>>>>) -> String {
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
     let stored =
@@ -1354,11 +1354,11 @@ async fn legacy_files_stay_readable_without_key_release() {
     assert_eq!(status, StatusCode::OK, "{params}");
     assert_eq!(params["key_version"], "0");
 
-    // Legacy rows never release keys here.
+    
     let (status, _, _) = post_gateway_unlock(&app, &id, PASSWORD).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // Server-side password transports still decrypt legacy bytes.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1377,7 +1377,7 @@ async fn legacy_files_stay_readable_without_key_release() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    // Old unlock links bounce to the host shell too.
+    
     let resp = app
         .clone()
         .oneshot(

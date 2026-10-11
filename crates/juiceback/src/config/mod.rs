@@ -28,8 +28,8 @@ pub struct Config {
 
     pub ip_pepper: String,
 
-    /// Hex-encoded 32-byte key for at-rest file encryption on juicehost.
-    /// Required at boot (fail closed); never logged.
+    
+    
     pub storage_encryption_key: String,
 
     pub password_min_len: usize,
@@ -380,16 +380,16 @@ fn clean_url(s: String) -> String {
     s.trim_end_matches('/').to_string()
 }
 
-/// Default minimum accepted upload password length.
+
 pub const DEFAULT_PASSWORD_MIN_LEN: usize = 8;
-/// Hard ceiling for upload passwords (Argon2id cost + DoS bound).
+
 pub const PASSWORD_MAX_LEN: usize = 256;
 const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
 const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
 const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
 
-/// Fail closed unless `hex` decodes to exactly 32 bytes. The value itself is
-/// never included in the error.
+
+
 fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
     let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
     if bytes.len() != 32 {
@@ -443,12 +443,12 @@ fn parse_env_bool(name: &str, default: bool) -> Result<bool, String> {
     }
 }
 
-/// Check an upload password against the length policy.
-///
-/// # Errors
-///
-/// Returns a message when the password is shorter than `min_len` or longer
-/// than [`PASSWORD_MAX_LEN`]. The password itself is never echoed back.
+
+
+
+
+
+
 pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), String> {
     if password.len() < min_len {
         return Err(format!("password must be at least {min_len} characters"));
@@ -462,24 +462,24 @@ pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), St
 }
 
 impl Config {
-    /// Parse `STORAGE_ENCRYPTION_KEY` into a usable file key.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::crypto_file::CryptoError`] when the stored value is
-    /// not 64 hex chars (cannot happen after successful load).
+    
+    
+    
+    
+    
+    
     pub fn storage_file_key(
         &self,
     ) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
         crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
     }
 
-    /// Check an upload password against this instance's length policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns a message when the password violates the policy; see
-    /// [`validate_upload_password`].
+    
+    
+    
+    
+    
+    
     pub fn check_upload_password(&self, password: &str) -> Result<(), String> {
         validate_upload_password(password, self.password_min_len)
     }

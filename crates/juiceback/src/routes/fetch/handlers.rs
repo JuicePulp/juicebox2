@@ -57,9 +57,9 @@ pub async fn fetch_start_handler(
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
 
-    // Policy-checked here; the cleartext password travels with the job and
-    // mints its per-file data key at store time (same operator trust as
-    // relay uploads, which also see plaintext).
+    
+    
+    
     if let Some(ref password) = body.password {
         if !password.is_empty() {
             state

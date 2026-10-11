@@ -43,8 +43,8 @@ pub struct DirectUploadReserveRequest {
     #[serde(default)]
     pub device_id: Option<String>,
 
-    /// Rejected: password-protected uploads must relay through juiceback
-    /// (`POST /upload`), which encrypts before pushing to juicehost.
+    
+    
     #[serde(default)]
     pub password: Option<String>,
 }
@@ -262,8 +262,8 @@ pub async fn direct_upload_complete_handler(
     if file.status != "uploading" {
         return Err(AppError::Conflict("upload is already complete".into()));
     }
-    // Defense in depth: tickets are never issued for protected files, but a
-    // reservation that somehow gained a verifier must not complete direct.
+    
+    
     if file.is_protected() {
         return Err(super::protected::relay_required());
     }

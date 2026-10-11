@@ -19,9 +19,9 @@ pub(crate) fn format_error_response(status: u16, body_text: String) -> String {
     }
 }
 
-/// Strip HTML tags, collapse whitespace, and truncate: upstreams (proxies,
-/// custom hosts, CDNs) may answer with full HTML error pages, and those must
-/// never reach user-facing messages verbatim.
+
+
+
 fn scrub_body(body: &str) -> String {
     const MAX_CHARS: usize = 200;
     let mut out = String::new();

@@ -146,11 +146,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    // TUS traffic (session creation, chunk PATCH, offset GET, session
-    // DELETE) gets its own generous budget: a parallel upload fans out
-    // dozens of requests in seconds and sustains a dozen per second on fast
-    // links, which would starve on the action governor and wedge uploads
-    // behind 429s. Abandoned sessions expire via the cleanup job.
+    
+    
+    
+    
+    
     let mut tus_data_builder = GovernorConfigBuilder::default();
     tus_data_builder.period(std::time::Duration::from_secs_f64(
         60.0 / f64::from(crate::constants::TUS_DATA_RATE_LIMIT_PER_MINUTE),
@@ -165,9 +165,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    // Reap stale per-IP buckets so NAT/IPv6 churn can't grow the governor
-    // stores without bound. `retain_recent` only drops buckets that are
-    // indistinguishable from fresh, so live limiters are untouched.
+    
+    
+    
     {
         let governors = [
             Arc::clone(&upload_governor_conf),

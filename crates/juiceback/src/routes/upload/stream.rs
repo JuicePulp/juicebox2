@@ -319,9 +319,9 @@ pub async fn stream_gzip_upload_to_juicehost(
     Ok((total_bytes, read_time, push_wait))
 }
 
-/// Relay a password-protected upload: validate plaintext, spool to disk,
-/// encrypt, then push ciphertext to juicehost. Returns plaintext bytes and
-/// the container header for the `enc_header` column.
+
+
+
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -398,8 +398,8 @@ pub async fn stream_protected_upload_to_juicehost(
     Ok((total_bytes, header))
 }
 
-/// Gzip variant of [`stream_protected_upload_to_juicehost`]: gunzip-decode
-/// the wire bytes, spool the plaintext, then encrypt and push.
+
+
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"

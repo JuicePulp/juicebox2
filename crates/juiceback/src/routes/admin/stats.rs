@@ -7,21 +7,21 @@ use utoipa::ToSchema;
 use super::common::AdminUser;
 use crate::{db, error::AppError, state::AppState};
 
-/// Admin-only visitor analytics dashboard totals. None of these numbers
-/// are ever exposed on public endpoints.
+
+
 #[derive(Serialize, ToSchema)]
 pub struct AdminStatsOverview {
-    /// Unique people ever seen on the main site (IP-hash deduped).
+    
     pub site_visitors: i64,
-    /// Total main-site page hits across all visitors.
+    
     pub site_visits: i64,
-    /// Distinct uploader identities with at least one file on record.
+    
     pub uploaders: i64,
-    /// Unique people who viewed at least one file.
+    
     pub file_viewers: i64,
-    /// Total file view hits.
+    
     pub file_views: i64,
-    /// Total file download hits.
+    
     pub file_downloads: i64,
 }
 

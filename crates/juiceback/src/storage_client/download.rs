@@ -1,8 +1,8 @@
-//! Gated reads of ciphertext stored on juicehost.
-//!
-//! Used by password-protected downloads: juiceback fetches ciphertext over
-//! the API-key-authenticated internal endpoint and decrypts locally, so
-//! plaintext never traverses juicehost's public routes.
+
+
+
+
+
 
 use std::sync::Arc;
 
@@ -12,17 +12,17 @@ use futures::StreamExt;
 use super::{client::StorageClient, target::require_juicehost_url};
 use crate::state::AppState;
 
-/// Fetch ciphertext bytes for `id`, optionally restricted to
-/// `[cipher_start, cipher_start + cipher_len)`.
-///
-/// Returns the byte stream plus whether juicehost honored the Range request
-/// (`true` = 206 with exactly the requested span; `false` = 200 full body,
-/// in which case callers skip locally).
-///
-/// # Errors
-///
-/// Returns a message when the backend URL is unset, authentication fails, or
-/// juicehost answers with an error status.
+
+
+
+
+
+
+
+
+
+
+
 pub async fn download_ciphertext(
     state: &Arc<AppState>,
     id: &str,

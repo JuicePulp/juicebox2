@@ -179,10 +179,10 @@ fn main() {
 
         let state = AppState::new(pool, config.clone(), http.clone(), juicehost_headers.clone(), jh_config);
 
-        // No background config poll: startup fetches once above, hot paths
-        // refetch on demand via `juicehost_config_or_refresh` when empty,
-        // and `config_handler` revalidates stale values in the background.
-        // This removes the perpetual 30s juicehost GET entirely.
+        
+        
+        
+        
 
         state.reload_banned_ips();
 

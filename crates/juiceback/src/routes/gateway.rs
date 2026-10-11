@@ -1,17 +1,17 @@
-//! Public key-release gateway for password-protected files.
-//!
-//! juicehost serves protected unlock shells and ciphertext only. The
-//! browser fetches decryption parameters here and POSTs the password
-//! directly to juiceback (never via juicehost, which must not see passwords
-//! or keys), receiving the file's data key over TLS. The data key is
-//! per-file: the global storage key is never exposed.
-//!
-//! * `GET /api/gateway/params/{id}` - public derivation parameters (salt, KDF
-//!   costs, chunk layout, ciphertext URL). The salt is public by design, like a
-//!   password-hash salt.
-//! * `POST /api/gateway/unlock` - verify the password (rate-limited) and
-//!   release the data key. Wrong passwords and unknown ids are
-//!   indistinguishable where possible; responses are `no-store`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -161,8 +161,8 @@ pub async fn unlock_handler(
         .await?
         .ok_or(AppError::NotFound)?;
     if !record.uses_per_file_key() {
-        // Legacy and public files never release keys here: legacy rows have
-        // no per-file key, and public files need none. Same 404 either way.
+        
+        
         return Err(AppError::NotFound);
     }
 
@@ -173,8 +173,8 @@ pub async fn unlock_handler(
         ));
     }
 
-    // One blocking task for both Argon2id runs (verify + derive): the
-    // password never leaves this call and never appears in errors.
+    
+    
     let password = body.password.clone();
     let hash = record.password_hash.clone().unwrap_or_default();
     let salt_b64 = record.dek_salt.clone().unwrap_or_default();

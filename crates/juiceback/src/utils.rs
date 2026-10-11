@@ -30,9 +30,9 @@ pub fn is_valid_id(id: &str) -> bool {
 
 pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
-/// Shareable URL for a file. Protected and public files alike share the
-/// juicehost `/f/` URL: juicehost serves the unlock shell for protected
-/// files and the bytes for public ones, so links never point at juiceback.
+
+
+
 #[must_use]
 pub fn share_url(
     public_base_url: &str,

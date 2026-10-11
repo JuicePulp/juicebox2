@@ -57,8 +57,8 @@ pub(crate) async fn download_and_store(
         encrypted_ip,
         None,
     );
-    // Mint the per-file data key while the password is in memory, so the
-    // pending row already carries verifier plus wrapped key material.
+    
+    
     let setup = match password.filter(|p| !p.is_empty()) {
         Some(password) => Some(
             crate::routes::upload::protected::prepare_protection(state, &password)
@@ -354,8 +354,8 @@ async fn transfer_to_juicehost(
     Ok((total, None))
 }
 
-/// Spool a fetch download, then encrypt and push it. Mirrors the plaintext
-/// transfer above but plaintext never leaves juiceback unencrypted.
+
+
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
