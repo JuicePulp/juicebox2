@@ -6,7 +6,7 @@
 
 .qr-modal__content {
   width: 100%;
-  max-width: none;
+  max-width: 600px;
 }
 
 .qr-modal__body {
