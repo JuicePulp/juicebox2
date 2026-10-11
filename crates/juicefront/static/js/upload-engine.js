@@ -23,6 +23,7 @@ import {
   readUploadMode
 } from "./upload-config.js";
 import { tryAcquireStream, releaseStream } from "./stream-limiter.js";
+import { announce } from "./util.js";
 import { compressFile } from "./compress.js";
 import { encodeTusMeta } from "./tus.js";
 export function extractServerId(url) {
@@ -125,6 +126,12 @@ async function createTusSession(input, init) {
   return { res, alreadyExists: false };
 }
 export function startUpload(item, file, controls) {
+  if (item.password) {
+    try {
+      announce("Protected upload: using secure relay");
+    } catch {}
+    return startDirectUpload(item, file, controls);
+  }
   if (readUploadMode() === "direct-prefer") {
     return startDirectTicketUpload(item, file, controls);
   }
@@ -207,7 +214,8 @@ async function reserveQuickLink(item, signal) {
       filename: item.filename,
       mime_type: item.mimeType || "application/octet-stream",
       ttl_hours: Number(item.ttlHours),
-      host: item.customHost || undefined
+      host: item.customHost || undefined,
+      password: item.password || undefined
     }),
     ...signal ? { signal } : {}
   });
@@ -254,6 +262,8 @@ function startDirectUpload(item, file, controls) {
     fd.append("upload_mode", item.uploadMode);
     if (reserveId)
       fd.append("reserve_id", reserveId);
+    if (item.password)
+      fd.append("password", item.password);
     fd.append("file", uploadFile);
     const progress = new LiveProgress((pct) => {
       update({ id: item.id, progress: Math.min(pct, 99.4) });
@@ -293,6 +303,7 @@ function startDirectUpload(item, file, controls) {
             url: res.url || "",
             deleteToken: res.delete_token || "",
             expiresAt: res.expires_at ? Number(res.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+            protected: !!res.protected,
             state: "done",
             progress: 100
           });
@@ -502,6 +513,7 @@ function startDirectTicketUpload(item, file, controls) {
         url: data.url || shareUrl,
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100
       });
@@ -1109,6 +1121,7 @@ function startTusUpload(item, file, controls) {
         url: data.url,
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100
       });

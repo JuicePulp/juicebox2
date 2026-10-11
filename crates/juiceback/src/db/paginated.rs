@@ -75,13 +75,16 @@ pub fn list_files_paginated(
     let mut total = 0;
     let rows = if search.is_empty() {
         let r = stmt.query_map(params![limit, offset], |row| {
-            total = row.get(11)?;
+            // Read by name: the window column shifts whenever FILE_COLUMNS
+            // grows (a hardcoded index here silently broke when the
+            // protected-link columns landed).
+            total = row.get("total")?;
             row_to_file_record(row)
         })?;
         r.collect::<Result<Vec<_>>>()?
     } else {
         let r = stmt.query_map(params![search_param, limit, offset], |row| {
-            total = row.get(11)?;
+            total = row.get("total")?;
             row_to_file_record(row)
         })?;
         r.collect::<Result<Vec<_>>>()?
@@ -112,7 +115,7 @@ pub fn list_reports_paginated(
     };
 
     let sql = format!(
-        "SELECT id, file_url, reason, details, reporter_ip, email, created_at, COUNT(*) OVER() AS total FROM reports {} ORDER BY {} {} LIMIT ?{} OFFSET ?{}",
+        "SELECT id, file_url, reason, details, reporter_ip, email, created_at, password, COUNT(*) OVER() AS total FROM reports {} ORDER BY {} {} LIMIT ?{} OFFSET ?{}",
         where_clause,
         col,
         d,
@@ -124,7 +127,7 @@ pub fn list_reports_paginated(
     let mut total = 0;
     let rows = if search.is_empty() {
         let r = stmt.query_map(params![limit, offset], |row| {
-            total = row.get(7)?;
+            total = row.get(8)?;
             Ok(ReportRecord {
                 id: row.get(0)?,
                 file_url: row.get(1)?,
@@ -133,12 +136,13 @@ pub fn list_reports_paginated(
                 reporter_ip: row.get(4)?,
                 email: row.get(5)?,
                 created_at: row.get(6)?,
+                password: row.get(7)?,
             })
         })?;
         r.collect::<Result<Vec<_>>>()?
     } else {
         let r = stmt.query_map(params![search_param, limit, offset], |row| {
-            total = row.get(7)?;
+            total = row.get(8)?;
             Ok(ReportRecord {
                 id: row.get(0)?,
                 file_url: row.get(1)?,
@@ -147,6 +151,7 @@ pub fn list_reports_paginated(
                 reporter_ip: row.get(4)?,
                 email: row.get(5)?,
                 created_at: row.get(6)?,
+                password: row.get(7)?,
             })
         })?;
         r.collect::<Result<Vec<_>>>()?

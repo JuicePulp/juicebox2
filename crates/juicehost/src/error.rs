@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 
 const NOT_FOUND_HTML_TEMPLATE: &str = include_str!("templates/not_found.html");
 const TEAPOT_HTML_TEMPLATE: &str = include_str!("templates/teapot_uploading.html");
+const FROZEN_HTML_TEMPLATE: &str = include_str!("templates/frozen.html");
 
 #[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
@@ -34,6 +35,9 @@ pub enum StorageError {
     #[error("insufficient storage")]
     InsufficientStorage,
 
+    #[error("file is frozen")]
+    Frozen,
+
     #[error("invalid file capability")]
     Forbidden,
 
@@ -52,6 +56,7 @@ impl From<StorageError> for JuicehostError {
             StorageError::PayloadTooLarge => Self::PayloadTooLarge,
             StorageError::SizeMismatch => Self::SizeMismatch,
             StorageError::InsufficientStorage => Self::InsufficientStorage,
+            StorageError::Frozen => Self::Frozen,
             StorageError::Forbidden => Self::Forbidden,
             StorageError::BodyRead(_) => Self::BadRequest,
             StorageError::Io(_) => Self::Internal,
@@ -63,6 +68,16 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
     (
         StatusCode::NOT_FOUND,
         Html(NOT_FOUND_HTML_TEMPLATE.to_string()),
+    )
+}
+
+/// Static 451 page for frozen files. Deliberately interpolation-free: no
+/// request-derived content is ever reflected, so there is nothing to escape
+/// and nothing to inject.
+pub fn frozen_html() -> (StatusCode, Html<String>) {
+    (
+        StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,
+        Html(FROZEN_HTML_TEMPLATE.to_string()),
     )
 }
 
@@ -126,6 +141,9 @@ pub enum JuicehostError {
     #[error("authentication required")]
     Unauthorized,
 
+    #[error("file is frozen and temporarily unavailable")]
+    Frozen,
+
     #[error("forbidden")]
     Forbidden,
 
@@ -149,6 +167,7 @@ impl IntoResponse for JuicehostError {
             Self::InsufficientStorage => (StatusCode::INSUFFICIENT_STORAGE, "INSUFFICIENT_STORAGE"),
             Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
+            Self::Frozen => (StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS, "FILE_FROZEN"),
             Self::Forbidden => (StatusCode::FORBIDDEN, "FORBIDDEN"),
             Self::BlockedFileType(_) => (StatusCode::BAD_REQUEST, "BLOCKED_FILE_TYPE"),
             Self::SizeMismatch => (StatusCode::BAD_REQUEST, "SIZE_MISMATCH"),
@@ -162,6 +181,7 @@ impl IntoResponse for JuicehostError {
             Self::InsufficientStorage => "This instance is out of storage! Try again later.".into(),
             Self::Internal => "Internal server error".into(),
             Self::Unauthorized => "Authentication required".into(),
+            Self::Frozen => "This file is frozen and temporarily unavailable".into(),
             Self::Forbidden => "Forbidden".into(),
             Self::BlockedFileType(msg) => msg.clone(),
             Self::SizeMismatch => "Request body size does not match the signed file size".into(),
@@ -245,6 +265,15 @@ mod tests {
     }
 
     #[test]
+    fn frozen_returns_451() {
+        assert_eq!(
+            status_for(JuicehostError::Frozen),
+            StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
+        );
+        assert_eq!(status_for(JuicehostError::Frozen).as_u16(), 451);
+    }
+
+    #[test]
     fn unauthorized_returns_401() {
         assert_eq!(
             status_for(JuicehostError::Unauthorized),
@@ -274,6 +303,27 @@ mod tests {
         let body = body_for(JuicehostError::NotFound).await;
         assert_eq!(body["error"], "FILE_NOT_FOUND");
         assert_eq!(body["message"], "File not found");
+    }
+
+    #[tokio::test]
+    async fn frozen_body() {
+        let body = body_for(JuicehostError::Frozen).await;
+        assert_eq!(body["error"], "FILE_FROZEN");
+        assert_eq!(
+            body["message"],
+            "This file is frozen and temporarily unavailable"
+        );
+    }
+
+    #[test]
+    fn frozen_html_contains_451() {
+        let (status, html) = frozen_html();
+        assert_eq!(status, StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS);
+        assert_eq!(status.as_u16(), 451);
+        assert!(html.0.contains("451"));
+        assert!(html.0.contains("frozen"));
+        // Fully static page: no template placeholders left to fill.
+        assert!(!html.0.contains("__"));
     }
 
     #[tokio::test]
@@ -333,6 +383,7 @@ mod tests {
             StorageError::InsufficientStorage.to_string(),
             "insufficient storage"
         );
+        assert_eq!(StorageError::Frozen.to_string(), "file is frozen");
         assert_eq!(
             StorageError::Io("disk error".into()).to_string(),
             "disk error"
@@ -346,6 +397,7 @@ mod tests {
             (StorageError::Conflict, "CONFLICT"),
             (StorageError::PayloadTooLarge, "FILE_TOO_LARGE"),
             (StorageError::InsufficientStorage, "INSUFFICIENT_STORAGE"),
+            (StorageError::Frozen, "FILE_FROZEN"),
             (StorageError::BodyRead("x".into()), "BAD_REQUEST"),
             (StorageError::Io("x".into()), "INTERNAL_ERROR"),
         ];

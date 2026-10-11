@@ -57,6 +57,18 @@ pub async fn fetch_start_handler(
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
 
+    // Policy-checked here; the cleartext password travels with the job and
+    // mints its per-file data key at store time (same operator trust as
+    // relay uploads, which also see plaintext).
+    if let Some(ref password) = body.password {
+        if !password.is_empty() {
+            state
+                .config
+                .check_upload_password(password)
+                .map_err(AppError::BadRequest)?;
+        }
+    }
+
     let job_id = nanoid::nanoid!(12);
     state
         .db_call("insert_fetch_job", {
@@ -74,6 +86,7 @@ pub async fn fetch_start_handler(
         source_url,
         opts,
         encrypted_ip,
+        body.password.filter(|p| !p.is_empty()),
     ));
 
     tracing::info!("fetch job {job_id} queued");
@@ -205,12 +218,15 @@ pub async fn fetch_status_handler(
             .db_call("get_file", move |db| db::get_file(db, &file_id))
             .await?;
         if let Some(record) = record {
-            let url = crate::utils::public_url(
+            let url = crate::utils::share_url(
                 &state.config.public_base_url,
                 record.storage_host.as_deref(),
                 &record.id,
                 &record.filename,
+                record.is_protected(),
             );
+            let protected = record.is_protected();
+            let is_encrypted = record.is_encrypted;
             response.file = Some(FetchFileResponse {
                 id: record.id,
                 filename: record.filename,
@@ -219,6 +235,8 @@ pub async fn fetch_status_handler(
                 url,
                 expires_at: record.expires_at,
                 delete_token: record.delete_token,
+                protected,
+                is_encrypted,
             });
         }
     }

@@ -8,9 +8,11 @@ pub struct HostNode {
     pub official: bool,
 }
 
-const OFFICIAL_DEFAULTS: &[(&str, &str)] = &[
-    ("Box", "https://box.juicey.dev"),
-    ("F", "https://f.juicey.dev"),
+const OFFICIAL_DEFAULTS: &[(&str, &str, &str)] = &[
+    ("Default", "", ""),
+    ("Legacy Router", "https://f.juicey.dev", ""),
+    ("Europe-1", "https://f-eu1.juicey.dev", "Europe"),
+    ("Europe-2", "https://f-eu2.juicey.dev", "Europe"),
 ];
 
 fn normalize_url(raw: &str) -> Option<String> {
@@ -73,10 +75,10 @@ fn merge_nodes(base: Vec<HostNode>, extra: Vec<HostNode>) -> Vec<HostNode> {
 pub fn official_nodes() -> Vec<HostNode> {
     let base: Vec<HostNode> = OFFICIAL_DEFAULTS
         .iter()
-        .map(|(name, url)| HostNode {
+        .map(|(name, url, region)| HostNode {
             name: (*name).to_owned(),
             url: (*url).to_owned(),
-            region: String::new(),
+            region: (*region).to_owned(),
             official: true,
         })
         .collect();

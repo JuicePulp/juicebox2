@@ -12,6 +12,7 @@ use super::{
     ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
     capability::{self, CapStore},
     common::{safe_extension, valid_component},
+    freeze::ensure_not_frozen,
 };
 use crate::error::StorageError;
 
@@ -54,6 +55,13 @@ impl LocalBackend {
                         format!("capability entry is not a regular file: {name}"),
                     ));
                 }
+                continue;
+            }
+            // Freeze markers are sidecars, never content: skip them here
+            // (any type — even a non-regular one, which the runtime still
+            // treats as frozen, fail-closed) so they can never be indexed
+            // as a stored file.
+            if name.starts_with(".frz.") {
                 continue;
             }
             if name.starts_with('.') && (name.ends_with(".reserve") || name.ends_with(".tmp")) {
@@ -104,9 +112,11 @@ impl LocalBackend {
 
     async fn stat_cached(&self, id: &str) -> Result<FileMetadata, StorageError> {
         if let Some(cached) = self.meta_cache.get(id) {
+            ensure_not_frozen(self, id).await?;
             return Ok(cached.clone());
         }
         let path = self.resolve_path(id).ok_or(StorageError::NotFound)?;
+        ensure_not_frozen(self, id).await?;
         let meta = tokio::fs::symlink_metadata(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 StorageError::NotFound
@@ -156,6 +166,75 @@ impl LocalBackend {
 
     fn capability_path(&self, id: &str) -> Option<PathBuf> {
         valid_component(id).then(|| self.files_dir.join(format!(".cap.{id}")))
+    }
+
+    fn frozen_path(&self, id: &str) -> Option<PathBuf> {
+        valid_component(id).then(|| self.files_dir.join(format!(".frz.{id}")))
+    }
+
+    /// Authoritative frozen check: any marker presence (even a non-regular
+    /// file, which indicates tampering) counts as frozen — fail closed.
+    /// Only a definitive absence (or an invalid ID) reports not frozen.
+    async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
+        let Some(path) = self.frozen_path(id) else {
+            return Ok(false);
+        };
+        match tokio::fs::symlink_metadata(&path).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(StorageError::Io(format!("freeze check failed: {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl super::freeze::FreezeStore for LocalBackend {
+    async fn freeze(&self, id: &str) -> Result<bool, StorageError> {
+        if !valid_component(id) {
+            return Err(StorageError::Io("invalid logical ID".into()));
+        }
+        if !self.extensions.contains_key(id) {
+            return Err(StorageError::NotFound);
+        }
+        let path = self
+            .frozen_path(id)
+            .ok_or_else(|| StorageError::Io("invalid logical ID".into()))?;
+        // `create_new` is the atomic freeze primitive: exactly one winner
+        // creates the marker, everyone else observes "already frozen".
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(file) => {
+                file.sync_all()
+                    .await
+                    .map_err(|e| StorageError::Io(format!("sync freeze marker failed: {e}")))?;
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(true),
+            Err(e) => Err(StorageError::Io(format!(
+                "create freeze marker failed: {e}"
+            ))),
+        }
+    }
+
+    async fn unfreeze(&self, id: &str) -> Result<bool, StorageError> {
+        if !valid_component(id) {
+            return Err(StorageError::Io("invalid logical ID".into()));
+        }
+        if let Some(path) = self.frozen_path(id) {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+        if !self.extensions.contains_key(id) {
+            return Err(StorageError::NotFound);
+        }
+        Ok(true)
+    }
+
+    async fn is_frozen(&self, id: &str) -> Result<bool, StorageError> {
+        self.frozen_marker_exists(id).await
     }
 }
 
@@ -307,6 +386,7 @@ impl LocalBackend {
 
             for part_id in part_ids {
                 let part_path = self.resolve_path(part_id).ok_or(StorageError::NotFound)?;
+                ensure_not_frozen(self, part_id).await?;
                 let mut part = self.open_regular(&part_path).await?;
                 let meta = part
                     .metadata()
@@ -431,6 +511,7 @@ impl StorageBackend for LocalBackend {
 
     async fn get(&self, id: &str) -> Result<FileData, StorageError> {
         let path = self.resolve_path(id).ok_or(StorageError::NotFound)?;
+        ensure_not_frozen(self, id).await?;
 
         let mut file = self.open_regular(&path).await?;
         let meta = file
@@ -477,6 +558,7 @@ impl StorageBackend for LocalBackend {
 
         let meta = self.stat_cached(id).await?;
         let path = self.resolve_path(id).ok_or(StorageError::NotFound)?;
+        ensure_not_frozen(self, id).await?;
 
         if start > meta.size || end >= meta.size {
             return Err(StorageError::Io(format!(
@@ -524,6 +606,9 @@ impl StorageBackend for LocalBackend {
         if let Some(capability) = capability {
             capability::verify(self, id, capability).await?;
         }
+        // Legal hold: frozen files cannot be deleted (or probed for freeze
+        // state without a valid capability — verified above first).
+        ensure_not_frozen(self, id).await?;
         let path = self.files_dir.join(format!("{id}.{ext}"));
         match tokio::fs::remove_file(&path).await {
             Ok(()) => {
@@ -552,6 +637,7 @@ impl StorageBackend for LocalBackend {
             .get(old_id)
             .map(|e| e.value().clone())
             .ok_or(StorageError::NotFound)?;
+        ensure_not_frozen(self, old_id).await?;
 
         let old_path = self.files_dir.join(format!("{old_id}.{ext}"));
         let old_meta = tokio::fs::symlink_metadata(&old_path)
@@ -615,6 +701,7 @@ impl StorageBackend for LocalBackend {
 
     async fn get_stream(&self, id: &str) -> Result<ByteStream, StorageError> {
         let path = self.resolve_path(id).ok_or(StorageError::NotFound)?;
+        ensure_not_frozen(self, id).await?;
         let file = self.open_regular(&path).await?;
         let stream = futures::stream::unfold(file, |mut file| async move {
             let mut buf = vec![0u8; 64 * 1024];

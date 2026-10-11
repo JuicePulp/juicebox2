@@ -87,6 +87,7 @@ function handleEnqueue(
     quickLink: msg.options.quickLink,
     customHost: msg.options.customHost,
     uploadMode: msg.options.uploadMode,
+    password: msg.options.password,
     createdAt: Date.now(),
   };
   const entry: Entry = { item, handle: null, tusIds: [] };

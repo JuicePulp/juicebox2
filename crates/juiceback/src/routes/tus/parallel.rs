@@ -67,6 +67,21 @@ pub(crate) async fn finalize_concat(
     part_ids: &[String],
     full_size: u64,
 ) -> Result<serde_json::Value, AppError> {
+    // Defense in depth: parallel parts land as plaintext on juicehost, so a
+    // protected reservation must never complete through concat (creation
+    // already rejects it).
+    if let Some(reserve_id) = meta.reserve_id.as_deref() {
+        let lookup = reserve_id.to_string();
+        let reservation = state
+            .db_call("get_concat_reservation", move |db| {
+                crate::db::get_file(db, &lookup)
+            })
+            .await?
+            .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
+        if reservation.is_protected() {
+            return Err(crate::routes::upload::protected::relay_required());
+        }
+    }
     let target_id = if let Some(ref rid) = meta.reserve_id {
         rid.clone()
     } else {
@@ -153,12 +168,15 @@ pub(crate) async fn finalize_concat(
         })
         .await?;
 
-    let public_url = crate::utils::public_url(
+    let public_url = crate::utils::share_url(
         &state.config.public_base_url,
         record.storage_host.as_deref(),
         &record.id,
         &record.filename,
+        record.is_protected(),
     );
+    let protected = record.is_protected();
+    let is_encrypted = record.is_encrypted;
 
     Ok(serde_json::to_value(crate::routes::upload::UploadResponse {
         id: record.id,
@@ -169,6 +187,8 @@ pub(crate) async fn finalize_concat(
         expires_at: record.expires_at,
         delete_token: record.delete_token,
         status: record.status,
+        protected,
+        is_encrypted,
     })
     .unwrap_or_default())
 }

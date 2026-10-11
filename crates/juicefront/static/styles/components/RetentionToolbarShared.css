@@ -1,231 +1,152 @@
-.rttinfo {
+.rttoolbar {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--juice-400);
-  font-size: 0.875rem;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  width: max-content;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  background-color: var(--juice-900);
+  border: 1px solid var(--juice-700);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  gap: 0.75rem;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.rttlabel-group {
+.rttoolbar__header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
 }
 
-.rttlabel {
-  color: var(--juice-300);
-  font-size: 18px;
-}
-
-.rtticon {
-  color: var(--orange-500);
-  width: 24px;
-  height: 24px;
+.host-btn--toolbar {
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
 }
 
-.rtticon svg {
-  display: block;
+.rttlabel {
+  flex: none;
+  margin: 0;
+  color: var(--juice-100);
+  font-size: 16px;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
-.rttvalue-container {
-  width: max-content;
-  height: 1.5em;
-  position: relative;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-}
-
-.rttvalue-wrapper {
+.rtt-options {
   display: flex;
-  gap: 0.3em;
-  font-family: "Secondary", "Unifont", monospace;
-  font-size: 18px;
-  color: var(--juice-200);
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  background-color: var(--juice-800);
+  border: 1px solid var(--juice-700);
+  border-radius: 9999px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
 
-.rttnumber,
-.rttunit,
-.rttunit-base,
-.rttunit-s {
-  display: inline-block;
+.rtt-options::-webkit-scrollbar {
+  display: none;
 }
 
-.rttnumber {
-  white-space: pre;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.rtt-options[hidden] {
+  display: none !important;
 }
 
-.rttunit-s {
-  margin-left: -0.3em;
-}
-
-.animate-up-enter {
-  animation: slide-up-enter 0.15s ease-out forwards;
-}
-.animate-down-enter {
-  animation: slide-down-enter 0.15s ease-out forwards;
-}
-.animate-up-exit {
-  animation: slide-up-exit 0.15s ease-out forwards;
-}
-.animate-down-exit {
-  animation: slide-down-exit 0.15s ease-out forwards;
-}
-
-@keyframes slide-up-enter {
-  from {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-@keyframes slide-down-enter {
-  from {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-@keyframes slide-up-exit {
-  from {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-}
-@keyframes slide-down-exit {
-  from {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-}
-
-.slider-wrapper {
-  position: relative;
-  width: 100%;
-  height: 24px;
+.rtt-option {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-}
-
-.rttslider {
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  background: var(--juice-800);
-  border-radius: 2px;
-  outline: none;
+  position: relative;
   cursor: pointer;
-  margin-top: 6px;
-  z-index: 2;
-  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease;
 }
 
-.rttslider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  background: var(--orange-500);
-  border: 2px solid var(--juice-900);
-  border-radius: 50%;
-  cursor: pointer;
-  transition:
-    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s;
-}
-.rttslider:hover::-webkit-slider-thumb {
-  background: var(--orange-400);
-  transform: scale(1.15);
-}
-.rttslider:active::-webkit-slider-thumb {
-  transform: scale(0.9);
-}
-
-.rttslider:focus-visible::-webkit-slider-thumb {
-  outline: 2px solid var(--orange-400);
-  outline-offset: 3px;
-}
-
-.rttslider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--orange-500);
-  border: 2px solid var(--juice-900);
-  border-radius: 50%;
-  cursor: pointer;
-  transition:
-    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s;
-}
-.rttslider:hover::-moz-range-thumb {
-  background: var(--orange-400);
-  transform: scale(1.15);
-}
-.rttslider:active::-moz-range-thumb {
-  transform: scale(0.9);
-}
-
-.rttslider:focus-visible::-moz-range-thumb {
-  outline: 2px solid var(--orange-400);
-  outline-offset: 3px;
-}
-
-.slider-ticks {
+.rtt-option input {
   position: absolute;
-  top: 18px;
-  left: 0;
-  width: 100%;
+  opacity: 0;
   pointer-events: none;
-  z-index: 1;
 }
 
-.tick {
-  position: absolute;
-  left: var(--tick-left, 0);
-  width: 2px;
-  height: 4px;
-  background-color: var(--juice-700);
-  border-radius: 1px;
-  transform: translateX(-50%);
-  transition:
-    background-color 0.3s ease,
-    height 0.3s ease,
-    transform 0.3s ease;
+.rtt-option span {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0.5rem 0.25rem;
+  font-size: 18px;
+  font-weight: normal;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--juice-400);
+  font-family: "Num", "General", "Unifont", monospace;
+  transition: color 0.15s ease;
 }
-.tick.active {
+
+.rtt-option:hover {
+  background-color: var(--juice-700);
+}
+
+.rtt-option:hover span {
+  color: var(--juice-100);
+}
+
+.rtt-option:has(input:checked) {
+  background-color: var(--orange-600);
+}
+
+.rtt-option:has(input:checked) span {
+  color: #fff;
+}
+
+.rtt-option:has(input:checked):hover {
   background-color: var(--orange-500);
-  height: 6px;
-  transform: translateX(-50%) scaleY(1.5);
+}
+
+.rtt-option input:focus-visible + span {
+  outline: 2px solid var(--orange-400);
+  outline-offset: -2px;
+}
+
+.rtt-divider {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  background-color: var(--juice-700);
 }
 
 @media (max-width: 768px) {
   .rttoolbar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 1rem;
+    padding: 0.6rem 0.75rem;
+    gap: 0.6rem;
+  }
+
+  .rtt-option span {
+    padding: 0.45rem 0.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rtt-option {
+    transition: none;
+  }
+
+  .rtt-option span {
+    transition: none;
   }
 }

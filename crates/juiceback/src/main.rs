@@ -179,43 +179,10 @@ fn main() {
 
         let state = AppState::new(pool, config.clone(), http.clone(), juicehost_headers.clone(), jh_config);
 
-        {
-            let refresh_state = Arc::clone(&state);
-            let refresh_http = http.clone();
-            let refresh_url = config.juicehost_url.clone();
-            let refresh_headers = juicehost_headers.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(
-                        juiceback::constants::DEGRADED_RETRY_INTERVAL_SECS,
-                    ))
-                    .await;
-                    match juiceback::storage_client::fetch_juicehost_config(
-                        &refresh_http,
-                        &refresh_url,
-                        &refresh_headers,
-                    )
-                    .await
-                    {
-                        Ok(cfg) => {
-                            tracing::debug!("juicehost config refreshed");
-                            match refresh_state.jh_config.write() {
-                                Ok(mut slot) => *slot = Some(Arc::new(cfg)),
-                                Err(_) => tracing::warn!(
-                                    "juicehost config lock poisoned, keeping last known value"
-                                ),
-                            }
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "juicehost config refresh failed (keeping last known value): {}",
-                                e
-                            );
-                        }
-                    }
-                }
-            });
-        }
+        // No background config poll: startup fetches once above, hot paths
+        // refetch on demand via `juicehost_config_or_refresh` when empty,
+        // and `config_handler` revalidates stale values in the background.
+        // This removes the perpetual 30s juicehost GET entirely.
 
         state.reload_banned_ips();
 
@@ -228,6 +195,13 @@ fn main() {
             let state_prune = Arc::clone(&state);
             tokio::spawn(async move {
                 juiceback::jobs::cleanup::run_mint_limiter_prune_loop(state_prune).await;
+            });
+        }
+
+        {
+            let state_prune = Arc::clone(&state);
+            tokio::spawn(async move {
+                juiceback::jobs::cleanup::run_unlock_limiter_prune_loop(state_prune).await;
             });
         }
 

@@ -1,6 +1,35 @@
 /** Reads the currently selected custom host from the DOM. */
 import { formatMaxSize } from "./format";
 import { clearHostGlow, shouldGlowHost } from "./device-ws";
+import { applySoundEnabled, playSound } from "./sounds";
+
+const MOTION_KEY = "juicebox_reduce_motion";
+const SOUND_KEY = "juicebox_sound";
+
+function readMotionReduced(): boolean {
+  try {
+    return localStorage.getItem(MOTION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function applyMotionReduced(on: boolean): void {
+  try {
+    localStorage.setItem(MOTION_KEY, on ? "1" : "0");
+  } catch {}
+  try {
+    document.documentElement.toggleAttribute("data-motion-reduce", on);
+  } catch {}
+}
+
+function readSoundEnabled(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 export function readSelectedHost(): string {
   const input = document.querySelector(
@@ -42,6 +71,7 @@ export function initHostGlow(): void {
 
   const observer = new MutationObserver(() => {
     if (
+      location.hash === "#settings-modal" ||
       location.hash === "#host-modal" ||
       location.hash === "#host-selector-modal"
     ) {
@@ -291,6 +321,34 @@ export function enhanceHostSelector(locale?: string) {
     });
   }
 
+  // Upload password lives in Storage Host settings and persists like the
+  // other host options. Note the tradeoff: the gate password is stored in
+  // plain text in this browser's localStorage so uploads stay protected
+  // without retyping. Clear the field to go back to public links.
+  const pwInput = document.querySelector<HTMLInputElement>("[data-upload-password]");
+  const pwHint = document.querySelector("[data-upload-password-hint]");
+  let syncPwState: (() => void) | null = null;
+  if (pwInput) {
+    try {
+      const savedPw = localStorage.getItem("juicebox_upload_password") || "";
+      if (savedPw && !pwInput.value) pwInput.value = savedPw;
+    } catch {}
+    const syncPwStateFn = () => {
+      const has = !!pwInput.value.trim();
+      try {
+        if (has) localStorage.setItem("juicebox_upload_password", pwInput.value.trim());
+        else localStorage.removeItem("juicebox_upload_password");
+      } catch {}
+      if (pwHint) pwHint.toggleAttribute("hidden", !has);
+      document
+        .querySelectorAll("[data-upload-password-indicator]")
+        .forEach((el) => el.toggleAttribute("hidden", !has));
+    };
+    pwInput.addEventListener("input", syncPwStateFn);
+    syncPwState = syncPwStateFn;
+    syncPwStateFn();
+  }
+
   const ultrafastToggle = document.querySelector(
     "[data-ultrafast-toggle]",
   ) as HTMLInputElement | null;
@@ -329,6 +387,27 @@ export function enhanceHostSelector(locale?: string) {
     setTimeout(() => {
       updateUltrafastState();
     }, 2000);
+  }
+
+  const soundToggle = document.querySelector(
+    "[data-sound-toggle]",
+  ) as HTMLInputElement | null;
+  if (soundToggle) {
+    soundToggle.checked = readSoundEnabled();
+    soundToggle.addEventListener("change", () => {
+      applySoundEnabled(soundToggle.checked);
+      if (soundToggle.checked) playSound("toggle");
+    });
+  }
+
+  const motionToggle = document.querySelector(
+    "[data-motion-toggle]",
+  ) as HTMLInputElement | null;
+  if (motionToggle) {
+    motionToggle.checked = readMotionReduced();
+    motionToggle.addEventListener("change", () => {
+      applyMotionReduced(motionToggle.checked);
+    });
   }
 
   updateDangerLevelDisplay(readDangerLevel(), locale);
@@ -462,7 +541,7 @@ export function enhanceHostSelector(locale?: string) {
   const validateHost = async (): Promise<Record<string, unknown> | null> => {
     const host = input.value.trim();
     if (!host) {
-      status.textContent = "empty";
+      status.textContent = "No host entered - using default";
       return null;
     }
     status.textContent = "checking...";
@@ -490,6 +569,7 @@ export function enhanceHostSelector(locale?: string) {
   applyBtn.addEventListener("click", async () => {
     applyBtn.disabled = true;
     try {
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (!cfg) return;
       saveHost();
@@ -500,4 +580,44 @@ export function enhanceHostSelector(locale?: string) {
       applyBtn.disabled = false;
     }
   });
+
+  // Done applies too, then closes the dialog. Same validation as Apply so
+  // leaving via Done never silently keeps a stale host.
+  const doneBtn = document.querySelector("[data-host-done]");
+  if (doneBtn) {
+    doneBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (syncPwState) syncPwState();
+      const cfg = await validateHost();
+      if (cfg) {
+        saveHost();
+        applyConfig(cfg);
+      }
+      window.location.hash = "!";
+    });
+  }
+
+  // Live-gate Apply: only an actually-reachable host can be applied. Quiet
+  // re-checks (no status text) run debounced while typing and once at open.
+  let gateTimer = 0;
+  const refreshApplyGate = async (): Promise<void> => {
+    const host = input.value.trim();
+    if (!host) {
+      applyBtn.disabled = true;
+      return;
+    }
+    let ok = false;
+    try {
+      ok = (await fetchHostConfig(host)).ok;
+    } catch {
+      ok = false;
+    }
+    applyBtn.disabled = !ok;
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(gateTimer);
+    applyBtn.disabled = true;
+    gateTimer = window.setTimeout(() => void refreshApplyGate(), 450);
+  });
+  void refreshApplyGate();
 }

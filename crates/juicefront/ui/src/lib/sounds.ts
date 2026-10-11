@@ -47,9 +47,24 @@ export function bindSounds(): void {
     if (!bound) {
       bound = true;
       bind();
+      warmUpAudio();
     }
     applySoundEnabled(storedEnabled());
   } catch {}
+}
+
+// Warm up the shared AudioContext on the first pointer press, so the cue on
+// the very first click - very often a navigation link - starts instantly.
+// Silent and one-shot; navigation itself is never delayed.
+function warmUpAudio(): void {
+  const warmup = (): void => {
+    document.removeEventListener("pointerdown", warmup, true);
+    if (!storedEnabled()) return;
+    try {
+      play("tap", { volume: 0 });
+    } catch {}
+  };
+  document.addEventListener("pointerdown", warmup, true);
 }
 
 declare global {

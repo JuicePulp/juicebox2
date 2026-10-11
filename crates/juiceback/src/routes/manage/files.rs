@@ -35,27 +35,36 @@ pub struct FileInfoResponse {
     pub url: String,
     pub storage_host: Option<String>,
     pub status: String,
+    #[serde(default)]
+    pub protected: bool,
+    #[serde(default)]
+    pub is_encrypted: bool,
 }
 
 impl FileInfoResponse {
     #[must_use]
     pub fn from_record(record: FileRecord, public_base_url: &str) -> Self {
-        let url = crate::utils::public_url(
+        let url = crate::utils::share_url(
             public_base_url,
             record.storage_host.as_deref(),
             &record.id,
             &record.filename,
+            record.is_protected(),
         );
+        let protected = record.is_protected();
+        let is_encrypted = record.is_encrypted;
         Self {
             id: record.id,
             filename: record.filename,
-            mime_type: record.mime_type,
             size_bytes: record.size_bytes,
+            mime_type: record.mime_type,
             uploaded_at: record.uploaded_at,
             expires_at: record.expires_at,
             url,
             storage_host: record.storage_host,
             status: record.status,
+            protected,
+            is_encrypted,
         }
     }
 }
@@ -304,11 +313,12 @@ pub async fn renew_file_id_handler(
     )
     .await?;
 
-    let url = crate::utils::public_url(
+    let url = crate::utils::share_url(
         &state.config.public_base_url,
         record.storage_host.as_deref(),
         &new_id,
         &record.filename,
+        record.is_protected(),
     );
 
     crate::cloudflare::purge_file(
@@ -421,11 +431,12 @@ pub async fn resolve_alias_handler(
                 .db_call("get_file", move |db| db::get_file(db, &id))
                 .await?;
             if let Some(rec) = record {
-                let url = crate::utils::public_url(
+                let url = crate::utils::share_url(
                     &state.config.public_base_url,
                     rec.storage_host.as_deref(),
                     &new_id,
                     &rec.filename,
+                    rec.is_protected(),
                 );
                 Ok(Json(serde_json::json!({ "new_id": new_id, "url": url })))
             } else {

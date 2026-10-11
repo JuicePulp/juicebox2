@@ -426,7 +426,7 @@ export default function FilesCard(props: Props) {
               <div class="form-field">
                 <label class="form-label" for="rename-input-${esc(f.id)}">${t(locale, "files.rename_placeholder")}</label>
                 <div class="rename-input-group">
-                  <span class="rename-input-prefix">/f/</span>
+                  <span class="rename-input-prefix">/v/</span>
                   <input type="text" id="rename-input-${esc(f.id)}" name="custom_id" class="form-input rename-input" value="${esc(currentId)}" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false" />
                 </div>
                 <p class="rename-error" hidden></p>
@@ -767,6 +767,7 @@ export default function FilesCard(props: Props) {
                   deleteToken={f.delete_token}
                   storageHost={f.storage_host ?? ""}
                   defaultHost={props.defaultHost}
+                  protected={f.protected}
                   expiresAt={f.expires_at}
                   uploadedAt={f.uploaded_at}
                   staggerIndex={i()}
@@ -878,9 +879,9 @@ export default function FilesCard(props: Props) {
 
       <footer class="footr footr--divd" data-footr="">
         <div class="footr__primary">
-          {(props.footerMessage ?? "juicebox2-epsilon") && (
+          {(props.footerMessage ?? "") && (
             <p class="footr__message">
-              {props.footerMessage ?? "juicebox2-epsilon"}
+              {props.footerMessage ?? ""}
             </p>
           )}
           <a

@@ -24,6 +24,7 @@ import {
   readUploadMode,
 } from "./upload-config";
 import { tryAcquireStream, releaseStream } from "./stream-limiter";
+import { announce } from "./format";
 import { compressFile } from "./compress";
 import { encodeTusMeta } from "./tus";
 
@@ -43,6 +44,7 @@ export interface UploadOptions {
   customHost: string;
   uploadMode: string;
   quickLink: boolean;
+  password?: string;
 }
 
 /** Upload-completion payload returned by both the direct and TUS paths.
@@ -79,6 +81,8 @@ export interface UploadItem {
   quickLink: boolean;
   customHost: string;
   uploadMode: string;
+  password?: string;
+  protected?: boolean;
   serverId?: string;
   url?: string;
   deleteToken?: string;
@@ -178,6 +182,12 @@ export function startUpload(
   file: File,
   controls: UploadControls,
 ): UploadHandle {
+  if (item.password) {
+    try {
+      announce("Protected upload: using secure relay");
+    } catch {}
+    return startDirectUpload(item, file, controls);
+  }
   if (readUploadMode() === "direct-prefer") {
     return startDirectTicketUpload(item, file, controls);
   }
@@ -282,6 +292,7 @@ async function reserveQuickLink(item: UploadItem, signal?: AbortSignal) {
       mime_type: item.mimeType || "application/octet-stream",
       ttl_hours: Number(item.ttlHours),
       host: item.customHost || undefined,
+      password: item.password || undefined,
     }),
     ...(signal ? { signal } : {}),
   });
@@ -332,6 +343,7 @@ function startDirectUpload(
     if (item.customHost) fd.append("host", item.customHost);
     fd.append("upload_mode", item.uploadMode);
     if (reserveId) fd.append("reserve_id", reserveId);
+    if (item.password) fd.append("password", item.password);
     fd.append("file", uploadFile);
 
     const progress = new LiveProgress((pct: number) => {
@@ -374,6 +386,7 @@ function startDirectUpload(
             expiresAt: res.expires_at
               ? Number(res.expires_at)
               : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+            protected: !!res.protected,
             state: "done",
             progress: 100,
           });
@@ -583,6 +596,7 @@ function startDirectTicketUpload(
         expiresAt: data.expires_at
           ? Number(data.expires_at)
           : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100,
       });
@@ -1347,6 +1361,7 @@ function startTusUpload(
         expiresAt: data.expires_at
           ? Number(data.expires_at)
           : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!data.protected,
         state: "done",
         progress: 100,
       });

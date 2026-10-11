@@ -57,6 +57,7 @@ export interface FileCardProps {
   errorMessage?: string;
   storageHost?: string;
   defaultHost?: string;
+  protected?: boolean;
   expiresAt?: number;
   uploadedAt?: number;
   staggerIndex?: number;
@@ -236,6 +237,14 @@ export default function FileCard(props: FileCardProps) {
               })}
             </span>
           )}
+        <Show when={props.protected}>
+          <span
+            class="storage-host-tag storage-host-tag--locked"
+            title={t(locale(), "files.protected")}
+            aria-label={t(locale(), "files.protected")}
+            innerHTML={iconSvgHtml("key", 16)}
+          />
+        </Show>
         <Show when={props.mode === "upload" && props.state !== "done"}>
           <button
             type="button"
@@ -514,7 +523,7 @@ export default function FileCard(props: FileCardProps) {
                     {t(locale(), "files.rename_placeholder")}
                   </label>
                   <div class="rename-input-group">
-                    <span class="rename-input-prefix">/f/</span>
+                    <span class="rename-input-prefix">/v/</span>
                     <input
                       ref={renameInput}
                       type="text"

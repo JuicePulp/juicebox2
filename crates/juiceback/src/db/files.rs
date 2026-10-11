@@ -40,7 +40,8 @@ pub fn finish_reservation(
 }
 
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
-    delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status";
+    delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
+    password_hash, is_encrypted, enc_header, dek_wrapped, dek_salt, dek_escrow, key_version";
 
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
@@ -61,13 +62,20 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
             Some(raw_host)
         },
         status,
+        password_hash: row.get(11)?,
+        is_encrypted: row.get::<_, i64>(12).unwrap_or(0) != 0,
+        enc_header: row.get(13)?,
+        dek_wrapped: row.get(14).unwrap_or(None),
+        dek_salt: row.get(15).unwrap_or(None),
+        dek_escrow: row.get(16).unwrap_or(None),
+        key_version: row.get(17).unwrap_or(0),
     })
 }
 
 pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
         ),
         params![
             record.id,
@@ -81,6 +89,13 @@ pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
             record.uploader_ip,
             record.storage_host.as_deref().unwrap_or(""),
             record.status,
+            record.password_hash.as_deref(),
+            i64::from(record.is_encrypted),
+            record.enc_header.as_deref(),
+            record.dek_wrapped.as_deref(),
+            record.dek_salt.as_deref(),
+            record.dek_escrow.as_deref(),
+            record.key_version,
         ],
     )?;
     Ok(())
@@ -172,6 +187,36 @@ pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRec
 
 pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     let affected = conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
+    if affected > 0 {
+        super::stats::delete_file_stats(conn, id)?;
+    }
+    Ok(affected > 0)
+}
+
+/// Record password-gate and encryption metadata for a completed upload.
+///
+/// # Errors
+///
+/// Returns [`rusqlite::Error`] on database failure.
+pub fn set_protection(
+    conn: &Connection,
+    id: &str,
+    material: &super::types::ProtectionMaterial,
+) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE files SET password_hash = ?1, is_encrypted = ?2, enc_header = ?3, \
+         dek_wrapped = ?4, dek_salt = ?5, dek_escrow = ?6, key_version = ?7 WHERE id = ?8",
+        params![
+            material.password_hash,
+            i64::from(material.is_encrypted),
+            material.enc_header,
+            material.dek_wrapped,
+            material.dek_salt,
+            material.dek_escrow,
+            material.key_version,
+            id
+        ],
+    )?;
     Ok(affected > 0)
 }
 
@@ -193,6 +238,13 @@ pub fn renew_file_id(
         "UPDATE files SET id = ?1, storage_path = ?2 WHERE id = ?3",
         params![new_id, new_storage_path, old_id],
     )?;
+    if affected > 0 {
+        // Keep accumulated viewers on the new id (old URLs alias to it).
+        conn.execute(
+            "UPDATE file_stats SET file_id = ?1 WHERE file_id = ?2",
+            params![new_id, old_id],
+        )?;
+    }
     Ok(affected > 0)
 }
 
@@ -273,5 +325,9 @@ pub fn delete_files_by_ids(conn: &Connection, ids: &[String]) -> Result<usize> {
     let sql = format!("DELETE FROM files WHERE id IN ({placeholders})");
     let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let affected = conn.execute(&sql, params.as_slice())?;
+    if affected > 0 {
+        let stats_sql = format!("DELETE FROM file_stats WHERE file_id IN ({placeholders})");
+        conn.execute(&stats_sql, params.as_slice())?;
+    }
     Ok(affected)
 }

@@ -63,7 +63,7 @@ import { playSound } from "./sounds.js";
       "d": function () { navigateTo("/docs"); },
       "s": function () { location.hash = "#share-modal"; },
       "l": function () { location.hash = "#language-modal"; },
-      "t": function () { location.hash = "#host-modal"; },
+      "t": function () { location.hash = "#settings-modal"; },
       "a": {
         "d": {
           "e": function () { toggleAdTesting(); window.location.reload(); }
@@ -273,8 +273,6 @@ import { playSound } from "./sounds.js";
                 copyBar.classList.add("copy-bar--copied");
                 setTimeout(function () { copyBar.classList.remove("copy-bar--copied"); }, 2000);
               }
-              showChordIndicator(["Copied!"]);
-              setTimeout(hideChordIndicator, 1500);
             }
           }).catch(function () {});
         }
@@ -334,6 +332,7 @@ import { playSound } from "./sounds.js";
   function init() {
     chordEl = document.getElementById("chord-indicator");
     chordKeysEl = chordEl ? chordEl.querySelector(".chord-indicator__keys") : null;
+    retargetLegacySettingsHash();
     redirectToSavedLocale();
     saveLanguageOnNav();
     initShareCopy();
@@ -341,9 +340,22 @@ import { playSound } from "./sounds.js";
     updateFocus();
   }
 
+  // The settings dialog moved from #host-modal to #settings-modal; old
+  // hashes (bookmarks, other tabs) land here instead of nowhere.
+  function retargetLegacySettingsHash() {
+    if (location.hash === "#host-modal") {
+      history.replaceState(null, "", "#settings-modal");
+    }
+  }
+
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onClick);
-  window.addEventListener("hashchange", updateFocus);
+  window.addEventListener("hashchange", function () {
+    if (location.hash === "#host-modal") {
+      history.replaceState(null, "", "#settings-modal");
+    }
+    updateFocus();
+  });
   document.addEventListener("DOMContentLoaded", init);
   document.addEventListener("click", function (e) {
     var t = e.target && e.target.closest ? e.target.closest("[data-share-select]") : null;

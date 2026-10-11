@@ -18,11 +18,20 @@ pub(crate) async fn run_fetch_job(
     source_url: String,
     opts: FetchOptions,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) {
     let timeout = std::time::Duration::from_secs(crate::constants::FETCH_JOB_TIMEOUT_SECS);
     match tokio::time::timeout(
         timeout,
-        run_fetch_job_inner(&state, &job_id, &user_id, &source_url, &opts, encrypted_ip),
+        run_fetch_job_inner(
+            &state,
+            &job_id,
+            &user_id,
+            &source_url,
+            &opts,
+            encrypted_ip,
+            password,
+        ),
     )
     .await
     {
@@ -60,9 +69,13 @@ pub(crate) async fn run_fetch_job_inner(
     source_url: &str,
     opts: &FetchOptions,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let (max_size, default_ttl_hours) = {
-        let jh = state.juicehost_config().map_err(|e| format!("{e:?}"))?;
+        let jh = state
+            .juicehost_config_or_refresh()
+            .await
+            .map_err(|e| format!("{e:?}"))?;
         (jh.max_file_size_bytes, jh.default_ttl_hours)
     };
 
@@ -89,6 +102,7 @@ pub(crate) async fn run_fetch_job_inner(
         max_size,
         default_ttl_hours,
         encrypted_ip.clone(),
+        password.clone(),
     )
     .await;
 
@@ -126,6 +140,7 @@ pub(crate) async fn run_fetch_job_inner(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip.clone(),
+                password.clone(),
             )
             .await;
             if !matches!(&r, Err(e) if youtube_needs_rescue(e)) {
@@ -180,6 +195,7 @@ pub(crate) async fn run_fetch_job_inner(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip.clone(),
+                password.clone(),
             )
             .await;
             let empty_retry = matches!(&retry, Err(e) if is_empty_stream_error(e));
@@ -207,6 +223,7 @@ pub(crate) async fn run_fetch_job_inner(
             max_size,
             default_ttl_hours,
             encrypted_ip.clone(),
+            password.clone(),
         )
         .await;
 
@@ -221,6 +238,7 @@ pub(crate) async fn run_fetch_job_inner(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip.clone(),
+                password.clone(),
             )
             .await
             {
@@ -248,6 +266,7 @@ pub(crate) async fn fetch_via(
     max_size: u64,
     default_ttl_hours: f64,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let response = cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
 
@@ -285,6 +304,7 @@ pub(crate) async fn fetch_via(
                 max_size,
                 default_ttl_hours,
                 encrypted_ip,
+                password.clone(),
             )
             .await
         }

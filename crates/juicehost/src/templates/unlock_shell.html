@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  __HEAD_META__
+  <title>Unlock __FILENAME__ - Juicebox</title>
+  <style>
+    __FONT_FACE__
+    __BASE_CSS__
+    __BRAND_CSS__
+    __PREVIEW_CSS__
+    .locktag{
+      flex:none;
+      font-size:.75rem;
+      font-weight:700;
+      color:#f97316;
+      border:1px solid #4a3d33;
+      border-radius:.4rem;
+      padding:.15rem .5rem;
+      background:#241d17;
+      white-space:nowrap;
+    }
+    .card{
+      width:min(26rem,100%);
+      background:#241d17;
+      border:1px solid #4a3d33;
+      border-radius:.75rem;
+      padding:1.5rem;
+      display:flex;
+      flex-direction:column;
+      gap:.9rem;
+    }
+    .card h1{font-size:1.05rem}
+    .card p{color:#a29188;font-size:.9rem;line-height:1.5}
+    .card label{font-size:.85rem;font-weight:600}
+    .card input{
+      width:100%;
+      padding:.6rem .8rem;
+      border:1px solid #4a3d33;
+      border-radius:.5rem;
+      background:#100d0a;
+      color:#e8ded4;
+      font-size:1rem;
+    }
+    .card button{
+      padding:.6rem 1rem;
+      border:0;
+      border-radius:.5rem;
+      background:#f97316;
+      color:#0a0908;
+      font-weight:700;
+      font-size:.95rem;
+      cursor:pointer;
+    }
+    .card button:hover{background:#fb923c}
+    .card button:disabled{opacity:.5;cursor:wait}
+    .status{font-size:.85rem;color:#a29188;min-height:1.2em}
+    .status.err{color:#f87171}
+    .progress{height:.4rem;background:#100d0a;border-radius:.2rem;overflow:hidden}
+    .progress > div{height:100%;width:0;background:#f97316;transition:width .15s}
+    .btn[disabled]{opacity:.5;cursor:not-allowed}
+    .view-full .topbar{display:none}
+    .view-full .stage{padding:0}
+    .float-dl{
+      position:fixed;
+      right:1rem;
+      bottom:1rem;
+      z-index:10;
+      padding:.6rem 1.2rem;
+      border:1px solid #4a3d33;
+      border-radius:.5rem;
+      background:#f97316;
+      color:#0a0908;
+      font-weight:700;
+      font-size:.9rem;
+      cursor:pointer;
+    }
+    .float-dl:hover{background:#fb923c}
+  </style>
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    __BRAND__
+    <span class="fname" title="__FILENAME__">__FILENAME__</span>
+    <span class="fsize">__SIZE__</span>
+    <span class="locktag">password-protected</span>
+    <nav class="actions">
+      <button class="btn btn--primary" id="topdl" type="button" disabled>Download</button>
+      <button class="btn" id="topraw" type="button" disabled>Raw</button>
+    </nav>
+  </header>
+  <main class="stage" id="stage">
+    <div class="card" id="unlockcard">
+      <h1>This file is password-protected</h1>
+      <p>Enter the password for <strong>__FILENAME__</strong>. Decryption happens in your browser - the storage server only ever sees ciphertext.</p>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button id="unlockbtn" type="button">Unlock</button>
+      <div class="progress" id="progress" hidden><div id="bar"></div></div>
+      <p class="status" id="status" aria-live="polite"></p>
+    </div>
+  </main>
+  <script>
+__APP_JS__
+  </script>
+</body>
+</html>

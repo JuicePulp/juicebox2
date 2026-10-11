@@ -20,4 +20,16 @@ pub(crate) struct TusUploadMeta {
     pub(crate) reservation_token: Option<String>,
 
     pub(crate) user_id: String,
+
+    pub(crate) password_hash: Option<String>,
+
+    pub(crate) dek: Option<crate::crypto_file::FileKey>,
+
+    pub(crate) dek_wrapped: Option<String>,
+
+    pub(crate) dek_salt: Option<String>,
+
+    pub(crate) dek_escrow: Option<String>,
+
+    pub(crate) upload_mode: crate::upload_mode::UploadMode,
 }

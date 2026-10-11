@@ -216,7 +216,11 @@ fn default_juicehost_url() -> String {
 }
 
 fn default_cors_origins() -> Vec<String> {
-    vec![String::from("http://localhost:6400")]
+    vec![
+        String::from("http://localhost:6400"),
+        String::from("http://localhost:6402"),
+        String::from("http://127.0.0.1:6402"),
+    ]
 }
 
 const fn default_report_retention_days() -> u64 {

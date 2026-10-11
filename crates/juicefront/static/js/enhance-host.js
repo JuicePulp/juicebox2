@@ -1,5 +1,34 @@
 import { formatMaxSize } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
+import { setSoundEnabled } from "./sounds.js";
+
+var MOTION_KEY = "juicebox_reduce_motion";
+var SOUND_KEY = "juicebox_sound";
+
+function readMotionReduced() {
+  try {
+    return localStorage.getItem(MOTION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function applyMotionReduced(on) {
+  try {
+    localStorage.setItem(MOTION_KEY, on ? "1" : "0");
+  } catch {}
+  try {
+    document.documentElement.toggleAttribute("data-motion-reduce", !!on);
+  } catch {}
+}
+
+function readSoundEnabled() {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 export function readSelectedHost() {
   const input = document.querySelector("[data-host-input]");
   if (input && input.value.trim())
@@ -26,7 +55,7 @@ export function initHostGlow() {
   if (!btn)
     return;
   const observer = new MutationObserver(() => {
-    if (location.hash === "#host-modal" || location.hash === "#host-selector-modal") {
+    if (location.hash === "#settings-modal" || location.hash === "#host-modal" || location.hash === "#host-selector-modal") {
       clearHostGlow();
     }
   });
@@ -207,6 +236,31 @@ export function enhanceHostSelector(locale) {
       localStorage.setItem("juicebox_quick_link", quickLinkToggle.checked ? "true" : "false");
     });
   }
+  // Upload password lives in Storage Host settings and persists like the
+  // other host options. Note the tradeoff: the gate password is stored in
+  // plain text in this browser's localStorage so uploads stay protected
+  // without retyping. Clear the field to go back to public links.
+  const pwInput = document.querySelector("[data-upload-password]");
+  const pwHint = document.querySelector("[data-upload-password-hint]");
+  var syncPwState = null;
+  if (pwInput) {
+    try {
+      const savedPw = localStorage.getItem("juicebox_upload_password") || "";
+      if (savedPw && !pwInput.value) pwInput.value = savedPw;
+    } catch {}
+    syncPwState = function () {
+      const has = !!((pwInput.value || "").trim());
+      try {
+        if (has) localStorage.setItem("juicebox_upload_password", pwInput.value.trim());
+        else localStorage.removeItem("juicebox_upload_password");
+      } catch {}
+      if (pwHint) pwHint.hidden = !has;
+      const indicators = document.querySelectorAll("[data-upload-password-indicator]");
+      for (let i = 0; i < indicators.length; i++) indicators[i].hidden = !has;
+    };
+    pwInput.addEventListener("input", syncPwState);
+    syncPwState();
+  }
   const ultrafastToggle = document.querySelector("[data-ultrafast-toggle]");
   if (ultrafastToggle) {
     ultrafastToggle.checked = localStorage.getItem("juicebox_ultrafast_enabled") === "true";
@@ -232,6 +286,20 @@ export function enhanceHostSelector(locale) {
     setTimeout(() => {
       updateUltrafastState();
     }, 2000);
+  }
+  const soundToggle = document.querySelector("[data-sound-toggle]");
+  if (soundToggle) {
+    soundToggle.checked = readSoundEnabled();
+    soundToggle.addEventListener("change", () => {
+      setSoundEnabled(soundToggle.checked);
+    });
+  }
+  const motionToggle = document.querySelector("[data-motion-toggle]");
+  if (motionToggle) {
+    motionToggle.checked = readMotionReduced();
+    motionToggle.addEventListener("change", () => {
+      applyMotionReduced(motionToggle.checked);
+    });
   }
   updateDangerLevelDisplay(readDangerLevel(), locale);
   const serverCfg = document.getElementById("server-config");
@@ -276,6 +344,10 @@ export function enhanceHostSelector(locale) {
       }
       if (typeof cfg.ultrafast === "boolean") {
         localStorage.setItem("juicebox_ultrafast_supported", String(cfg.ultrafast));
+      }
+      if (cfg.password_links === false) {
+        var pwWrap = document.querySelector("[data-upload-password-wrap]");
+        if (pwWrap) pwWrap.hidden = true;
       }
       if (cfg.danger_level) {
         localStorage.setItem("juicebox_danger_level", cfg.danger_level);
@@ -345,7 +417,7 @@ export function enhanceHostSelector(locale) {
   const validateHost = async () => {
     const host = input.value.trim();
     if (!host) {
-      status.textContent = "empty";
+      status.textContent = "No host entered - using default";
       return null;
     }
     status.textContent = "checking...";
@@ -370,6 +442,7 @@ export function enhanceHostSelector(locale) {
   applyBtn.addEventListener("click", async () => {
     applyBtn.disabled = true;
     try {
+      if (syncPwState) syncPwState();
       const cfg = await validateHost();
       if (!cfg)
         return;
@@ -381,4 +454,44 @@ export function enhanceHostSelector(locale) {
       applyBtn.disabled = false;
     }
   });
+
+  // Done applies too, then closes the dialog. Same validation as Apply so
+  // leaving via Done never silently keeps a stale host.
+  const doneBtn = document.querySelector("[data-host-done]");
+  if (doneBtn) {
+    doneBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (syncPwState) syncPwState();
+      const cfg = await validateHost();
+      if (cfg) {
+        saveHost();
+        applyConfig(cfg);
+      }
+      window.location.hash = "!";
+    });
+  }
+
+  // Live-gate Apply: only an actually-reachable host can be applied. Quiet
+  // re-checks (no status text) run debounced while typing and once at open.
+  let gateTimer = 0;
+  const refreshApplyGate = async () => {
+    const host = input.value.trim();
+    if (!host) {
+      applyBtn.disabled = true;
+      return;
+    }
+    let ok = false;
+    try {
+      ok = (await fetchHostConfig(host)).ok;
+    } catch {
+      ok = false;
+    }
+    applyBtn.disabled = !ok;
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(gateTimer);
+    applyBtn.disabled = true;
+    gateTimer = setTimeout(refreshApplyGate, 450);
+  });
+  refreshApplyGate();
 }

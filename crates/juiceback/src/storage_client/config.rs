@@ -80,7 +80,7 @@ pub async fn fetch_juicehost_config(
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    tracing::info!(
+    tracing::debug!(
         "juicehost config: max_file_size={}MB default_ttl={}h danger={} quick_link={} custom_id={} ultrafast={}",
         max_file_size_bytes / (1024 * 1024),
         default_ttl_hours,

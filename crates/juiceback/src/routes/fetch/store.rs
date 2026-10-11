@@ -28,6 +28,7 @@ pub(crate) async fn download_and_store(
     max_size: u64,
     ttl_hours: f64,
     encrypted_ip: Option<String>,
+    password: Option<String>,
 ) -> FetchResult {
     let filename = sanitize_filename(filename, opts.audio_only);
     let fallback_mime: &str = if opts.audio_only {
@@ -45,7 +46,7 @@ pub(crate) async fn download_and_store(
     let now = chrono::Utc::now().timestamp();
     let expires_at = now + (ttl_hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64;
 
-    let record = FileRecord::new(
+    let mut record = FileRecord::new(
         file_id.clone(),
         filename.clone(),
         mime_type.clone(),
@@ -56,6 +57,25 @@ pub(crate) async fn download_and_store(
         encrypted_ip,
         None,
     );
+    // Mint the per-file data key while the password is in memory, so the
+    // pending row already carries verifier plus wrapped key material.
+    let setup = match password.filter(|p| !p.is_empty()) {
+        Some(password) => Some(
+            crate::routes::upload::protected::prepare_protection(state, &password)
+                .await
+                .map_err(|e| format!("protection setup failed: {e:?}"))?,
+        ),
+        None => None,
+    };
+
+    if let Some(ref setup) = setup {
+        record.password_hash = Some(setup.password_hash.clone());
+        record.is_encrypted = true;
+        record.dek_wrapped = Some(setup.wrapped_b64.clone());
+        record.dek_salt = Some(setup.salt_b64.clone());
+        record.dek_escrow = Some(setup.escrow_hex.clone());
+        record.key_version = crate::crypto_file::KEY_VERSION_V1;
+    }
 
     if let Err(e) = db::insert_pending_file(state, record.clone()).await {
         return Err(format!("failed to reserve file slot: {e:?}"));
@@ -78,10 +98,11 @@ pub(crate) async fn download_and_store(
         source_url,
         &byte_source,
         max_size,
+        setup.as_ref().map(|setup| setup.dek.clone()),
     )
     .await;
 
-    let size_bytes = result?;
+    let (size_bytes, enc_header) = result?;
     cleanup.active = false;
     finalize_stored_file(
         state,
@@ -91,6 +112,15 @@ pub(crate) async fn download_and_store(
         mime_type,
         size_bytes,
         delete_token,
+        setup.as_ref().map(|setup| {
+            (
+                setup.password_hash.clone(),
+                setup.wrapped_b64.clone(),
+                setup.salt_b64.clone(),
+                setup.escrow_hex.clone(),
+            )
+        }),
+        enc_header.as_deref(),
     )
     .await
 }
@@ -174,7 +204,8 @@ async fn transfer_to_juicehost(
     source_url: &str,
     byte_source: &ByteSource,
     max_size: u64,
-) -> Result<u64, String> {
+    dek: Option<crate::crypto_file::FileKey>,
+) -> Result<(u64, Option<String>), String> {
     use tokio::io::AsyncReadExt as _;
     let (mut stream, _precheck_len): (
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>,
@@ -228,6 +259,21 @@ async fn transfer_to_juicehost(
             )
         }
     };
+
+    if let Some(dek) = dek {
+        return transfer_protected_to_juicehost(
+            state,
+            file_id,
+            filename,
+            mime_type,
+            capability,
+            &mut stream,
+            max_size,
+            source_url,
+            &dek,
+        )
+        .await;
+    }
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(
         crate::constants::STREAM_CHANNEL_CAPACITY,
@@ -305,7 +351,59 @@ async fn transfer_to_juicehost(
         .await
         .map_err(|_| "storage task panicked".to_string())??;
 
-    Ok(total)
+    Ok((total, None))
+}
+
+/// Spool a fetch download, then encrypt and push it. Mirrors the plaintext
+/// transfer above but plaintext never leaves juiceback unencrypted.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
+)]
+async fn transfer_protected_to_juicehost(
+    state: &Arc<AppState>,
+    file_id: &str,
+    filename: &str,
+    mime_type: &str,
+    capability: &str,
+    stream: &mut std::pin::Pin<
+        Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>,
+    >,
+    max_size: u64,
+    source_url: &str,
+    dek: &crate::crypto_file::FileKey,
+) -> Result<(u64, Option<String>), String> {
+    let (spool_tx, spool_handle) =
+        crate::routes::upload::protected::spawn_spool_task(max_size as i64);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("media download failed mid-stream: {e}"))?;
+        if spool_tx.send(Ok(chunk)).await.is_err() {
+            break;
+        }
+    }
+    drop(spool_tx);
+    let (spool_file, total) = spool_handle
+        .await
+        .map_err(|_| "spool task panicked".to_string())?
+        .map_err(|e| format!("spool failed: {e:?}"))?;
+    if total == 0 {
+        return Err(empty_stream_message(source_url));
+    }
+    let header = crate::routes::upload::protected::push_encrypted_file(
+        state,
+        file_id,
+        filename,
+        mime_type,
+        None,
+        capability,
+        spool_file.path(),
+        total,
+        crate::upload_mode::UploadMode::Standard,
+        dek,
+    )
+    .await
+    .map_err(|e| format!("encrypted push failed: {e:?}"))?;
+    Ok((total, Some(hex::encode(header))))
 }
 
 async fn finalize_stored_file(
@@ -316,6 +414,8 @@ async fn finalize_stored_file(
     mime_type: String,
     size_bytes: u64,
     delete_token: String,
+    key_material: Option<(String, String, String, String)>,
+    enc_header: Option<&str>,
 ) -> FetchResult {
     let completed = state
         .db_call("complete_fetch_reservation", move |db| {
@@ -336,6 +436,26 @@ async fn finalize_stored_file(
         db::FinishReservationResult::Completed(record) => {
             let owned = record.clone();
             let owner = user_id.to_string();
+            if let Some((hash, wrapped, salt, escrow)) = key_material {
+                let rid = record.id.clone();
+                let material = db::ProtectionMaterial {
+                    password_hash: Some(hash),
+                    is_encrypted: true,
+                    enc_header: enc_header.map(str::to_string),
+                    dek_wrapped: Some(wrapped),
+                    dek_salt: Some(salt),
+                    dek_escrow: Some(escrow),
+                    key_version: crate::crypto_file::KEY_VERSION_V1,
+                };
+                if let Err(e) = state
+                    .db_call("set_fetch_protection", move |db| {
+                        db::set_protection(db, &rid, &material).map(|_| ())
+                    })
+                    .await
+                {
+                    tracing::warn!("fetch: could not set protection: {e:?}");
+                }
+            }
             if let Err(e) = state
                 .db_call("own_fetched_file", move |db| {
                     db::add_client_file(db, &owner, &owned)

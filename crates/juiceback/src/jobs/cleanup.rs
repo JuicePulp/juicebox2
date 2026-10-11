@@ -50,6 +50,17 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         _ => {}
     }
 
+    match state
+        .db_call("cleanup_orphan_stats", |db| {
+            db::delete_orphan_file_stats(db)
+        })
+        .await
+    {
+        Ok(count) if count > 0 => tracing::info!("cleanup: purged {count} orphan stat rows"),
+        Err(error) => tracing::error!("cleanup: orphan stats purge failed: {:?}", error),
+        _ => {}
+    }
+
     let mut cursor = String::new();
     loop {
         let state2 = Arc::clone(state);
@@ -281,6 +292,19 @@ pub async fn run_mint_limiter_prune_loop(state: Arc<AppState>) {
         state.mint_limiter.prune();
         if before != 0 {
             tracing::debug!("mint limiter: pruned buckets before={before}");
+        }
+    }
+}
+
+pub async fn run_unlock_limiter_prune_loop(state: Arc<AppState>) {
+    let mut ticker = tokio::time::interval(Duration::from_secs(MINT_LIMITER_PRUNE_INTERVAL_SECS));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let before = state.unlock_limiter.len_probe();
+        state.unlock_limiter.prune();
+        if before != 0 {
+            tracing::debug!("unlock limiter: pruned buckets before={before}");
         }
     }
 }

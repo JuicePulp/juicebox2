@@ -3,24 +3,20 @@
 <h1 class="upload-header__title"><img src="/static/assets/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high">Juicebox²</h1>
 <p class="upload-header__subtitle">{{ cx.t("upload.subtitle") }}</p>
 </header>
-<a href="#host-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--card" title="{{ cx.t("upload.settings_aria") }}" aria-label="{{ cx.t("upload.settings_aria") }}"><span>{{ cx.icon("settings", 24)|safe }}</span></a>
 <form class="upload-form" data-upload-form="" data-cobalt-services="{{ cobalt_services }}" method="POST" action="/upload" enctype="multipart/form-data">
 <section class="rttoolbar" data-rttoolbar="" aria-labelledby="upload-card-retention-label">
-<div class="rttinfo"><div class="rttlabel-group"><span class="rtticon">{{ cx.icon("clock", 24)|safe }}</span><span id="upload-card-retention-label" class="rttlabel">{{ cx.t("upload.retention") }}</span></div></div>
+<div class="rttoolbar__header">
+<span id="upload-card-retention-label" class="rttlabel">{{ cx.t("upload.retention") }}</span>
+<a href="#settings-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--toolbar" title="{{ cx.t("upload.settings_aria") }}" aria-label="{{ cx.t("upload.settings_aria") }}"><span>{{ cx.icon("settings", 24)|safe }}</span></a>
+</div>
 <fieldset class="rtt-options">
 <legend class="sr-only">{{ cx.t("upload.retention_hint") }}</legend>
-{% for opt in retention %}<label class="rtt-option" data-cuelume-select><input type="radio" name="ttl_hours" value="{{ opt.hours }}"{% if opt.checked %} checked{% endif %}><span>{{ opt.label }}</span></label>
-{% endfor %}</fieldset>
+{% for opt in retention %}{% if opt.divider_before %}<span class="rtt-divider" aria-hidden="true"></span>{% endif %}<label class="rtt-option"><input type="radio" name="ttl_hours" value="{{ opt.hours }}"{% if opt.checked %} checked{% endif %}><span>{{ opt.label }}</span></label>{% endfor %}</fieldset>
 </section>
 <input type="radio" name="upload_mode" id="mode-file" value="file" checked class="tab-radio" aria-label="{{ cx.t("upload.tab_file") }}">
+{% if cobalt %}<input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label="{{ cx.t("upload.tab_video") }}">{% endif %}
 <input type="radio" name="upload_mode" id="mode-text" value="text" class="tab-radio" aria-label="{{ cx.t("upload.tab_text") }}">
-{% if cobalt %}<input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label="{{ cx.t("upload.tab_cobalt") }}">{% endif %}
-<div class="upload-tabs nojs-only">
-<label for="mode-file" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_file") }}</label>
-<label for="mode-text" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_text") }}</label>
-{% if cobalt %}<label for="mode-cobalt" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_cobalt") }}</label>{% endif %}
-</div>
-<div class="upload-tabs upload-tabs--mobile">
+<div class="upload-tabs">
 <label for="mode-file" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_file") }}</label>
 {% if cobalt %}<label for="mode-cobalt" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_video") }}</label>{% endif %}
 <label for="mode-text" data-cuelume-select class="upload-tab">{{ cx.t("upload.tab_text") }}</label>
@@ -74,7 +70,7 @@
 <div class="services-info__tip" role="tooltip">
 <strong>{{ cx.t("upload.services_title") }}</strong>
 <div class="services-info__cards" data-services-cards="">
-{% if services.is_empty() %}<code class="services-info__card services-info__loading">…</code>{% else %}{% for svc in services %}<code class="services-info__card">{{ svc }}</code>{% endfor %}{% endif %}
+{% if services.is_empty() %}<code class="services-info__card services-info__loading">...</code>{% else %}{% for svc in services %}<code class="services-info__card">{{ svc }}</code>{% endfor %}{% endif %}
 </div>
 </div>
 </details>

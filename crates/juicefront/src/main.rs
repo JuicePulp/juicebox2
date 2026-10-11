@@ -227,7 +227,20 @@ fn main() {
                 admin::admin_guard,
             ))
             .layer(middleware::from_fn(juiceutils::add_security_headers))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                    if juiceutils::is_noisy_http_path(request.uri().path()) {
+                        tracing::Span::none()
+                    } else {
+                        tracing::info_span!(
+                            "http.request",
+                            method = %request.method(),
+                            path = request.uri().path(),
+                            version = ?request.version(),
+                        )
+                    }
+                }),
+            )
             .layer(NewSentryLayer::<Request<Body>>::new_from_top())
             .with_state(state.clone());
 

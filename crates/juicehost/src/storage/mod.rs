@@ -1,5 +1,6 @@
 pub(crate) mod capability;
 mod common;
+pub(crate) mod freeze;
 mod local;
 mod s3;
 
@@ -11,6 +12,7 @@ use std::{pin::Pin, sync::atomic::AtomicU64};
 use bytes::Bytes;
 pub(crate) use common::valid_component;
 pub use common::{extract_extension, guess_mime};
+pub use freeze::FreezeStore;
 use futures::Stream;
 pub use local::LocalBackend;
 pub use s3::S3Backend;
@@ -52,7 +54,7 @@ pub struct StorageMetrics {
 }
 
 #[async_trait::async_trait]
-pub trait StorageBackend: Send + Sync + 'static {
+pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
     async fn put(
         &self,
         id: &str,

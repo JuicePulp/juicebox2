@@ -2,15 +2,19 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{Extension, Path, State},
+    http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use futures::StreamExt;
 
-use super::common::backend_request;
+use super::{
+    common::backend_request,
+    shell::{ShellMode, protected_shell_response, remaining_ttl_secs},
+    stats::{ViewerIp, report_file_hit},
+};
 use crate::{
-    error::{JuicehostError, StorageError, not_found_html, teapot_html},
+    error::{JuicehostError, StorageError, frozen_html, not_found_html, teapot_html},
     state::AppState,
     storage,
     storage::valid_component as is_valid_id,
@@ -35,24 +39,6 @@ pub(crate) fn file_cache_control_value(
     }
 }
 
-pub(crate) async fn remaining_ttl_secs(state: &AppState, id: &str) -> Option<u64> {
-    if !state.file_cache_enabled {
-        return None;
-    }
-    let backend_url = state.backend_url.as_ref()?;
-    let status_url = format!("{backend_url}/internal/file/{id}/status");
-    let resp = backend_request(state, status_url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body = resp.json::<serde_json::Value>().await.ok()?;
-    let expires_at = body.get("expires_at")?.as_i64()?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
-    Some((expires_at - now).max(0) as u64)
-}
-
 fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -64,17 +50,35 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_wildcard(
     State(state): State<Arc<AppState>>,
+    Extension(viewer): Extension<ViewerIp>,
+    method: Method,
     headers: HeaderMap,
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_file_inner(state, headers, id).await
+    serve_file_inner(state, headers, method, id, false, viewer.0).await
+}
+
+/// Same as `/f/`, but forces a download instead of inline viewing.
+#[tracing::instrument(skip_all)]
+pub async fn serve_file_download(
+    State(state): State<Arc<AppState>>,
+    Extension(viewer): Extension<ViewerIp>,
+    method: Method,
+    headers: HeaderMap,
+    Path(path): Path<String>,
+) -> Result<Response<Body>, JuicehostError> {
+    let id = path.split('.').next().unwrap_or(&path).to_string();
+    serve_file_inner(state, headers, method, id, true, viewer.0).await
 }
 
 async fn serve_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
+    method: Method,
     id: String,
+    force_download: bool,
+    viewer_ip: Option<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -82,6 +86,9 @@ async fn serve_file_inner(
 
     let file_meta = match state.storage.stat(&id).await {
         Ok(meta) => meta,
+        Err(StorageError::Frozen) => {
+            return Ok(prevent_file_caching(frozen_html().into_response()));
+        }
         Err(StorageError::NotFound) => {
             if let Some(ref backend_url) = state.backend_url {
                 let status_url = format!("{backend_url}/internal/file/{id}/status");
@@ -131,6 +138,17 @@ async fn serve_file_inner(
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
+    // Password-gated files store ciphertext only: serve the unlock shell
+    // on public routes, never raw bytes.
+    let mode = if force_download {
+        ShellMode::Download
+    } else {
+        ShellMode::View
+    };
+    if let Some(shelled) = protected_shell_response(&state, &id, mode).await {
+        return Ok(shelled);
+    }
+
     let etag = &file_meta.etag;
 
     let ttl_remaining = remaining_ttl_secs(&state, &id).await;
@@ -151,10 +169,29 @@ async fn serve_file_inner(
         builder
     };
 
+    // Admin analytics: count GETs that actually return bytes (repeat
+    // views and media range chunks collapse per-viewer server-side, and
+    // HEAD/failed serves never count).
+    let count_hit = |viewer_ip: &Option<String>| {
+        if method != Method::GET {
+            return;
+        }
+        let Some(ip) = viewer_ip.as_deref() else {
+            return;
+        };
+        report_file_hit(
+            &state,
+            &id,
+            if force_download { "download" } else { "view" },
+            ip,
+        );
+    };
+
     if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
         && let Ok(val) = if_none_match.to_str()
         && val.trim_matches('"') == etag.trim_matches('"')
     {
+        count_hit(&viewer_ip);
         return with_cache_headers(
             Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
@@ -166,6 +203,16 @@ async fn serve_file_inner(
 
     let mime_str = storage::guess_mime(&file_meta.extension);
     let total_size = file_meta.size;
+    let download_name = format!("{}.{}", id, file_meta.extension);
+    let with_disposition = |mut builder: axum::http::response::Builder| {
+        if force_download {
+            builder = builder.header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{download_name}\""),
+            );
+        }
+        builder
+    };
 
     let permit = Arc::clone(&state.download_semaphore)
         .try_acquire_owned()
@@ -185,7 +232,8 @@ async fn serve_file_inner(
                     let _ = &permit;
                     item
                 });
-                return with_cache_headers(
+                count_hit(&viewer_ip);
+                return with_disposition(with_cache_headers(
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
                         .header(header::CONTENT_TYPE, &mime_str)
@@ -196,7 +244,7 @@ async fn serve_file_inner(
                         )
                         .header(header::ETAG, etag)
                         .header(header::ACCEPT_RANGES, "bytes"),
-                )
+                ))
                 .body(Body::from_stream(stream))
                 .map_err(|_| JuicehostError::Internal);
             }
@@ -225,14 +273,15 @@ async fn serve_file_inner(
     });
     let body = Body::from_stream(stream);
 
-    with_cache_headers(
+    count_hit(&viewer_ip);
+    with_disposition(with_cache_headers(
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, &mime_str)
             .header(header::CONTENT_LENGTH, total_size)
             .header(header::ETAG, etag)
             .header(header::ACCEPT_RANGES, "bytes"),
-    )
+    ))
     .body(body)
     .map_err(|_| JuicehostError::Internal)
 }

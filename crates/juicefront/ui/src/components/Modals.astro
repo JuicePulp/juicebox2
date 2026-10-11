@@ -287,93 +287,151 @@ const shortcuts = [
   </div>
 </div>
 
-<div id="host-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-modal-title">
+<span id="host-modal" class="mdl-alias" aria-hidden="true"></span>
+<div id="settings-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
   <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
   <div class="mdlcontent host-modal">
     <div class="mdlheader">
-      <h2 id="host-modal-title" class="mdltitle">
+      <h2 id="settings-modal-title" class="mdltitle">
         <span set:html={iconSvgHtml("settings", 24)} class="mdltitle-icon" />
-        {t(currentLocale, "host.title")}
+        {t(currentLocale, "settings.title")}
       </h2>
       <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label={t(currentLocale, "modal.close")}>
         <span set:html={iconSvgHtml("close", 24)} />
       </a>
     </div>
     <div class="mdlbody">
-      <p class="host-modal__hint">{t(currentLocale, "host.hint")}</p>
-      <div class="form-field">
-        <label class="form-label" for="host-input">{t(currentLocale, "host.label")}</label>
-        <input id="host-input" data-cuelume-type type="text" class="form-input host-input" data-host-input="" placeholder="f.juicey.dev" />
-        <div class="host-modal-actions js-only">
-          <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--secondary host-check-btn" data-host-check="">{t(currentLocale, "host.check")}</button>
-          <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--primary host-apply-btn" data-host-apply="">{t(currentLocale, "host.apply")}</button>
-          <span class="host-status" data-host-status=""></span>
-        </div>
+      <input type="radio" name="settings-tab" id="settings-tab-connection" value="connection" checked class="tab-radio" aria-label={t(currentLocale, "settings.tab_connection")} />
+      <input type="radio" name="settings-tab" id="settings-tab-upload" value="upload" class="tab-radio" aria-label={t(currentLocale, "settings.tab_upload")} />
+      <input type="radio" name="settings-tab" id="settings-tab-preferences" value="preferences" class="tab-radio" aria-label={t(currentLocale, "settings.tab_preferences")} />
+      <div class="full-tab">
+        <label for="settings-tab-connection" data-cuelume-select class="full-tab__tab">{t(currentLocale, "settings.tab_connection")}</label>
+        <label for="settings-tab-upload" data-cuelume-select class="full-tab__tab">{t(currentLocale, "settings.tab_upload")}</label>
+        <label for="settings-tab-preferences" data-cuelume-select class="full-tab__tab">{t(currentLocale, "settings.tab_preferences")}</label>
       </div>
-      <div class="host-options-group">
-        <label class="form-label">{t(currentLocale, "host.options")}</label>
-        <div class="form-field">
-          <label class="select-option select-option--toggle" data-cuelume-toggle>
-            <input
-              type="checkbox"
-              data-quic-toggle=""
-              aria-label={t(currentLocale, "host.quic")}
-            />
-            <span class="select-option__icon select-option__check" aria-hidden="true">
-              <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
-              <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
-            </span>
-            <span class="select-option__text">
-              <span class="select-option__label">{t(currentLocale, "host.quic")}</span>
-              <span class="select-option__desc">{t(currentLocale, "host.quic_desc")}</span>
-            </span>
-          </label>
-        </div>
-        <div class="form-field">
-          <label class="select-option select-option--toggle" data-cuelume-toggle>
-            <input
-              type="checkbox"
-              data-quick-link-toggle=""
-              aria-label={t(currentLocale, "host.quick_link")}
-            />
-            <span class="select-option__icon select-option__check" aria-hidden="true">
-              <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
-              <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
-            </span>
-            <span class="select-option__text">
-              <span class="select-option__label">{t(currentLocale, "host.quick_link")}</span>
-              <span class="select-option__desc">{t(currentLocale, "host.quick_link_desc")}</span>
-            </span>
-          </label>
-        </div>
-        <div class="form-field">
-          <label class="select-option select-option--toggle" data-cuelume-toggle>
-            <input
-              type="checkbox"
-              data-ultrafast-toggle=""
-              aria-label="UltraFast"
-            />
-            <span class="select-option__icon select-option__check" aria-hidden="true">
-              <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
-              <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
-            </span>
-            <span class="select-option__text">
-              <span class="select-option__label">UltraFast</span>
-              <span class="select-option__desc">Upload directly from your device (requires paired device)</span>
-            </span>
-          </label>
-        </div>
-      </div>
-      <div class="form-field">
-        <label class="form-label">{t(currentLocale, "host.blocked_types")}</label>
-        <div class="blocked-types-info" data-blocked-types-info>
-          <p class="blocked-types-text" data-blocked-types-text>{blockedTypesText}</p>
-        </div>
+      <div class="settings-panels">
+        <section data-settings-panel="connection" aria-label={t(currentLocale, "settings.tab_connection")}>
+          <p class="host-modal__hint">{t(currentLocale, "host.hint")}</p>
+          <div class="form-field">
+            <label class="form-label" for="host-input">{t(currentLocale, "host.label")}</label>
+            <input id="host-input" data-cuelume-type type="text" class="form-input host-input" data-host-input="" placeholder="f.juicey.dev" />
+            <div class="host-modal-actions js-only">
+              <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--secondary host-check-btn" data-host-check="">{t(currentLocale, "host.check")}</button>
+              <button type="button" data-cuelume-tap class="mdlbtn mdlbtn--primary host-apply-btn" data-host-apply="">{t(currentLocale, "host.apply")}</button>
+              <span class="host-status" data-host-status=""></span>
+            </div>
+          </div>
+          <div class="form-field">
+            <a href={selectorHref} data-cuelume-navigate class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
+          </div>
+        </section>
+        <section data-settings-panel="upload" aria-label={t(currentLocale, "settings.tab_upload")} hidden>
+          <div class="host-options-group">
+            <label class="form-label">{t(currentLocale, "host.options")}</label>
+            <div class="form-field">
+              <label class="select-option select-option--toggle" data-cuelume-toggle>
+                <input
+                  type="checkbox"
+                  data-quic-toggle=""
+                  aria-label={t(currentLocale, "host.quic")}
+                />
+                <span class="select-option__icon select-option__check" aria-hidden="true">
+                  <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+                  <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+                </span>
+                <span class="select-option__text">
+                  <span class="select-option__label">{t(currentLocale, "host.quic")}</span>
+                  <span class="select-option__desc">{t(currentLocale, "host.quic_desc")}</span>
+                </span>
+              </label>
+            </div>
+            <div class="form-field">
+              <label class="select-option select-option--toggle" data-cuelume-toggle>
+                <input
+                  type="checkbox"
+                  data-quick-link-toggle=""
+                  aria-label={t(currentLocale, "host.quick_link")}
+                />
+                <span class="select-option__icon select-option__check" aria-hidden="true">
+                  <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+                  <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+                </span>
+                <span class="select-option__text">
+                  <span class="select-option__label">{t(currentLocale, "host.quick_link")}</span>
+                  <span class="select-option__desc">{t(currentLocale, "host.quick_link_desc")}</span>
+                </span>
+              </label>
+            </div>
+            <div class="form-field">
+              <label class="select-option select-option--toggle" data-cuelume-toggle>
+                <input
+                  type="checkbox"
+                  data-ultrafast-toggle=""
+                  aria-label="UltraFast"
+                />
+                <span class="select-option__icon select-option__check" aria-hidden="true">
+                  <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+                  <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+                </span>
+                <span class="select-option__text">
+                  <span class="select-option__label">UltraFast</span>
+                  <span class="select-option__desc">Upload directly from your device (requires paired device)</span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label">{t(currentLocale, "host.blocked_types")}</label>
+            <div class="blocked-types-info" data-blocked-types-info>
+              <p class="blocked-types-text" data-blocked-types-text>{blockedTypesText}</p>
+            </div>
+          </div>
+          <div class="form-field" data-upload-password-wrap="">
+            <label class="form-label" for="host-upload-password">{t(currentLocale, "upload.password_label")}</label>
+            <input id="host-upload-password" class="form-input upload-password__input" type="password" data-upload-password="" data-cuelume-type placeholder={t(currentLocale, "upload.password_ph")} autocomplete="new-password" minlength={8} maxlength={256} />
+            <p class="form-help-text" data-upload-password-hint="" hidden>{t(currentLocale, "upload.password_relay")}</p>
+          </div>
+        </section>
+        <section data-settings-panel="preferences" aria-label={t(currentLocale, "settings.tab_preferences")} hidden>
+          <div class="form-field">
+            <label class="select-option select-option--toggle" data-cuelume-toggle>
+              <input
+                type="checkbox"
+                data-sound-toggle=""
+                aria-label={t(currentLocale, "settings.sound")}
+              />
+              <span class="select-option__icon select-option__check" aria-hidden="true">
+                <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+                <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+              </span>
+              <span class="select-option__text">
+                <span class="select-option__label">{t(currentLocale, "settings.sound")}</span>
+                <span class="select-option__desc">{t(currentLocale, "settings.sound_desc")}</span>
+              </span>
+            </label>
+          </div>
+          <div class="form-field">
+            <label class="select-option select-option--toggle" data-cuelume-toggle>
+              <input
+                type="checkbox"
+                data-motion-toggle=""
+                aria-label={t(currentLocale, "settings.motion")}
+              />
+              <span class="select-option__icon select-option__check" aria-hidden="true">
+                <span class="check-off"><Fragment set:html={iconSvgHtml("checkbox", 24)} /></span>
+                <span class="check-on"><Fragment set:html={iconSvgHtml("checkbox-on", 24)} /></span>
+              </span>
+              <span class="select-option__text">
+                <span class="select-option__label">{t(currentLocale, "settings.motion")}</span>
+                <span class="select-option__desc">{t(currentLocale, "settings.motion_desc")}</span>
+              </span>
+            </label>
+          </div>
+        </section>
       </div>
     </div>
     <div class="mdlfooter">
-      <a href={selectorHref} data-cuelume-navigate class="mdlbtn mdlbtn--primary">{t(currentLocale, "host.browse")}</a>
-      <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
+      <a href="#!" data-host-done="" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{t(currentLocale, "modal.done")}</a>
     </div>
   </div>
 </div>
@@ -478,7 +536,7 @@ const shortcuts = [
       "d": function() { navigateTo("/docs"); },
       "s": function() { location.hash = "#share-modal"; },
       "l": function() { location.hash = "#language-modal"; },
-      "t": function() { location.hash = "#host-modal"; },
+      "t": function() { location.hash = "#settings-modal"; },
       "a": {
         "d": {
           "e": function() { toggleAdTesting(); window.location.reload(); }
@@ -686,8 +744,6 @@ const shortcuts = [
                 copyBar.classList.add("copy-bar--copied");
                 setTimeout(function() { copyBar.classList.remove("copy-bar--copied"); }, 2000);
               }
-              showChordIndicator(["Copied!"]);
-              setTimeout(hideChordIndicator, 1500);
             }
           }).catch(function() {});
         }
@@ -747,6 +803,7 @@ const shortcuts = [
   function init() {
     chordEl = document.getElementById("chord-indicator");
     chordKeysEl = chordEl ? chordEl.querySelector(".chord-indicator__keys") : null;
+    retargetLegacySettingsHash();
     redirectToSavedLocale();
     saveLanguageOnNav();
     initShareCopy();
@@ -756,7 +813,17 @@ const shortcuts = [
 
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("click", onClick);
-  window.addEventListener("hashchange", updateFocus);
+  // The settings dialog moved from #host-modal to #settings-modal; old
+  // hashes (bookmarks, other tabs) land here instead of nowhere.
+  function retargetLegacySettingsHash() {
+    if (location.hash === "#host-modal") {
+      history.replaceState(null, "", "#settings-modal");
+    }
+  }
+  window.addEventListener("hashchange", function() {
+    retargetLegacySettingsHash();
+    updateFocus();
+  });
   document.addEventListener("astro:page-load", init);
   init();
 })();

@@ -13,6 +13,7 @@ import {
 import {
   UPLOAD_URL,
   readMaxFileSize,
+  readUploadPassword,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
 } from "./upload-config.js";
@@ -127,6 +128,30 @@ function removeItem(item) {
     setEmpty(!listContentRef || !listContentRef.querySelector(".file-item:not(.exiting)"));
   }, 300);
 }
+// Dismiss a queued/uploading/errored row boundedly: drop the DOM row AND
+// purge the upload store, otherwise the subscribe loop re-adopts the row on
+// the next store tick and deleted rows come back from the dead.
+function dismissRow(item) {
+  var id = item.getAttribute("data-upload-id");
+  if (id) removeUpload(id);
+  removeItem(item);
+}
+// Key badge before the filename for protected rows (before, so filename
+// ellipsis can never push it out). Idempotent.
+function markRowProtected(row) {
+  if (!row || row.querySelector(".file-protected")) return;
+  var nameEl = row.querySelector(".file-name");
+  if (!nameEl) return;
+  var wrap = document.createElement("span");
+  wrap.className = "file-name-row";
+  nameEl.before(wrap);
+  var badge = document.createElement("span");
+  badge.className = "file-protected";
+  badge.title = t(LOCALE, "files.protected");
+  badge.setAttribute("aria-label", t(LOCALE, "files.protected"));
+  badge.innerHTML = iconHTML("key", 24);
+  wrap.append(badge, nameEl);
+}
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
   pill.classList.add("error");
@@ -197,6 +222,7 @@ function completeRow(item, row) {
   row.classList.add("complete");
   var actionArea = row.querySelector(".file-action-area");
   if (actionArea) actionArea.classList.add("complete");
+  if (item.protected) markRowProtected(row);
   status.textContent = t(LOCALE, "upload.complete");
   var spinner = pill.querySelector(".spinner");
   if (spinner) spinner.remove();
@@ -380,7 +406,7 @@ function startUltraFastFromDropzone() {
     '<span class="status-text">' + t(LOCALE, "upload.delegating_to_app") + "</span>" +
     "</div></div></div>";
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
@@ -575,7 +601,7 @@ function startCobaltFetch(url) {
   var nameEl = item.querySelector(".file-name");
   if (nameEl) nameEl.textContent = url.length > 48 ? url.slice(0, 45) + "..." : url;
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
@@ -593,6 +619,8 @@ function startCobaltFetch(url) {
   var betterAudio = betterEl ? betterEl.value === "enhanced" : false;
 
   var payload = { url: url, audio_only: audioOnly };
+  var _pw = readUploadPassword();
+  if (_pw) payload.password = _pw;
   if (audioOnly) {
     payload.audio_format = audioFormat;
     payload.better_audio = betterAudio;
@@ -698,6 +726,7 @@ function completeCobaltRow(file, item, fill, status, pill) {
   if (progressDivider) progressDivider.setAttribute("aria-valuenow", "100");
   item.classList.add("complete");
   item.setAttribute("data-file-id", file.id);
+  if (file.protected) markRowProtected(item);
   var actionArea = item.querySelector(".file-action-area");
   if (actionArea) actionArea.classList.add("complete");
   status.textContent = t(LOCALE, "upload.complete");
@@ -772,7 +801,7 @@ function adoptItem(data) {
   setEmpty(false);
   var item = buildRow(data.filename || "upload", formatSize(data.size || 0), iconForMime(data.mimeType || ""));
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   item.setAttribute("data-upload-id", data.id);
@@ -784,7 +813,7 @@ function startItem(file) {
   setEmpty(false);
   var item = buildRow(file.name, formatSize(file.size), extIcon(file.name));
   item.querySelector(".delete-btn").addEventListener("click", function () {
-    removeItem(item);
+    dismissRow(item);
   });
   listContentRef.prepend(item);
   var fill = item.querySelector(".progress-fill");
@@ -809,7 +838,7 @@ function startItem(file) {
     );
     return;
   }
-  if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
+  if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported() && !readUploadPassword()) {
     ultrafastReserve(file, item, fill, status, pill);
     return;
   }
@@ -822,6 +851,7 @@ function startItem(file) {
       customHost: readSelectedHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
+      password: readUploadPassword(),
     });
   } finally {
     suppressAdopt--;

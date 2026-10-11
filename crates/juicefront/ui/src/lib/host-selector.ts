@@ -100,15 +100,37 @@ function syncConfigBits(cfg: Record<string, unknown>): void {
   }
 }
 
-function featuresOf(cfg: Record<string, unknown>): NodeFeatures {
-  return { quic: cfg.quic === true, cobalt: cfg.cobalt === true };
+function capsOf(cfg: Record<string, unknown>): string[] {
+  const caps: string[] = [];
+  if (cfg.quic === true) caps.push("QUIC");
+  if (cfg.cobalt === true) caps.push("Cobalt");
+  if (cfg.quick_link === true) caps.push("Quick link");
+  if (cfg.ultrafast === true) caps.push("Ultrafast");
+  return caps;
+}
+
+function versionParts(v: string): number[] {
+  return v.split(".").map((p) => parseInt(p, 10));
+}
+
+function isLegacyVersion(cfg: Record<string, unknown>, current: string): boolean {
+  const theirs = typeof cfg.version === "string" ? cfg.version : "";
+  if (!theirs || !current) return false;
+  const a = versionParts(theirs);
+  const b = versionParts(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = Number.isFinite(a[i]) ? a[i] : 0;
+    const y = Number.isFinite(b[i]) ? b[i] : 0;
+    if (x !== y) return x < y;
+  }
+  return false;
 }
 
 export function initHostSelector(): void {
   const rootEl = document.getElementById("host-selector-modal");
   if (!rootEl || rootEl.dataset.hostselInit === "1") return;
-  // Bind a non-nullable alias: narrowing on `rootEl` is lost inside the
-  // closures below, so the explicit type keeps astro check clean.
+  
+  
   const root: HTMLElement = rootEl;
   root.dataset.hostselInit = "1";
 
@@ -158,7 +180,7 @@ export function initHostSelector(): void {
     if (dot) dot.setAttribute("data-state", s.state);
     if (latency)
       latency.textContent =
-        s.latencyMs === null ? "—" : `${Math.round(s.latencyMs)} ms`;
+        s.latencyMs === null ? "-" : `${Math.round(s.latencyMs)} ms`;
     if (status)
       status.textContent =
         s.state === "online"
@@ -171,17 +193,18 @@ export function initHostSelector(): void {
     if (badges) {
       badges.innerHTML = "";
       if (s.state === "online" && s.cfg) {
-        const f = featuresOf(s.cfg);
-        if (f.quic) {
+        for (const cap of capsOf(s.cfg)) {
           const b = document.createElement("span");
           b.className = "hostsel-badge";
-          b.textContent = "QUIC";
+          b.textContent = cap;
           badges.appendChild(b);
         }
-        if (f.cobalt) {
+        if (
+          isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || "")
+        ) {
           const b = document.createElement("span");
-          b.className = "hostsel-badge";
-          b.textContent = "Cobalt";
+          b.className = "hostsel-badge hostsel-badge--legacy";
+          b.textContent = "Legacy";
           badges.appendChild(b);
         }
       }
@@ -247,7 +270,7 @@ export function initHostSelector(): void {
         Array.isArray(cfg) ||
         !("max_file_size_bytes" in (cfg as Record<string, unknown>))
       ) {
-        throw new Error("not a juicebox node");
+        throw new Error("not a JuiceHost node");
       }
       s.cfg = cfg as Record<string, unknown>;
       s.state = "online";
@@ -258,6 +281,10 @@ export function initHostSelector(): void {
       s.cfg = null;
     }
     renderRow(s);
+    if (pendingSelect === s) {
+      pendingSelect = null;
+      if (s.state === "online") selectRow(s);
+    }
     applyFilters();
   }
 
@@ -318,25 +345,38 @@ export function initHostSelector(): void {
     );
     markSelected(s.url);
     setStatusLine(str(root, "applied", "Host applied"));
-    location.hash = "#!";
+    location.hash = "#settings-modal";
+  }
+
+  let pendingSelect: RowState | null = null;
+
+  function activateRow(s: RowState): void {
+    if (s.state === "online") {
+      selectRow(s);
+      return;
+    }
+    pendingSelect = s;
+    void pingRow(s);
   }
 
   root.addEventListener("click", (e) => {
     const t = e.target as HTMLElement | null;
-    if (!t) return;
-    const pingBtn = t.closest<HTMLElement>("[data-hostsel-ping]");
-    if (pingBtn) {
-      const row = pingBtn.closest<HTMLElement>("[data-hostsel-row]");
-      const s = rows.find((r) => r.row === row);
-      if (s) void pingRow(s);
-      return;
-    }
-    const useBtn = t.closest<HTMLElement>("[data-hostsel-use]");
-    if (useBtn) {
-      const row = useBtn.closest<HTMLElement>("[data-hostsel-row]");
-      const s = rows.find((r) => r.row === row);
-      if (s) selectRow(s);
-    }
+    if (!t || t.closest("a, button, input, select, textarea")) return;
+    const row = t.closest<HTMLElement>("[data-hostsel-row]");
+    if (!row) return;
+    const s = rows.find((r) => r.row === row);
+    if (s) activateRow(s);
+  });
+
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = (e.target as HTMLElement | null)?.closest?.(
+      "[data-hostsel-row]",
+    ) as HTMLElement | null | undefined;
+    if (!row) return;
+    e.preventDefault();
+    const s = rows.find((r) => r.row === row);
+    if (s) activateRow(s);
   });
 
   search?.addEventListener("input", applyFilters);

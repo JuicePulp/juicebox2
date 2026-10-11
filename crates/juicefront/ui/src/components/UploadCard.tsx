@@ -4,6 +4,7 @@ import { formatSize, iconForMime, iconHTML, announce, makeCopyBar, type CopyBarS
 import {
   UPLOAD_URL,
   readMaxFileSize,
+  readUploadPassword,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
 } from "../lib/upload-config";
@@ -146,6 +147,15 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }, 300);
   }
 
+  // Dismiss a queued/uploading/errored row boundedly: drop the DOM row AND
+  // purge the upload store, otherwise the subscribe loop re-adopts the row
+  // on the next store tick and deleted rows come back from the dead.
+  function dismissRow(item: HTMLElement) {
+    const id = item.getAttribute("data-upload-id");
+    if (id) removeUpload(id);
+    removeItem(item);
+  }
+
   function failItem(
     item: HTMLElement,
     pill: HTMLElement,
@@ -220,6 +230,23 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     getRowParts(row).pill.after(makeCopyBar(item.reserveUrl, copyBarStrings(locale())));
   }
 
+  // Key badge before the filename for protected rows (before, so filename
+  // ellipsis can never push it out). Idempotent.
+  function markRowProtected(row: HTMLElement) {
+    if (row.querySelector(".file-protected")) return;
+    const nameEl = row.querySelector(".file-name, .file-card-name");
+    if (!nameEl) return;
+    const wrap = document.createElement("span");
+    wrap.className = "file-name-row";
+    nameEl.before(wrap);
+    const badge = document.createElement("span");
+    badge.className = "file-protected";
+    badge.title = t(locale(), "files.protected");
+    badge.setAttribute("aria-label", t(locale(), "files.protected"));
+    badge.innerHTML = iconHTML("key", 24);
+    wrap.append(badge, nameEl);
+  }
+
   function completeRow(item: UploadItem, row: HTMLElement) {
     const { fill, status, pill } = getRowParts(row);
     fill.classList.remove("finalizing");
@@ -232,6 +259,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }
     row.classList.add("complete");
     row.querySelector(".file-action-area")?.classList.add("complete");
+    if (item.protected) markRowProtected(row);
     status.textContent = t(locale(), "upload.complete");
     pill.querySelector(".spinner")?.remove();
     const existingCopyBar = pill.nextElementSibling;
@@ -443,7 +471,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       </div>`;
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;
@@ -673,7 +701,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       url.length > 48 ? `${url.slice(0, 45)}...` : url;
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;
@@ -706,6 +734,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
         ...(audioOnly
           ? { audio_format: audioFormat, better_audio: betterAudio }
           : { video_quality: videoQuality, video_container: videoContainer }),
+        ...(readUploadPassword() ? { password: readUploadPassword() } : {}),
       }),
     })
       .then(async (res) => {
@@ -799,6 +828,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       url: string;
       expires_at: number;
       delete_token: string;
+      protected?: boolean;
     },
     item: HTMLElement,
     fill: HTMLElement,
@@ -809,6 +839,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     item.querySelector(".file-size")!.textContent = formatSize(
       file.size_bytes,
     );
+    if (file.protected) markRowProtected(item);
     const iconContainer = item.querySelector(".file-card-icon") as HTMLElement | null;
     if (iconContainer && file.mime_type) {
       iconContainer.innerHTML = iconHTML(iconForMime(file.mime_type), 24);
@@ -898,7 +929,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     item.querySelector(".file-size")!.textContent = formatSize(file.size);
     item
       .querySelector(".delete-btn")!
-      .addEventListener("click", () => removeItem(item));
+      .addEventListener("click", () => dismissRow(item));
     listContentRef.prepend(item);
 
     const fill = item.querySelector(".progress-fill") as HTMLElement;
@@ -919,7 +950,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
     }
 
     // App mode: delegate to juicebox-plus via UltraFast reserve
-    if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
+    if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported() && !readUploadPassword()) {
       ultrafastReserve(file, item, fill, status, pill);
       return;
     }
@@ -930,6 +961,7 @@ export default function UploadCard(props: { uploadedFile?: string | null; locale
       customHost: readSelectedHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
+      password: readUploadPassword(),
     });
     item.setAttribute("data-upload-id", id);
     rowIds.set(id, item);

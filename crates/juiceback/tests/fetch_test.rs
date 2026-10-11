@@ -137,7 +137,7 @@ async fn full_tunnel_flow_stores_file_and_links_owner() {
         file["url"]
             .as_str()
             .unwrap()
-            .starts_with("http://localhost:6402/f/")
+            .starts_with("http://localhost:6402/v/")
     );
     assert!(!file["delete_token"].as_str().unwrap().is_empty());
 

@@ -27,6 +27,15 @@ pub struct Config {
     pub ip_encryption_key: String,
 
     pub ip_pepper: String,
+
+    /// Hex-encoded 32-byte key for at-rest file encryption on juicehost.
+    /// Required at boot (fail closed); never logged.
+    pub storage_encryption_key: String,
+
+    pub password_min_len: usize,
+    pub password_try_limit: u32,
+    pub password_try_window_secs: u64,
+    pub encrypted_force_relay: bool,
     pub cors_origins: Vec<String>,
 
     pub report_webhook_url: Option<String>,
@@ -104,6 +113,11 @@ impl std::fmt::Debug for Config {
             .field("jwt_secret", &"[REDACTED]")
             .field("ip_encryption_key", &"[REDACTED]")
             .field("ip_pepper", &"[REDACTED]")
+            .field("storage_encryption_key", &"[REDACTED]")
+            .field("password_min_len", &self.password_min_len)
+            .field("password_try_limit", &self.password_try_limit)
+            .field("password_try_window_secs", &self.password_try_window_secs)
+            .field("encrypted_force_relay", &self.encrypted_force_relay)
             .field("cors_origins", &self.cors_origins)
             .field(
                 "report_webhook_url",
@@ -194,6 +208,17 @@ impl Config {
         if encryption_key_bytes.len() != 32 {
             return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
         }
+
+        let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
+            .map_err(|e| e.to_string())?;
+        validate_storage_key_hex(&storage_encryption_key)?;
+
+        let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
+        let password_try_limit = parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
+        let password_try_window_secs =
+            parse_env_u64("PASSWORD_TRY_WINDOW_SECS", DEFAULT_PASSWORD_TRY_WINDOW_SECS)?;
+        let encrypted_force_relay =
+            parse_env_bool("ENCRYPTED_FORCE_RELAY", DEFAULT_ENCRYPTED_FORCE_RELAY)?;
 
         let juicehost_url = file.urls.juicehost_url.trim_end_matches('/').to_string();
         let public_juicehost_url = file
@@ -307,6 +332,11 @@ impl Config {
             jwt_secret,
             ip_encryption_key,
             ip_pepper,
+            storage_encryption_key,
+            password_min_len,
+            password_try_limit,
+            password_try_window_secs,
+            encrypted_force_relay,
             cors_origins,
             report_webhook_url,
             smtp_host,
@@ -348,4 +378,135 @@ impl Config {
 
 fn clean_url(s: String) -> String {
     s.trim_end_matches('/').to_string()
+}
+
+/// Default minimum accepted upload password length.
+pub const DEFAULT_PASSWORD_MIN_LEN: usize = 8;
+/// Hard ceiling for upload passwords (Argon2id cost + DoS bound).
+pub const PASSWORD_MAX_LEN: usize = 256;
+const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
+const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
+const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
+
+/// Fail closed unless `hex` decodes to exactly 32 bytes. The value itself is
+/// never included in the error.
+fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
+    let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
+    if bytes.len() != 32 {
+        return Err(storage_key_error());
+    }
+    Ok(())
+}
+
+fn storage_key_error() -> String {
+    "STORAGE_ENCRYPTION_KEY must be 64 hex chars encoding exactly 32 bytes".to_string()
+}
+
+fn parse_env_usize(name: &str, default: usize) -> Result<usize, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_u32(name: &str, default: u32) -> Result<u32, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_u64(name: &str, default: u64) -> Result<u64, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .trim()
+            .parse()
+            .map_err(|_| format!("{name} must be a non-negative integer")),
+        _ => Ok(default),
+    }
+}
+
+fn parse_env_bool(name: &str, default: bool) -> Result<bool, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(format!("{name} must be a boolean (true/false/1/0)")),
+        },
+        _ => Ok(default),
+    }
+}
+
+/// Check an upload password against the length policy.
+///
+/// # Errors
+///
+/// Returns a message when the password is shorter than `min_len` or longer
+/// than [`PASSWORD_MAX_LEN`]. The password itself is never echoed back.
+pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), String> {
+    if password.len() < min_len {
+        return Err(format!("password must be at least {min_len} characters"));
+    }
+    if password.len() > PASSWORD_MAX_LEN {
+        return Err(format!(
+            "password must be at most {PASSWORD_MAX_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
+impl Config {
+    /// Parse `STORAGE_ENCRYPTION_KEY` into a usable file key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::crypto_file::CryptoError`] when the stored value is
+    /// not 64 hex chars (cannot happen after successful load).
+    pub fn storage_file_key(
+        &self,
+    ) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
+        crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
+    }
+
+    /// Check an upload password against this instance's length policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the password violates the policy; see
+    /// [`validate_upload_password`].
+    pub fn check_upload_password(&self, password: &str) -> Result<(), String> {
+        validate_upload_password(password, self.password_min_len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_key_hex_validation() {
+        assert!(validate_storage_key_hex(&"ab".repeat(32)).is_ok());
+        assert!(validate_storage_key_hex(&format!("  {}  ", "ab".repeat(32))).is_ok());
+        assert!(validate_storage_key_hex("abc").is_err());
+        assert!(validate_storage_key_hex(&"ab".repeat(31)).is_err());
+        assert!(validate_storage_key_hex(&"zz".repeat(32)).is_err());
+        let err = validate_storage_key_hex("nope").unwrap_err();
+        assert!(!err.contains("nope"), "key material must not leak: {err}");
+    }
+
+    #[test]
+    fn upload_password_policy() {
+        assert!(validate_upload_password("12345678", 8).is_ok());
+        assert!(validate_upload_password("1234567", 8).is_err());
+        assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN), 8).is_ok());
+        assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN + 1), 8).is_err());
+        let err = validate_upload_password("short", 8).unwrap_err();
+        assert!(!err.contains("short"), "password must not leak: {err}");
+    }
 }

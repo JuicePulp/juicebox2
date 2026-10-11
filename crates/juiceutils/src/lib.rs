@@ -5,6 +5,20 @@ pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
 pub mod urls;
+pub mod web;
+
+/// High-frequency polling / long-lived endpoints whose per-request
+/// `http.request` span would otherwise spam `info` logs via
+/// `FmtSpan::CLOSE` (health + config polling, SSE presence handshakes).
+/// Callers skip the span entirely (`Span::none()`) so neither `info` nor
+/// `debug` deployments pay per-request log lines for these paths.
+#[must_use]
+pub fn is_noisy_http_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/health" | "/api/config" | "/api/presence" | "/api/ip" | "/api/device/status"
+    )
+}
 
 #[cfg(feature = "quic")]
 pub mod server;
@@ -41,6 +55,12 @@ pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     }
 }
 
+/// Wait for Ctrl+C (and SIGTERM on unix) before returning.
+///
+/// # Panics
+///
+/// Panics if the OS signal handlers cannot be installed, which only
+/// happens in environments without signal support.
 pub async fn shutdown_signal(service_name: &str) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -76,6 +96,7 @@ pub async fn add_security_headers(
     use axum::http::{HeaderValue, header};
 
     let is_file_route = req.uri().path().starts_with("/f/");
+    let is_preview_route = req.uri().path().starts_with("/v/");
 
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
@@ -94,18 +115,36 @@ pub async fn add_security_headers(
     );
 
     if is_file_route {
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
-            ),
-        );
+        // Bytes AND unlock shells share this path. Shells set their own
+        // tight CSP in the handler (see below); anything else keeps the
+        // strict no-script policy so stored HTML/SVG uploads can't execute.
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+                ),
+            );
+        }
+    } else if is_preview_route {
+        // The preview page carries inline styles, one inline script, and
+        // an inlined brand font (data: URI) - everything else is same-origin.
+        // Unlock shells served here set their own CSP (cross-origin gateway
+        // fetch); keep it.
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
+                ),
+            );
+        }
     } else {
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:",
             ),
         );
     }
@@ -145,5 +184,21 @@ mod tests {
         assert_eq!(extract_bearer_token(&headers), Some("token"));
         headers.insert("authorization", "Bearer token extra".parse().unwrap());
         assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn noisy_paths_cover_polling_and_sse() {
+        for path in [
+            "/api/health",
+            "/api/config",
+            "/api/presence",
+            "/api/ip",
+            "/api/device/status",
+        ] {
+            assert!(is_noisy_http_path(path), "{path} should be noisy");
+        }
+        for path in ["/api/owned-files", "/upload", "/file/abc/info", "/"] {
+            assert!(!is_noisy_http_path(path), "{path} should stay info");
+        }
     }
 }

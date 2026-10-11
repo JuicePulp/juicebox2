@@ -28,16 +28,25 @@ impl DirectorySettings {
     #[must_use]
     pub fn load(file: &DirectoryFile) -> Self {
         let files_dir = file.files_dir.clone();
-        let backend_url = file
-            .backend_url
-            .clone()
-            .filter(|s| !s.trim().is_empty() && s.trim() != "none")
-            .map(|s| s.trim_end_matches('/').to_string());
-        let frontend_url = file
-            .frontend_url
-            .clone()
-            .filter(|s| !s.trim().is_empty() && s.trim() != "none")
-            .map(|s| s.trim_end_matches('/').to_string());
+        // Explicit environment wins over the file (the TOML documents
+        // `Env: BACKEND_URL / FRONTEND_URL`). Unset falls back to the
+        // file; set-but-blank or "none" disables.
+        let url_setting = |env_name: &str, file_value: Option<String>| match std::env::var(env_name)
+        {
+            Ok(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() || trimmed == "none" {
+                    None
+                } else {
+                    Some(trimmed.trim_end_matches('/').to_string())
+                }
+            }
+            Err(_) => file_value
+                .filter(|s| !s.trim().is_empty() && s.trim() != "none")
+                .map(|s| s.trim_end_matches('/').to_string()),
+        };
+        let backend_url = url_setting("BACKEND_URL", file.backend_url.clone());
+        let frontend_url = url_setting("FRONTEND_URL", file.frontend_url.clone());
         Self {
             files_dir,
             backend_url,

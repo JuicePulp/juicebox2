@@ -36,6 +36,10 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("pairing_codes.ip_hash", m06_pairing_codes_ip_hash),
     ("fetch_jobs.progress", m07_fetch_jobs_progress),
     ("client_files.legacy_index", m08_client_files_legacy_index),
+    ("files.protected_links", m09_files_protected_links),
+    ("reports.password", m10_reports_password),
+    ("files.per_file_dek", m11_files_per_file_dek),
+    ("visitor_stats", m12_visitor_stats),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -143,6 +147,103 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
 
 fn m08_client_files_legacy_index(conn: &Connection) -> Result<()> {
     conn.execute("DROP INDEX IF EXISTS idx_client_files_client", [])?;
+    Ok(())
+}
+
+fn m09_files_protected_links(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "password_hash")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN password_hash TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "is_encrypted")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "enc_header")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN enc_header TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m10_reports_password(conn: &Connection) -> Result<()> {
+    // Reporter-supplied file-gate password (not a user credential) so
+    // moderators can open protected reports. Never logged.
+    if !has_column(conn, "reports", "password")? {
+        conn.execute(
+            "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
+    // Per-file data keys for password-gated files: the DEK wrapped by a
+    // password-derived KEK (`dek_wrapped`, base64) plus its salt
+    // (`dek_salt`, base64), and a global-key escrow copy (`dek_escrow`,
+    // hex) so admins/moderators can still preview reported files.
+    // `key_version` 0 = legacy single global key, 1 = per-file DEK.
+    // Existing protected rows keep working untouched (they stay version 0).
+    if !has_column(conn, "files", "dek_wrapped")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_wrapped TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_salt")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_salt TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "dek_escrow")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN dek_escrow TEXT DEFAULT NULL",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "key_version")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN key_version INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m12_visitor_stats(conn: &Connection) -> Result<()> {
+    // Admin-only visitor analytics. IPs are never stored raw here: callers
+    // hash with the ip_pepper HMAC first, so rows only carry `ip_hash`.
+    // `file_stats` is keyed per (file, viewer): one row per person per
+    // file, with running view/download hit totals (range-request chunks
+    // from media streaming collapse into the same row instead of
+    // inflating the count). `site_visitors` is one row per person ever
+    // seen on the main site.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS file_stats (
+            file_id       TEXT NOT NULL,
+            ip_hash       TEXT NOT NULL,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            views         INTEGER NOT NULL DEFAULT 0,
+            downloads     INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (file_id, ip_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_stats_file ON file_stats(file_id);
+        CREATE TABLE IF NOT EXISTS site_visitors (
+            ip_hash       TEXT PRIMARY KEY,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            visits        INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
     Ok(())
 }
 

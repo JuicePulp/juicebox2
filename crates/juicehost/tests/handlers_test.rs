@@ -1239,3 +1239,595 @@ async fn empty_api_key_fails_closed_without_explicit_opt_out() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+async fn mock_backend(status_code: u16, body: serde_json::Value) -> String {
+    let app = axum::Router::new().route(
+        "/internal/file/{id}/status",
+        axum::routing::get(move || {
+            let body = body.clone();
+            async move {
+                (
+                    axum::http::StatusCode::from_u16(status_code).unwrap(),
+                    axum::Json(body),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn backend_state(dir: &std::path::Path, backend_url: Option<String>) -> Arc<AppState> {
+    let backend = Arc::new(LocalBackend::new(dir.to_path_buf(), 0).unwrap());
+    backend.init_cache().await.unwrap();
+    let mut cfg = test_config("", None);
+    cfg.allow_no_auth = true;
+    cfg.backend_url = backend_url;
+    Arc::new(AppState::new(&cfg, backend))
+}
+
+async fn store_bytes(app: &axum::Router, id: &str, bytes: &[u8]) {
+    let boundary = "----GateBoundary";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"id\"\r\n\r\n\
+         {id}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"filename\"\r\n\r\n\
+         test.txt\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let (key, val) = api_key_header();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file")
+                .header(key, val)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+async fn get_public(
+    app: &axum::Router,
+    uri: &str,
+    range: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    // Browser-like headers: bare requests are treated as bots on /v/.
+    let mut builder = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36")
+        .header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+    if let Some(range) = range {
+        builder = builder.header("range", range);
+    }
+    let resp = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+async fn get_bare(
+    app: &axum::Router,
+    uri: &str,
+    ua: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(ua) = ua {
+        builder = builder.header("user-agent", ua);
+    }
+    let resp = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+#[tokio::test]
+async fn protected_file_serves_unlock_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
+
+    // View mode opens the decrypted bytes natively, preview keeps the page.
+    let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("v1View"));
+    assert!(page.contains("renderNative"));
+    assert!(!page.contains("location.href = URL.createObjectURL"));
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("text/html; charset=utf-8")
+    );
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("/c/abc12345"));
+    assert!(
+        page.contains("https://box.example/api/gateway/unlock")
+            || page.contains("https://box.example")
+    );
+    assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
+
+    // Ciphertext stays public for browser-side decryption.
+    let (status, headers, body) = get_public(&app, "/c/abc12345", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ciphertext-bytes");
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
+    );
+
+    // Ciphertext ranges work for chunk-aligned decrypt fetches.
+    let (status, headers, body) = get_public(&app, "/c/abc12345", Some("bytes=0-9")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"ciphertext");
+    assert_eq!(
+        headers.get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 0-9/16")
+    );
+}
+
+#[tokio::test]
+async fn protected_shell_needs_no_unlock_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(200, serde_json::json!({ "protected": true })).await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "lockedfile", b"ciphertext-bytes").await;
+
+    let (status, _, body) = get_public(&app, "/f/lockedfile", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("password-protected"));
+}
+
+#[tokio::test]
+async fn unprotected_file_serves_normally_with_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({ "protected": false, "expires_at": 9_999_999_999i64 }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "openfile", b"hello world").await;
+
+    let (status, _, body) = get_public(&app, "/f/openfile.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"hello world");
+}
+
+#[tokio::test]
+async fn unknown_backend_status_serves_legacy_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(404, serde_json::json!({})).await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "legacy01", b"legacy bytes").await;
+
+    let (status, _, body) = get_public(&app, "/f/legacy01", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"legacy bytes");
+}
+
+#[tokio::test]
+async fn unreachable_backend_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), Some("http://127.0.0.1:1".into())).await;
+    let app = build_router(state);
+    store_bytes(&app, "somefile", b"bytes").await;
+
+    let (status, _, _) = get_public(&app, "/f/somefile", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn internal_ciphertext_endpoint_serves_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "cipher01", b"0123456789abcdef").await;
+    let (key, val) = api_key_header();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .header(key, val)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), b"0123456789abcdef");
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .header(key, val)
+                .header("range", "bytes=4-7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        resp.headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
+        Some("bytes 4-7/16")
+    );
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), b"4567");
+
+    // No credentials: rejected.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/internal/file/cipher01/ciphertext")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn download_forces_attachment_with_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "dlfile01", b"download me").await;
+
+    let (status, headers, body) = get_public(&app, "/d/dlfile01.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"download me");
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"dlfile01.txt\"")
+    );
+    // Same file inline has no disposition.
+    let (status, headers, _) = get_public(&app, "/f/dlfile01.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.get("content-disposition").is_none());
+}
+
+#[tokio::test]
+async fn download_supports_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_bytes(&app, "dlrange01", b"0123456789abcdef").await;
+
+    let (status, headers, body) = get_public(&app, "/d/dlrange01.txt", Some("bytes=4-7")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"4567");
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"dlrange01.txt\"")
+    );
+}
+
+#[tokio::test]
+async fn download_serves_unlock_shell_for_protected() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "abc12345.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
+
+    let (status, _, body) = get_public(&app, "/d/abc12345.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("mode: \"download\""));
+}
+
+async fn store_named(app: &axum::Router, id: &str, filename: &str, bytes: &[u8]) {
+    let boundary = "----PrevBoundary";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"id\"\r\n\r\n\
+         {id}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"filename\"\r\n\r\n\
+         {filename}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let (key, val) = api_key_header();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file")
+                .header(key, val)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn preview_renders_by_media_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "vid00001", "clip.mp4", b"fake-video").await;
+    store_named(&app, "aud00001", "song.mp3", b"fake-audio").await;
+    store_named(&app, "img00001", "pic.png", b"fake-image").await;
+    store_named(&app, "txt00001", "notes.txt", b"hello text preview").await;
+    store_named(&app, "zip00001", "archive.zip", b"fake-zip").await;
+
+    let (status, _, body) = get_public(&app, "/v/vid00001.mp4", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<video") && page.contains("/f/vid00001.mp4"));
+    assert!(page.contains("og:video"));
+
+    let (status, _, body) = get_public(&app, "/v/aud00001.mp3", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<audio") && page.contains("/f/aud00001.mp3"));
+
+    let (status, _, body) = get_public(&app, "/v/img00001.png", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("<img") && page.contains("og:image"));
+
+    let (status, _, body) = get_public(&app, "/v/txt00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("textview") && page.contains("/f/txt00001.txt"));
+
+    let (status, _, body) = get_public(&app, "/v/zip00001.zip", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("/d/zip00001.zip") && page.contains("Download"));
+    assert!(!page.contains("preview-card"));
+    assert!(page.contains("discord:component-embed"));
+}
+
+#[tokio::test]
+async fn preview_bots_redirect_to_raw() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "bot00001", "notes.txt", b"hello bots").await;
+
+    // curl-style client: 302 to the raw bytes, never the preview page.
+    let (status, headers, body) = get_bare(&app, "/v/bot00001.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/f/bot00001.txt")
+    );
+    assert!(body.is_empty());
+
+    
+    let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _, body) =
+        get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("discord:component-embed"));
+    assert!(page.contains("og:title"));
+
+    
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v/bot00001.txt")
+                .header("user-agent", "some-uploader/1.0")
+                .header("accept", "*/*")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FOUND);
+
+    // A real navigation (Sec-Fetch-Mode) keeps the HTML even with an odd UA.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v/bot00001.txt")
+                .header("user-agent", "curl/8.5.0")
+                .header("sec-fetch-mode", "navigate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Humans keep the page: logo, curler notice, no fullscreen, no truncation note.
+    let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("data:image/webp;base64,"));
+    assert!(page.contains("preview, NOT the raw file"));
+    assert!(!page.contains("fsbtn"));
+    assert!(!page.contains("requestFullscreen"));
+    assert!(!page.contains("Truncated preview"));
+    assert!(page.contains("IntersectionObserver"));
+}
+
+#[tokio::test]
+async fn preview_protected_shell_ignores_bot_redirect() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.txt",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "protbot01", b"ciphertext").await;
+
+    // The gate runs first: bots get the shell, never a raw redirect.
+    let (status, headers, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("password-protected"));
+    // The shell carries its own executable CSP (inline app + gateway fetch).
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("script-src 'unsafe-inline'"), "{csp}");
+    assert!(csp.contains("connect-src http"), "{csp}");
+}
+
+#[tokio::test]
+async fn preview_page_csp_allows_brand_font() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = backend_state(dir.path(), None).await;
+    let app = build_router(state);
+    store_named(&app, "font0001", "notes.txt", b"hi").await;
+
+    let (status, headers, _) = get_public(&app, "/v/font0001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("font-src"), "{csp}");
+    assert!(csp.contains("data:"), "{csp}");
+}
+
+#[tokio::test]
+async fn preview_missing_and_protected() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.mp4",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_named(&app, "prot0001", "secret.mp4", b"ciphertext").await;
+
+    let (status, headers, body) = get_public(&app, "/v/prot0001.mp4", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("password-protected"));
+    assert!(page.contains("mode: \"preview\""));
+    // Same topbar + stage chrome as the public preview page.
+    assert!(page.contains("id=\"topdl\""));
+    assert!(page.contains("id=\"topraw\""));
+    assert!(page.contains("dl-hero"));
+    assert!(page.contains("renderDlHero"));
+    let csp = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("frame-src blob:"), "{csp}");
+
+    let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

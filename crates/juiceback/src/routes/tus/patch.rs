@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::StreamExt;
+use tokio::io::AsyncWriteExt;
 
 use super::{
     completion::complete_tus_upload,
@@ -222,11 +223,35 @@ async fn patch_upload_handler_impl(
             crate::file_validation::validate_file(&filename, &body_bytes, level),
         ) {
             state.tus.remove(&id);
+            let spool = crate::routes::upload::protected::tus_spool_path(&id);
+            let _ = tokio::fs::remove_file(&spool).await;
             return Err(err);
         }
     }
 
-    {
+    let protected = state
+        .tus
+        .get(&id)
+        .ok_or(AppError::TusSessionNotFound)?
+        .password_hash
+        .is_some();
+
+    if protected {
+        // Protected sessions spool plaintext locally; ciphertext is produced
+        // once at completion. Offsets still advance so resume works.
+        let spool = crate::routes::upload::protected::tus_spool_path(&id);
+        tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&spool)
+            .await
+            .map_err(|e| AppError::Internal(format!("spool failed: {e}")))?
+            .write_all(&body_bytes)
+            .await
+            .map_err(|e| AppError::Internal(format!("spool failed: {e}")))?;
+        let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
+        upload.spool_path = Some(spool);
+    } else {
         let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
         if let Some(rx) = upload.push_rx.take() {
             drop(upload);
@@ -234,21 +259,22 @@ async fn patch_upload_handler_impl(
         }
     }
 
-    let sender = state
-        .tus_senders
-        .get(&id)
-        .ok_or(AppError::TusSessionNotFound)?;
-
-    let send_start = std::time::Instant::now();
-    if sender.send(Ok(body_bytes)).await.is_err() {
+    if !protected {
+        let sender = state
+            .tus_senders
+            .get(&id)
+            .ok_or(AppError::TusSessionNotFound)?;
+        let send_start = std::time::Instant::now();
+        if sender.send(Ok(body_bytes)).await.is_err() {
+            drop(sender);
+            state.tus_senders.remove(&id);
+            await_storage_push(&state, &id).await?;
+            return Err(AppError::TusSessionNotFound);
+        }
+        let stream_elapsed = send_start.elapsed();
+        tracing::debug!("tus patch: chunk_stream took {stream_elapsed:?} ({chunk_len} bytes)");
         drop(sender);
-        state.tus_senders.remove(&id);
-        await_storage_push(&state, &id).await?;
-        return Err(AppError::TusSessionNotFound);
     }
-    let stream_elapsed = send_start.elapsed();
-    tracing::debug!("tus patch: chunk_stream took {stream_elapsed:?} ({chunk_len} bytes)");
-    drop(sender);
 
     let (is_complete, completed_meta) = {
         let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
@@ -271,6 +297,12 @@ async fn patch_upload_handler_impl(
                     .clone()
                     .or_else(|| upload.reservation_token.clone()),
                 user_id: upload.user_id.clone(),
+                password_hash: upload.password_hash.clone(),
+                dek: upload.dek.clone(),
+                dek_wrapped: upload.dek_wrapped.clone(),
+                dek_salt: upload.dek_salt.clone(),
+                dek_escrow: upload.dek_escrow.clone(),
+                upload_mode: upload.upload_mode,
             };
             (true, Some(meta))
         } else {
