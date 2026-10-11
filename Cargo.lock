@@ -1958,7 +1958,7 @@ dependencies = [
 
 [[package]]
 name = "juiceback"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "juicebox"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "juiceutils",
  "libc",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "juicefront"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -2056,7 +2056,7 @@ dependencies = [
 
 [[package]]
 name = "juicehost"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "juiceutils"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
