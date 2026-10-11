@@ -47,6 +47,14 @@
 }
 
 @font-face {
+  font-family: "Num";
+  src: url("/static/assets/num.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Unifont";
   src: url("/static/assets/unifont.woff2") format("woff2");
   font-weight: normal;
@@ -413,23 +421,14 @@ html[data-banned] .upload-tabs {
   border-bottom: none;
 }
 
-.upload-tabs--mobile {
-  display: none;
-}
-
-/* JS on: the File | Video Upload | Text strip is the primary tab strip at
- * every width, not just <=768px. The desktop strip is `.nojs-only`, so with
- * JS the tabs must come from here or the upload-mode selector (and the Video
- * upload entry point) silently disappears on wider / desktop-mode viewports.
+/* Single tab strip shared by JS and no-JS: the File | Video | Text labels
+ * below the retention toolbar always come from this one element.
  */
-html.js .upload-tabs--mobile {
-  display: flex;
-}
 
-/* Tabs are always visible with JS, so whatever panel sits below loses its top
+/* Tabs are always visible, so whatever panel sits below loses its top
    corners at every width. */
-html.js .upload-form .drop-zone,
-html.js .upload-form .text-editor {
+.upload-form .drop-zone,
+.upload-form .text-editor {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
@@ -1889,7 +1888,7 @@ html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
 .pair-code__code {
   opacity: 1;
   transform: translateY(0);
-  font-family: "Primary", "Unifont", monospace;
+  font-family: "Num", "Unifont", monospace;
   font-size: 2rem;
   letter-spacing: 0.15em;
   color: var(--juice-100);

@@ -22,6 +22,8 @@ use crate::{error::ErrorResponse, storage::StorageMetrics};
         crate::handlers::store::store_file_streaming,
         crate::handlers::store::store_file_ticket,
         crate::handlers::delete::delete_file,
+        crate::handlers::freeze::freeze_file,
+        crate::handlers::freeze::unfreeze_file,
         crate::handlers::rename::rename_file,
         crate::handlers::concat::concat_files,
         crate::handlers::general::stat_file,

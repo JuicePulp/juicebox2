@@ -5,7 +5,7 @@ import { formatMaxSize, formatSize, iconForMime } from "../lib/format";
 import { t, resolveLocale } from "../i18n";
 import { getMoreMenuItems } from "../lib/more-menu";
 import { readCookieHost, resolveEffectiveConfig, fetchCobaltServices } from "../lib/server-host";
-import { ttlLabel } from "../lib/retention";
+import { ttlLabel, ttlTier } from "../lib/retention";
 import { getFormattedCommitLabel, getRepoUrl } from "../lib/metadata";
 import { lp } from "../lib/locale-prefix";
 const locale = resolveLocale(Astro.currentLocale);
@@ -53,44 +53,41 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
     <p class="upload-header__subtitle">{t(locale, "upload.subtitle")}</p>
   </header>
 
-  <a href="#host-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--card" title={t(locale, "upload.settings_aria")} aria-label={t(locale, "upload.settings_aria")}>
-    <span set:html={iconSvgHtml("settings", 24)} />
-  </a>
-
   <form class="upload-form" data-upload-form="" data-cobalt-services={cobaltServices.join(",")} method="POST" action="/upload" enctype="multipart/form-data">
     <section class="rttoolbar" data-rttoolbar="" aria-labelledby="upload-card-retention-label">
-      <div class="rttinfo">
-        <div class="rttlabel-group">
-          <span class="rtticon" set:html={iconSvgHtml("clock", 24)} />
-          <span id="upload-card-retention-label" class="rttlabel">{t(locale, "upload.retention")}</span>
-        </div>
+      <div class="rttoolbar__header">
+        <span id="upload-card-retention-label" class="rttlabel">{t(locale, "upload.retention")}</span>
+        <a href="#settings-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--toolbar" title={t(locale, "upload.settings_aria")} aria-label={t(locale, "upload.settings_aria")}>
+          <span set:html={iconSvgHtml("settings", 24)} />
+        </a>
       </div>
       <fieldset class="rtt-options">
         <legend class="sr-only">{t(locale, "upload.retention_hint")}</legend>
-        {RETENTION_OPTIONS.map((opt, i) => (
-          <label class="rtt-option" data-cuelume-select>
-            <input type="radio" name="ttl_hours" value={opt.hours} checked={i === RETENTION_DEFAULT_INDEX} />
-            <span>{opt.label}</span>
-          </label>
-        ))}
+        {(() => {
+          let prevTier: number | null = null;
+          return RETENTION_OPTIONS.map((opt, i) => {
+            const tier = ttlTier(opt.hours);
+            const divider = prevTier !== null && prevTier !== tier;
+            prevTier = tier;
+            return (<>
+              {divider && <span class="rtt-divider" aria-hidden="true" />}
+              <label class="rtt-option">
+                <input type="radio" name="ttl_hours" value={opt.hours} checked={i === RETENTION_DEFAULT_INDEX} />
+                <span>{opt.label}</span>
+              </label>
+            </>);
+          });
+        })()}
       </fieldset>
     </section>
 
     <input type="radio" name="upload_mode" id="mode-file" value="file" checked class="tab-radio" aria-label={t(locale, "upload.tab_file")} />
-    <input type="radio" name="upload_mode" id="mode-text" value="text" class="tab-radio" aria-label={t(locale, "upload.tab_text")} />
     {cobaltEnabled && (
-      <input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label={t(locale, "upload.tab_cobalt")} />
+      <input type="radio" name="upload_mode" id="mode-cobalt" value="cobalt" class="tab-radio" aria-label={t(locale, "upload.tab_video")} />
     )}
+    <input type="radio" name="upload_mode" id="mode-text" value="text" class="tab-radio" aria-label={t(locale, "upload.tab_text")} />
 
-    <div class="upload-tabs nojs-only">
-      <label for="mode-file" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_file")}</label>
-      <label for="mode-text" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_text")}</label>
-      {cobaltEnabled && (
-        <label for="mode-cobalt" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_cobalt")}</label>
-      )}
-    </div>
-
-    <div class="upload-tabs upload-tabs--mobile">
+    <div class="upload-tabs">
       <label for="mode-file" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_file")}</label>
       {cobaltEnabled && (
         <label for="mode-cobalt" data-cuelume-select class="upload-tab">{t(locale, "upload.tab_video")}</label>

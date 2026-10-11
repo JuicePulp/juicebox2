@@ -31,6 +31,7 @@ pub mod noscript;
 pub mod pairing;
 pub mod presence;
 pub mod register;
+pub mod stats;
 pub mod tus;
 pub mod unlock;
 pub mod upload;
@@ -310,7 +311,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/file/{id}/info", get(manage::file_info_handler))
         .route("/file/{id}/renew", post(manage::renew_file_id_handler))
         .route("/file/{id}", delete(manage::delete_file_handler))
-        .route("/file/{id}/unlock", get(unlock::unlock_page_handler).post(unlock::unlock_submit_handler))
+        .route(
+            "/file/{id}/unlock",
+            get(unlock::unlock_page_handler).post(unlock::unlock_submit_handler),
+        )
         .route(
             "/file/{id}/content",
             get(unlock::content_handler).head(unlock::content_handler),
@@ -324,6 +328,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(manage::resolve_alias_handler),
         )
         .route("/internal/ban-snapshot", get(ban_snapshot_handler))
+        .route("/internal/stats/hit", post(stats::hit_handler))
+        .route("/internal/stats/visit", post(stats::visit_handler))
         .route("/file/{id}/delete", post(manage::delete_file_form_handler))
         .route("/file/{id}/rename", post(manage::rename_file_form_handler))
         .merge(small_payload_routes)
@@ -362,13 +368,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn(add_security_headers))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-                tracing::info_span!(
-                    "http.request",
-                    method = %request.method(),
-                    path = request.uri().path(),
-                    version = ?request.version(),
-                    client_ip = tracing::field::Empty,
-                )
+                if juiceutils::is_noisy_http_path(request.uri().path()) {
+                    tracing::Span::none()
+                } else {
+                    tracing::info_span!(
+                        "http.request",
+                        method = %request.method(),
+                        path = request.uri().path(),
+                        version = ?request.version(),
+                        client_ip = tracing::field::Empty,
+                    )
+                }
             }),
         )
         .layer(NewSentryLayer::<Request<Body>>::new_from_top())

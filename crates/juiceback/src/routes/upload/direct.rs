@@ -74,7 +74,7 @@ pub async fn direct_upload_reserve_handler(
     Json(body): Json<DirectUploadReserveRequest>,
 ) -> Result<Json<DirectUploadReserveResponse>, AppError> {
     let (default_ttl, allowed_ttl, danger, max_file_size, public_juicehost_url) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),

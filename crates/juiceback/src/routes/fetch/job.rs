@@ -72,7 +72,10 @@ pub(crate) async fn run_fetch_job_inner(
     password: Option<String>,
 ) -> FetchResult {
     let (max_size, default_ttl_hours) = {
-        let jh = state.juicehost_config().map_err(|e| format!("{e:?}"))?;
+        let jh = state
+            .juicehost_config_or_refresh()
+            .await
+            .map_err(|e| format!("{e:?}"))?;
         (jh.max_file_size_bytes, jh.default_ttl_hours)
     };
 

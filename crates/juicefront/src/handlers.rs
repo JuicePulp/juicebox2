@@ -44,7 +44,10 @@ fn hreflang_links_absolute(headers: &HeaderMap, stripped: &str) -> Vec<Hreflang>
     hreflang_links_absolute_inner(stripped, &|href| absolute_url(headers, &href))
 }
 
-fn hreflang_links_absolute_inner(stripped: &str, resolve: &dyn Fn(String) -> String) -> Vec<Hreflang> {
+fn hreflang_links_absolute_inner(
+    stripped: &str,
+    resolve: &dyn Fn(String) -> String,
+) -> Vec<Hreflang> {
     i18n::LOCALES
         .iter()
         .map(|(code, _)| {
@@ -239,6 +242,9 @@ fn modals_html(
             .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec())
             .iter()
             .map(|hours| {
+                // Whole configured hour values only; `as` saturates rather
+                // than wrapping, and magnitudes here are tiny.
+                #[allow(clippy::cast_possible_truncation)]
                 if hours.fract() == 0.0 {
                     format!("{}", *hours as i64)
                 } else {
@@ -325,7 +331,7 @@ fn ad_zones() -> std::collections::HashMap<String, AdZone> {
         if let Some(key) = juiceutils::config::optional_secret(env)
             && !key.is_empty()
         {
-            for holder in holders.iter() {
+            for holder in *holders {
                 zones.insert(
                     (*holder).to_owned(),
                     AdZone {
@@ -405,7 +411,7 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
     }
 }
 
-fn no_extra() -> Vec<String> {
+const fn no_extra() -> Vec<String> {
     Vec::new()
 }
 
@@ -539,6 +545,10 @@ const CSS_BUNDLE: &str = concat!(
     "\n",
     include_str!("../static/styles/components/Modals.css"),
     "\n",
+    include_str!("../static/styles/components/SettingsTabs.css"),
+    "\n",
+    include_str!("../static/styles/components/FullTab.css"),
+    "\n",
     include_str!("../static/styles/components/NetDebug.css"),
     "\n",
     include_str!("../static/styles/components/DocsPage.css"),
@@ -606,6 +616,7 @@ struct RetentionOpt {
     hours: f64,
     label: String,
     checked: bool,
+    divider_before: bool,
 }
 
 struct UploadedFile {
@@ -632,6 +643,9 @@ fn json_str(value: &serde_json::Value, key: &str, max_len: usize) -> String {
         .unwrap_or_default()
 }
 
+/// Finite f64 → i64 saturates (never wraps); untrusted magnitudes clamp
+/// instead of corrupting memory sizes.
+#[allow(clippy::cast_possible_truncation)]
 fn json_num(value: &serde_json::Value, key: &str) -> i64 {
     value
         .get(key)
@@ -644,6 +658,9 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
     let bytes = base64url_decode(param)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let mime = json_str(&value, "mime_type", 200);
+    // Non-negative sizes only in practice; a hostile negative saturates to
+    // zero via `as` instead of wrapping.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let size = json_num(&value, "size_bytes") as u64;
     Some(UploadedFile {
         id: json_str(&value, "id", 50),
@@ -723,7 +740,14 @@ pub async fn index(
         .unwrap_or(retention::DEFAULT_TTL_HOURS);
     let default_index = allowed
         .iter()
-        .position(|hours| *hours == default_ttl)
+        // Exact match on discrete configured values (all exactly
+        // representable); an epsilon here could misclassify tiers.
+        .position(|hours| {
+            #[allow(clippy::float_cmp)]
+            {
+                *hours == default_ttl
+            }
+        })
         .unwrap_or(0);
     let max_bytes = data.eff.config.max_file_size_bytes.unwrap_or(524_288_000);
     let cobalt = data.eff.config.cobalt.unwrap_or(false);
@@ -746,15 +770,25 @@ pub async fn index(
         cobalt,
         cobalt_services: services.join(","),
         services,
-        retention: allowed
-            .into_iter()
-            .enumerate()
-            .map(|(index, hours)| RetentionOpt {
-                hours,
-                label: cx.ttl(hours),
-                checked: index == default_index,
-            })
-            .collect(),
+        retention: {
+            let mut prev_tier: Option<u8> = None;
+            allowed
+                .into_iter()
+                .enumerate()
+                .map(|(index, hours)| {
+                    let tier = retention::ttl_tier(hours);
+                    let divider_before =
+                        prev_tier.is_some_and(|prev| prev != tier);
+                    prev_tier = Some(tier);
+                    RetentionOpt {
+                        hours,
+                        label: cx.ttl(hours),
+                        checked: index == default_index,
+                        divider_before,
+                    }
+                })
+                .collect()
+        },
         drop_max_html,
         uploaded,
         repo_url: metadata::REPO_URL.to_owned(),
@@ -910,7 +944,7 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
     if pairs.is_empty() {
         return Vec::new();
     }
-    let files = match tokio::time::timeout(Duration::from_secs(5), async {
+    let Ok(Some(files)) = tokio::time::timeout(Duration::from_secs(5), async {
         let response = state
             .http
             .post(format!("{}/api/owned-files", state.config.juiceback_url))
@@ -924,9 +958,8 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         response.json::<serde_json::Value>().await.ok()
     })
     .await
-    {
-        Ok(Some(data)) => data,
-        _ => return Vec::new(),
+    else {
+        return Vec::new();
     };
     let now = chrono_now();
     files
@@ -943,12 +976,16 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
         .collect()
 }
 
+// Unix timestamps are non-negative for any real clock; `as` saturates
+// rather than wrapping on hypothetical far-future dates.
+#[allow(clippy::cast_possible_wrap)]
 fn chrono_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs() as i64)
 }
 
+#[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1641,6 +1678,11 @@ pub async fn docs_page(
     stream_page(StatusCode::OK, stream)
 }
 
+/// Shared renderer for the Terms and Privacy pages.
+///
+/// Async for consistency with the calling handlers, even though this body
+/// awaits only inside the streamed response (see `unused_async` exemption).
+#[allow(clippy::unused_async)]
 async fn legal_page(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -1778,6 +1820,10 @@ struct NotFoundTpl {
     flags_html: String,
 }
 
+/// Shared 404 renderer. Async for consistency with the calling handlers,
+/// even though this body awaits only inside the streamed response
+/// (see `unused_async` exemption).
+#[allow(clippy::unused_async)]
 pub async fn not_found_page(
     state: Arc<AppState>,
     headers: HeaderMap,

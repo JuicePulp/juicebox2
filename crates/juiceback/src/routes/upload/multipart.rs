@@ -57,7 +57,7 @@ pub async fn reserve_upload_handler(
     Json(body): Json<ReserveUploadRequest>,
 ) -> Result<(StatusCode, Json<ReserveResponse>), AppError> {
     let (default_ttl, allowed_ttl, danger) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),
@@ -239,7 +239,9 @@ pub async fn upload_handler(
     let protection = params.protection;
     let protected = protection.is_some();
     if protected && params.enc_header.is_none() {
-        return Err(AppError::Internal("protected upload missing ciphertext".into()));
+        return Err(AppError::Internal(
+            "protected upload missing ciphertext".into(),
+        ));
     }
 
     let record = if let Some(ref existing) = params.reservation {
@@ -283,9 +285,9 @@ pub async fn upload_handler(
         );
         let mut completed = completed;
         if let Some(ref upload_protection) = protection {
-            let header = params.enc_header.ok_or_else(|| {
-                AppError::Internal("protected upload missing ciphertext".into())
-            })?;
+            let header = params
+                .enc_header
+                .ok_or_else(|| AppError::Internal("protected upload missing ciphertext".into()))?;
             let material = upload_protection.material(hex::encode(header));
             super::protected::mark_protected(&state, &completed.id, &material).await?;
             completed.password_hash = material.password_hash.clone();
@@ -310,9 +312,9 @@ pub async fn upload_handler(
             params.selected_host.clone(),
         );
         if let Some(ref upload_protection) = protection {
-            let header = params.enc_header.ok_or_else(|| {
-                AppError::Internal("protected upload missing ciphertext".into())
-            })?;
+            let header = params
+                .enc_header
+                .ok_or_else(|| AppError::Internal("protected upload missing ciphertext".into()))?;
             let material = upload_protection.material(hex::encode(header));
             record.password_hash = material.password_hash.clone();
             record.is_encrypted = material.is_encrypted;

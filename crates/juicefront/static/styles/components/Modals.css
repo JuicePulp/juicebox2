@@ -13,6 +13,11 @@
     transition: opacity 0.2s ease;
     pointer-events: none;
   }
+/* Legacy hash alias anchors (e.g. #host-modal for the settings dialog):
+ * addressable but never rendered. */
+.mdl-alias {
+    display: none;
+}
   .chord-indicator[hidden] {
     display: flex;
     opacity: 0;

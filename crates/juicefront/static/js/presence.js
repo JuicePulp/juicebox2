@@ -9,6 +9,15 @@ let retryDelay = INITIAL_RETRY_MS;
 let consecutiveFailures = 0;
 let retryTimer = null;
 let visibilityWired = false;
+function hasSessionCookie() {
+  try {
+    return document.cookie.split("; ").some(function (c) {
+      return c.startsWith("jb_session=");
+    });
+  } catch {
+    return false;
+  }
+}
 export function isAppMode() {
   return connected && devices.length > 0;
 }
@@ -39,6 +48,10 @@ export function connectPresence() {
   if (eventSource || typeof window === "undefined")
     return;
   if (typeof document !== "undefined" && document.hidden)
+    return;
+  // Anonymous tabs can never have devices (UserId falls back to a random
+  // UUID with no sessions). Don't hold an SSE stream per anonymous tab.
+  if (!hasSessionCookie())
     return;
   wireVisibilityHandler();
   eventSource = new EventSource(apiPresence);

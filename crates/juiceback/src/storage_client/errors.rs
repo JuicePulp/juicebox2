@@ -8,7 +8,9 @@ pub(crate) fn format_error_response(status: u16, body_text: String) -> String {
         .as_ref()
         .and_then(|v| v.get("message").and_then(|m| m.as_str()));
     match detail {
-        Some(d) if !d.is_empty() => format!("[{error_code}] {d} (status={status})", d = scrub_body(d)),
+        Some(d) if !d.is_empty() => {
+            format!("[{error_code}] {d} (status={status})", d = scrub_body(d))
+        }
         _ if body_text.is_empty() => format!("{error_code} (status={status}, body=<empty>)"),
         _ => format!(
             "[{error_code}] {body} (status={status})",
@@ -34,7 +36,10 @@ fn scrub_body(body: &str) -> String {
     }
     let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() > MAX_CHARS {
-        format!("{}...", collapsed.chars().take(MAX_CHARS).collect::<String>())
+        format!(
+            "{}...",
+            collapsed.chars().take(MAX_CHARS).collect::<String>()
+        )
     } else {
         collapsed
     }

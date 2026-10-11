@@ -1,6 +1,35 @@
 /** Reads the currently selected custom host from the DOM. */
 import { formatMaxSize } from "./format";
 import { clearHostGlow, shouldGlowHost } from "./device-ws";
+import { applySoundEnabled, playSound } from "./sounds";
+
+const MOTION_KEY = "juicebox_reduce_motion";
+const SOUND_KEY = "juicebox_sound";
+
+function readMotionReduced(): boolean {
+  try {
+    return localStorage.getItem(MOTION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function applyMotionReduced(on: boolean): void {
+  try {
+    localStorage.setItem(MOTION_KEY, on ? "1" : "0");
+  } catch {}
+  try {
+    document.documentElement.toggleAttribute("data-motion-reduce", on);
+  } catch {}
+}
+
+function readSoundEnabled(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 export function readSelectedHost(): string {
   const input = document.querySelector(
@@ -42,6 +71,7 @@ export function initHostGlow(): void {
 
   const observer = new MutationObserver(() => {
     if (
+      location.hash === "#settings-modal" ||
       location.hash === "#host-modal" ||
       location.hash === "#host-selector-modal"
     ) {
@@ -357,6 +387,27 @@ export function enhanceHostSelector(locale?: string) {
     setTimeout(() => {
       updateUltrafastState();
     }, 2000);
+  }
+
+  const soundToggle = document.querySelector(
+    "[data-sound-toggle]",
+  ) as HTMLInputElement | null;
+  if (soundToggle) {
+    soundToggle.checked = readSoundEnabled();
+    soundToggle.addEventListener("change", () => {
+      applySoundEnabled(soundToggle.checked);
+      if (soundToggle.checked) playSound("toggle");
+    });
+  }
+
+  const motionToggle = document.querySelector(
+    "[data-motion-toggle]",
+  ) as HTMLInputElement | null;
+  if (motionToggle) {
+    motionToggle.checked = readMotionReduced();
+    motionToggle.addEventListener("change", () => {
+      applyMotionReduced(motionToggle.checked);
+    });
   }
 
   updateDangerLevelDisplay(readDangerLevel(), locale);

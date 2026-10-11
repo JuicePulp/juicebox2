@@ -50,6 +50,17 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         _ => {}
     }
 
+    match state
+        .db_call("cleanup_orphan_stats", |db| {
+            db::delete_orphan_file_stats(db)
+        })
+        .await
+    {
+        Ok(count) if count > 0 => tracing::info!("cleanup: purged {count} orphan stat rows"),
+        Err(error) => tracing::error!("cleanup: orphan stats purge failed: {:?}", error),
+        _ => {}
+    }
+
     let mut cursor = String::new();
     loop {
         let state2 = Arc::clone(state);

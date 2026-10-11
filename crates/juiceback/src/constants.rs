@@ -32,7 +32,10 @@ pub const MAX_PAIRING_CODES_PER_USER: i64 = 5;
 pub const MAX_PAIRING_CODES_PER_IP: i64 = 10;
 pub const MAX_SSE_CONNECTIONS: usize = 256;
 pub const MAX_SSE_CONNECTIONS_PER_IP: u32 = 8;
-pub const DEGRADED_RETRY_INTERVAL_SECS: u64 = 30;
+/// Staleness threshold for the cached juicehost config. Hot paths serve
+/// the cache and refetch on demand when empty; `config_handler` revalidates
+/// in the background once older than this. No poll loop exists.
+pub const HEALTHY_CONFIG_REFRESH_INTERVAL_SECS: u64 = 300;
 pub const STARTUP_CONFIG_RETRIES: u32 = 3;
 pub const STARTUP_BACKOFF_BASE_SECS: u64 = 2;
 pub const COBALT_FETCH_RATE_LIMIT_PER_MINUTE: u32 = 3;

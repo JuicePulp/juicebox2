@@ -54,7 +54,11 @@ pub async fn download_ciphertext(
     if let Some((start, len)) = range.filter(|(_, len)| *len > 0) {
         request = request.header(
             "range",
-            format!("bytes={}-{}", start, start.saturating_add(len).saturating_sub(1)),
+            format!(
+                "bytes={}-{}",
+                start,
+                start.saturating_add(len).saturating_sub(1)
+            ),
         );
     }
 

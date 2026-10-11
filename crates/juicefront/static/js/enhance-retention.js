@@ -1,7 +1,9 @@
-import { t } from "./i18n.js";
 import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js";
 import { ttlLabel } from "./i18n.js";
+import { playSound } from "./sounds.js";
+
 const TTL_STORAGE_KEY = "juicebox_ttl_hours";
+
 function readStoredTtl() {
   try {
     return localStorage.getItem(TTL_STORAGE_KEY);
@@ -9,29 +11,48 @@ function readStoredTtl() {
     return null;
   }
 }
+
 function storeTtl(hours) {
   try {
     localStorage.setItem(TTL_STORAGE_KEY, hours);
   } catch {}
 }
-function resolveRadios(card, locale) {
-  const fieldset = card.querySelector(".rtt-options");
-  if (!fieldset)
-    return null;
-  const allowed = readAllowedTtlHours();
-  const def = readDefaultTtlHours();
-  if (allowed.length === 0) {
-    return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
-  }
+
+function ttlTier(hours) {
+  const h = Number(hours);
+  if (!Number.isFinite(h)) return 1;
+  if (h < 1) return 0;
+  if (Number.isInteger(h / 24)) return 2;
+  return 1;
+}
+
+function buildOptions(fieldset, locale, allowed, def, stored) {
   fieldset.innerHTML = "";
+  let prevTier = null;
+  let checkedValue = null;
+  if (stored !== null && allowed.some((h) => String(h) === stored)) {
+    checkedValue = stored;
+  } else if (allowed.includes(def)) {
+    checkedValue = String(def);
+  } else if (allowed.length > 0) {
+    checkedValue = String(allowed[0]);
+  }
   for (const hours of allowed) {
+    const tier = ttlTier(hours);
+    if (prevTier !== null && prevTier !== tier) {
+      const divider = document.createElement("span");
+      divider.className = "rtt-divider";
+      divider.setAttribute("aria-hidden", "true");
+      fieldset.appendChild(divider);
+    }
+    prevTier = tier;
     const label = document.createElement("label");
     label.className = "rtt-option";
     const input = document.createElement("input");
     input.type = "radio";
     input.name = "ttl_hours";
     input.value = String(hours);
-    input.checked = hours === def;
+    input.checked = String(hours) === checkedValue;
     const span = document.createElement("span");
     span.textContent = ttlLabel(locale, hours);
     label.append(input, span);
@@ -39,206 +60,71 @@ function resolveRadios(card, locale) {
   }
   return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
 }
+
+function resolveOptions(card, locale) {
+  const fieldset = card.querySelector(".rtt-options");
+  if (!fieldset) return null;
+  const allowed = readAllowedTtlHours();
+  const def = readDefaultTtlHours();
+  if (allowed.length === 0) {
+    return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
+  }
+  const stored = readStoredTtl();
+  return buildOptions(fieldset, locale, allowed, def, stored);
+}
+
+function syncStored(card) {
+  const stored = readStoredTtl();
+  if (stored === null) return;
+  const radios = Array.from(card.querySelectorAll('.rtt-options input[type="radio"]'));
+  if (radios.some((r) => r.value === stored)) {
+    radios.forEach((r) => (r.checked = r.value === stored));
+  }
+}
+
 export function enhanceRetention(card, locale = "en") {
   const toolbar = card.querySelector("[data-rttoolbar]");
   const fieldset = toolbar?.querySelector(".rtt-options");
-  if (!toolbar || !fieldset)
-    return;
-  const radios = resolveRadios(card, locale);
-  if (!radios || radios.length === 0)
-    return;
-  const stored = readStoredTtl();
-  if (stored !== null && radios.some((r) => r.value === stored)) {
-    radios.forEach((r) => r.checked = r.value === stored);
-  }
-  const labels = radios.map((r) => r.nextElementSibling?.textContent?.trim() ?? "");
-  let index = radios.findIndex((r) => r.checked);
-  if (index < 0)
-    index = 0;
-  toolbar.dataset.enhanced = "";
-  const height = toolbar.offsetHeight;
-  toolbar.style.minHeight = `${height}px`;
-  fieldset.hidden = true;
-  const info = toolbar.querySelector(".rttinfo");
-  const valueWrap = document.createElement("div");
-  valueWrap.className = "rttvalue-container";
-  info?.appendChild(valueWrap);
-  let lastIndex = index;
-  let cleanupTimer = 0;
-  const splitLabel = (label) => {
-    const m = label.match(/^(\d+(?:\.\d+)?)(.*)$/);
-    const num = m ? m[1] : "";
-    const unit = m ? m[2].trim() : "";
-    const hasS = unit.endsWith("s") && unit.length > 1;
-    return {
-      number: num,
-      unit,
-      base: hasS ? unit.slice(0, -1) : unit,
-      hasS
-    };
+  if (!toolbar || !fieldset) return;
+  const radios = resolveOptions(card, locale);
+  if (!radios || radios.length === 0) return;
+  // The radios intentionally carry no data-cuelume-select: cuelume would
+  // tick on its own terms, but retention ticks are played here instead —
+  // one per change, spammable like every other sound (the shared burst
+  // gate in playSound is the only throttle).
+  let lastTicked = radios.find((r) => r.checked)?.value ?? null;
+  const orderOf = (value) => radios.findIndex((r) => r.value === value);
+  const onChange = (e) => {
+    const target = e.target;
+    if (target && target.name === "ttl_hours" && target.checked) {
+      storeTtl(target.value);
+      const direction = orderOf(target.value) >= orderOf(lastTicked) ? "forward" : "back";
+      lastTicked = target.value;
+      playSound("select", { emphasis: "subtle", direction });
+    }
   };
-  const setValue = (i) => {
-    const nw = splitLabel(labels[i]);
-    let wrapper = valueWrap.querySelector(".rttvalue-wrapper");
-    if (!wrapper) {
-      wrapper = document.createElement("div");
-      wrapper.className = "rttvalue-wrapper";
-      wrapper.innerHTML = '<span class="rttnumber"></span><span class="rttunit-base"></span>';
-      wrapper.querySelector(".rttnumber").textContent = nw.number;
-      wrapper.querySelector(".rttunit-base").textContent = nw.base;
-      if (nw.hasS) {
-        const s = document.createElement("span");
-        s.className = "rttunit-s";
-        s.textContent = "s";
-        wrapper.appendChild(s);
-      }
-      valueWrap.appendChild(wrapper);
-      lastIndex = i;
-      return;
-    }
-    if (i === lastIndex)
-      return;
-    clearTimeout(cleanupTimer);
-    wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
-    const isUp = i > lastIndex;
-    const exitClass = isUp ? "animate-up-exit" : "animate-down-exit";
-    const enterClass = isUp ? "animate-up-enter" : "animate-down-enter";
-    const old = splitLabel(labels[lastIndex]);
-    const numberEl = wrapper.querySelector(".rttnumber");
-    const baseEl = wrapper.querySelector(".rttunit-base");
-    let suffixEl = wrapper.querySelector(".rttunit-s");
-    const baseChanged = old.base !== nw.base;
-    const wr = wrapper.getBoundingClientRect();
-    const toRemove = [];
-    const nRect = numberEl.getBoundingClientRect();
-    const exitN = numberEl.cloneNode(true);
-    exitN.dataset.exitClone = "";
-    exitN.style.position = "absolute";
-    exitN.style.left = `${nRect.left - wr.left}px`;
-    exitN.style.top = `${nRect.top - wr.top}px`;
-    exitN.style.width = `${nRect.width}px`;
-    exitN.style.margin = "0";
-    exitN.style.pointerEvents = "none";
-    exitN.className = `rttnumber ${exitClass}`;
-    wrapper.appendChild(exitN);
-    toRemove.push(exitN);
-    if (baseChanged) {
-      const bRect = baseEl.getBoundingClientRect();
-      const exitB = baseEl.cloneNode(true);
-      exitB.dataset.exitClone = "";
-      exitB.style.position = "absolute";
-      exitB.style.left = `${bRect.left - wr.left}px`;
-      exitB.style.top = `${bRect.top - wr.top}px`;
-      exitB.style.width = `${bRect.width}px`;
-      exitB.style.margin = "0";
-      exitB.style.pointerEvents = "none";
-      exitB.className = `rttunit-base ${exitClass}`;
-      wrapper.appendChild(exitB);
-      toRemove.push(exitB);
-    }
-    const suffixChanges = old.hasS !== nw.hasS || old.base !== nw.base;
-    if (suffixChanges && suffixEl) {
-      const sRect = suffixEl.getBoundingClientRect();
-      const exitS = suffixEl.cloneNode(true);
-      exitS.dataset.exitClone = "";
-      exitS.style.position = "absolute";
-      exitS.style.left = `${sRect.left - wr.left}px`;
-      exitS.style.top = `${sRect.top - wr.top}px`;
-      exitS.style.width = `${sRect.width}px`;
-      exitS.style.margin = "0";
-      exitS.style.pointerEvents = "none";
-      exitS.className = `rttunit-s ${exitClass}`;
-      wrapper.appendChild(exitS);
-      toRemove.push(exitS);
-      suffixEl.remove();
-      suffixEl = null;
-    }
-    numberEl.textContent = nw.number;
-    numberEl.className = "rttnumber";
-    baseEl.textContent = nw.base;
-    baseEl.className = "rttunit-base";
-    if (suffixChanges && nw.hasS) {
-      const s = document.createElement("span");
-      s.className = `rttunit-s ${enterClass}`;
-      s.textContent = "s";
-      wrapper.appendChild(s);
-      window.setTimeout(() => {
-        s.className = "rttunit-s";
-      }, 200);
-    }
-    requestAnimationFrame(() => {
-      numberEl.classList.add(enterClass);
-      if (baseChanged)
-        baseEl.classList.add(enterClass);
-    });
-    cleanupTimer = window.setTimeout(() => {
-      toRemove.forEach((el) => el.remove());
-    }, 200);
-    lastIndex = i;
-  };
-  const sliderWrap = document.createElement("div");
-  sliderWrap.className = "slider-wrapper";
-  const slider = document.createElement("input");
-  slider.type = "range";
-  slider.className = "rttslider";
-  slider.setAttribute("aria-label", t(locale, "accessibility.retention_period"));
-  slider.min = "0";
-  slider.max = String(radios.length - 1);
-  slider.step = "1";
-  slider.value = String(index);
-  const ticks = document.createElement("div");
-  ticks.className = "slider-ticks";
-  ticks.setAttribute("aria-hidden", "true");
-  radios.forEach((_, i) => {
-    const max = radios.length - 1;
-    const p = max === 0 ? 0 : i / max;
-    const offset = 10 - p * 16;
-    const tick = document.createElement("div");
-    tick.className = "tick" + (i === index ? " active" : "");
-    tick.style.setProperty("--tick-left", `calc(${p * 100}% + ${offset}px)`);
-    ticks.appendChild(tick);
-  });
-  sliderWrap.append(slider, ticks);
-  toolbar.appendChild(sliderWrap);
-  slider.addEventListener("input", () => {
-    const i = Number(slider.value);
-    radios[i].checked = true;
-    ticks.querySelectorAll(".tick").forEach((t, j) => t.classList.toggle("active", j === i));
-    setValue(i);
-    storeTtl(radios[i].value);
-  });
-  radios.forEach((r, i) => {
-    r.addEventListener("change", () => {
-      if (r.checked) {
-        slider.value = String(i);
-        ticks.querySelectorAll(".tick").forEach((t, j) => t.classList.toggle("active", j === i));
-        setValue(i);
-        storeTtl(r.value);
-      }
-    });
-  });
-  setValue(index);
+  fieldset.addEventListener("change", onChange);
   return {
     destroy() {
-      sliderWrap.remove();
-      ticks.remove();
-      const wrapper = valueWrap.querySelector(".rttvalue-wrapper");
-      if (wrapper)
-        wrapper.remove();
-      valueWrap.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
-      fieldset.hidden = false;
-      toolbar.dataset.enhanced = "";
-      toolbar.style.minHeight = "";
-      valueWrap.remove();
-      radios.forEach((r) => r.checked = false);
-      if (radios.length > 0)
-        radios[0].checked = true;
-      clearTimeout(cleanupTimer);
-    }
+      fieldset.removeEventListener("change", onChange);
+    },
   };
 }
+
 export function rebuildRetention(card, locale = "en", destroyFn) {
-  if (destroyFn)
-    destroyFn();
+  if (destroyFn) destroyFn();
+  const fieldset = card.querySelector(".rtt-options");
+  if (fieldset) {
+    const allowed = readAllowedTtlHours();
+    const def = readDefaultTtlHours();
+    if (allowed.length > 0) {
+      const stored = readStoredTtl();
+      buildOptions(fieldset, locale, allowed, def, stored);
+    } else {
+      syncStored(card);
+    }
+  } else {
+    syncStored(card);
+  }
   return enhanceRetention(card, locale);
 }

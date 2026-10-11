@@ -47,7 +47,7 @@ pub async fn create_upload_handler(
         .ok_or_else(|| AppError::TusMissingLength)?;
 
     let (max_size, default_ttl, allowed_ttl, _danger) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.max_file_size_bytes,
             jh.default_ttl_hours,
@@ -254,9 +254,9 @@ pub async fn create_upload_handler(
     let protection_setup = match reservation_hash {
         Some(_) => None,
         None => match password {
-            Some(password) => Some(
-                crate::routes::upload::protected::prepare_protection(&state, &password).await?,
-            ),
+            Some(password) => {
+                Some(crate::routes::upload::protected::prepare_protection(&state, &password).await?)
+            }
             None => None,
         },
     };
@@ -298,9 +298,15 @@ pub async fn create_upload_handler(
         push_rx: Some(rx),
         password_hash,
         dek: protection_setup.as_ref().map(|setup| setup.dek.clone()),
-        dek_wrapped: protection_setup.as_ref().map(|setup| setup.wrapped_b64.clone()),
-        dek_salt: protection_setup.as_ref().map(|setup| setup.salt_b64.clone()),
-        dek_escrow: protection_setup.as_ref().map(|setup| setup.escrow_hex.clone()),
+        dek_wrapped: protection_setup
+            .as_ref()
+            .map(|setup| setup.wrapped_b64.clone()),
+        dek_salt: protection_setup
+            .as_ref()
+            .map(|setup| setup.salt_b64.clone()),
+        dek_escrow: protection_setup
+            .as_ref()
+            .map(|setup| setup.escrow_hex.clone()),
         spool_path: None,
     };
 

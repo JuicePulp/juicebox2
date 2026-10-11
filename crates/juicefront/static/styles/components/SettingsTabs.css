@@ -1,0 +1,41 @@
+/* Settings modal tab strip + panels. Single strip shared by JS and no-JS:
+ * the radios are the state, the labels are the tabs, pure CSS switches
+ * panels. Mirrors the upload-tabs pattern. */
+
+/* Settings-modal instance of the full-tab component (see FullTab.css):
+ * the strip bolts onto the modal title; the active tab gets a bottom
+ * indicator bar instead of an outline. */
+#settings-tab-connection:checked ~ .full-tab label[for="settings-tab-connection"],
+#settings-tab-upload:checked ~ .full-tab label[for="settings-tab-upload"],
+#settings-tab-preferences:checked ~ .full-tab label[for="settings-tab-preferences"] {
+  background: var(--orange-500-15);
+  color: var(--orange-500);
+  box-shadow: inset 0 -2px 0 0 var(--orange-600);
+  position: relative;
+  z-index: 1;
+}
+
+.settings-panels [data-settings-panel] {
+  display: none;
+}
+
+#settings-tab-connection:checked ~ .settings-panels [data-settings-panel="connection"],
+#settings-tab-upload:checked ~ .settings-panels [data-settings-panel="upload"],
+#settings-tab-preferences:checked ~ .settings-panels [data-settings-panel="preferences"] {
+  display: block;
+}
+
+/* Breathing room between the host input block and the Browse-hosts action:
+ * the connection panel's fields are otherwise flush-stacked. */
+[data-settings-panel="connection"] .form-field:last-child {
+  margin-top: 1.25rem;
+}
+
+/* User motion preference override. Complements (never weakens) the
+ * prefers-reduced-motion blocks: explicit opt-in to stillness. */
+html[data-motion-reduce] *,
+html[data-motion-reduce] *::before,
+html[data-motion-reduce] *::after {
+  animation: none !important;
+  transition: none !important;
+}

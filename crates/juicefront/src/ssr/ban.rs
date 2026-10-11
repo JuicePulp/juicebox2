@@ -44,12 +44,13 @@ pub async fn check_user_ban(
 }
 
 fn urlencoding(text: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.~:".contains(&byte) {
             out.push(byte as char);
         } else {
-            out.push_str(&format!("%{byte:02X}"));
+            let _ = write!(out, "%{byte:02X}");
         }
     }
     out

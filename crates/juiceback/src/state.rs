@@ -56,6 +56,8 @@ pub struct AppState {
 
     pub jh_config: Arc<std::sync::RwLock<Option<Arc<JuicehostConfig>>>>,
 
+    pub jh_config_updated_at: Arc<std::sync::RwLock<Option<std::time::Instant>>>,
+
     #[cfg(feature = "quic")]
     pub quic_endpoint: std::sync::Arc<tokio::sync::OnceCell<h3_quinn::quinn::Endpoint>>,
 
@@ -97,6 +99,7 @@ impl AppState {
         ));
 
         let max_concurrent_uploads = config.max_concurrent_uploads.max(1) as usize;
+        let config_fresh = jh_config.is_some();
 
         Arc::new(Self {
             db: pool,
@@ -110,6 +113,9 @@ impl AppState {
             juicehost_headers,
             upload_semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent_uploads)),
             jh_config: Arc::new(std::sync::RwLock::new(jh_config.map(Arc::new))),
+            jh_config_updated_at: Arc::new(std::sync::RwLock::new(
+                config_fresh.then(std::time::Instant::now),
+            )),
             #[cfg(feature = "quic")]
             quic_endpoint: std::sync::Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(feature = "quic")]
@@ -140,6 +146,61 @@ impl AppState {
         cfg.ok_or_else(|| {
             AppError::ServiceUnavailable("juicehost config unavailable (degraded mode)".into())
         })
+    }
+
+    /// Fetch juicehost config now and swap it in. Used on demand when the
+    /// cache is empty (degraded recovery) or stale (change pickup), so no
+    /// background poll loop is needed.
+    pub async fn refresh_juicehost_config(&self) -> Result<Arc<JuicehostConfig>, String> {
+        let cfg = crate::storage_client::fetch_juicehost_config(
+            &self.http,
+            &self.config.juicehost_url,
+            &self.juicehost_headers,
+        )
+        .await?;
+        let fresh = Arc::new(cfg);
+        if let Ok(mut slot) = self.jh_config.write() {
+            *slot = Some(Arc::clone(&fresh));
+        }
+        if let Ok(mut at) = self.jh_config_updated_at.write() {
+            *at = Some(std::time::Instant::now());
+        }
+        Ok(fresh)
+    }
+
+    /// Cached config, refetching once when empty. Hot paths use this instead
+    /// of `juicehost_config()` so a degraded boot recovers on first use.
+    pub async fn juicehost_config_or_refresh(&self) -> Result<Arc<JuicehostConfig>, AppError> {
+        if let Ok(cfg) = self.juicehost_config() {
+            return Ok(cfg);
+        }
+        self.refresh_juicehost_config()
+            .await
+            .map_err(AppError::ServiceUnavailable)
+    }
+
+    /// Whether the cached config is older than the healthy refresh cadence.
+    /// `config_handler` uses this for stale-while-revalidate: serve stale,
+    /// refresh in the background.
+    pub fn juicehost_config_stale(&self) -> bool {
+        let at = self
+            .jh_config_updated_at
+            .read()
+            .map(|guard| *guard)
+            .unwrap_or(None);
+        match at {
+            None => self
+                .jh_config
+                .read()
+                .map(|slot| slot.is_some())
+                .unwrap_or(false),
+            Some(instant) => {
+                instant.elapsed()
+                    >= std::time::Duration::from_secs(
+                        crate::constants::HEALTHY_CONFIG_REFRESH_INTERVAL_SECS,
+                    )
+            }
+        }
     }
 
     pub fn reload_banned_ips(&self) {

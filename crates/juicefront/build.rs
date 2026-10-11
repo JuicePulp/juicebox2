@@ -1,8 +1,42 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+/// Absolute path of the current checkout's git HEAD, if discoverable.
+///
+/// `rerun-if-changed` paths are resolved against the *package* directory, so
+/// a workspace-relative `.git/HEAD` would watch
+/// `crates/juicefront/.git/HEAD` — a file that never exists. Cargo treats a
+/// missing watched file as permanently dirty, rerunning this script (and
+/// recompiling juicefront) on every single build. Resolve the real git dir
+/// instead; `None` means "don't watch HEAD at all".
+fn git_head_path() -> Option<PathBuf> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(dir) = std::process::Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .current_dir(manifest_dir)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| PathBuf::from(text.trim().to_owned()))
+        .filter(|dir| dir.is_dir())
+    {
+        let head = dir.join("HEAD");
+        if head.is_file() {
+            return Some(head);
+        }
+    }
+    let fallback = manifest_dir.join("../../.git/HEAD");
+    fallback.is_file().then_some(fallback)
+}
 
 fn main() {
     println!("cargo:rerun-if-changed=icons/");
-    println!("cargo:rerun-if-changed=.git/HEAD");
+    if let Some(head) = git_head_path() {
+        println!("cargo:rerun-if-changed={}", head.display());
+    }
     println!("cargo:rerun-if-changed=build.rs");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");

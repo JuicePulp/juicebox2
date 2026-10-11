@@ -96,6 +96,7 @@ pub fn icon_html(name: &str, size: u32, class: &str) -> String {
 }
 
 fn suffix_ids(svg: &str, uid: u64) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(svg.len() + 16);
     let mut rest = svg;
     loop {
@@ -113,13 +114,13 @@ fn suffix_ids(svg: &str, uid: u64) -> String {
             let value_start = pos + 4;
             if let Some(rel) = rest[value_start..].find('"') {
                 out.push_str(&rest[..value_start + rel]);
-                out.push_str(&format!("-{uid}\""));
+                let _ = write!(out, "-{uid}\"");
                 rest = &rest[value_start + rel + 1..];
                 continue;
             }
         } else if let Some(rel) = rest[pos + 5..].find(')') {
             out.push_str(&rest[..pos + 5 + rel]);
-            out.push_str(&format!("-{uid})"));
+            let _ = write!(out, "-{uid})");
             rest = &rest[pos + 5 + rel + 1..];
             continue;
         }

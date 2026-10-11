@@ -12,6 +12,7 @@ pub mod paginated;
 pub mod reports;
 pub mod schema;
 pub mod sessions;
+pub mod stats;
 pub mod types;
 
 #[cfg(test)]
@@ -30,4 +31,5 @@ pub use paginated::*;
 pub use reports::*;
 pub use schema::*;
 pub use sessions::*;
+pub use stats::*;
 pub use types::*;

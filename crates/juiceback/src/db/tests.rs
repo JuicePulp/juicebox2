@@ -864,8 +864,14 @@ fn protected_record_roundtrips_with_defaults_for_plain() {
     let got = get_file(&conn, "locked").unwrap().unwrap();
     assert!(got.is_protected());
     assert!(got.is_encrypted);
-    assert_eq!(got.password_hash.as_deref(), shielded.password_hash.as_deref());
-    assert_eq!(got.enc_header.as_deref(), Some("4a424331100000000000000000"));
+    assert_eq!(
+        got.password_hash.as_deref(),
+        shielded.password_hash.as_deref()
+    );
+    assert_eq!(
+        got.enc_header.as_deref(),
+        Some("4a424331100000000000000000")
+    );
 
     let plain = FileRecord::new(
         "open".into(),

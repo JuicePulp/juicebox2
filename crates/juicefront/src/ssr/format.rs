@@ -1,3 +1,12 @@
+/// Human-size formatting (`512 B`, `1.5 KB`). Float math is display-only:
+/// magnitudes are clamped before casting, so the `as` conversions below
+/// cannot misbehave.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 pub fn format_size(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B".to_owned();
@@ -13,6 +22,13 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Max-size label (`500 MB`, `1.5 GB`). Same display-only float math as
+/// [`format_size`].
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 pub fn format_max_size(bytes: u64) -> String {
     let mb = bytes as f64 / (1024.0 * 1024.0);
     if mb >= 1024.0 {
@@ -90,6 +106,14 @@ pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     crate::i18n::tv(locale, "files.expires", "time", &time)
 }
 
+/// Percentage of TTL remaining, clamped to `0..=100` by construction
+/// (`left` is floored at zero, `total` is positive): the float ratio and
+/// final cast cannot overflow.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 pub fn pct_remaining(expires_at: i64, uploaded_at: i64, now_ms: i64) -> u64 {
     let total = (expires_at - uploaded_at) * 1000;
     if total <= 0 {
@@ -121,10 +145,7 @@ pub fn is_default_host(host: &str, default_host: Option<&str>) -> bool {
     if DEFAULT_HOSTS.contains(&stripped.as_str()) {
         return true;
     }
-    match default_host {
-        Some(default_host) => stripped == strip_host(default_host),
-        None => false,
-    }
+    default_host.is_some_and(|default_host| stripped == strip_host(default_host))
 }
 
 #[cfg(test)]

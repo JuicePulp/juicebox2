@@ -31,9 +31,9 @@ pub(crate) async fn finish_tus_upload(
         if meta.password_hash.is_some() {
             let target_id = meta.reserve_id.as_deref().unwrap_or(&meta.id);
             let spool = crate::routes::upload::protected::tus_spool_path(&meta.id);
-            let spooled = tokio::fs::metadata(&spool).await.map_err(|_| {
-                AppError::Internal("protected upload spool missing".into())
-            })?;
+            let spooled = tokio::fs::metadata(&spool)
+                .await
+                .map_err(|_| AppError::Internal("protected upload spool missing".into()))?;
             if spooled.len() != meta.total_length {
                 return Err(AppError::Internal("protected upload size mismatch".into()));
             }
@@ -57,7 +57,9 @@ pub(crate) async fn finish_tus_upload(
             } else if let Some(reserve_id) = meta.reserve_id.as_deref() {
                 let lookup = reserve_id.to_string();
                 let reservation = state
-                    .db_call("get_tus_protection_row", move |db| db::get_file(db, &lookup))
+                    .db_call("get_tus_protection_row", move |db| {
+                        db::get_file(db, &lookup)
+                    })
                     .await?
                     .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
                 let material = ProtectionMaterial {
@@ -70,9 +72,7 @@ pub(crate) async fn finish_tus_upload(
                     key_version: reservation.key_version,
                 };
                 let dek = match material.dek_escrow.as_deref() {
-                    Some(escrow) => {
-                        crate::routes::upload::protected::unwrap_escrow(state, escrow)?
-                    }
+                    Some(escrow) => crate::routes::upload::protected::unwrap_escrow(state, escrow)?,
                     None => state
                         .config
                         .storage_file_key()

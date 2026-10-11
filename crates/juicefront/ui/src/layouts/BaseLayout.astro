@@ -111,6 +111,11 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
     <script is:inline>
       document.documentElement.classList.remove("no-js");
       document.documentElement.classList.add("js");
+      try {
+        if (localStorage.getItem("juicebox_reduce_motion") === "1") {
+          document.documentElement.setAttribute("data-motion-reduce", "");
+        }
+      } catch {}
     </script>
     <meta charset="utf-8" />
     <meta name="viewport" content={viewport} />

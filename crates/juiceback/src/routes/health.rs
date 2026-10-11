@@ -18,72 +18,16 @@ use crate::{error::AppError, routes::api_doc::ApiDoc, state::AppState};
     ),
     tag = "General",
 )]
-pub async fn health_handler(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Json<serde_json::Value> {
-    let mut body = json!({
+pub async fn health_handler() -> Json<serde_json::Value> {
+    // Static liveness only: no downstream probe, no per-request metric.
+    // Dependency status is not health; monitors that need it hit each
+    // service directly. Previously every call probed juicehost over HTTP
+    // (10s cache) plus a sentry counter, so 137 pollers meant constant
+    // cross-service traffic for an offline banner.
+    Json(json!({
         "status": "ok",
         "juiceback": "ok",
-    });
-
-    if !headers.contains_key("x-health-probe") {
-        body["juicehost"] = json!(probe_juicehost_cached(&state).await);
-    }
-
-    sentry::metrics::counter("juiceback.health", 1).capture();
-
-    Json(body)
-}
-
-const HEALTH_PROBE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
-
-static JUICEHOST_PROBE_CACHE: std::sync::LazyLock<
-    std::sync::Mutex<(Option<std::time::Instant>, &'static str)>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new((None, "unknown")));
-
-async fn probe_juicehost_cached(state: &Arc<AppState>) -> &'static str {
-    if let Some(cached) = JUICEHOST_PROBE_CACHE.lock().ok().and_then(|guard| {
-        guard
-            .0
-            .filter(|at| at.elapsed() < HEALTH_PROBE_TTL)
-            .map(|_| guard.1)
-    }) {
-        return cached;
-    }
-    let fresh = probe_juicehost(state).await;
-    if let Ok(mut guard) = JUICEHOST_PROBE_CACHE.lock() {
-        *guard = (Some(std::time::Instant::now()), fresh);
-    }
-    fresh
-}
-
-async fn probe_juicehost(state: &Arc<AppState>) -> &'static str {
-    if state.config.juicehost_url.is_empty() {
-        return "unknown";
-    }
-    let url = format!(
-        "{}/api/health",
-        state.config.juicehost_url.trim_end_matches('/')
-    );
-    let Ok(resp) = state
-        .http
-        .get(&url)
-        .headers(state.juicehost_headers.clone())
-        .header("x-health-probe", "1")
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await
-    else {
-        return "unreachable";
-    };
-    if !resp.status().is_success() {
-        return "unreachable";
-    }
-    match resp.json::<serde_json::Value>().await {
-        Ok(v) if v.get("status").and_then(|s| s.as_str()) == Some("ok") => "ok",
-        _ => "degraded",
-    }
+    }))
 }
 
 #[utoipa::path(
@@ -95,7 +39,22 @@ async fn probe_juicehost(state: &Arc<AppState>) -> &'static str {
     tag = "General",
 )]
 pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let jh = state.juicehost_config().ok();
+    // Serve from cache; refetch on demand when empty (degraded recovery).
+    // When the cached value goes stale, serve it anyway and revalidate in
+    // the background so juicehost changes are picked up without any poll
+    // loop and without blocking this request on a fetch.
+    let jh = match state.juicehost_config() {
+        Ok(cfg) => {
+            if state.juicehost_config_stale() {
+                let refresh_state = Arc::clone(&state);
+                tokio::spawn(async move {
+                    let _ = refresh_state.refresh_juicehost_config().await;
+                });
+            }
+            Some(cfg)
+        }
+        Err(_) => state.refresh_juicehost_config().await.ok(),
+    };
 
     match jh.as_ref() {
         Some(cfg) => {
