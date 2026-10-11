@@ -36,7 +36,8 @@
 <meta name="twitter:image" content="{{ head.og_image }}">
 <meta name="twitter:image:alt" content="{{ head.og_image_alt }}">
 <meta name="twitter:url" content="{{ head.canonical }}">
-<script type="application/ld+json">{{ head.structured_data|safe }}</script>
+{% if head.discord_embed != "" %}<script id="discord:component-embed" type="application/json">{{ head.discord_embed|safe }}</script>
+{% endif %}<script type="application/ld+json">{{ head.structured_data|safe }}</script>
 <link rel="stylesheet" href="/static/bundle.css">
 <script src="/static/js/boot.js"></script>
 <script type="speculationrules" src="/static/speculation.json"></script>
