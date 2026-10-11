@@ -52,6 +52,10 @@ impl R2Store {
                 content_type.to_string().into(),
             );
         }
+        attributes.insert(
+            object_store::Attribute::CacheControl,
+            "public, max-age=86400".to_string().into(),
+        );
         let opts = object_store::PutOptions {
             attributes,
             ..Default::default()
