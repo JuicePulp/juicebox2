@@ -19,9 +19,6 @@ pub(crate) fn format_error_response(status: u16, body_text: String) -> String {
     }
 }
 
-
-
-
 fn scrub_body(body: &str) -> String {
     const MAX_CHARS: usize = 200;
     let mut out = String::new();

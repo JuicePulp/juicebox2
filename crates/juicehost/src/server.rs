@@ -170,6 +170,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/internal/bans/ban", post(handlers::push_ban))
         .route("/internal/bans/unban", post(handlers::push_unban))
         .route("/internal/bans/snapshot", post(handlers::push_snapshot))
+        .route("/internal/file/{id}/promote", post(handlers::promote_file))
+        .route("/internal/file/{id}/demote", post(handlers::demote_file))
         .merge(concat)
         .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
         .layer(middleware::from_fn_with_state(

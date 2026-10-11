@@ -113,8 +113,8 @@ async fn protected_record(state: &Arc<AppState>, id: &str) -> Result<db::FileRec
 }
 
 fn public_url_for(state: &Arc<AppState>, record: &db::FileRecord) -> String {
-    crate::utils::public_url(
-        &state.config.public_base_url,
+    crate::utils::share_link(
+        &state.config,
         record.storage_host.as_deref(),
         &record.id,
         &record.filename,

@@ -935,3 +935,52 @@ fn renew_ids_are_atomic_in_transaction() {
     tx.rollback().unwrap();
     assert!(resolve_alias(&conn, "new").unwrap().is_none());
 }
+
+#[test]
+fn hot_tier_migration_and_promo_flow() {
+    let conn = setup_db();
+    assert!(schema_version(&conn).unwrap() >= 13);
+
+    let rec = FileRecord::new(
+        "hot1".into(),
+        "movie.mp4".into(),
+        "video/mp4".into(),
+        1024,
+        "tok-hot".into(),
+        1000,
+        9_999_999_999,
+        None,
+        Some("https://f-eu1.juicey.dev".into()),
+    );
+    insert_file(&conn, &rec).unwrap();
+    let got = get_file(&conn, "hot1").unwrap().unwrap();
+    assert_eq!(got.tier, "standard");
+    assert!(got.r2_key.is_empty());
+
+    let (count, bytes) = hot_usage(&conn).unwrap();
+    assert_eq!((count, bytes), (0, 0));
+
+    let candidates = list_promo_candidates(&conn, 9_999_999_000, 500).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, "hot1");
+
+    set_file_tier(&conn, "hot1", "hot", "hot/hot1.mp4").unwrap();
+    let got = get_file(&conn, "hot1").unwrap().unwrap();
+    assert_eq!(got.tier, "hot");
+    assert_eq!(got.r2_key, "hot/hot1.mp4");
+
+    let (count, bytes) = hot_usage(&conn).unwrap();
+    assert_eq!((count, bytes), (1, 1024));
+
+    let candidates = list_promo_candidates(&conn, 9_999_999_000, 500).unwrap();
+    assert!(candidates.is_empty());
+
+    upsert_promo_state(&conn, &[("hot1".to_string(), 60, 5, 2000)]).unwrap();
+    let seen = read_promo_state(&conn, &["hot1".to_string()]).unwrap();
+    assert_eq!(seen.get("hot1"), Some(&(60, 5, 2000)));
+
+    assert_eq!(prune_promo_state(&conn).unwrap(), 0);
+    conn.execute("DELETE FROM files WHERE id = 'hot1'", [])
+        .unwrap();
+    assert_eq!(prune_promo_state(&conn).unwrap(), 1);
+}

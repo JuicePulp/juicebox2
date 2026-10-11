@@ -218,12 +218,11 @@ pub async fn fetch_status_handler(
             .db_call("get_file", move |db| db::get_file(db, &file_id))
             .await?;
         if let Some(record) = record {
-            let url = crate::utils::share_url(
-                &state.config.public_base_url,
+            let url = crate::utils::share_link(
+                &state.config,
                 record.storage_host.as_deref(),
                 &record.id,
                 &record.filename,
-                record.is_protected(),
             );
             let protected = record.is_protected();
             let is_encrypted = record.is_encrypted;

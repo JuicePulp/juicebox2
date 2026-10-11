@@ -57,6 +57,8 @@ function syncConfigBits(cfg) {
 }
 function capsOf(cfg) {
   const caps = [];
+  if (cfg.router === true)
+    caps.unshift("Router");
   if (cfg.quic === true)
     caps.push("QUIC");
   if (cfg.cobalt === true)

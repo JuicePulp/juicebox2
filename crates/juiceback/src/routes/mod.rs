@@ -324,6 +324,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(upload::file_status_handler),
         )
         .route(
+            "/internal/resolve/{id}",
+            get(upload::resolve_file_handler),
+        )
+        .route(
             "/internal/alias/{old_id}",
             get(manage::resolve_alias_handler),
         )

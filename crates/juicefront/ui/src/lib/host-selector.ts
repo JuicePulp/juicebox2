@@ -99,6 +99,7 @@ function syncConfigBits(cfg: Record<string, unknown>): void {
 
 function capsOf(cfg: Record<string, unknown>): string[] {
   const caps: string[] = [];
+  if (cfg.router === true) caps.unshift("Router");
   if (cfg.quic === true) caps.push("QUIC");
   if (cfg.cobalt === true) caps.push("Cobalt");
   if (cfg.quick_link === true) caps.push("Quick link");

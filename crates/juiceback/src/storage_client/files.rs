@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::client::StorageClient;
-use crate::state::AppState;
+use crate::{db, state::AppState};
 
 pub async fn rename_file_on_juicehost(
     state: &Arc<AppState>,
@@ -51,6 +51,87 @@ pub async fn rename_file_on_juicehost(
     }
 }
 
+pub async fn demote_file_on_juicehost(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+) -> Result<(), String> {
+    let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
+    if custom_host.is_none() && state.config.juicehost_url.is_empty() {
+        return Ok(());
+    }
+    let client = StorageClient::resolve(state, custom_host).await?;
+
+    let headers = client.headers_with(None)?;
+
+    let resp = client
+        .http()
+        .post(format!("{}/internal/file/{}/demote", client.base_url(), id))
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| format!("juicehost demote request failed: {e}"))?;
+
+    if resp.status().is_success() {
+        tracing::info!("juicehost demote: id={id} ok");
+        Ok(())
+    } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        tracing::warn!("juicehost demote: id={id} not found (already gone)");
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        Err(format!(
+            "juicehost demote failed: status={status} body={body_text}"
+        ))
+    }
+}
+
+pub async fn promote_file_on_juicehost(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+    capability: Option<&str>,
+) -> Result<String, String> {
+    let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
+    if custom_host.is_none() && state.config.juicehost_url.is_empty() {
+        return Err("JUICEHOST_URL is not set".into());
+    }
+    let client = StorageClient::resolve(state, custom_host).await?;
+
+    let headers = client.headers_with(capability)?;
+
+    let resp = client
+        .http()
+        .post(format!(
+            "{}/internal/file/{}/promote",
+            client.base_url(),
+            id
+        ))
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| format!("juicehost promote request failed: {e}"))?;
+
+    if resp.status().is_success() {
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("juicehost promote invalid response: {e}"))?;
+        body.get("key")
+            .and_then(|v| v.as_str())
+            .filter(|k| !k.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "juicehost promote response missing key".to_string())
+    } else {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        Err(format!(
+            "juicehost promote failed: status={status} body={body_text}"
+        ))
+    }
+}
+
 pub async fn delete_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
@@ -61,6 +142,18 @@ pub async fn delete_file_on_juicehost(
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
         return Ok(());
     }
+
+    let id_owned = id.to_string();
+    let hot = state
+        .db_call("get_file_tier", move |db| db::get_file(db, &id_owned))
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|record| record.tier == "hot");
+    if hot && let Err(e) = demote_file_on_juicehost(state, id, host).await {
+        tracing::warn!("juicehost delete: R2 demote failed for id={id}: {e}");
+    }
+
     let client = StorageClient::resolve(state, custom_host).await?;
 
     let headers = client.headers_with(capability)?;

@@ -62,12 +62,52 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
     });
 }
 
-pub fn purge_file(config: &Arc<Config>, id: &str, filename: &str, storage_host: Option<&str>) {
-    let url = crate::utils::public_url(&config.public_base_url, storage_host, id, filename);
+pub fn cache_variants(
+    config: &Config,
+    storage_host: Option<&str>,
+    id: &str,
+    filename: &str,
+    tier: &str,
+    r2_key: &str,
+) -> Vec<String> {
+    let mut urls = vec![crate::utils::public_url(
+        &config.public_base_url,
+        storage_host,
+        id,
+        filename,
+    )];
+    if crate::utils::is_official_host(config, storage_host.unwrap_or("")) {
+        if let Some(router) = config
+            .router_base_url
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+        {
+            urls.push(crate::utils::public_url(router, None, id, filename));
+        }
+    }
+    if tier == "hot" && !r2_key.is_empty() && !config.r2_public_base_url.is_empty() {
+        urls.push(format!(
+            "{}/{}",
+            config.r2_public_base_url.trim_end_matches('/'),
+            r2_key.trim_start_matches('/')
+        ));
+    }
+    urls
+}
+
+pub fn purge_file(config: &Arc<Config>, record: &crate::db::FileRecord) {
+    let urls = cache_variants(
+        config,
+        record.storage_host.as_deref(),
+        &record.id,
+        &record.filename,
+        &record.tier,
+        &record.r2_key,
+    );
     let config = Arc::clone(config);
-    let id = id.to_string();
+    let id = record.id.clone();
     tokio::spawn(async move {
-        purge_urls(Arc::clone(&config), vec![url]).await;
+        purge_urls(Arc::clone(&config), urls).await;
         purge_tags(config, vec![format!("juicebox:{id}")]).await;
     });
 }

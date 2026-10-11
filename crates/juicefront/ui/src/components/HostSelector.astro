@@ -22,6 +22,7 @@ const renderRow = (n: HostNode) => (
     data-url={n.url}
     data-name={n.name}
     data-region={n.region}
+    data-kind={n.kind}
     data-official={n.official ? "true" : "false"}
     data-selected={n.url === savedHost ? "" : undefined}
   >

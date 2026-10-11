@@ -1,8 +1,5 @@
 use rusqlite::{Connection, Result, params};
 
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitKind {
     View,
@@ -20,7 +17,6 @@ impl HitKind {
     }
 }
 
-
 pub struct FileStatsAggregate {
     pub file_id: String,
     pub viewers: i64,
@@ -30,25 +26,20 @@ pub struct FileStatsAggregate {
     pub last_seen_at: i64,
 }
 
-
 #[derive(Debug, Default)]
 pub struct SiteOverview {
-    
     pub site_visitors: i64,
-    
+
     pub site_visits: i64,
-    
+
     pub uploaders: i64,
-    
+
     pub file_viewers: i64,
-    
+
     pub file_views: i64,
-    
+
     pub file_downloads: i64,
 }
-
-
-
 
 pub fn record_file_hit(
     conn: &Connection,
@@ -73,7 +64,6 @@ pub fn record_file_hit(
     Ok(())
 }
 
-
 pub fn record_site_visit(conn: &Connection, ip_hash: &str, now: i64) -> Result<()> {
     conn.execute(
         "INSERT INTO site_visitors (ip_hash, first_seen_at, last_seen_at, visits)
@@ -85,8 +75,6 @@ pub fn record_site_visit(conn: &Connection, ip_hash: &str, now: i64) -> Result<(
     )?;
     Ok(())
 }
-
-
 
 pub fn file_stats_for_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileStatsAggregate>> {
     if ids.is_empty() {
@@ -120,7 +108,6 @@ pub fn file_stats_for_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileS
     rows.collect()
 }
 
-
 pub fn site_overview(conn: &Connection) -> Result<SiteOverview> {
     conn.query_row(
         "SELECT
@@ -144,8 +131,6 @@ pub fn site_overview(conn: &Connection) -> Result<SiteOverview> {
     )
 }
 
-
-
 pub fn delete_file_stats(conn: &Connection, file_id: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM file_stats WHERE file_id = ?1",
@@ -153,8 +138,6 @@ pub fn delete_file_stats(conn: &Connection, file_id: &str) -> Result<()> {
     )?;
     Ok(())
 }
-
-
 
 pub fn delete_orphan_file_stats(conn: &Connection) -> Result<usize> {
     let affected = conn.execute(

@@ -29,8 +29,7 @@ pub struct ReportRecord {
     pub reporter_ip: Option<String>,
     pub email: Option<String>,
     pub created_at: i64,
-    
-    
+
     pub password: Option<String>,
 }
 
@@ -99,30 +98,22 @@ pub struct FileRecord {
 
     pub status: String,
 
-    
+    pub tier: String,
+
+    pub r2_key: String,
+
     pub password_hash: Option<String>,
 
-    
     pub is_encrypted: bool,
 
-    
-    
     pub enc_header: Option<String>,
 
-    
-    
     pub dek_wrapped: Option<String>,
 
-    
-    
     pub dek_salt: Option<String>,
 
-    
-    
     pub dek_escrow: Option<String>,
 
-    
-    
     pub key_version: i64,
 }
 
@@ -155,6 +146,8 @@ impl FileRecord {
             uploader_ip,
             storage_host,
             status: "ready".to_string(),
+            tier: "standard".to_string(),
+            r2_key: String::new(),
             password_hash: None,
             is_encrypted: false,
             enc_header: None,
@@ -165,14 +158,11 @@ impl FileRecord {
         }
     }
 
-    
     #[must_use]
     pub fn is_protected(&self) -> bool {
         self.password_hash.is_some()
     }
 
-    
-    
     #[must_use]
     pub fn uses_per_file_key(&self) -> bool {
         self.key_version == crate::crypto_file::KEY_VERSION_V1
@@ -211,9 +201,6 @@ impl FileRecord {
     }
 }
 
-
-
-
 #[derive(Debug, Clone)]
 pub struct ProtectionMaterial {
     pub password_hash: Option<String>,
@@ -226,8 +213,6 @@ pub struct ProtectionMaterial {
 }
 
 impl ProtectionMaterial {
-    
-    
     #[must_use]
     pub fn legacy(password_hash: Option<String>, enc_header: Option<String>) -> Self {
         Self {

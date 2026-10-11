@@ -40,6 +40,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("reports.password", m10_reports_password),
     ("files.per_file_dek", m11_files_per_file_dek),
     ("visitor_stats", m12_visitor_stats),
+    ("files.hot_tier", m13_files_hot_tier),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -173,8 +174,6 @@ fn m09_files_protected_links(conn: &Connection) -> Result<()> {
 }
 
 fn m10_reports_password(conn: &Connection) -> Result<()> {
-    
-    
     if !has_column(conn, "reports", "password")? {
         conn.execute(
             "ALTER TABLE reports ADD COLUMN password TEXT DEFAULT NULL",
@@ -185,12 +184,6 @@ fn m10_reports_password(conn: &Connection) -> Result<()> {
 }
 
 fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
-    
-    
-    
-    
-    
-    
     if !has_column(conn, "files", "dek_wrapped")? {
         conn.execute(
             "ALTER TABLE files ADD COLUMN dek_wrapped TEXT DEFAULT NULL",
@@ -218,14 +211,32 @@ fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn m13_files_hot_tier(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "tier")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN tier TEXT NOT NULL DEFAULT 'standard'",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "r2_key")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN r2_key TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS promo_state (
+            file_id        TEXT PRIMARY KEY,
+            views_seen     INTEGER NOT NULL DEFAULT 0,
+            downloads_seen INTEGER NOT NULL DEFAULT 0,
+            checked_at     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_files_tier_status ON files(tier, status);",
+    )?;
+    Ok(())
+}
+
 fn m12_visitor_stats(conn: &Connection) -> Result<()> {
-    
-    
-    
-    
-    
-    
-    
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS file_stats (
             file_id       TEXT NOT NULL,

@@ -75,9 +75,6 @@ pub fn list_files_paginated(
     let mut total = 0;
     let rows = if search.is_empty() {
         let r = stmt.query_map(params![limit, offset], |row| {
-            
-            
-            
             total = row.get("total")?;
             row_to_file_record(row)
         })?;

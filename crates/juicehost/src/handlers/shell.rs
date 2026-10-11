@@ -103,13 +103,26 @@ impl ShellMode {
 
 
 
-pub(crate) async fn protected_shell_response(
-    state: &AppState,
-    id: &str,
-    mode: ShellMode,
-) -> Option<Response<Body>> {
-    if state.backend_url.is_none() {
+pub(crate) enum GateDecision {
+    Respond(Response<Body>),
+    HotRedirect(String),
+    ServeLocal,
+}
+
+fn hot_r2_url(body: &serde_json::Value) -> Option<String> {
+    if body.get("tier").and_then(|v| v.as_str()) != Some("hot") {
         return None;
+    }
+    let url = body.get("r2_url").and_then(|v| v.as_str()).unwrap_or("");
+    let valid = url
+        .parse::<url::Url>()
+        .is_ok_and(|u| u.scheme() == "http" || u.scheme() == "https");
+    if valid { Some(url.to_string()) } else { None }
+}
+
+pub(crate) async fn gate_decision(state: &AppState, id: &str, mode: ShellMode) -> GateDecision {
+    if state.backend_url.is_none() {
+        return GateDecision::ServeLocal;
     }
     match backend_file_status(state, id).await {
         BackendStatus::Known(body)
@@ -130,26 +143,41 @@ pub(crate) async fn protected_shell_response(
                 .and_then(|v| v.as_u64())
                 .map(super::preview::human_size)
                 .unwrap_or_default();
-            Some(render_shell(
+            let ciphertext_url = hot_r2_url(&body).unwrap_or_else(|| format!("/c/{id}"));
+            GateDecision::Respond(render_shell(
                 filename,
                 id,
                 gateway_origin,
+                &ciphertext_url,
                 &key_version,
                 &size_label,
                 mode,
             ))
         }
-        BackendStatus::Known(_) | BackendStatus::Unknown => None,
-        
-        
+        BackendStatus::Known(body) => match hot_r2_url(&body) {
+            Some(url) => GateDecision::HotRedirect(url),
+            None => GateDecision::ServeLocal,
+        },
+        BackendStatus::Unknown => GateDecision::ServeLocal,
         BackendStatus::Unavailable => {
             let mut resp = not_found_html().into_response();
             resp.headers_mut().insert(
                 header::CACHE_CONTROL,
                 header::HeaderValue::from_static("no-store"),
             );
-            Some(resp)
+            GateDecision::Respond(resp)
         }
+    }
+}
+
+pub(crate) async fn protected_shell_response(
+    state: &AppState,
+    id: &str,
+    mode: ShellMode,
+) -> Option<Response<Body>> {
+    match gate_decision(state, id, mode).await {
+        GateDecision::Respond(resp) => Some(resp),
+        GateDecision::HotRedirect(_) | GateDecision::ServeLocal => None,
     }
 }
 
@@ -166,6 +194,7 @@ fn render_shell(
     filename: &str,
     id: &str,
     gateway_origin: &str,
+    ciphertext_url: &str,
     key_version: &str,
     size_label: &str,
     mode: ShellMode,
@@ -199,7 +228,7 @@ fn render_shell(
         .replace("__FILENAME__", &escape_html(filename))
         .replace("__SIZE__", &escape_html(size_label))
         .replace("__GATEWAY_ORIGIN__", &escape_html(gateway_origin))
-        .replace("__CIPHERTEXT_URL__", &escape_html(&format!("/c/{id}")))
+        .replace("__CIPHERTEXT_URL__", &escape_html(ciphertext_url))
         .replace("__CONTENT_URL__", &escape_html(&content_url))
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))

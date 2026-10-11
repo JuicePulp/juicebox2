@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{config::Config, storage::StorageBackend};
+use crate::{
+    config::Config,
+    storage::{R2Store, StorageBackend},
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -46,6 +49,8 @@ pub struct AppState {
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
     pub download_semaphore: Arc<tokio::sync::Semaphore>,
 
+    pub r2: Option<Arc<R2Store>>,
+
     pub backend_client: reqwest::Client,
 }
 
@@ -80,6 +85,28 @@ impl AppState {
             download_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 config.max_concurrent_downloads,
             )),
+            r2: match (
+                config.r2_bucket.as_deref(),
+                config.r2_endpoint.as_deref(),
+                config.r2_access_key.as_deref(),
+                config.r2_secret_key.as_deref(),
+            ) {
+                (Some(bucket), Some(endpoint), Some(access), Some(secret))
+                    if !bucket.is_empty() && !endpoint.is_empty() =>
+                {
+                    match R2Store::new(bucket, endpoint, &config.r2_region, access, secret) {
+                        Ok(store) => {
+                            tracing::info!("R2 hot-tier enabled: bucket={bucket}");
+                            Some(Arc::new(store))
+                        }
+                        Err(e) => {
+                            tracing::error!("R2 hot-tier disabled: client build failed: {e}");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            },
             backend_client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(2))
                 .build()

@@ -15,6 +15,12 @@ cleanup_interval_minutes = 30
 public_base_url = "http://localhost:6402"
 juicehost_url = "http://127.0.0.1:6402"
 
+# Single link domain (Cloudflare Worker router). When set, share links for
+# official regional hosts are minted under this host instead of the region,
+# e.g. https://f.juicey.dev/v/abc123.gif. Custom third-party hosts keep theirs.
+# Env override: ROUTER_BASE_URL
+# router_base_url = "https://f.juicey.dev"
+
 # Public juicehost URL handed to browsers. Defaults to public_base_url.
 # public_juicehost_url = "http://localhost:6402"
 
@@ -74,6 +80,28 @@ direct_upload_enabled = false
 # Per-region public juicehost map. TOML-only.
 # [regions.public_juicehosts]
 # eu = "http://localhost:6402"
+
+[r2]
+# Hot-tier overflow for popular files. Disabled by default; enable with
+# enabled = true plus bucket/endpoint/public_base_url and R2_* env keys.
+# Usage is capped by max_bytes/max_hot_files: promotions stop when full,
+# so the R2 bill stays bounded. Expiry/deletion removes the R2 copy.
+enabled = false
+# bucket = "juicebox-hot"
+# endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+# public_base_url = "https://r.juicey.dev"
+max_bytes = 10737418240
+max_hot_files = 500
+max_promote_bytes = 268435456
+
+[promo]
+# Velocity promoter. Only runs when [r2].enabled. dry_run = true only logs
+# candidates so thresholds can be tuned before spending anything.
+interval_secs = 300
+min_views = 50
+min_views_per_min = 10.0
+min_ttl_remaining_secs = 3600
+dry_run = true
 
 [sentry]
 # DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEBACK).

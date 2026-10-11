@@ -17,13 +17,15 @@ export interface HostNode {
   url: string;
   region: string;
   official: boolean;
+  kind: "router" | "storage";
 }
 
 const OFFICIAL_DEFAULTS: HostNode[] = [
-  { name: "Default", url: "", region: "", official: true },
-  { name: "Legacy Router", url: "https://f.juicey.dev", region: "", official: true },
-  { name: "Europe-1", url: "https://f-eu1.juicey.dev", region: "Europe", official: true },
-  { name: "Europe-2", url: "https://f-eu2.juicey.dev", region: "Europe", official: true },
+  { name: "Default", url: "", region: "", official: true, kind: "storage" },
+  { name: "Router", url: "https://f.juicey.dev", region: "", official: true, kind: "router" },
+  { name: "Europe-1", url: "https://f-eu1.juicey.dev", region: "Europe", official: true, kind: "storage" },
+  { name: "Europe-2", url: "https://f-eu2.juicey.dev", region: "Europe", official: true, kind: "storage" },
+  // New regions (US, Asia, Oceania, …) get a row here once their DNS exists.
 ];
 
 const UNOFFICIAL_DEFAULTS: HostNode[] = [];
@@ -48,10 +50,10 @@ function parseEnvList(
   if (!raw) return [];
   const out: HostNode[] = [];
   for (const entry of raw.split(",")) {
-    const [name = "", url = "", region = ""] = entry.split("|").map((s) => s.trim());
+    const [name = "", url = "", region = "", kind = ""] = entry.split("|").map((s) => s.trim());
     const base = normalizeUrl(url);
     if (!base) continue;
-    out.push({ name: name || base, url: base, region, official });
+    out.push({ name: name || base, url: base, region, official, kind: kind === "router" ? "router" : "storage" });
   }
   return out;
 }

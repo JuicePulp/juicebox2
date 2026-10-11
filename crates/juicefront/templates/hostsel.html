@@ -15,7 +15,7 @@
 <section aria-labelledby="hostsel-official-title" data-hostsel-section="">
 <h3 id="hostsel-official-title" class="hostsel__group-title">{{ cx.t("hostsel.official") }}</h3>
 <table class="hostsel-table"><tbody data-hostsel-list="">
-{% for n in official %}<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-official="true"{% if n.selected %} data-selected=""{% endif %}>
+{% for n in official %}<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-kind="{{ n.kind }}" data-official="true"{% if n.selected %} data-selected=""{% endif %}>
 <td class="hostsel-cell hostsel-cell--dot"><span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span></td>
 <td class="hostsel-cell hostsel-cell--meta">
 <span class="hostsel-name">{{ n.name }}</span>
@@ -34,7 +34,7 @@
 <p class="hostsel-empty" data-hostsel-empty="">{{ cx.t("hostsel.empty_unofficial") }}</p>
 {% else %}
 <table class="hostsel-table"><tbody data-hostsel-list="">
-{% for n in unofficial %}<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-official="false"{% if n.selected %} data-selected=""{% endif %}>
+{% for n in unofficial %}<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-kind="{{ n.kind }}" data-official="false"{% if n.selected %} data-selected=""{% endif %}>
 <td class="hostsel-cell hostsel-cell--dot"><span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span></td>
 <td class="hostsel-cell hostsel-cell--meta">
 <span class="hostsel-name">{{ n.name }}</span>

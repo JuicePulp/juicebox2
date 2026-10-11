@@ -145,12 +145,14 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
 
         let cf_urls: Vec<String> = deleted
             .iter()
-            .map(|r| {
-                crate::utils::public_url(
-                    &state.config.public_base_url,
+            .flat_map(|r| {
+                crate::cloudflare::cache_variants(
+                    &state.config,
                     r.storage_host.as_deref(),
                     &r.id,
                     &r.filename,
+                    &r.tier,
+                    &r.r2_key,
                 )
             })
             .collect();

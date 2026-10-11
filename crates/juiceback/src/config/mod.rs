@@ -22,14 +22,13 @@ pub struct Config {
 
     pub public_juicehost_url: String,
     pub juiceback_origin: String,
+    pub router_base_url: Option<String>,
     pub jwt_secret: String,
 
     pub ip_encryption_key: String,
 
     pub ip_pepper: String,
 
-    
-    
     pub storage_encryption_key: String,
 
     pub password_min_len: usize,
@@ -91,6 +90,22 @@ pub struct Config {
     pub region_public_juicehosts: HashMap<String, String>,
 
     pub allow_private_fetch: bool,
+
+    pub r2_enabled: bool,
+    pub r2_bucket: Option<String>,
+    pub r2_endpoint: Option<String>,
+    pub r2_public_base_url: String,
+    pub r2_access_key: String,
+    pub r2_secret_key: String,
+    pub r2_max_bytes: u64,
+    pub r2_max_hot_files: u64,
+    pub r2_max_promote_bytes: u64,
+
+    pub promo_interval_secs: u64,
+    pub promo_min_views: u64,
+    pub promo_min_views_per_min: f64,
+    pub promo_min_ttl_remaining_secs: i64,
+    pub promo_dry_run: bool,
 }
 
 impl std::fmt::Debug for Config {
@@ -237,6 +252,12 @@ impl Config {
             .unwrap_or_else(|| format!("http://{host}:{port}"))
             .trim_end_matches('/')
             .to_string();
+        let router_base_url = std::env::var("ROUTER_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.urls.router_base_url.clone())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim_end_matches('/').to_string());
 
         let cors_origins: Vec<String> = file
             .cors
@@ -291,6 +312,40 @@ impl Config {
 
         let region_public_juicehosts = file.regions.public_juicehosts.clone().unwrap_or_default();
 
+        let r2_enabled = file.r2.enabled;
+        let r2_bucket = std::env::var("R2_BUCKET")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.bucket.clone());
+        let r2_endpoint = std::env::var("R2_ENDPOINT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.endpoint.clone());
+        let r2_public_base_url = std::env::var("R2_PUBLIC_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| file.r2.public_base_url.clone())
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string();
+        let r2_access_key =
+            juiceutils::config::optional_secret("R2_ACCESS_KEY").unwrap_or_default();
+        let r2_secret_key =
+            juiceutils::config::optional_secret("R2_SECRET_KEY").unwrap_or_default();
+        let r2_max_bytes = parse_env_u64("R2_MAX_BYTES", file.r2.max_bytes)?;
+        let r2_max_hot_files = parse_env_u64("R2_MAX_HOT_FILES", file.r2.max_hot_files)?;
+        let r2_max_promote_bytes =
+            parse_env_u64("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
+
+        let promo_interval_secs = file.promo.interval_secs.max(60);
+        let promo_min_views = file.promo.min_views;
+        let promo_min_views_per_min = file.promo.min_views_per_min;
+        let promo_min_ttl_remaining_secs = file.promo.min_ttl_remaining_secs.max(0);
+        let promo_dry_run = std::env::var("PROMO_DRY_RUN")
+            .ok()
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(file.promo.dry_run);
+
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
             return Err(
                 "cobalt session_api_url and COBALT_SESSION_API_KEY must be set together \
@@ -329,6 +384,7 @@ impl Config {
             juicehost_url,
             public_juicehost_url,
             juiceback_origin,
+            router_base_url,
             jwt_secret,
             ip_encryption_key,
             ip_pepper,
@@ -372,6 +428,20 @@ impl Config {
             dte_mint_burst,
             region_public_juicehosts,
             allow_private_fetch,
+            r2_enabled,
+            r2_bucket,
+            r2_endpoint,
+            r2_public_base_url,
+            r2_access_key,
+            r2_secret_key,
+            r2_max_bytes,
+            r2_max_hot_files,
+            r2_max_promote_bytes,
+            promo_interval_secs,
+            promo_min_views,
+            promo_min_views_per_min,
+            promo_min_ttl_remaining_secs,
+            promo_dry_run,
         })
     }
 }
@@ -380,15 +450,12 @@ fn clean_url(s: String) -> String {
     s.trim_end_matches('/').to_string()
 }
 
-
 pub const DEFAULT_PASSWORD_MIN_LEN: usize = 8;
 
 pub const PASSWORD_MAX_LEN: usize = 256;
 const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
 const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
 const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
-
-
 
 fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
     let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
@@ -443,12 +510,6 @@ fn parse_env_bool(name: &str, default: bool) -> Result<bool, String> {
     }
 }
 
-
-
-
-
-
-
 pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), String> {
     if password.len() < min_len {
         return Err(format!("password must be at least {min_len} characters"));
@@ -462,24 +523,12 @@ pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), St
 }
 
 impl Config {
-    
-    
-    
-    
-    
-    
     pub fn storage_file_key(
         &self,
     ) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
         crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
     }
 
-    
-    
-    
-    
-    
-    
     pub fn check_upload_password(&self, password: &str) -> Result<(), String> {
         validate_upload_password(password, self.password_min_len)
     }

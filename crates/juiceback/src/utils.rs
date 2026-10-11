@@ -30,18 +30,39 @@ pub fn is_valid_id(id: &str) -> bool {
 
 pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
 
-
-
+#[must_use]
+pub fn is_official_host(config: &crate::config::Config, host: &str) -> bool {
+    let host = host.trim().trim_end_matches('/');
+    if host.is_empty() {
+        return true;
+    }
+    if host == config.juicehost_url.trim_end_matches('/') {
+        return true;
+    }
+    config
+        .region_public_juicehosts
+        .values()
+        .any(|u| u.trim().trim_end_matches('/') == host)
+}
 
 #[must_use]
-pub fn share_url(
-    public_base_url: &str,
+pub fn share_link(
+    config: &crate::config::Config,
     storage_host: Option<&str>,
     id: &str,
     filename: &str,
-    _protected: bool,
 ) -> String {
-    public_url(public_base_url, storage_host, id, filename)
+    if let Some(router) = config
+        .router_base_url
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let official = storage_host.map_or(true, |h| is_official_host(config, h));
+        if official {
+            return public_url(router, None, id, filename);
+        }
+    }
+    public_url(&config.public_base_url, storage_host, id, filename)
 }
 
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {

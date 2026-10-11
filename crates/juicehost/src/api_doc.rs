@@ -29,6 +29,8 @@ use crate::{error::ErrorResponse, storage::StorageMetrics};
         crate::handlers::bans::push_ban,
         crate::handlers::bans::push_unban,
         crate::handlers::bans::push_snapshot,
+        crate::handlers::r2::promote_file,
+        crate::handlers::r2::demote_file,
         crate::handlers::general::stat_file,
     ),
     components(schemas(

@@ -191,6 +191,13 @@ fn main() {
             juiceback::jobs::cleanup::run_cleanup_loop(state_cleanup).await;
         });
 
+        if state.config.r2_enabled {
+            let state_promo = Arc::clone(&state);
+            tokio::spawn(async move {
+                juiceback::jobs::promo::run_promo_loop(state_promo).await;
+            });
+        }
+
         if state.config.dte_enabled {
             let state_prune = Arc::clone(&state);
             tokio::spawn(async move {

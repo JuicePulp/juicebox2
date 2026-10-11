@@ -40,6 +40,11 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         s3_allow_http: false,
         s3_access_key: None,
         s3_secret_key: None,
+        r2_bucket: None,
+        r2_endpoint: None,
+        r2_region: "auto".into(),
+        r2_access_key: None,
+        r2_secret_key: None,
         min_free_space_bytes: 0,
         max_file_size_bytes: 10 * 1024 * 1024,
         max_range_response_bytes: 16 * 1024 * 1024,
@@ -1828,4 +1833,125 @@ async fn preview_missing_and_protected() {
 
     let (status, _, _) = get_public(&app, "/v/nosuchid.mp4", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn hot_file_redirects_to_r2() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": false,
+            "filename": "hot.txt",
+            "tier": "hot",
+            "r2_url": "https://r.example/hot/hot00001.txt",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "hot00001", b"local-bytes").await;
+
+    let (status, headers, _) = get_public(&app, "/f/hot00001.txt", None).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("https://r.example/hot/hot00001.txt")
+    );
+}
+
+#[tokio::test]
+async fn standard_file_serves_locally() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({"protected": false, "filename": "std.txt", "tier": "standard"}),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_bytes(&app, "std00001", b"local-bytes").await;
+
+    let (status, _, body) = get_public(&app, "/f/std00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"local-bytes");
+}
+
+#[tokio::test]
+async fn hot_protected_shell_uses_r2_ciphertext() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": true,
+            "filename": "secret.mp4",
+            "key_version": 1,
+            "gateway_origin": "https://box.example",
+            "tier": "hot",
+            "r2_url": "https://r.example/hot/sec00001.mp4",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_named(&app, "sec00001", "secret.mp4", b"ciphertext").await;
+
+    let (status, _, body) = get_public(&app, "/f/sec00001.mp4", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("https://r.example/hot/sec00001.mp4"));
+}
+
+#[tokio::test]
+async fn promote_needs_r2_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path()).await;
+    let app = build_router(state);
+    let (key, val) = api_key_header();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/abc12345/promote")
+                .header(key, val)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/abc12345/demote")
+                .header(key, val)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["removed"], 0);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/bad!!id/promote")
+                .header(key, val)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

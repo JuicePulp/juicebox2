@@ -42,11 +42,6 @@ pub fn delete_report(conn: &Connection, id: i64) -> Result<bool> {
     Ok(affected > 0)
 }
 
-
-
-
-
-
 pub fn get_report(conn: &Connection, id: i64) -> Result<Option<ReportRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, file_url, reason, details, reporter_ip, email, created_at, password FROM reports WHERE id = ?1",
@@ -65,7 +60,6 @@ pub fn get_report(conn: &Connection, id: i64) -> Result<Option<ReportRecord>> {
     })?;
     rows.next().transpose()
 }
-
 
 #[must_use]
 pub fn file_id_from_url(file_url: &str) -> Option<String> {

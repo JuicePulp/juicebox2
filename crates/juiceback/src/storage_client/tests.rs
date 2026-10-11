@@ -49,6 +49,7 @@ fn test_state() -> Arc<AppState> {
         juicehost_url: "http://127.0.0.1:6402".into(),
         public_juicehost_url: "http://localhost:6402".into(),
         juiceback_origin: "http://127.0.0.1:6401".into(),
+        router_base_url: None,
         jwt_secret: "secret".into(),
         cors_origins: vec![],
         report_webhook_url: None,
@@ -94,6 +95,20 @@ fn test_state() -> Arc<AppState> {
         dte_mint_burst: crate::constants::DTE_MINT_BURST,
         region_public_juicehosts: std::collections::HashMap::new(),
         allow_private_fetch: true,
+        r2_enabled: false,
+        r2_bucket: None,
+        r2_endpoint: None,
+        r2_public_base_url: String::new(),
+        r2_access_key: String::new(),
+        r2_secret_key: String::new(),
+        r2_max_bytes: 10 * 1024 * 1024 * 1024,
+        r2_max_hot_files: 500,
+        r2_max_promote_bytes: 256 * 1024 * 1024,
+        promo_interval_secs: 300,
+        promo_min_views: 50,
+        promo_min_views_per_min: 10.0,
+        promo_min_ttl_remaining_secs: 3600,
+        promo_dry_run: true,
     };
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("x-juicehost-api-key", "my_api_key".parse().unwrap());

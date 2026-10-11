@@ -10,6 +10,7 @@ mod feature;
 mod limits;
 mod public;
 mod quic;
+mod r2;
 mod s3;
 mod secret;
 mod security;
@@ -22,6 +23,7 @@ use feature::FeatureSettings;
 use limits::LimitsSettings;
 use public::PublicSettings;
 use quic::QuicSettings;
+use r2::R2Settings;
 use s3::S3Settings;
 use secret::SecretSettings;
 use security::SecuritySettings;
@@ -78,6 +80,16 @@ pub struct Config {
     pub s3_access_key: Option<String>,
 
     pub s3_secret_key: Option<String>,
+
+    pub r2_bucket: Option<String>,
+
+    pub r2_endpoint: Option<String>,
+
+    pub r2_region: String,
+
+    pub r2_access_key: Option<String>,
+
+    pub r2_secret_key: Option<String>,
 
     pub min_free_space_bytes: u64,
 
@@ -137,6 +149,9 @@ pub struct FileConfig {
 
     #[serde(default)]
     pub s3: S3File,
+
+    #[serde(default)]
+    pub r2: R2File,
 
     #[serde(default)]
     pub limits: LimitsFile,
@@ -326,6 +341,22 @@ pub struct S3File {
 
     #[serde(default)]
     pub allow_http: bool,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct R2File {
+    #[serde(default)]
+    pub bucket: Option<String>,
+
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    #[serde(default = "default_r2_region")]
+    pub region: String,
+}
+
+fn default_r2_region() -> String {
+    String::from("auto")
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -539,6 +570,7 @@ impl Config {
         let directories = DirectorySettings::load(&file.dirs);
         let security = SecuritySettings::load(&file.security, &directories)?;
         let s3 = S3Settings::load(&file.s3)?;
+        let r2 = R2Settings::load(&file.r2)?;
         let limits = LimitsSettings::load(&file.limits)?;
         let features = FeatureSettings::load(&file.features)?;
         let secrets = SecretSettings::load(&security)?;
@@ -571,6 +603,11 @@ impl Config {
             s3_allow_http: s3.allow_http(),
             s3_access_key: s3.access_key().map(str::to_owned),
             s3_secret_key: s3.secret_key().map(str::to_owned),
+            r2_bucket: r2.bucket().map(str::to_owned),
+            r2_endpoint: r2.endpoint().map(str::to_owned),
+            r2_region: r2.region().to_owned(),
+            r2_access_key: r2.access_key().map(str::to_owned),
+            r2_secret_key: r2.secret_key().map(str::to_owned),
             min_free_space_bytes: limits.min_free_space_bytes(),
             max_file_size_bytes: limits.max_file_size_bytes(),
             max_range_response_bytes: limits.max_range_response_bytes(),

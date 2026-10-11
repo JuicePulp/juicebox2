@@ -43,13 +43,12 @@ pub struct FileInfoResponse {
 
 impl FileInfoResponse {
     #[must_use]
-    pub fn from_record(record: FileRecord, public_base_url: &str) -> Self {
-        let url = crate::utils::share_url(
-            public_base_url,
+    pub fn from_record(record: FileRecord, config: &crate::config::Config) -> Self {
+        let url = crate::utils::share_link(
+            config,
             record.storage_host.as_deref(),
             &record.id,
             &record.filename,
-            record.is_protected(),
         );
         let protected = record.is_protected();
         let is_encrypted = record.is_encrypted;
@@ -124,7 +123,7 @@ pub async fn file_info_handler(
         headers,
         Json(FileInfoResponse::from_record(
             record,
-            &state.config.public_base_url,
+            &state.config,
         )),
     ))
 }
@@ -205,9 +204,7 @@ async fn delete_file_inner(
 
     crate::cloudflare::purge_file(
         &state.config,
-        id,
-        &record.filename,
-        record.storage_host.as_deref(),
+        &record,
     );
 
     tracing::info!("delete: id={id}");
@@ -313,19 +310,16 @@ pub async fn renew_file_id_handler(
     )
     .await?;
 
-    let url = crate::utils::share_url(
-        &state.config.public_base_url,
+    let url = crate::utils::share_link(
+        &state.config,
         record.storage_host.as_deref(),
         &new_id,
         &record.filename,
-        record.is_protected(),
     );
 
     crate::cloudflare::purge_file(
         &state.config,
-        &id,
-        &record.filename,
-        record.storage_host.as_deref(),
+        &record,
     );
 
     tracing::info!(
@@ -431,12 +425,11 @@ pub async fn resolve_alias_handler(
                 .db_call("get_file", move |db| db::get_file(db, &id))
                 .await?;
             if let Some(rec) = record {
-                let url = crate::utils::share_url(
-                    &state.config.public_base_url,
+                let url = crate::utils::share_link(
+                    &state.config,
                     rec.storage_host.as_deref(),
                     &new_id,
                     &rec.filename,
-                    rec.is_protected(),
                 );
                 Ok(Json(serde_json::json!({ "new_id": new_id, "url": url })))
             } else {

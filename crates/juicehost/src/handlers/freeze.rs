@@ -6,7 +6,11 @@ use axum::{
     response::Json,
 };
 
-use crate::{error::JuicehostError, state::AppState, storage::valid_component as is_valid_id};
+use crate::{
+    error::JuicehostError,
+    state::AppState,
+    storage::{R2Store, valid_component as is_valid_id},
+};
 
 
 
@@ -57,6 +61,12 @@ pub async fn freeze_file(
         .freeze(&id)
         .await
         .map_err(JuicehostError::from)?;
+
+    if let Some(ref r2) = state.r2
+        && let Err(e) = r2.delete_prefix(&R2Store::hot_prefix(&id)).await
+    {
+        tracing::warn!("freeze: R2 demote failed for id={id}: {e}");
+    }
 
     tracing::info!("froze file: {id}");
     Ok(Json(

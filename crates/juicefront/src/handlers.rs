@@ -596,6 +596,7 @@ struct HostRow {
     url: String,
     name: String,
     region: String,
+    kind: String,
     selected: bool,
 }
 
@@ -817,6 +818,7 @@ pub async fn index(
             url: node.url,
             name: node.name,
             region: node.region,
+            kind: node.kind,
         })
         .collect();
     let unofficial: Vec<HostRow> = hosts::unofficial_nodes()
@@ -826,6 +828,7 @@ pub async fn index(
             url: node.url,
             name: node.name,
             region: node.region,
+            kind: node.kind,
         })
         .collect();
     let hostsel_html = HostselTpl {

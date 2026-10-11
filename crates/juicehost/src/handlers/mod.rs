@@ -5,6 +5,7 @@ pub mod delete;
 pub mod freeze;
 pub mod general;
 pub mod preview;
+pub mod r2;
 pub mod rename;
 pub mod serve;
 pub mod shell;
@@ -24,6 +25,7 @@ pub use general::{
     stat_file, storage_handler,
 };
 pub use preview::preview_file_wildcard;
+pub use r2::{demote_file, promote_file};
 pub use rename::{RenameRequest, rename_file};
 pub use serve::{serve_file_download, serve_file_wildcard};
 pub(crate) use stats::viewer_ip_middleware;

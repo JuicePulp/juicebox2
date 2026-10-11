@@ -1,9 +1,3 @@
-
-
-
-
-
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -11,17 +5,6 @@ use futures::StreamExt;
 
 use super::{client::StorageClient, target::require_juicehost_url};
 use crate::state::AppState;
-
-
-
-
-
-
-
-
-
-
-
 
 pub async fn download_ciphertext(
     state: &Arc<AppState>,

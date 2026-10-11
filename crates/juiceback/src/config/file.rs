@@ -26,6 +26,10 @@ pub struct FileConfig {
     #[serde(default)]
     pub regions: RegionsFile,
     #[serde(default)]
+    pub r2: R2File,
+    #[serde(default)]
+    pub promo: PromoFile,
+    #[serde(default)]
     pub sentry: juiceutils::config::SentrySettings,
 }
 
@@ -67,6 +71,8 @@ pub struct UrlsFile {
     pub public_juicehost_url: Option<String>,
     #[serde(default)]
     pub juiceback_origin: Option<String>,
+    #[serde(default)]
+    pub router_base_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -175,6 +181,38 @@ pub struct RegionsFile {
     pub public_juicehosts: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct R2File {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub bucket: Option<String>,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub public_base_url: Option<String>,
+    #[serde(default = "default_r2_max_bytes")]
+    pub max_bytes: u64,
+    #[serde(default = "default_r2_max_hot_files")]
+    pub max_hot_files: u64,
+    #[serde(default = "default_r2_max_promote_bytes")]
+    pub max_promote_bytes: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PromoFile {
+    #[serde(default = "default_promo_interval_secs")]
+    pub interval_secs: u64,
+    #[serde(default = "default_promo_min_views")]
+    pub min_views: u64,
+    #[serde(default = "default_promo_min_views_per_min")]
+    pub min_views_per_min: f64,
+    #[serde(default = "default_promo_min_ttl_remaining_secs")]
+    pub min_ttl_remaining_secs: i64,
+    #[serde(default = "default_promo_dry_run")]
+    pub dry_run: bool,
+}
+
 fn default_host() -> String {
     String::from("127.0.0.1")
 }
@@ -275,6 +313,38 @@ const fn default_secure_cookies() -> bool {
     true
 }
 
+const fn default_r2_max_bytes() -> u64 {
+    10 * 1024 * 1024 * 1024
+}
+
+const fn default_r2_max_hot_files() -> u64 {
+    500
+}
+
+const fn default_r2_max_promote_bytes() -> u64 {
+    256 * 1024 * 1024
+}
+
+const fn default_promo_interval_secs() -> u64 {
+    300
+}
+
+const fn default_promo_min_views() -> u64 {
+    50
+}
+
+const fn default_promo_min_views_per_min() -> f64 {
+    10.0
+}
+
+const fn default_promo_min_ttl_remaining_secs() -> i64 {
+    3600
+}
+
+const fn default_promo_dry_run() -> bool {
+    true
+}
+
 impl Default for FileConfig {
     fn default() -> Self {
         Self {
@@ -287,6 +357,8 @@ impl Default for FileConfig {
             dte: DteFile::default(),
             features: FeaturesFile::default(),
             regions: RegionsFile::default(),
+            r2: R2File::default(),
+            promo: PromoFile::default(),
             sentry: juiceutils::config::SentrySettings::default(),
         }
     }
@@ -317,6 +389,7 @@ impl Default for UrlsFile {
             juicehost_url: default_juicehost_url(),
             public_juicehost_url: None,
             juiceback_origin: None,
+            router_base_url: None,
         }
     }
 }
@@ -362,6 +435,32 @@ impl Default for RegionsFile {
     fn default() -> Self {
         Self {
             public_juicehosts: None,
+        }
+    }
+}
+
+impl Default for R2File {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bucket: None,
+            endpoint: None,
+            public_base_url: None,
+            max_bytes: default_r2_max_bytes(),
+            max_hot_files: default_r2_max_hot_files(),
+            max_promote_bytes: default_r2_max_promote_bytes(),
+        }
+    }
+}
+
+impl Default for PromoFile {
+    fn default() -> Self {
+        Self {
+            interval_secs: default_promo_interval_secs(),
+            min_views: default_promo_min_views(),
+            min_views_per_min: default_promo_min_views_per_min(),
+            min_ttl_remaining_secs: default_promo_min_ttl_remaining_secs(),
+            dry_run: default_promo_dry_run(),
         }
     }
 }

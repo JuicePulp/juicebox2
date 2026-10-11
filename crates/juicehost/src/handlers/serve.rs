@@ -10,7 +10,7 @@ use futures::StreamExt;
 
 use super::{
     common::backend_request,
-    shell::{ShellMode, protected_shell_response, remaining_ttl_secs},
+    shell::{GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
     stats::{ViewerIp, report_file_hit},
 };
 use crate::{
@@ -145,8 +145,17 @@ async fn serve_file_inner(
     } else {
         ShellMode::View
     };
-    if let Some(shelled) = protected_shell_response(&state, &id, mode).await {
-        return Ok(shelled);
+    match gate_decision(&state, &id, mode).await {
+        GateDecision::Respond(resp) => return Ok(resp),
+        GateDecision::HotRedirect(url) => {
+            return Response::builder()
+                .status(StatusCode::FOUND)
+                .header(header::LOCATION, &url)
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(Body::empty())
+                .map_err(|_| JuicehostError::Internal);
+        }
+        GateDecision::ServeLocal => {}
     }
 
     let etag = &file_meta.etag;

@@ -100,8 +100,8 @@ pub async fn list_files_handler(
     let files: Vec<AdminFileEntry> = records
         .into_iter()
         .map(|r| {
-            let url = crate::utils::public_url(
-                &state.config.public_base_url,
+            let url = crate::utils::share_link(
+                &state.config,
                 r.storage_host.as_deref(),
                 &r.id,
                 &r.filename,
@@ -182,9 +182,7 @@ pub async fn delete_file_handler(
 
     crate::cloudflare::purge_file(
         &state.config,
-        &id,
-        &record.filename,
-        record.storage_host.as_deref(),
+        &record,
     );
 
     tracing::info!("admin delete: id={id}");

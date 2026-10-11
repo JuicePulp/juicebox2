@@ -78,6 +78,7 @@ use crate::{
         crate::routes::register::register_handler,
 
         crate::routes::upload::internal::file_status_handler,
+        crate::routes::upload::internal::resolve_file_handler,
         crate::routes::health::ban_snapshot_handler,
 
         crate::routes::stats::hit_handler,

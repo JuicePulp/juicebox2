@@ -13,7 +13,7 @@ pub use direct::{
     DirectUploadCompleteRequest, DirectUploadReserveRequest, DirectUploadReserveResponse,
     direct_upload_complete_handler, direct_upload_reserve_handler,
 };
-pub use internal::file_status_handler;
+pub use internal::{file_status_handler, resolve_file_handler};
 pub use multipart::{
     ReserveResponse, ReserveUploadRequest, reserve_upload_handler, upload_handler,
 };
