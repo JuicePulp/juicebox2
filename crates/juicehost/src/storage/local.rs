@@ -54,10 +54,10 @@ impl LocalBackend {
                 }
                 continue;
             }
-            // Freeze markers are sidecars, never content: skip them here
-            // (any type — even a non-regular one, which the runtime still
-            // treats as frozen, fail-closed) so they can never be indexed
-            // as a stored file.
+            
+            
+            
+            
             if name.starts_with(".frz.") {
                 continue;
             }
@@ -169,9 +169,9 @@ impl LocalBackend {
         valid_component(id).then(|| self.files_dir.join(format!(".frz.{id}")))
     }
 
-    /// Authoritative frozen check: any marker presence (even a non-regular
-    /// file, which indicates tampering) counts as frozen — fail closed.
-    /// Only a definitive absence (or an invalid ID) reports not frozen.
+    
+    
+    
     async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
         let Some(path) = self.frozen_path(id) else {
             return Ok(false);
@@ -196,8 +196,8 @@ impl super::freeze::FreezeStore for LocalBackend {
         let path = self
             .frozen_path(id)
             .ok_or_else(|| StorageError::Io("invalid logical ID".into()))?;
-        // `create_new` is the atomic freeze primitive: exactly one winner
-        // creates the marker, everyone else observes "already frozen".
+        
+        
         match tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -603,8 +603,8 @@ impl StorageBackend for LocalBackend {
         if let Some(capability) = capability {
             capability::verify(self, id, capability).await?;
         }
-        // Legal hold: frozen files cannot be deleted (or probed for freeze
-        // state without a valid capability — verified above first).
+        
+        
         ensure_not_frozen(self, id).await?;
         let path = self.files_dir.join(format!("{id}.{ext}"));
         match tokio::fs::remove_file(&path).await {

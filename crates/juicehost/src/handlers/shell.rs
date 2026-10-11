@@ -1,10 +1,10 @@
-//! Password-gate shells for public routes (`/f/`, `/d/`, `/v/`).
-//!
-//! Protected files store ciphertext only. Instead of redirecting to
-//! juiceback, the host serves an unlock shell: a password form plus a
-//! self-contained decrypt app. The browser POSTs the password directly to
-//! the juiceback key-release gateway and decrypts `/c/` ciphertext locally
-//! - juicehost never sees passwords, keys, or plaintext.
+
+
+
+
+
+
+
 
 use axum::{
     body::Body,
@@ -20,13 +20,13 @@ const SHELL_APP_JS: &str = include_str!("../templates/shell_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
-/// Backend file-status probe outcome.
+
 pub(crate) enum BackendStatus {
-    /// Backend answered with a status document.
+    
     Known(serde_json::Value),
-    /// Backend answered but knows nothing about this id (legacy/direct file).
+    
     Unknown,
-    /// No backend configured, or the probe failed. Callers fail closed.
+    
     Unavailable,
 }
 
@@ -70,7 +70,7 @@ pub(crate) async fn remaining_ttl_secs(state: &AppState, id: &str) -> Option<u64
         .map(ttl_from_expires_at)
 }
 
-/// Seconds until `expires_at` (unix), saturating at zero.
+
 fn ttl_from_expires_at(expires_at: i64) -> u64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -78,7 +78,7 @@ fn ttl_from_expires_at(expires_at: i64) -> u64 {
     (expires_at - now).max(0) as u64
 }
 
-/// Which public route asked for the shell (drives the post-unlock action).
+
 #[derive(Clone, Copy)]
 pub(crate) enum ShellMode {
     View,
@@ -96,13 +96,13 @@ impl ShellMode {
     }
 }
 
-/// Shell check for public byte/page routes.
-///
-/// Returns `Some(response)` when the request must not proceed to bytes: the
-/// unlock shell for protected files, or a 404 when protection cannot be
-/// ruled out (unreachable backend). Returns `None` when serving may
-/// proceed - including standalone hosts without a backend (nothing can be
-/// protected there) and ids the backend does not know (legacy files).
+
+
+
+
+
+
+
 pub(crate) async fn protected_shell_response(
     state: &AppState,
     id: &str,
@@ -140,8 +140,8 @@ pub(crate) async fn protected_shell_response(
             ))
         }
         BackendStatus::Known(_) | BackendStatus::Unknown => None,
-        // Fail closed: an unreachable backend must not leak bytes that
-        // might be ciphertext for a protected file.
+        
+        
         BackendStatus::Unavailable => {
             let mut resp = not_found_html().into_response();
             resp.headers_mut().insert(
@@ -204,11 +204,11 @@ fn render_shell(
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))
         .replace("__MIME__", &escape_html(&mime));
-    // Own CSP: the shell is a self-contained app (inline script + styles,
-    // data:/blob: media, cross-origin gateway fetch). Blob subresources
-    // (decrypted media, PDF frames) are explicitly allowed; top-level blob
-    // navigation is avoided entirely. The middleware keeps handler-set
-    // policies, so byte responses stay scriptless while the shell runs.
+    
+    
+    
+    
+    
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")

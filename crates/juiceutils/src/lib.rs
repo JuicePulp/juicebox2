@@ -7,11 +7,11 @@ pub mod proxy;
 pub mod urls;
 pub mod web;
 
-/// High-frequency polling / long-lived endpoints whose per-request
-/// `http.request` span would otherwise spam `info` logs via
-/// `FmtSpan::CLOSE` (health + config polling, SSE presence handshakes).
-/// Callers skip the span entirely (`Span::none()`) so neither `info` nor
-/// `debug` deployments pay per-request log lines for these paths.
+
+
+
+
+
 #[must_use]
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(
@@ -55,12 +55,12 @@ pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     }
 }
 
-/// Wait for Ctrl+C (and SIGTERM on unix) before returning.
-///
-/// # Panics
-///
-/// Panics if the OS signal handlers cannot be installed, which only
-/// happens in environments without signal support.
+
+
+
+
+
+
 pub async fn shutdown_signal(service_name: &str) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -115,9 +115,9 @@ pub async fn add_security_headers(
     );
 
     if is_file_route {
-        // Bytes AND unlock shells share this path. Shells set their own
-        // tight CSP in the handler (see below); anything else keeps the
-        // strict no-script policy so stored HTML/SVG uploads can't execute.
+        
+        
+        
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
@@ -127,10 +127,10 @@ pub async fn add_security_headers(
             );
         }
     } else if is_preview_route {
-        // The preview page carries inline styles, one inline script, and
-        // an inlined brand font (data: URI) - everything else is same-origin.
-        // Unlock shells served here set their own CSP (cross-origin gateway
-        // fetch); keep it.
+        
+        
+        
+        
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,

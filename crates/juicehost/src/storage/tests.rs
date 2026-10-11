@@ -377,7 +377,7 @@ async fn local_freeze_blocks_mutations() {
             .await,
         Err(StorageError::Frozen)
     ));
-    // Bytes untouched by the blocked attempts.
+    
     assert_eq!(backend.unfreeze("fr1").await.unwrap(), true);
     assert!(!backend.is_frozen("fr1").await.unwrap());
     assert_eq!(backend.get("fr1").await.unwrap().data.as_ref(), b"secret");
@@ -445,14 +445,14 @@ async fn local_freeze_symlink_marker_fails_closed() {
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    // Tampered marker (symlink instead of regular file) still freezes.
+    
     symlink(dir.path().join("fr1.txt"), dir.path().join(".frz.fr1")).unwrap();
     assert!(backend.is_frozen("fr1").await.unwrap());
     assert!(matches!(
         backend.stat("fr1").await,
         Err(StorageError::Frozen)
     ));
-    // ...and startup skips it instead of choking on it.
+    
     drop(backend);
     let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend2.init_cache().await.unwrap();

@@ -86,10 +86,10 @@ impl S3Backend {
         object_store::path::Path::from(format!("files/.frozen/{id}"))
     }
 
-    /// Authoritative frozen check: a HEAD on the marker object. Only a
-    /// definitive absence reports not frozen; any other storage error
-    /// propagates so callers fail closed instead of serving unverifiable
-    /// bytes.
+    
+    
+    
+    
     async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Ok(false);

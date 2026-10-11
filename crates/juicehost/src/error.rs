@@ -71,9 +71,9 @@ pub fn not_found_html() -> (StatusCode, Html<String>) {
     )
 }
 
-/// Static 451 page for frozen files. Deliberately interpolation-free: no
-/// request-derived content is ever reflected, so there is nothing to escape
-/// and nothing to inject.
+
+
+
 pub fn frozen_html() -> (StatusCode, Html<String>) {
     (
         StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(status.as_u16(), 451);
         assert!(html.0.contains("451"));
         assert!(html.0.contains("frozen"));
-        // Fully static page: no template placeholders left to fill.
+        
         assert!(!html.0.contains("__"));
     }
 

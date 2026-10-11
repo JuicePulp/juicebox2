@@ -10,11 +10,11 @@ use axum::{
 
 use crate::state::AppState;
 
-/// Viewer IP resolved once per file-serving request and stashed as an
-/// extension. `None` when there is no socket peer (in-process calls):
-/// without a peer the trusted-proxy rules cannot apply, and stats must
-/// never fall back to trivially spoofable headers, so those hits are
-/// simply not counted.
+
+
+
+
+
 #[derive(Clone)]
 pub struct ViewerIp(pub Option<String>);
 
@@ -35,10 +35,10 @@ pub(crate) async fn viewer_ip_middleware(
     next.run(req).await
 }
 
-/// Best-effort visitor hit report to juiceback (`POST
-/// /internal/stats/hit`). Fire-and-forget: never blocks or fails the
-/// response being served; unreachable backends just drop the hit (debug
-/// log). No-op when no backend is configured (backendless mode).
+
+
+
+
 pub(crate) fn report_file_hit(state: &AppState, file_id: &str, kind: &'static str, ip: &str) {
     let Some(ref backend_url) = state.backend_url else {
         return;

@@ -8,13 +8,13 @@ use axum::{
 
 use crate::{error::JuicehostError, state::AppState, storage::valid_component as is_valid_id};
 
-/// Admin-only gate for freeze management.
-///
-/// Deliberately stricter than the router's `require_api_key` layer: per-file
-/// capability headers are *ignored* here. Freezing is a moderation/legal
-/// action, not an owner action (owners can simply delete their own file),
-/// so only the instance API key authorizes it. Fail-closed: when no API key
-/// is configured, nobody can freeze anything.
+
+
+
+
+
+
+
 fn require_freeze_admin(headers: &HeaderMap, api_key: &str) -> Result<(), JuicehostError> {
     let provided = headers
         .get("x-juicehost-api-key")
@@ -128,8 +128,8 @@ mod tests {
 
     #[test]
     fn freeze_admin_fails_closed_without_configured_key() {
-        // No configured key: even an "empty matches empty" comparison must
-        // not authorize — and capability headers must not help either.
+        
+        
         assert!(require_freeze_admin(&HeaderMap::new(), "").is_err());
         let mut headers = HeaderMap::new();
         headers.insert("x-juicehost-file-capability", "anything".parse().unwrap());

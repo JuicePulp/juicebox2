@@ -12,8 +12,8 @@ use tokio::{
 
 const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
-/// Local backend origin assumed when the orchestrator launches juicehost
-/// without an explicit `BACKEND_URL`. Matches the default backend port.
+
+
 const DEFAULT_LOCAL_BACKEND_URL: &str = "http://127.0.0.1:6401";
 
 const MIN_HEALTHY_SECS: u64 = 10;
@@ -33,8 +33,8 @@ fn sibling_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Workspace root when running from `target/debug` or `target/release`.
-/// Returns `None` for installed binaries outside a checkout.
+
+
 fn workspace_dir() -> Option<PathBuf> {
     let dir = sibling_dir();
     let profile = dir.file_name()?.to_str()?;
@@ -52,15 +52,15 @@ fn workspace_dir() -> Option<PathBuf> {
     Some(root.to_path_buf())
 }
 
-/// Build service binaries before spawning. Always runs (a no-op when
-/// fresh) so `cargo run` never supervises stale code after `target/`
-/// rebuilds or branch switches. Set `JUICEBOX_NO_BUILD=1` to skip (e.g.
-/// production images with prebuilt binaries). `cargo run` releases the
-/// target-dir lock once the orchestrator itself is built, so invoking
-/// cargo here cannot deadlock.
-///
-/// Returns whether the services are (now) built: `false` when the build
-/// itself failed.
+
+
+
+
+
+
+
+
+
 fn ensure_services_built() -> bool {
     if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -76,9 +76,9 @@ fn ensure_services_built() -> bool {
     tracing::info!("building services");
     let mut cmd = std::process::Command::new("cargo");
     cmd.arg("build");
-    // The orchestrator spawns binaries next to itself, so the inner build
-    // must target the same profile: `cargo run --release` needs release
-    // service binaries, plain `cargo run` needs debug ones.
+    
+    
+    
     if !cfg!(debug_assertions) {
         cmd.arg("--release");
     }
@@ -105,12 +105,12 @@ fn ensure_services_built() -> bool {
     }
 }
 
-/// Whether the source watcher (live rebuild + restart) is active.
-///
-/// Explicit `JUICEBOX_WATCH=1` forces it on, `=0`/`false` forces it off.
-/// Otherwise it follows the build: disabled together with
-/// `JUICEBOX_NO_BUILD=1` (rebuilding is the watcher's whole job), enabled
-/// in every other case where a workspace checkout exists to watch.
+
+
+
+
+
+
 fn watch_enabled() -> bool {
     if let Some(v) = juiceutils::config::optional_secret("JUICEBOX_WATCH") {
         return v == "1" || v.eq_ignore_ascii_case("true");
@@ -119,8 +119,8 @@ fn watch_enabled() -> bool {
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
-/// File kinds that participate in live rebuilds: sources, templates,
-/// static assets, icons, locale dicts, and crate/root manifests.
+
+
 fn watchable_file(path: &Path) -> bool {
     let visible = path
         .file_name()
@@ -153,12 +153,12 @@ fn watchable_file(path: &Path) -> bool {
         })
 }
 
-/// Directories and files whose changes rebuild + restart the services.
-/// Deliberately narrow: `target/`, `ui/` (currently unserved legacy mirror
-/// with its own `node_modules/` + `dist/`), data dirs, and databases stay
-/// out. `.env` stays out too: secrets are baked into this process's
-/// environment at startup, so a respawn would silently keep stale values —
-/// changing secrets still needs a full `cargo run` restart.
+
+
+
+
+
+
 fn watch_roots(root: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for name in [
@@ -219,9 +219,9 @@ fn scan_dir(dir: &Path, out: &mut HashMap<PathBuf, SystemTime>) {
     }
 }
 
-/// Dependency-free polling watcher: snapshots mtimes under the watch roots
-/// about once a second and reports when the snapshot differs (covers add,
-/// modify, and delete). Cheap enough to run inline in the supervise loop.
+
+
+
 struct FsWatcher {
     roots: Vec<PathBuf>,
     last: HashMap<PathBuf, SystemTime>,
@@ -267,7 +267,7 @@ impl FsWatcher {
         self.last_scan = Instant::now();
     }
 
-    /// Returns `true` once per detected change set.
+    
     fn poll(&mut self) -> bool {
         if self.last_scan.elapsed() < Duration::from_millis(500) {
             return false;
@@ -282,15 +282,15 @@ impl FsWatcher {
     }
 }
 
-/// Load `./.env` (repo root in dev) for vars not already set. Explicit
-/// environment always wins; missing file is fine.
+
+
 fn load_dotenv() {
     juiceutils::config::load_dotenv();
 }
 
-/// Backend origin injected into the juicehost child when the operator did
-/// not set `BACKEND_URL` (unset or blank). `Some` means "apply the local
-/// default", `None` means "respect the explicit value".
+
+
+
 fn host_backend_default() -> Option<&'static str> {
     if std::env::var("BACKEND_URL").is_ok_and(|v| !v.trim().is_empty()) {
         None
@@ -301,9 +301,9 @@ fn host_backend_default() -> Option<&'static str> {
 
 fn spawn(name: &str) -> std::io::Result<Child> {
     let mut cmd = Command::new(sibling_dir().join(name));
-    // The orchestrator always runs a local backend next to the host: point
-    // the host at it unless the operator set BACKEND_URL explicitly.
-    // Without this the host runs backendless and password gates never apply.
+    
+    
+    
     if name == "juicehost"
         && let Some(default) = host_backend_default()
     {
@@ -445,10 +445,10 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Live editing: watch workspace sources and rebuild + restart the
-    // services on change. Respawns mint fresh boot IDs, so browsers reload
-    // on their own via the live channel. Inert without a checkout
-    // (production images) or when explicitly disabled.
+    
+    
+    
+    
     let mut watcher = if watch_enabled() {
         workspace_dir().and_then(|root| FsWatcher::new(&root))
     } else {
@@ -468,15 +468,15 @@ async fn main() {
     });
 
     loop {
-        // Live rebuild: a detected source change rebuilds, and on success
-        // gracefully restarts every service. The build runs synchronously
-        // (children keep serving meanwhile); a failed build keeps the old
-        // binaries running. Snapshots refresh after handling so one change
-        // set restarts exactly once.
+        
+        
+        
+        
+        
         if watcher.as_mut().is_some_and(FsWatcher::poll) {
             tracing::info!("sources changed, rebuilding services for live reload");
             if *shutdown_rx.borrow() {
-                // Shutting down: leave the restart to the exit path.
+                
             } else if ensure_services_built() {
                 for (name, child) in &mut children {
                     tracing::info!("stopping {name} for live reload");
@@ -519,10 +519,10 @@ async fn main() {
             let status = tokio::select! {
                 _ = shutdown_rx.changed() => None,
                 status = child.wait() => status.ok(),
-                // Tick so the loop keeps cycling while children are
-                // healthy: without this the watch check below only runs
-                // when a child exits, and live rebuilds never fire.
-                // Short tick keeps save-to-restart latency low.
+                
+                
+                
+                
                 () = tokio::time::sleep(Duration::from_millis(250)) => None,
             };
             let Some(status) = status else {
@@ -693,14 +693,14 @@ mod tests {
         std::fs::write(&file, "fn main() {}").unwrap();
 
         let mut watcher = FsWatcher::new(&root).expect("watch roots");
-        // Fresh snapshot: nothing to report until something changes.
+        
         watcher.last_scan = Instant::now();
         assert!(!watcher.poll());
 
         std::fs::write(&file, "fn main() { /* edited */ }").unwrap();
         watcher.last_scan = aged();
         assert!(watcher.poll());
-        // Same state again: quiet.
+        
         watcher.last_scan = aged();
         assert!(!watcher.poll());
 

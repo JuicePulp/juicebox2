@@ -1,10 +1,10 @@
-//! Fullscreen file previews (`/v/`).
-//!
-//! A self-contained immersive page in the Juicebox aesthetic: the media fills
-//! the viewport with minimal chrome (filename, download, raw, fullscreen).
-//! No card layouts - previews get the whole screen. Works without JS for
-//! video/audio/image/PDF (native elements); text preview and the fullscreen
-//! button progressively enhance.
+
+
+
+
+
+
+
 
 use std::sync::Arc;
 
@@ -98,9 +98,9 @@ const PREVIEW_APP_JS: &str = include_str!("../templates/preview_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
-/// User-Agent fragments identifying non-interactive clients (curl-like
-/// tools, social unfurlers, crawlers). Matched case-insensitively against
-/// the whole header; real browsers never contain these tokens.
+
+
+
 const BOT_UA_TOKENS: &[&str] = &[
     "curl",
     "wget",
@@ -468,13 +468,13 @@ fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
 }
 
 #[tracing::instrument(skip_all)]
-/// Render the fullscreen preview page for a stored file.
-///
-/// # Errors
-///
-/// Returns [`JuicehostError::BadRequest`] for invalid ids and
-/// [`JuicehostError::Internal`] on storage failure; missing files render the
-/// HTML 404 page instead of erroring.
+
+
+
+
+
+
+
 pub async fn preview_file_wildcard(
     State(state): State<Arc<AppState>>,
     Extension(viewer): Extension<ViewerIp>,
@@ -507,7 +507,7 @@ async fn preview_file_inner(
     let meta = match state.storage.stat(id).await {
         Ok(meta) => meta,
         Err(crate::error::StorageError::Frozen) => {
-            // Same visibility rules as the serve path: 451, never cached.
+            
             let (status, html) = frozen_html();
             return Response::builder()
                 .status(status)

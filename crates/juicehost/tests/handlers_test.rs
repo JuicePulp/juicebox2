@@ -1309,7 +1309,7 @@ async fn get_public(
     uri: &str,
     range: Option<&str>,
 ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    // Browser-like headers: bare requests are treated as bots on /v/.
+    
     let mut builder = Request::builder()
         .method("GET")
         .uri(uri)
@@ -1372,7 +1372,7 @@ async fn protected_file_serves_unlock_shell() {
     let app = build_router(state);
     store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
 
-    // View mode opens the decrypted bytes natively, preview keeps the page.
+    
     let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -1392,7 +1392,7 @@ async fn protected_file_serves_unlock_shell() {
     );
     assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
 
-    // Ciphertext stays public for browser-side decryption.
+    
     let (status, headers, body) = get_public(&app, "/c/abc12345", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"ciphertext-bytes");
@@ -1401,7 +1401,7 @@ async fn protected_file_serves_unlock_shell() {
         Some("application/octet-stream")
     );
 
-    // Ciphertext ranges work for chunk-aligned decrypt fetches.
+    
     let (status, headers, body) = get_public(&app, "/c/abc12345", Some("bytes=0-9")).await;
     assert_eq!(status, StatusCode::PARTIAL_CONTENT);
     assert_eq!(body, b"ciphertext");
@@ -1522,7 +1522,7 @@ async fn internal_ciphertext_endpoint_serves_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), b"4567");
 
-    // No credentials: rejected.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1553,7 +1553,7 @@ async fn download_forces_attachment_with_bytes() {
             .and_then(|v| v.to_str().ok()),
         Some("attachment; filename=\"dlfile01.txt\"")
     );
-    // Same file inline has no disposition.
+    
     let (status, headers, _) = get_public(&app, "/f/dlfile01.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers.get("content-disposition").is_none());
@@ -1684,7 +1684,7 @@ async fn preview_bots_redirect_to_raw() {
     let app = build_router(state);
     store_named(&app, "bot00001", "notes.txt", b"hello bots").await;
 
-    // curl-style client: 302 to the raw bytes, never the preview page.
+    
     let (status, headers, body) = get_bare(&app, "/v/bot00001.txt", Some("curl/8.5.0")).await;
     assert_eq!(status, StatusCode::FOUND);
     assert_eq!(
@@ -1719,7 +1719,7 @@ async fn preview_bots_redirect_to_raw() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FOUND);
 
-    // A real navigation (Sec-Fetch-Mode) keeps the HTML even with an odd UA.
+    
     let resp = app
         .clone()
         .oneshot(
@@ -1734,7 +1734,7 @@ async fn preview_bots_redirect_to_raw() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Humans keep the page: logo, curler notice, no fullscreen, no truncation note.
+    
     let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -1763,11 +1763,11 @@ async fn preview_protected_shell_ignores_bot_redirect() {
     let app = build_router(state);
     store_bytes(&app, "protbot01", b"ciphertext").await;
 
-    // The gate runs first: bots get the shell, never a raw redirect.
+    
     let (status, headers, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
     assert_eq!(status, StatusCode::OK);
     assert!(String::from_utf8_lossy(&body).contains("password-protected"));
-    // The shell carries its own executable CSP (inline app + gateway fetch).
+    
     let csp = headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
@@ -1815,7 +1815,7 @@ async fn preview_missing_and_protected() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"preview\""));
-    // Same topbar + stage chrome as the public preview page.
+    
     assert!(page.contains("id=\"topdl\""));
     assert!(page.contains("id=\"topraw\""));
     assert!(page.contains("dl-hero"));

@@ -6,13 +6,13 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 #[must_use]
-/// Hash an IP address with a pepper for ban-list storage.
-///
-/// # Panics
-///
-/// Panics if HMAC key initialization fails. `Hmac::new_from_slice`
-/// accepts keys of any length, so this cannot fire unless the `hmac`
-/// crate itself is broken.
+
+
+
+
+
+
+
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
     let ip = ip
         .parse::<IpAddr>()

@@ -25,8 +25,8 @@
     var topdl = document.getElementById("topdl");
     var topraw = document.getElementById("topraw");
 
-    // Held access after unlock: either the v1 data key or the legacy
-    // password. Memory only, never stored, never placed in a URL.
+    
+    
     var held = null;
 
     function enableTopbar() {
@@ -93,9 +93,9 @@
       var plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, data);
       return new Uint8Array(plain);
     }
-    // Decrypt plaintext [plainStart, plainEnd) by fetching exactly the
-    // overlapping stored chunks, then slicing. Chunk-aligned sequential
-    // calls stream without ever holding the whole file.
+    
+    
+    
     async function decryptRange(key, plainStart, plainEnd, plainLen, onChunk) {
       var range = cipherRangeForPlain(plainStart, plainEnd, plainLen);
       var cipherBytes = await fetchRange(CFG.cipherUrl, range[0], range[1]);
@@ -165,7 +165,7 @@
           return;
         } catch (e) {
           if (e && e.name === "AbortError") { say("Save cancelled."); return; }
-          // Fall through to blob fallback below.
+          
         }
       }
       var parts = [];
@@ -228,8 +228,8 @@
       say("Download complete.");
     }
 
-    // Full decrypt into one Blob (view/open + media preview). Holds the
-    // whole file in memory: callers cap absurd sizes first.
+    
+    
     async function decryptFull(key, plainLen) {
       var parts = [];
       var done = 0;
@@ -250,8 +250,8 @@
       return bytes + " B";
     }
 
-    // Download hero identical to the public preview page for unpreviewable
-    // types (same classes, same shared stylesheet).
+    
+    
     function renderDlHero(mimeLabel, sizeLabel, onDownload) {
       card.hidden = true;
       var hero = document.createElement("div");
@@ -283,8 +283,8 @@
       say("");
     }
 
-    // View mode (/f/): the decrypted bytes become the page content itself,
-    // natively rendered fullscreen with only a floating download left.
+    
+    
     async function v1View(h) {
       if (h.plainLen > 512 * 1024 * 1024) {
         say("File is too large to open in the browser. Download it instead.", true);
@@ -296,12 +296,12 @@
       renderNative(blob, kindOf(CFG.mime), function () { return v1Download(h.key, h.plainLen); });
     }
 
-    // Native fullscreen render of decrypted bytes: the document becomes the
-    // file itself (image/video/audio/PDF/text fill the viewport, no page
-    // chrome left except an optional floating download). Top-level blob
-    // navigation is deliberately avoided: it fails under page CSPs and drops
-    // the held access. Blob subresources stay in this document where the
-    // policy explicitly allows them.
+    
+    
+    
+    
+    
+    
     function renderNative(blob, kind, withDownload) {
       card.hidden = true;
       if (topbar && !withDownload) topbar.style.display = "none";
@@ -340,7 +340,7 @@
       document.body.appendChild(b);
     }
 
-    // Download + open through held access (topbar buttons + float button).
+    
     async function downloadHeld(h) {
       if (h.v1) return v1Download(h.key, h.plainLen);
       var res = await fetch(CFG.contentUrl, { headers: { "X-File-Password": h.password }, cache: "no-store" });

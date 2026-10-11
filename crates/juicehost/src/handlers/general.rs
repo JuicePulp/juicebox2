@@ -40,7 +40,7 @@ pub async fn index_handler(State(state): State<Arc<AppState>>) -> Response {
     tag = "General",
 )]
 pub async fn health() -> Response {
-    // Static liveness only: no backend probe, no per-request metric.
+    
     let body = serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
@@ -140,8 +140,8 @@ pub async fn stat_file(
             "size_bytes": meta.size,
             "extension": meta.extension,
         }))),
-        // Frozen files still exist: report the hold (without bytes) so
-        // admins and health checks can see it. Not an error.
+        
+        
         Err(StorageError::Frozen) => Ok(Json(serde_json::json!({
             "exists": true,
             "frozen": true,
@@ -178,9 +178,9 @@ pub async fn ciphertext_file(
     serve_stored_bytes(&state, &headers, &id).await
 }
 
-/// Public ciphertext bytes for browser-side decryption (`/c/{id}`).
-/// No gate: ciphertext is useless without the data key, which juicehost
-/// never holds. Same bytes and Range semantics as the internal endpoint.
+
+
+
 #[tracing::instrument(skip_all)]
 pub async fn ciphertext_public(
     State(state): State<Arc<AppState>>,

@@ -59,7 +59,7 @@ pub async fn serve_file_wildcard(
     serve_file_inner(state, headers, method, id, false, viewer.0).await
 }
 
-/// Same as `/f/`, but forces a download instead of inline viewing.
+
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_download(
     State(state): State<Arc<AppState>>,
@@ -138,8 +138,8 @@ async fn serve_file_inner(
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
-    // Password-gated files store ciphertext only: serve the unlock shell
-    // on public routes, never raw bytes.
+    
+    
     let mode = if force_download {
         ShellMode::Download
     } else {
@@ -169,9 +169,9 @@ async fn serve_file_inner(
         builder
     };
 
-    // Admin analytics: count GETs that actually return bytes (repeat
-    // views and media range chunks collapse per-viewer server-side, and
-    // HEAD/failed serves never count).
+    
+    
+    
     let count_hit = |viewer_ip: &Option<String>| {
         if method != Method::GET {
             return;
