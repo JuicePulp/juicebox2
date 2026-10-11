@@ -270,7 +270,7 @@ fn component_embed_payload(
     abs_download: &str,
 ) -> serde_json::Value {
     let name = truncate_chars(&page.filename, 80);
-    let meta = truncate_chars(&format!("{} · {}", page.mime, page.size_label), 160);
+    let meta = truncate_chars(&format!("{} - {}", page.mime, page.size_label), 160);
     let heading = format!("## [{name}]({abs_page})\n{meta}");
     let mut container: Vec<serde_json::Value> = Vec::new();
     container.push(serde_json::json!({
@@ -284,10 +284,10 @@ fn component_embed_payload(
         }));
     } else {
         let hint = match page.kind {
-            PreviewKind::Audio => "Audio file — open the preview page to listen.",
-            PreviewKind::Pdf => "PDF file — open the preview page to read it.",
-            PreviewKind::Text => "Text file — open the preview page to read it.",
-            _ => "File ready — open the preview page or download it.",
+            PreviewKind::Audio => "Audio file - open the preview page to listen.",
+            PreviewKind::Pdf => "PDF file - open the preview page to read it.",
+            PreviewKind::Text => "Text file - open the preview page to read it.",
+            _ => "File ready - open the preview page or download it.",
         };
         container.push(serde_json::json!({
             "type": 10,
@@ -322,7 +322,7 @@ fn component_embed_script(
     let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
     if serialized.len() > 3000 {
         let name = truncate_chars(&page.filename, 40);
-        let meta = truncate_chars(&format!("{} · {}", page.mime, page.size_label), 80);
+        let meta = truncate_chars(&format!("{} - {}", page.mime, page.size_label), 80);
         payload = serde_json::json!({
             "component": {
                 "type": 17,
@@ -341,7 +341,7 @@ fn component_embed_script(
 
 fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     use std::fmt::Write as _;
-    let description = format!("{} · {}", page.mime, page.size_label);
+    let description = format!("{} - {}", page.mime, page.size_label);
     let mut tags = format!(
         "<meta property=\"og:title\" content=\"{title}\">\n<meta property=\"og:description\" content=\"{desc}\">\n<meta property=\"og:url\" content=\"{url}\">\n<meta property=\"og:type\" content=\"website\">",
         title = escape_html(&page.filename),
@@ -404,7 +404,7 @@ fn stage_html(page: &PreviewPage) -> String {
             "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview...</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
         ),
         PreviewKind::Download => format!(
-            "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">&#8681;</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} &middot; {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
+            "<div class=\"dl-hero\"><img class=\"dl-icon\" src=\"https://f.juicey.dev/f/OiG6RoKK.svg\" alt=\"\" aria-hidden=\"true\"><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} - {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
             name = escape_html(&page.filename),
             mime = escape_html(&page.mime),
             size = escape_html(&page.size_label),
@@ -527,7 +527,7 @@ async fn preview_file_inner(
             .map_err(|_| JuicehostError::Internal);
     }
     let mime = storage::guess_mime(&extension);
-    let title = format!("{filename} - Juicebox");
+    let title = format!("{filename} - Juicebox²");
     let page = PreviewPage {
         kind: preview_kind(&mime),
         title,
@@ -592,7 +592,7 @@ mod tests {
     fn stage_has_no_card_chrome() {
         let page = PreviewPage {
             kind: PreviewKind::Video,
-            title: "a.mp4 - Juicebox".into(),
+            title: "a.mp4 - Juicebox²".into(),
             filename: "a.mp4".into(),
             size_label: "1.0 MB".into(),
             raw_url: "/f/a.mp4".into(),

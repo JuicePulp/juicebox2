@@ -70,16 +70,15 @@
     .fallback-note a{color:#f97316}
     .dl-hero{display:flex;flex-direction:column;align-items:center;gap:.75rem;text-align:center}
     .dl-icon{
-      font-size:3.5rem;
       color:#f97316;
       background:#241d17;
       border:1px solid #4a3d33;
       border-radius:1rem;
       width:7rem;
       height:7rem;
-      display:flex;
-      align-items:center;
-      justify-content:center;
+      box-sizing:border-box;
+      padding:.75rem;
+      object-fit:contain;
     }
     .dl-name{font-size:1.1rem;font-weight:700;word-break:break-all}
     .dl-meta{color:#a29188;font-size:.9rem}

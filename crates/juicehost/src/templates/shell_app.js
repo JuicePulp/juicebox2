@@ -305,7 +305,7 @@
     function renderNative(blob, kind, withDownload) {
       card.hidden = true;
       if (topbar && !withDownload) topbar.style.display = "none";
-      document.title = CFG.filename + " - Juicebox";
+      document.title = CFG.filename + " - Juicebox²";
       stage.style.padding = "0";
       if (kind === "text") {
         blob.text().then(function (text) {

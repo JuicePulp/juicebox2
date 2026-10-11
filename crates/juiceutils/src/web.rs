@@ -39,7 +39,7 @@ mod tests {
     fn brand_has_logo_and_wordmark() {
         let html = brand_html("DATA_URI");
         assert!(html.contains("DATA_URI"));
-        assert!(html.contains("Juicebox<sup>2</sup>"));
+        assert!(html.contains("Juicebox²"));
         assert!(html.contains("brand-logo"));
     }
 
