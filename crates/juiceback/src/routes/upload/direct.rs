@@ -4,6 +4,7 @@ use axum::{
     Json,
     extract::{ConnectInfo, State},
     http::HeaderMap,
+    response::{IntoResponse, Response},
 };
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -19,7 +20,7 @@ use super::{
 use crate::{
     db::{self, FileRecord},
     error::AppError,
-    routes::UserId,
+    routes::{UserId, noscript},
     state::AppState,
 };
 
@@ -220,8 +221,9 @@ pub async fn direct_upload_reserve_handler(
 pub async fn direct_upload_complete_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
+    headers: HeaderMap,
     Json(body): Json<DirectUploadCompleteRequest>,
-) -> Result<Json<UploadResponse>, AppError> {
+) -> Result<Response, AppError> {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode as jwt_decode};
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["exp"]);
@@ -318,7 +320,14 @@ pub async fn direct_upload_complete_handler(
     let public_url = public_url_for(&state, &file);
     let protected = file.is_protected();
     let is_encrypted = file.is_encrypted;
-    Ok(Json(UploadResponse {
+    let cookie_hdr = noscript::file_cookie_header(
+        &headers,
+        &noscript::FileCookieEntry {
+            id: file_id.clone(),
+            token: file.delete_token.clone(),
+        },
+    );
+    let mut resp = Json(UploadResponse {
         id: file_id,
         url: public_url,
         filename: file.filename,
@@ -329,5 +338,11 @@ pub async fn direct_upload_complete_handler(
         status: "ready".into(),
         protected,
         is_encrypted,
-    }))
+    })
+    .into_response();
+    resp.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        cookie_hdr,
+    );
+    Ok(resp)
 }

@@ -15,6 +15,10 @@ use crate::{db, error::AppError, notify, state::AppState, utils::ClientIp};
 const COOKIE_NAME: &str = "jb_files";
 const COOKIE_MAX_AGE: &str = "2592000";
 
+/// Browsers cap cookies around 4KB; one entry is ~130B once encoded, so this
+/// keeps the newest entries parseable instead of letting the cookie rot.
+pub const MAX_FILE_COOKIE_ENTRIES: usize = 25;
+
 #[derive(Deserialize, ToSchema)]
 pub struct ReportRequest {
     #[serde(default)]
@@ -239,6 +243,9 @@ pub(crate) fn build_file_cookie_value(existing: &HeaderMap, new_entry: &FileCook
 
     entries.retain(|e| e.id != new_entry.id);
     entries.push(new_entry.clone());
+    if entries.len() > MAX_FILE_COOKIE_ENTRIES {
+        entries.drain(..entries.len() - MAX_FILE_COOKIE_ENTRIES);
+    }
 
     let json = serde_json::to_string(&entries).unwrap_or_default();
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
@@ -287,6 +294,23 @@ pub fn rename_file_cookie_header(
         id: new_id.to_string(),
         token: token.to_string(),
     });
+    if entries.len() > MAX_FILE_COOKIE_ENTRIES {
+        entries.drain(..entries.len() - MAX_FILE_COOKIE_ENTRIES);
+    }
+
+    let json = serde_json::to_string(&entries).unwrap_or_default();
+    let val = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
+    cookie_header_value(&val, existing)
+}
+
+#[must_use]
+pub fn remove_file_cookie_header(existing: &HeaderMap, id: &str) -> HeaderValue {
+    let mut entries = existing
+        .get(header::COOKIE)
+        .map(parse_file_cookie)
+        .unwrap_or_default();
+
+    entries.retain(|e| e.id != id);
 
     let json = serde_json::to_string(&entries).unwrap_or_default();
     let val = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
@@ -443,5 +467,60 @@ mod tests {
         let hdr = HeaderValue::from_static("other=value");
         let entries = parse_file_cookie(&hdr);
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn cookie_entries_capped_to_newest() {
+        let mut headers = HeaderMap::new();
+        let mut val = String::new();
+        for i in 0..(MAX_FILE_COOKIE_ENTRIES + 10) {
+            let entry = FileCookieEntry {
+                id: format!("id{i:03}"),
+                token: "tok".into(),
+            };
+            val = build_file_cookie_value(&headers, &entry);
+            headers.insert(
+                header::COOKIE,
+                HeaderValue::from_str(&format!("jb_files={val}")).unwrap(),
+            );
+        }
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&val)
+            .unwrap();
+        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(entries.len(), MAX_FILE_COOKIE_ENTRIES);
+        assert_eq!(entries.first().unwrap().id, "id010");
+        assert_eq!(entries.last().unwrap().id, format!("id{:03}", MAX_FILE_COOKIE_ENTRIES + 9));
+    }
+
+    #[test]
+    fn remove_file_cookie_entry() {
+        let mut headers = HeaderMap::new();
+        for id in ["aaa", "bbb"] {
+            let entry = FileCookieEntry {
+                id: id.into(),
+                token: "tok".into(),
+            };
+            let val = build_file_cookie_value(&headers, &entry);
+            headers.insert(
+                header::COOKIE,
+                HeaderValue::from_str(&format!("jb_files={val}")).unwrap(),
+            );
+        }
+        let hdr = remove_file_cookie_header(&headers, "aaa");
+        let val = hdr
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .trim_start_matches("jb_files=")
+            .to_string();
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&val)
+            .unwrap();
+        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "bbb");
     }
 }

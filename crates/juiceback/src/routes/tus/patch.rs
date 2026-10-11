@@ -314,6 +314,22 @@ async fn patch_upload_handler_impl(
 
     if is_complete {
         if let Some(meta) = completed_meta {
+            let cookie_id = meta.id.clone();
+            let cookie_token = meta.delete_token.clone();
+            let cookie_hdr = crate::routes::noscript::file_cookie_header(
+                &headers,
+                &crate::routes::noscript::FileCookieEntry {
+                    id: cookie_id,
+                    token: cookie_token,
+                },
+            );
+            let with_cookie = |mut resp: Response| {
+                resp.headers_mut().insert(
+                    axum::http::header::SET_COOKIE,
+                    cookie_hdr.clone(),
+                );
+                resp
+            };
             if let (Some(sid), Some(pi)) = (&session_id, part_index) {
                 state.tus.remove(&id);
                 let response = complete_parallel_part(&state, meta, sid, pi).await?;
@@ -322,11 +338,17 @@ async fn patch_upload_handler_impl(
                 } else {
                     StatusCode::ACCEPTED
                 };
-                return Ok((status, Json(response)).into_response());
+                let resp = (status, Json(response)).into_response();
+                return Ok(if status == StatusCode::OK {
+                    with_cookie(resp)
+                } else {
+                    resp
+                });
             } else {
                 state.tus.remove(&id);
                 let response = complete_tus_upload(&state, meta).await?;
-                return Ok(Json(response).into_response());
+                let resp = Json(response).into_response();
+                return Ok(with_cookie(resp));
             }
         }
     }

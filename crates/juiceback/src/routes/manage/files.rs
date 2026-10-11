@@ -145,11 +145,17 @@ pub async fn file_info_handler(
 pub async fn delete_file_form_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Form(_params): Form<noscript::DeleteRequest>,
-) -> Result<Redirect, AppError> {
+) -> Result<Response, AppError> {
     delete_file_inner(&state, &user_id, &id, None).await?;
-    Ok(Redirect::to(&format!("/files.html?deleted={id}")))
+    let mut response = Redirect::to(&format!("/files.html?deleted={id}")).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        noscript::remove_file_cookie_header(&headers, &id),
+    );
+    Ok(response)
 }
 
 async fn delete_file_inner(
@@ -230,12 +236,17 @@ pub async fn delete_file_handler(
     UserId(user_id): UserId,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<StatusCode, AppError> {
+) -> Result<(HeaderMap, StatusCode), AppError> {
     let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
 
     delete_file_inner(&state, &user_id, &id, token).await?;
 
-    Ok(StatusCode::NO_CONTENT)
+    let mut out = HeaderMap::new();
+    out.insert(
+        axum::http::header::SET_COOKIE,
+        crate::routes::noscript::remove_file_cookie_header(&headers, &id),
+    );
+    Ok((out, StatusCode::NO_CONTENT))
 }
 
 #[utoipa::path(
@@ -261,7 +272,7 @@ pub async fn renew_file_id_handler(
     headers: HeaderMap,
     Path(id): Path<String>,
     body: Option<Json<RenewRequest>>,
-) -> Result<Json<RenewResponse>, AppError> {
+) -> Result<(HeaderMap, Json<RenewResponse>), AppError> {
     let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
     let id2 = id.clone();
     let record = state
@@ -329,13 +340,21 @@ pub async fn renew_file_id_handler(
         is_custom
     );
 
-    Ok(Json(RenewResponse {
-        id: new_id,
-        url,
-        filename: record.filename,
-        expires_at: record.expires_at,
-        custom: is_custom,
-    }))
+    let mut headers_out = HeaderMap::new();
+    headers_out.insert(
+        header::SET_COOKIE,
+        noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token),
+    );
+    Ok((
+        headers_out,
+        Json(RenewResponse {
+            id: new_id,
+            url,
+            filename: record.filename,
+            expires_at: record.expires_at,
+            custom: is_custom,
+        }),
+    ))
 }
 
 pub async fn rename_file_form_handler(

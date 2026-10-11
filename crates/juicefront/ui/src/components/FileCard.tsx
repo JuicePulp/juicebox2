@@ -242,7 +242,7 @@ export default function FileCard(props: FileCardProps) {
             class="storage-host-tag storage-host-tag--locked"
             title={t(locale(), "files.protected")}
             aria-label={t(locale(), "files.protected")}
-            innerHTML={iconSvgHtml("key", 16)}
+            innerHTML={iconSvgHtml("key", 24)}
           />
         </Show>
         <Show when={props.mode === "upload" && props.state !== "done"}>
