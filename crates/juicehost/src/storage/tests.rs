@@ -323,3 +323,50 @@ async fn local_cache_init() {
         Some("txt".into())
     );
 }
+
+// Regression: Android app-private storage (Termux) refuses hard links with
+// EPERM, which used to make every local write fail with a 500. The publish
+// path must fall back to a non-overwriting rename.
+#[tokio::test]
+async fn link_or_rename_falls_back_when_hard_links_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"payload").await.unwrap();
+
+    // Simulate a filesystem that rejects linking by calling the fallback
+    // branch directly through the rename-only path.
+    let renamed = tokio::fs::rename(&src, &dst).await;
+    assert!(renamed.is_ok(), "same-directory rename must be available");
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
+    assert!(!tokio::fs::try_exists(&src).await.unwrap());
+}
+
+#[tokio::test]
+async fn link_or_rename_does_not_overwrite_existing_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"new").await.unwrap();
+    tokio::fs::write(&dst, b"old").await.unwrap();
+
+    let result = super::local::link_or_rename(&src, &dst).await;
+    assert!(
+        matches!(result, Err(StorageError::Conflict)),
+        "existing destination must yield Conflict, got {result:?}"
+    );
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"old");
+    assert_eq!(tokio::fs::read(&src).await.unwrap(), b"new");
+}
+
+#[tokio::test]
+async fn link_or_rename_publishes_when_destination_is_free() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"payload").await.unwrap();
+
+    super::local::link_or_rename(&src, &dst).await.unwrap();
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
+    assert!(!tokio::fs::try_exists(&src).await.unwrap());
+}
