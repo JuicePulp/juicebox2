@@ -115,10 +115,7 @@ pub(crate) async fn protected_shell_response(
         BackendStatus::Known(body)
             if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
         {
-            let filename = body
-                .get("filename")
-                .and_then(|v| v.as_str())
-                .unwrap_or(id);
+            let filename = body.get("filename").and_then(|v| v.as_str()).unwrap_or(id);
             let gateway_origin = body
                 .get("gateway_origin")
                 .and_then(|v| v.as_str())
@@ -173,7 +170,11 @@ fn render_shell(
     size_label: &str,
     mode: ShellMode,
 ) -> Response<Body> {
-    let extension = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let extension = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let mime = crate::storage::guess_mime(&extension);
     let content_url = format!(
         "{}/file/{}/content",
@@ -193,18 +194,12 @@ fn render_shell(
             &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
         .replace("__APP_JS__", SHELL_APP_JS.trim_end())
-        .replace(
-            "__PREVIEW_CSS__",
-            juiceutils::web::PREVIEW_CSS.trim_end(),
-        )
+        .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
         .replace("__FILE_ID__", &escape_html(id))
         .replace("__FILENAME__", &escape_html(filename))
         .replace("__SIZE__", &escape_html(size_label))
         .replace("__GATEWAY_ORIGIN__", &escape_html(gateway_origin))
-        .replace(
-            "__CIPHERTEXT_URL__",
-            &escape_html(&format!("/c/{id}")),
-        )
+        .replace("__CIPHERTEXT_URL__", &escape_html(&format!("/c/{id}")))
         .replace("__CONTENT_URL__", &escape_html(&content_url))
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))

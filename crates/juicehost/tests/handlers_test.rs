@@ -1253,9 +1253,7 @@ async fn mock_backend(status_code: u16, body: serde_json::Value) -> String {
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -1308,7 +1306,11 @@ async fn store_bytes(app: &axum::Router, id: &str, bytes: &[u8]) {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-async fn get_public(app: &axum::Router, uri: &str, range: Option<&str>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+async fn get_public(
+    app: &axum::Router,
+    uri: &str,
+    range: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
     // Browser-like headers: bare requests are treated as bots on /v/.
     let mut builder = Request::builder()
         .method("GET")
@@ -1318,22 +1320,40 @@ async fn get_public(app: &axum::Router, uri: &str, range: Option<&str>) -> (Stat
     if let Some(range) = range {
         builder = builder.header("range", range);
     }
-    let resp = app.clone().oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let status = resp.status();
     let headers = resp.headers().clone();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
     (status, headers, bytes)
 }
 
-async fn get_bare(app: &axum::Router, uri: &str, ua: Option<&str>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+async fn get_bare(
+    app: &axum::Router,
+    uri: &str,
+    ua: Option<&str>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
     let mut builder = Request::builder().method("GET").uri(uri);
     if let Some(ua) = ua {
         builder = builder.header("user-agent", ua);
     }
-    let resp = app.clone().oneshot(builder.body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let status = resp.status();
     let headers = resp.headers().clone();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
     (status, headers, bytes)
 }
 
@@ -1368,7 +1388,10 @@ async fn protected_file_serves_unlock_shell() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("/c/abc12345"));
-    assert!(page.contains("https://box.example/api/gateway/unlock") || page.contains("https://box.example"));
+    assert!(
+        page.contains("https://box.example/api/gateway/unlock")
+            || page.contains("https://box.example")
+    );
     assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
 
     // Ciphertext stays public for browser-side decryption.
@@ -1466,10 +1489,14 @@ async fn internal_ciphertext_endpoint_serves_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
         Some("application/octet-stream")
     );
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     assert_eq!(bytes.as_ref(), b"0123456789abcdef");
 
     let resp = app
@@ -1487,10 +1514,14 @@ async fn internal_ciphertext_endpoint_serves_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(
-        resp.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes 4-7/16")
     );
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     assert_eq!(bytes.as_ref(), b"4567");
 
     // No credentials: rejected.
@@ -1537,8 +1568,7 @@ async fn download_supports_ranges() {
     let app = build_router(state);
     store_bytes(&app, "dlrange01", b"0123456789abcdef").await;
 
-    let (status, headers, body) =
-        get_public(&app, "/d/dlrange01.txt", Some("bytes=4-7")).await;
+    let (status, headers, body) = get_public(&app, "/d/dlrange01.txt", Some("bytes=4-7")).await;
     assert_eq!(status, StatusCode::PARTIAL_CONTENT);
     assert_eq!(body, b"4567");
     assert_eq!(

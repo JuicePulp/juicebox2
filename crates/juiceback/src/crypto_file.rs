@@ -285,12 +285,24 @@ fn write_header(out: &mut Vec<u8>, plain_len: u64) {
 pub const fn encode_header(plain_len: u64) -> [u8; 13] {
     let size = plain_len.to_le_bytes();
     [
-        MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], CHUNK_SHIFT, size[0], size[1], size[2], size[3],
-        size[4], size[5], size[6], size[7],
+        MAGIC[0],
+        MAGIC[1],
+        MAGIC[2],
+        MAGIC[3],
+        CHUNK_SHIFT,
+        size[0],
+        size[1],
+        size[2],
+        size[3],
+        size[4],
+        size[5],
+        size[6],
+        size[7],
     ]
 }
 
-/// Parse and validate the 13-byte header, returning the original plaintext size.
+/// Parse and validate the 13-byte header, returning the original plaintext
+/// size.
 ///
 /// # Errors
 ///
@@ -493,7 +505,9 @@ mod tests {
     }
 
     fn pattern(len: usize) -> Vec<u8> {
-        (0..len).map(|i| (i.wrapping_mul(31).wrapping_add(7)) as u8).collect()
+        (0..len)
+            .map(|i| (i.wrapping_mul(31).wrapping_add(7)) as u8)
+            .collect()
     }
 
     #[test]
@@ -560,7 +574,10 @@ mod tests {
     #[test]
     fn bad_header_rejected() {
         assert_eq!(parse_header(&[]).unwrap_err(), CryptoError::Truncated);
-        assert_eq!(parse_header(&[0_u8; HEADER_LEN]).unwrap_err(), CryptoError::BadFormat);
+        assert_eq!(
+            parse_header(&[0_u8; HEADER_LEN]).unwrap_err(),
+            CryptoError::BadFormat
+        );
         let mut good = vec![0_u8; HEADER_LEN];
         good[..4].copy_from_slice(b"JBC1");
         good[4] = 15;
@@ -571,8 +588,14 @@ mod tests {
     fn key_parsing() {
         assert!(FileKey::from_hex(&"ab".repeat(32)).is_ok());
         assert_eq!(FileKey::from_hex("abc").unwrap_err(), CryptoError::BadKey);
-        assert_eq!(FileKey::from_hex(&"zz".repeat(32)).unwrap_err(), CryptoError::BadKey);
-        assert_eq!(FileKey::from_bytes(&[1_u8; 31][..]).unwrap_err(), CryptoError::BadKey);
+        assert_eq!(
+            FileKey::from_hex(&"zz".repeat(32)).unwrap_err(),
+            CryptoError::BadKey
+        );
+        assert_eq!(
+            FileKey::from_bytes(&[1_u8; 31][..]).unwrap_err(),
+            CryptoError::BadKey
+        );
     }
 
     #[test]
@@ -614,7 +637,10 @@ mod tests {
     #[test]
     fn cipher_range_covers_exact_chunks() {
         // Single-chunk file.
-        assert_eq!(cipher_range_for_plain(0, 100, 100).unwrap(), (13, 12 + 100 + 16));
+        assert_eq!(
+            cipher_range_for_plain(0, 100, 100).unwrap(),
+            (13, 12 + 100 + 16)
+        );
         // Empty range.
         assert_eq!(cipher_range_for_plain(5, 5, 100).unwrap(), (13, 0));
         // Two full chunks + short tail: range inside second chunk only.
@@ -673,7 +699,10 @@ mod tests {
         let dek = FileKey::generate();
         let wrapped = wrap_dek(&kek, &dek).unwrap();
         let wrong = derive_kek("wrong password", &[7_u8; DEK_SALT_LEN]).unwrap();
-        assert_eq!(unwrap_dek(&wrong, &wrapped).unwrap_err(), CryptoError::Decrypt);
+        assert_eq!(
+            unwrap_dek(&wrong, &wrapped).unwrap_err(),
+            CryptoError::Decrypt
+        );
     }
 
     #[test]
@@ -682,7 +711,10 @@ mod tests {
         let dek = FileKey::generate();
         let wrapped = wrap_dek(&kek, &dek).unwrap();
         let other = derive_kek("correct horse 999", &[8_u8; DEK_SALT_LEN]).unwrap();
-        assert_eq!(unwrap_dek(&other, &wrapped).unwrap_err(), CryptoError::Decrypt);
+        assert_eq!(
+            unwrap_dek(&other, &wrapped).unwrap_err(),
+            CryptoError::Decrypt
+        );
     }
 
     #[test]
@@ -691,7 +723,10 @@ mod tests {
         let dek = FileKey::generate();
         let mut wrapped = wrap_dek(&kek, &dek).unwrap();
         wrapped[20] ^= 1;
-        assert_eq!(unwrap_dek(&kek, &wrapped).unwrap_err(), CryptoError::Decrypt);
+        assert_eq!(
+            unwrap_dek(&kek, &wrapped).unwrap_err(),
+            CryptoError::Decrypt
+        );
         assert_eq!(
             unwrap_dek(&kek, &wrapped[..WRAPPED_DEK_LEN - 1]).unwrap_err(),
             CryptoError::Truncated

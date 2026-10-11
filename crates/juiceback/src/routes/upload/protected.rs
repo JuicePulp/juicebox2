@@ -80,8 +80,7 @@ pub async fn prepare_protection(
         .map_err(|_| AppError::Internal("storage encryption unavailable".into()))?;
     let owned = password.to_string();
     tokio::task::spawn_blocking(move || {
-        let password_hash =
-            crate::auth::hash_password(&owned).map_err(AppError::Internal)?;
+        let password_hash = crate::auth::hash_password(&owned).map_err(AppError::Internal)?;
         let salt = crypto_file::random_salt();
         let kek = crypto_file::derive_kek(&owned, &salt)
             .map_err(|e| AppError::Internal(format!("key wrap failed: {e}")))?;
@@ -114,8 +113,8 @@ pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey,
         .config
         .storage_file_key()
         .map_err(|_| AppError::Internal("storage encryption unavailable".into()))?;
-    let raw = hex::decode(escrow_hex.trim())
-        .map_err(|_| AppError::Internal("bad key escrow".into()))?;
+    let raw =
+        hex::decode(escrow_hex.trim()).map_err(|_| AppError::Internal("bad key escrow".into()))?;
     let plain = crypto_file::decrypt_chunk(&key, &raw)
         .map_err(|_| AppError::Internal("bad key escrow".into()))?;
     FileKey::from_bytes(&plain).map_err(|_| AppError::Internal("bad key escrow".into()))
@@ -208,11 +207,11 @@ pub fn spawn_spool_task(
     mpsc::Sender<Result<Bytes, String>>,
     tokio::task::JoinHandle<Result<(tempfile::NamedTempFile, u64), AppError>>,
 ) {
-    let (tx, mut rx) = mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
+    let (tx, mut rx) =
+        mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
     let handle = tokio::spawn(async move {
-        let spool = tempfile::NamedTempFile::new().map_err(|e| {
-            AppError::Internal(format!("protected upload spool failed: {e}"))
-        })?;
+        let spool = tempfile::NamedTempFile::new()
+            .map_err(|e| AppError::Internal(format!("protected upload spool failed: {e}")))?;
         let mut out = tokio::fs::OpenOptions::new()
             .append(true)
             .open(spool.path())
@@ -282,7 +281,8 @@ pub async fn push_encrypted_file(
     let mut remaining = plain_len;
     while remaining > 0 {
         let want = remaining.min(crate::crypto_file::PLAINTEXT_CHUNK_LEN as u64);
-        let want = usize::try_from(want).map_err(|_| AppError::Internal("file too large".into()))?;
+        let want =
+            usize::try_from(want).map_err(|_| AppError::Internal("file too large".into()))?;
         let mut got = 0;
         while got < want {
             let n = tokio::io::AsyncReadExt::read(&mut file, &mut buf[got..want])

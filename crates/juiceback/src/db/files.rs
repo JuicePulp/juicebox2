@@ -187,6 +187,9 @@ pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRec
 
 pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     let affected = conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
+    if affected > 0 {
+        super::stats::delete_file_stats(conn, id)?;
+    }
     Ok(affected > 0)
 }
 
@@ -235,6 +238,13 @@ pub fn renew_file_id(
         "UPDATE files SET id = ?1, storage_path = ?2 WHERE id = ?3",
         params![new_id, new_storage_path, old_id],
     )?;
+    if affected > 0 {
+        // Keep accumulated viewers on the new id (old URLs alias to it).
+        conn.execute(
+            "UPDATE file_stats SET file_id = ?1 WHERE file_id = ?2",
+            params![new_id, old_id],
+        )?;
+    }
     Ok(affected > 0)
 }
 
@@ -315,5 +325,9 @@ pub fn delete_files_by_ids(conn: &Connection, ids: &[String]) -> Result<usize> {
     let sql = format!("DELETE FROM files WHERE id IN ({placeholders})");
     let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let affected = conn.execute(&sql, params.as_slice())?;
+    if affected > 0 {
+        let stats_sql = format!("DELETE FROM file_stats WHERE file_id IN ({placeholders})");
+        conn.execute(&stats_sql, params.as_slice())?;
+    }
     Ok(affected)
 }

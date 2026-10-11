@@ -75,13 +75,16 @@ pub fn list_files_paginated(
     let mut total = 0;
     let rows = if search.is_empty() {
         let r = stmt.query_map(params![limit, offset], |row| {
-            total = row.get(11)?;
+            // Read by name: the window column shifts whenever FILE_COLUMNS
+            // grows (a hardcoded index here silently broke when the
+            // protected-link columns landed).
+            total = row.get("total")?;
             row_to_file_record(row)
         })?;
         r.collect::<Result<Vec<_>>>()?
     } else {
         let r = stmt.query_map(params![search_param, limit, offset], |row| {
-            total = row.get(11)?;
+            total = row.get("total")?;
             row_to_file_record(row)
         })?;
         r.collect::<Result<Vec<_>>>()?

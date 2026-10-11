@@ -8,6 +8,7 @@ use super::{
     ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
     capability::{self, CapStore},
     common::{safe_extension, valid_component},
+    freeze::{FreezeStore, ensure_not_frozen},
 };
 use crate::error::StorageError;
 
@@ -79,6 +80,56 @@ impl S3Backend {
 
     fn capability_key(id: &str) -> object_store::path::Path {
         object_store::path::Path::from(format!("files/.capabilities/{id}"))
+    }
+
+    fn freeze_key(id: &str) -> object_store::path::Path {
+        object_store::path::Path::from(format!("files/.frozen/{id}"))
+    }
+
+    /// Authoritative frozen check: a HEAD on the marker object. Only a
+    /// definitive absence reports not frozen; any other storage error
+    /// propagates so callers fail closed instead of serving unverifiable
+    /// bytes.
+    async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
+        if !valid_component(id) {
+            return Ok(false);
+        }
+        match self.client.head(&Self::freeze_key(id)).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(e) => Err(StorageError::Io(format!("freeze check failed: {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl FreezeStore for S3Backend {
+    async fn freeze(&self, id: &str) -> Result<bool, StorageError> {
+        if !valid_component(id) {
+            return Err(StorageError::Io("invalid logical ID".into()));
+        }
+        self.find_object(id).await?;
+        self.client
+            .put(
+                &Self::freeze_key(id),
+                object_store::PutPayload::from(Bytes::new()),
+            )
+            .await
+            .map(|_| true)
+            .map_err(Into::into)
+    }
+
+    async fn unfreeze(&self, id: &str) -> Result<bool, StorageError> {
+        if !valid_component(id) {
+            return Err(StorageError::Io("invalid logical ID".into()));
+        }
+        let _ = self.client.delete(&Self::freeze_key(id)).await;
+        self.find_object(id).await?;
+        Ok(true)
+    }
+
+    async fn is_frozen(&self, id: &str) -> Result<bool, StorageError> {
+        self.frozen_marker_exists(id).await
     }
 }
 
@@ -286,6 +337,7 @@ impl S3Backend {
                     .await
                     .ok_or(StorageError::NotFound)?
                     .map_err(|e| StorageError::Io(format!("S3 list failed for {part_id}: {e}")))?;
+                ensure_not_frozen(self, part_id).await?;
 
                 let get_result =
                     self.client.get(&obj.location).await.map_err(|e| {
@@ -384,6 +436,7 @@ impl StorageBackend for S3Backend {
             .await
             .ok_or(StorageError::NotFound)?
             .map_err(|e| StorageError::Io(format!("S3 list failed: {e}")))?;
+        ensure_not_frozen(self, id).await?;
 
         let get_result = self
             .client
@@ -432,6 +485,7 @@ impl StorageBackend for S3Backend {
         if let Some(capability) = capability {
             capability::verify(self, id, capability).await?;
         }
+        ensure_not_frozen(self, id).await?;
         let obj: object_store::ObjectMeta = match head {
             Some(Ok(obj)) => obj,
             _ => return Ok(false),
@@ -455,6 +509,8 @@ impl StorageBackend for S3Backend {
         if let Some(capability) = capability {
             capability::verify(self, old_id, capability).await?;
         }
+        self.stat(old_id).await?;
+        ensure_not_frozen(self, old_id).await?;
         capability::run_minted(self, new_id, capability, || async {
             self.rename_object(old_id, new_id).await
         })
@@ -463,6 +519,7 @@ impl StorageBackend for S3Backend {
 
     async fn stat(&self, id: &str) -> Result<FileMetadata, StorageError> {
         let obj = self.find_object(id).await?;
+        ensure_not_frozen(self, id).await?;
 
         let key_str = obj.location.as_ref();
         let ext = key_str.rsplit('.').next().unwrap_or("bin").to_string();
@@ -491,6 +548,7 @@ impl StorageBackend for S3Backend {
         use futures::StreamExt;
 
         let obj = self.find_object(id).await?;
+        ensure_not_frozen(self, id).await?;
 
         let result = self
             .client
@@ -511,6 +569,7 @@ impl StorageBackend for S3Backend {
 
     async fn get_stream(&self, id: &str) -> Result<ByteStream, StorageError> {
         let obj = self.find_object(id).await?;
+        ensure_not_frozen(self, id).await?;
         let stream = self
             .client
             .get(&obj.location)

@@ -82,7 +82,7 @@ pub async fn register_handler(
     let filename = sanitize_filename(&payload.filename);
 
     let (default_ttl, allowed_ttl) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (jh.default_ttl_hours, jh.allowed_ttl_hours.clone())
     };
 

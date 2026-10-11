@@ -39,6 +39,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("files.protected_links", m09_files_protected_links),
     ("reports.password", m10_reports_password),
     ("files.per_file_dek", m11_files_per_file_dek),
+    ("visitor_stats", m12_visitor_stats),
 ];
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -214,6 +215,35 @@ fn m11_files_per_file_dek(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    Ok(())
+}
+
+fn m12_visitor_stats(conn: &Connection) -> Result<()> {
+    // Admin-only visitor analytics. IPs are never stored raw here: callers
+    // hash with the ip_pepper HMAC first, so rows only carry `ip_hash`.
+    // `file_stats` is keyed per (file, viewer): one row per person per
+    // file, with running view/download hit totals (range-request chunks
+    // from media streaming collapse into the same row instead of
+    // inflating the count). `site_visitors` is one row per person ever
+    // seen on the main site.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS file_stats (
+            file_id       TEXT NOT NULL,
+            ip_hash       TEXT NOT NULL,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            views         INTEGER NOT NULL DEFAULT 0,
+            downloads     INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (file_id, ip_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_stats_file ON file_stats(file_id);
+        CREATE TABLE IF NOT EXISTS site_visitors (
+            ip_hash       TEXT PRIMARY KEY,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL,
+            visits        INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
     Ok(())
 }
 

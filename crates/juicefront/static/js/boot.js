@@ -1,6 +1,14 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
+// Apply the stored motion preference before first paint so opting out of
+// animation never flashes animated content. Mirrors data-motion-toggle.
+try {
+  if (localStorage.getItem("juicebox_reduce_motion") === "1") {
+    document.documentElement.setAttribute("data-motion-reduce", "");
+  }
+} catch {}
+
 (function () {
   if (!document.documentElement || document.documentElement.dataset.live !== "1") return;
   if (typeof EventSource === "undefined") return;
@@ -39,17 +47,26 @@ document.documentElement.classList.add("js");
       sessionStorage.setItem(COUNT_KEY, JSON.stringify(list));
     } catch {}
   }
+  function scheduleReconnect() {
+    if (reloads().length >= 5) return;
+    var delay = retryMs;
+    retryMs = Math.min(retryMs * 2, 10000);
+    setTimeout(connect, delay);
+  }
+  var retryMs = 250;
   function connect() {
     if (reloads().length >= 5) return;
     var src;
     try {
       src = new EventSource("/__live");
     } catch {
+      scheduleReconnect();
       return;
     }
     src.addEventListener("boot", function (e) {
       var id = (e.data || "").trim();
       if (!id) return;
+      retryMs = 250;
       var prev = seen();
       store(id);
       if (prev && prev !== id) {
@@ -61,6 +78,7 @@ document.documentElement.classList.add("js");
       try {
         src.close();
       } catch {}
+      scheduleReconnect();
     };
   }
   if (document.readyState === "loading") {

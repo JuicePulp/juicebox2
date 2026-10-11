@@ -169,16 +169,19 @@ pub async fn preview_report_handler(
     if !record.is_protected() {
         return Err(AppError::NotFound);
     }
-    let password = report.password.filter(|p| !p.is_empty()).ok_or_else(|| {
-        AppError::Forbidden("report has no password for this file".into())
-    })?;
+    let password = report
+        .password
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| AppError::Forbidden("report has no password for this file".into()))?;
     let hash = record.password_hash.clone().unwrap_or_default();
     let ok = tokio::task::spawn_blocking(move || crate::auth::verify_password(&password, &hash))
         .await
         .map_err(|_| AppError::Internal("password check panicked".into()))?
         .map_err(AppError::Internal)?;
     if !ok {
-        return Err(AppError::Forbidden("stored password does not open this file".into()));
+        return Err(AppError::Forbidden(
+            "stored password does not open this file".into(),
+        ));
     }
 
     tracing::warn!(

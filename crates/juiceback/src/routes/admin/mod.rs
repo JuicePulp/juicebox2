@@ -13,6 +13,7 @@ pub mod feedback;
 pub mod files;
 pub mod hosters;
 pub mod reports;
+pub mod stats;
 
 pub use announcement::{
     AnnouncementRequest, AnnouncementResponse, get_announcement_handler, put_announcement_handler,
@@ -38,6 +39,7 @@ pub use reports::{
     AdminReportEntry, AdminReportsResponse, delete_report_handler, list_reports_handler,
     preview_report_handler,
 };
+pub use stats::{AdminStatsOverview, stats_overview_handler};
 
 #[must_use]
 pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router<Arc<AppState>> {
@@ -93,6 +95,10 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
         .route(
             "/api/admin/report/{id}/preview",
             axum::routing::get(preview_report_handler),
+        )
+        .route(
+            "/api/admin/stats/overview",
+            axum::routing::get(stats_overview_handler),
         )
         .route(
             "/api/admin/bans",

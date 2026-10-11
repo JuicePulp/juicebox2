@@ -157,6 +157,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/internal/file/{id}", delete(handlers::delete_file))
         .route("/internal/file/{id}/rename", post(handlers::rename_file))
+        .route("/internal/file/{id}/freeze", post(handlers::freeze_file))
+        .route(
+            "/internal/file/{id}/unfreeze",
+            post(handlers::unfreeze_file),
+        )
         .route("/internal/file/{id}/stat", get(handlers::stat_file))
         .route(
             "/internal/file/{id}/ciphertext",
@@ -185,6 +190,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/d/{*path}", get(handlers::serve_file_download))
         .route("/v/{*path}", get(handlers::preview_file_wildcard))
         .route("/c/{*path}", get(handlers::ciphertext_public))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            handlers::viewer_ip_middleware,
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             ban_check_middleware,
@@ -245,12 +254,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn(add_security_headers))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-                tracing::info_span!(
-                    "http.request",
-                    method = %request.method(),
-                    path = request.uri().path(),
-                    version = ?request.version(),
-                )
+                if juiceutils::is_noisy_http_path(request.uri().path()) {
+                    tracing::Span::none()
+                } else {
+                    tracing::info_span!(
+                        "http.request",
+                        method = %request.method(),
+                        path = request.uri().path(),
+                        version = ?request.version(),
+                    )
+                }
             }),
         )
         .layer(NewSentryLayer::<Request<Body>>::new_from_top())

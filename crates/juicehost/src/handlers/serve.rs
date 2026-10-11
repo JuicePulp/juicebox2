@@ -2,16 +2,19 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{Extension, Path, State},
+    http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use futures::StreamExt;
 
-use super::common::backend_request;
-use super::shell::{ShellMode, protected_shell_response, remaining_ttl_secs};
+use super::{
+    common::backend_request,
+    shell::{ShellMode, protected_shell_response, remaining_ttl_secs},
+    stats::{ViewerIp, report_file_hit},
+};
 use crate::{
-    error::{JuicehostError, StorageError, not_found_html, teapot_html},
+    error::{JuicehostError, StorageError, frozen_html, not_found_html, teapot_html},
     state::AppState,
     storage,
     storage::valid_component as is_valid_id,
@@ -47,29 +50,35 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_wildcard(
     State(state): State<Arc<AppState>>,
+    Extension(viewer): Extension<ViewerIp>,
+    method: Method,
     headers: HeaderMap,
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_file_inner(state, headers, id, false).await
+    serve_file_inner(state, headers, method, id, false, viewer.0).await
 }
 
 /// Same as `/f/`, but forces a download instead of inline viewing.
 #[tracing::instrument(skip_all)]
 pub async fn serve_file_download(
     State(state): State<Arc<AppState>>,
+    Extension(viewer): Extension<ViewerIp>,
+    method: Method,
     headers: HeaderMap,
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_file_inner(state, headers, id, true).await
+    serve_file_inner(state, headers, method, id, true, viewer.0).await
 }
 
 async fn serve_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
+    method: Method,
     id: String,
     force_download: bool,
+    viewer_ip: Option<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -77,6 +86,9 @@ async fn serve_file_inner(
 
     let file_meta = match state.storage.stat(&id).await {
         Ok(meta) => meta,
+        Err(StorageError::Frozen) => {
+            return Ok(prevent_file_caching(frozen_html().into_response()));
+        }
         Err(StorageError::NotFound) => {
             if let Some(ref backend_url) = state.backend_url {
                 let status_url = format!("{backend_url}/internal/file/{id}/status");
@@ -157,10 +169,29 @@ async fn serve_file_inner(
         builder
     };
 
+    // Admin analytics: count GETs that actually return bytes (repeat
+    // views and media range chunks collapse per-viewer server-side, and
+    // HEAD/failed serves never count).
+    let count_hit = |viewer_ip: &Option<String>| {
+        if method != Method::GET {
+            return;
+        }
+        let Some(ip) = viewer_ip.as_deref() else {
+            return;
+        };
+        report_file_hit(
+            &state,
+            &id,
+            if force_download { "download" } else { "view" },
+            ip,
+        );
+    };
+
     if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
         && let Ok(val) = if_none_match.to_str()
         && val.trim_matches('"') == etag.trim_matches('"')
     {
+        count_hit(&viewer_ip);
         return with_cache_headers(
             Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
@@ -201,6 +232,7 @@ async fn serve_file_inner(
                     let _ = &permit;
                     item
                 });
+                count_hit(&viewer_ip);
                 return with_disposition(with_cache_headers(
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
@@ -241,6 +273,7 @@ async fn serve_file_inner(
     });
     let body = Body::from_stream(stream);
 
+    count_hit(&viewer_ip);
     with_disposition(with_cache_headers(
         Response::builder()
             .status(StatusCode::OK)

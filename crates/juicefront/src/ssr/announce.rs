@@ -63,11 +63,6 @@ pub struct Banner {
     pub learn_more: String,
 }
 
-pub async fn banner_for(state: &AppState, locale: &str, banned: bool) -> Banner {
-    let announcement = fetch_announcement(state).await;
-    build_banner(locale, banned, announcement)
-}
-
 pub fn build_banner(locale: &str, banned: bool, announcement: Option<Announcement>) -> Banner {
     if banned {
         return Banner {

@@ -116,10 +116,7 @@ impl std::fmt::Debug for Config {
             .field("storage_encryption_key", &"[REDACTED]")
             .field("password_min_len", &self.password_min_len)
             .field("password_try_limit", &self.password_try_limit)
-            .field(
-                "password_try_window_secs",
-                &self.password_try_window_secs,
-            )
+            .field("password_try_window_secs", &self.password_try_window_secs)
             .field("encrypted_force_relay", &self.encrypted_force_relay)
             .field("cors_origins", &self.cors_origins)
             .field(
@@ -212,14 +209,12 @@ impl Config {
             return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
         }
 
-        let storage_encryption_key =
-            juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
-                .map_err(|e| e.to_string())?;
+        let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
+            .map_err(|e| e.to_string())?;
         validate_storage_key_hex(&storage_encryption_key)?;
 
         let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
-        let password_try_limit =
-            parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
+        let password_try_limit = parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
         let password_try_window_secs =
             parse_env_u64("PASSWORD_TRY_WINDOW_SECS", DEFAULT_PASSWORD_TRY_WINDOW_SECS)?;
         let encrypted_force_relay =
@@ -396,8 +391,7 @@ const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
 /// Fail closed unless `hex` decodes to exactly 32 bytes. The value itself is
 /// never included in the error.
 fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
-    let bytes =
-        hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
+    let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
     if bytes.len() != 32 {
         return Err(storage_key_error());
     }
@@ -474,7 +468,9 @@ impl Config {
     ///
     /// Returns [`crate::crypto_file::CryptoError`] when the stored value is
     /// not 64 hex chars (cannot happen after successful load).
-    pub fn storage_file_key(&self) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
+    pub fn storage_file_key(
+        &self,
+    ) -> Result<crate::crypto_file::FileKey, crate::crypto_file::CryptoError> {
         crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
     }
 

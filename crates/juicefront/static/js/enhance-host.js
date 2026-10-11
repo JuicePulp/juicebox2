@@ -1,5 +1,34 @@
 import { formatMaxSize } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
+import { setSoundEnabled } from "./sounds.js";
+
+var MOTION_KEY = "juicebox_reduce_motion";
+var SOUND_KEY = "juicebox_sound";
+
+function readMotionReduced() {
+  try {
+    return localStorage.getItem(MOTION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function applyMotionReduced(on) {
+  try {
+    localStorage.setItem(MOTION_KEY, on ? "1" : "0");
+  } catch {}
+  try {
+    document.documentElement.toggleAttribute("data-motion-reduce", !!on);
+  } catch {}
+}
+
+function readSoundEnabled() {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 export function readSelectedHost() {
   const input = document.querySelector("[data-host-input]");
   if (input && input.value.trim())
@@ -26,7 +55,7 @@ export function initHostGlow() {
   if (!btn)
     return;
   const observer = new MutationObserver(() => {
-    if (location.hash === "#host-modal" || location.hash === "#host-selector-modal") {
+    if (location.hash === "#settings-modal" || location.hash === "#host-modal" || location.hash === "#host-selector-modal") {
       clearHostGlow();
     }
   });
@@ -257,6 +286,20 @@ export function enhanceHostSelector(locale) {
     setTimeout(() => {
       updateUltrafastState();
     }, 2000);
+  }
+  const soundToggle = document.querySelector("[data-sound-toggle]");
+  if (soundToggle) {
+    soundToggle.checked = readSoundEnabled();
+    soundToggle.addEventListener("change", () => {
+      setSoundEnabled(soundToggle.checked);
+    });
+  }
+  const motionToggle = document.querySelector("[data-motion-toggle]");
+  if (motionToggle) {
+    motionToggle.checked = readMotionReduced();
+    motionToggle.addEventListener("change", () => {
+      applyMotionReduced(motionToggle.checked);
+    });
   }
   updateDangerLevelDisplay(readDangerLevel(), locale);
   const serverCfg = document.getElementById("server-config");

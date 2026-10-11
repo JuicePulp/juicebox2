@@ -19,11 +19,25 @@ let devices: Array<{ device_id: string; device_name: string }> = [];
 
 // Reconnect state: exponential backoff so a dead backend doesn't get
 // hammered (and doesn't flood the dev proxy log with ECONNREFUSED).
+// After sustained failures (e.g. 429 storms from too many presence streams)
+// park at SUSTAINED_RETRY_MS instead of retrying every minute forever.
 const INITIAL_RETRY_MS = 5000;
 const MAX_RETRY_MS = 60000;
+const SUSTAINED_RETRY_MS = 300000;
 let retryDelay = INITIAL_RETRY_MS;
+let consecutiveFailures = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let visibilityWired = false;
+
+function hasSessionCookie(): boolean {
+  try {
+    return document.cookie
+      .split("; ")
+      .some((c) => c.startsWith("jb_session="));
+  } catch {
+    return false;
+  }
+}
 
 /** Whether juicebox-plus is currently connected. */
 export function isAppMode(): boolean {
@@ -64,12 +78,15 @@ export function connectPresence(): void {
   if (eventSource || typeof window === "undefined") return;
   // Don't poll in background tabs; the visibility handler reconnects.
   if (typeof document !== "undefined" && document.hidden) return;
+  // Anonymous tabs can never have devices; don't hold an SSE stream each.
+  if (!hasSessionCookie()) return;
 
   wireVisibilityHandler();
   eventSource = new EventSource(apiPresence);
 
   eventSource.onopen = () => {
     retryDelay = INITIAL_RETRY_MS;
+    consecutiveFailures = 0;
   };
 
   eventSource.onmessage = (event) => {
@@ -109,7 +126,11 @@ export function connectPresence(): void {
     } catch {}
     eventSource = null;
     if (retryTimer) clearTimeout(retryTimer);
-    const delay = retryDelay;
+    // EventSource hides the HTTP status, so a 429 (too many presence
+    // streams) looks like any other error. After 5 consecutive failures
+    // assume sustained rejection and park at 5min instead of hammering.
+    consecutiveFailures++;
+    const delay = consecutiveFailures >= 5 ? SUSTAINED_RETRY_MS : retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     retryTimer = setTimeout(() => {
       retryTimer = null;
@@ -136,6 +157,7 @@ function wireVisibilityHandler(): void {
       }
     } else {
       retryDelay = INITIAL_RETRY_MS;
+      consecutiveFailures = 0;
       connectPresence();
     }
   });

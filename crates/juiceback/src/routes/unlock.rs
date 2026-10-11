@@ -43,11 +43,7 @@ fn unlock_cookie_name(id: &str) -> String {
     format!("jb_unlock_{id}")
 }
 
-fn mint_unlock_token(
-    jwt_secret: &str,
-    file_id: &str,
-    now: i64,
-) -> Result<String, AppError> {
+fn mint_unlock_token(jwt_secret: &str, file_id: &str, now: i64) -> Result<String, AppError> {
     use jsonwebtoken::{EncodingKey, Header, encode};
     let claims = UnlockClaims {
         sub: file_id.to_string(),
@@ -64,7 +60,7 @@ fn mint_unlock_token(
 }
 
 fn valid_unlock_cookie(headers: &HeaderMap, file_id: &str, jwt_secret: &str) -> bool {
-    use jsonwebtoken::{DecodingKey, Validation, Algorithm, decode};
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     let name = unlock_cookie_name(file_id);
     let Some(token) = crate::auth::cookie_value(headers, &name) else {
         return false;
@@ -104,10 +100,7 @@ fn set_unlock_cookie(
     Ok(())
 }
 
-async fn protected_record(
-    state: &Arc<AppState>,
-    id: &str,
-) -> Result<db::FileRecord, AppError> {
+async fn protected_record(state: &Arc<AppState>, id: &str) -> Result<db::FileRecord, AppError> {
     let lookup = id.to_string();
     let record = state
         .db_call("get_unlock_file", move |db| db::get_file(db, &lookup))
@@ -279,7 +272,12 @@ pub async fn unlock_submit_handler(
     let wants_html = crate::routes::noscript::wants_html(&headers);
     if wants_html {
         let mut headers_out = HeaderMap::new();
-        set_unlock_cookie(&mut headers_out, &record.id, &token, state.config.secure_cookies)?;
+        set_unlock_cookie(
+            &mut headers_out,
+            &record.id,
+            &token,
+            state.config.secure_cookies,
+        )?;
         let redirect = Redirect::to(&format!("/file/{}/content", record.id)).into_response();
         let (mut parts, body) = redirect.into_parts();
         parts.headers.extend(headers_out);
@@ -415,6 +413,7 @@ fn decrypt_cipher_stream(
 pub async fn content_handler(
     State(state): State<Arc<AppState>>,
     method: Method,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<UnlockQuery>,
@@ -442,7 +441,24 @@ pub async fn content_handler(
         .flatten()
         .unwrap_or((0, plain_len));
 
-    serve_protected_bytes(&state, &record, start, end, &method).await
+    let response = serve_protected_bytes(&state, &record, start, end, &method).await?;
+    // Count actual served bytes as a view (admin report previews bypass
+    // this handler, so moderator peeks never pollute the counters).
+    if method == Method::GET && response.status().is_success() {
+        let viewer_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
+        let ip_hash = crate::utils::hash_ip_for_ban(&viewer_ip, &state.config.ip_pepper);
+        let now = chrono::Utc::now().timestamp();
+        let file_id = record.id.clone();
+        if let Err(error) = state
+            .db_call("record_content_view", move |db| {
+                db::record_file_hit(db, &file_id, &ip_hash, db::HitKind::View, now)
+            })
+            .await
+        {
+            tracing::warn!("stats: content view not recorded: {error:?}");
+        }
+    }
+    Ok(response)
 }
 
 /// Fetch ciphertext for `record`, decrypt the `[start, end)` plaintext span,
@@ -479,9 +495,8 @@ pub(crate) async fn serve_protected_bytes(
             .storage_file_key()
             .map_err(|_| AppError::Internal("storage encryption unavailable".into()))?,
     };
-    let (cipher_start, cipher_len) =
-        crypto_file::cipher_range_for_plain(start, end, plain_len)
-            .map_err(|_| AppError::RangeNotSatisfiable("bad range".into()))?;
+    let (cipher_start, cipher_len) = crypto_file::cipher_range_for_plain(start, end, plain_len)
+        .map_err(|_| AppError::RangeNotSatisfiable("bad range".into()))?;
     let (cipher_stream, ranged) = crate::storage_client::download_ciphertext(
         &state,
         &record.id,
@@ -510,20 +525,15 @@ pub(crate) async fn serve_protected_bytes(
         .header(header::CONTENT_TYPE, mime)
         .header(header::ACCEPT_RANGES, "bytes")
         .header(header::CACHE_CONTROL, "no-store")
-        .header(
-            header::CONTENT_LENGTH,
-            (end - start).to_string(),
-        );
+        .header(header::CONTENT_LENGTH, (end - start).to_string());
     if !enc_header_hex.is_empty() {
-        builder = builder.header(
-            header::ETAG,
-            format!("\"{enc_header_hex}\""),
-        );
+        builder = builder.header(header::ETAG, format!("\"{enc_header_hex}\""));
     }
     if partial {
-        builder = builder
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(header::CONTENT_RANGE, format!("bytes {start}-{}/{plain_len}", end - 1));
+        builder = builder.status(StatusCode::PARTIAL_CONTENT).header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{}/{plain_len}", end - 1),
+        );
     }
     if method == Method::HEAD {
         return builder

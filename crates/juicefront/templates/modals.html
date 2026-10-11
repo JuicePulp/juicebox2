@@ -95,14 +95,25 @@
 </div>
 </div>
 
-<div id="host-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="host-modal-title">
+<span id="host-modal" class="mdl-alias" aria-hidden="true"></span>
+<div id="settings-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
 <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
 <div class="mdlcontent host-modal">
 <div class="mdlheader">
-<h2 id="host-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("settings", 24)|safe }}</span>{{ cx.t("host.title") }}</h2>
+<h2 id="settings-modal-title" class="mdltitle"><span class="mdltitle-icon">{{ cx.icon("settings", 24)|safe }}</span>{{ cx.t("settings.title") }}</h2>
 <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlclose" aria-label="{{ cx.t("modal.close") }}"><span>{{ cx.icon("close", 24)|safe }}</span></a>
 </div>
 <div class="mdlbody">
+<input type="radio" name="settings-tab" id="settings-tab-connection" value="connection" checked class="tab-radio" aria-label="{{ cx.t("settings.tab_connection") }}">
+<input type="radio" name="settings-tab" id="settings-tab-upload" value="upload" class="tab-radio" aria-label="{{ cx.t("settings.tab_upload") }}">
+<input type="radio" name="settings-tab" id="settings-tab-preferences" value="preferences" class="tab-radio" aria-label="{{ cx.t("settings.tab_preferences") }}">
+<div class="full-tab">
+<label for="settings-tab-connection" data-cuelume-select class="full-tab__tab">{{ cx.t("settings.tab_connection") }}</label>
+<label for="settings-tab-upload" data-cuelume-select class="full-tab__tab">{{ cx.t("settings.tab_upload") }}</label>
+<label for="settings-tab-preferences" data-cuelume-select class="full-tab__tab">{{ cx.t("settings.tab_preferences") }}</label>
+</div>
+<div class="settings-panels">
+<section data-settings-panel="connection" aria-label="{{ cx.t("settings.tab_connection") }}">
 <p class="host-modal__hint">{{ cx.t("host.hint") }}</p>
 <div class="form-field">
 <label class="form-label" for="host-input">{{ cx.t("host.label") }}</label>
@@ -113,6 +124,11 @@
 <span class="host-status" data-host-status=""></span>
 </div>
 </div>
+<div class="form-field">
+<a href="{{ selector_href }}" data-cuelume-navigate class="mdlbtn mdlbtn--primary">{{ cx.t("host.browse") }}</a>
+</div>
+</section>
+<section data-settings-panel="upload" aria-label="{{ cx.t("settings.tab_upload") }}" hidden>
 <div class="host-options-group">
 <label class="form-label">{{ cx.t("host.options") }}</label>
 <div class="form-field">
@@ -146,9 +162,26 @@
 <input id="host-upload-password" class="form-input upload-password__input" type="password" data-upload-password="" data-cuelume-type placeholder="{{ cx.t("upload.password_ph") }}" autocomplete="new-password" minlength="8" maxlength="256">
 <p class="form-help-text" data-upload-password-hint="" hidden>{{ cx.t("upload.password_relay") }}</p>
 </div>
+</section>
+<section data-settings-panel="preferences" aria-label="{{ cx.t("settings.tab_preferences") }}" hidden>
+<div class="form-field">
+<label class="select-option select-option--toggle" data-cuelume-toggle>
+<input type="checkbox" data-sound-toggle="" aria-label="{{ cx.t("settings.sound") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("settings.sound") }}</span><span class="select-option__desc">{{ cx.t("settings.sound_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle" data-cuelume-toggle>
+<input type="checkbox" data-motion-toggle="" aria-label="{{ cx.t("settings.motion") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("settings.motion") }}</span><span class="select-option__desc">{{ cx.t("settings.motion_desc") }}</span></span>
+</label>
+</div>
+</section>
+</div>
 </div>
 <div class="mdlfooter">
-<a href="{{ selector_href }}" data-cuelume-navigate class="mdlbtn mdlbtn--primary">{{ cx.t("host.browse") }}</a>
 <a href="#!" data-host-done="" data-cuelume-close data-cuelume-emphasis="subtle" class="mdlbtn mdlbtn--secondary">{{ cx.t("modal.done") }}</a>
 </div>
 </div>

@@ -185,7 +185,8 @@ impl FileRecord {
         reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
     )]
     #[must_use]
-    pub fn from_upload_with_token(        id: String,
+    pub fn from_upload_with_token(
+        id: String,
         filename: String,
         mime_type: String,
         size_bytes: i64,

@@ -60,9 +60,7 @@ pub async fn owned_files_handler(
                     .get(&r.id)
                     .is_some_and(|t| constant_time_eq(&r.delete_token, t))
         })
-        .map(|r| {
-            FileInfoResponse::from_record(r, &state.config.public_base_url)
-        })
+        .map(|r| FileInfoResponse::from_record(r, &state.config.public_base_url))
         .collect();
 
     Ok(Json(OwnedFilesResponse { files }))

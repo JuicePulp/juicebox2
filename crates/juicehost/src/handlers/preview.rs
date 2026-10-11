@@ -10,14 +10,17 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{HeaderMap, header},
+    extract::{Extension, Path, State},
+    http::{HeaderMap, Method, header},
     response::{IntoResponse, Response},
 };
 
-use super::shell::{ShellMode, protected_shell_response};
+use super::{
+    shell::{ShellMode, protected_shell_response},
+    stats::{ViewerIp, report_file_hit},
+};
 use crate::{
-    error::not_found_html,
+    error::{frozen_html, not_found_html},
     state::AppState,
     storage,
     storage::valid_component as is_valid_id,
@@ -55,7 +58,8 @@ fn preview_kind(mime: &str) -> PreviewKind {
                 | "application/javascript"
                 | "application/x-javascript"
                 | "application/xml"
-        ) {
+        )
+    {
         PreviewKind::Text
     } else {
         PreviewKind::Download
@@ -98,27 +102,94 @@ const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 /// tools, social unfurlers, crawlers). Matched case-insensitively against
 /// the whole header; real browsers never contain these tokens.
 const BOT_UA_TOKENS: &[&str] = &[
-    "curl", "wget", "httpie", "aria2", "axel", "python-urllib", "python-requests",
-    "go-http-client", "okhttp", "libwww-perl", "scrapy", "node-fetch", "undici",
-    "got", "axios", "httpclient", "perl", "ruby", "php", "powershell",
-    "discordbot", "telegram", "twitterbot", "facebookexternalhit", "facebookcatalog",
-    "slackbot", "linkedinbot", "whatsapp", "skypeuripreview", "mastodon", "misskey",
-    "pleroma", "pixelfed", "matrix", "signal", "line", "kakao", "viber", "pinterest",
-    "redditbot", "tumblr", "bitlybot", "embedly", "iframely", "microlink", "outbrain",
-    "quora", "mj12bot", "ahrefsbot", "semrushbot", "dotbot", "coccoc", "petalbot",
-    "bytespider", "gptbot", "claudebot", "ccbot", "anthropic-ai", "perplexitybot",
-    "applebot", "bingbot", "googlebot", "adsbot", "mediapartners-google", "slurp",
-    "duckduckbot", "bravebot", "mojeek", "yandex", "baidu", "sogou", "exabot",
-    "facebot", "ia_archiver", "bot", "crawl", "spider", "scrape", "archiver",
+    "curl",
+    "wget",
+    "httpie",
+    "aria2",
+    "axel",
+    "python-urllib",
+    "python-requests",
+    "go-http-client",
+    "okhttp",
+    "libwww-perl",
+    "scrapy",
+    "node-fetch",
+    "undici",
+    "got",
+    "axios",
+    "httpclient",
+    "perl",
+    "ruby",
+    "php",
+    "powershell",
+    "discordbot",
+    "telegram",
+    "twitterbot",
+    "facebookexternalhit",
+    "facebookcatalog",
+    "slackbot",
+    "linkedinbot",
+    "whatsapp",
+    "skypeuripreview",
+    "mastodon",
+    "misskey",
+    "pleroma",
+    "pixelfed",
+    "matrix",
+    "signal",
+    "line",
+    "kakao",
+    "viber",
+    "pinterest",
+    "redditbot",
+    "tumblr",
+    "bitlybot",
+    "embedly",
+    "iframely",
+    "microlink",
+    "outbrain",
+    "quora",
+    "mj12bot",
+    "ahrefsbot",
+    "semrushbot",
+    "dotbot",
+    "coccoc",
+    "petalbot",
+    "bytespider",
+    "gptbot",
+    "claudebot",
+    "ccbot",
+    "anthropic-ai",
+    "perplexitybot",
+    "applebot",
+    "bingbot",
+    "googlebot",
+    "adsbot",
+    "mediapartners-google",
+    "slurp",
+    "duckduckbot",
+    "bravebot",
+    "mojeek",
+    "yandex",
+    "baidu",
+    "sogou",
+    "exabot",
+    "facebot",
+    "ia_archiver",
+    "bot",
+    "crawl",
+    "spider",
+    "scrape",
+    "archiver",
 ];
 
 /// Layered bot check for the preview page (humans keep the HTML, anything
 /// else gets the raw bytes):
-/// 1. `Sec-Fetch-Mode: navigate` is only ever sent by browsers on page
-///    loads - always a user.
+/// 1. `Sec-Fetch-Mode: navigate` is only ever sent by browsers on page loads -
+///    always a user.
 /// 2. Known bot/crawler/curler User-Agent tokens.
-/// 3. `Accept` without `text/html` (curl `*/*`, API clients), or neither
-///    header at all (browsers navigating always send both).
+/// 3. `Accept` without `text/html` (curl `*/*`, API clients), or neither header
+///    at all (browsers navigating always send both).
 fn is_bot(headers: &HeaderMap) -> bool {
     if headers
         .get("sec-fetch-mode")
@@ -220,8 +291,7 @@ fn stage_html(page: &PreviewPage) -> String {
 fn render_preview(page: &PreviewPage) -> String {
     let notice = format!(
         " Juicebox preview page for {} - this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
-        page.filename,
-        page.raw_url,
+        page.filename, page.raw_url,
     );
     PREVIEW_TEMPLATE
         .replace("__CURL_NOTICE__", &notice)
@@ -232,11 +302,11 @@ fn render_preview(page: &PreviewPage) -> String {
         )
         .replace("__BASE_CSS__", juiceutils::web::BASE_CSS.trim_end())
         .replace("__BRAND_CSS__", juiceutils::web::BRAND_CSS.trim_end())
-        .replace("__BRAND__", &juiceutils::web::brand_html(LOGO_DATA_URI.trim()))
         .replace(
-            "__PREVIEW_CSS__",
-            juiceutils::web::PREVIEW_CSS.trim_end(),
+            "__BRAND__",
+            &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
+        .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
         .replace("__APP_JS__", PREVIEW_APP_JS.trim_end())
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
@@ -258,6 +328,8 @@ fn render_preview(page: &PreviewPage) -> String {
 /// HTML 404 page instead of erroring.
 pub async fn preview_file_wildcard(
     State(state): State<Arc<AppState>>,
+    Extension(viewer): Extension<ViewerIp>,
+    method: Method,
     headers: HeaderMap,
     Path(path): Path<String>,
 ) -> Result<Response<Body>, crate::error::JuicehostError> {
@@ -270,19 +342,31 @@ pub async fn preview_file_wildcard(
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
     }
-    preview_file_inner(state, headers, &id, &ext).await
+    preview_file_inner(state, headers, method, &id, &ext, viewer.0).await
 }
 
 async fn preview_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
+    method: Method,
     id: &str,
     ext: &str,
+    viewer_ip: Option<String>,
 ) -> Result<Response<Body>, crate::error::JuicehostError> {
     use crate::error::JuicehostError;
 
     let meta = match state.storage.stat(id).await {
         Ok(meta) => meta,
+        Err(crate::error::StorageError::Frozen) => {
+            // Same visibility rules as the serve path: 451, never cached.
+            let (status, html) = frozen_html();
+            return Response::builder()
+                .status(status)
+                .header(header::CACHE_CONTROL, NO_STORE)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .body(Body::from(html.0))
+                .map_err(|_| JuicehostError::Internal);
+        }
         Err(crate::error::StorageError::NotFound) => {
             return Ok(not_found_html().into_response());
         }
@@ -326,12 +410,21 @@ async fn preview_file_inner(
         download_url,
         mime,
     };
-    Response::builder()
+    let response = Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, NO_STORE)
         .body(Body::from(render_preview(&page)))
-        .map_err(|_| JuicehostError::Internal)
+        .map_err(|_| JuicehostError::Internal)?;
+    // Reaching the HTML page means a human opened the file: the bot
+    // branch above already redirected crawlers to raw bytes (counted on
+    // `/f/` if fetched).
+    if method == Method::GET
+        && let Some(ip) = viewer_ip.as_deref()
+    {
+        report_file_hit(&state, id, "view", ip);
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -352,7 +445,10 @@ mod tests {
         assert_eq!(preview_kind("application/javascript"), PreviewKind::Text);
         assert_eq!(preview_kind("application/ld+json"), PreviewKind::Text);
         assert_eq!(preview_kind("application/zip"), PreviewKind::Download);
-        assert_eq!(preview_kind("application/octet-stream"), PreviewKind::Download);
+        assert_eq!(
+            preview_kind("application/octet-stream"),
+            PreviewKind::Download
+        );
     }
 
     #[test]

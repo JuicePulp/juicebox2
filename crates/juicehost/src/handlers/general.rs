@@ -8,15 +8,12 @@ use axum::{
 };
 use serde_json::json;
 
-use super::common::backend_request;
 use crate::{
     error::{JuicehostError, StorageError, not_found_html},
     state::AppState,
     storage,
     storage::valid_component as is_valid_id,
 };
-
-const HEALTH_PROBE_HEADER: &str = "x-health-probe";
 
 #[utoipa::path(
     get,
@@ -42,49 +39,20 @@ pub async fn index_handler(State(state): State<Arc<AppState>>) -> Response {
     ),
     tag = "General",
 )]
-pub async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    let mut body = serde_json::json!({
+pub async fn health() -> Response {
+    // Static liveness only: no backend probe, no per-request metric.
+    let body = serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "juicehost": "ok",
     });
-
-    if !headers.contains_key(HEALTH_PROBE_HEADER)
-        && let Some(ref backend_url) = state.backend_url
-    {
-        body["juiceback"] = serde_json::json!(if check_backend_health(&state, backend_url).await {
-            "ok"
-        } else {
-            "unreachable"
-        });
-    }
 
     let mut resp = Response::new(Body::from(serde_json::to_string(&body).unwrap_or_default()));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
     );
-    sentry::metrics::counter("juicehost.health", 1).capture();
     resp
-}
-
-async fn check_backend_health(state: &AppState, backend_url: &str) -> bool {
-    let url = format!("{}/api/health", backend_url.trim_end_matches('/'));
-    let Ok(resp) = backend_request(state, url)
-        .header(HEALTH_PROBE_HEADER, "1")
-        .send()
-        .await
-    else {
-        return false;
-    };
-    if !resp.status().is_success() {
-        return false;
-    }
-    resp.json::<serde_json::Value>().await.is_ok_and(|v| {
-        v.get("status")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s == "ok")
-    })
 }
 
 #[utoipa::path(
@@ -171,6 +139,13 @@ pub async fn stat_file(
             "size_bytes": meta.size,
             "extension": meta.extension,
         }))),
+        // Frozen files still exist: report the hold (without bytes) so
+        // admins and health checks can see it. Not an error.
+        Err(StorageError::Frozen) => Ok(Json(serde_json::json!({
+            "exists": true,
+            "frozen": true,
+            "id": id,
+        }))),
         Err(StorageError::NotFound) => Ok(Json(serde_json::json!({
             "exists": false,
             "id": id,
@@ -225,14 +200,11 @@ pub(crate) async fn serve_stored_bytes(
     if !is_valid_id(id) {
         return Err(JuicehostError::BadRequest);
     }
-    let meta = state
-        .storage
-        .stat(id)
-        .await
-        .map_err(|e| match e {
-            StorageError::NotFound => JuicehostError::NotFound,
-            _ => JuicehostError::Internal,
-        })?;
+    let meta = state.storage.stat(id).await.map_err(|e| match e {
+        StorageError::NotFound => JuicehostError::NotFound,
+        StorageError::Frozen => JuicehostError::Frozen,
+        _ => JuicehostError::Internal,
+    })?;
     let total_size = meta.size;
 
     if let Some(range_header) = headers.get(axum::http::header::RANGE)
@@ -244,7 +216,10 @@ pub(crate) async fn serve_stored_bytes(
                     .storage
                     .get_range_stream(id, start, end)
                     .await
-                    .map_err(|_| JuicehostError::Internal)?;
+                    .map_err(|e| match e {
+                        StorageError::Frozen => JuicehostError::Frozen,
+                        _ => JuicehostError::Internal,
+                    })?;
                 return Response::builder()
                     .status(axum::http::StatusCode::PARTIAL_CONTENT)
                     .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
@@ -277,11 +252,10 @@ pub(crate) async fn serve_stored_bytes(
         }
     }
 
-    let stream = state
-        .storage
-        .get_stream(id)
-        .await
-        .map_err(|_| JuicehostError::Internal)?;
+    let stream = state.storage.get_stream(id).await.map_err(|e| match e {
+        StorageError::Frozen => JuicehostError::Frozen,
+        _ => JuicehostError::Internal,
+    })?;
     Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
@@ -289,9 +263,7 @@ pub(crate) async fn serve_stored_bytes(
         .header(axum::http::header::ACCEPT_RANGES, "bytes")
         .header(axum::http::header::CACHE_CONTROL, "no-store")
         .body(Body::from_stream(stream.map(|item| {
-            item.map_err(|_| {
-                axum::Error::new(std::io::Error::other("ciphertext stream failed"))
-            })
+            item.map_err(|_| axum::Error::new(std::io::Error::other("ciphertext stream failed")))
         })))
         .map_err(|_| JuicehostError::Internal)
 }

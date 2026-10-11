@@ -19,8 +19,7 @@ fn b64(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
-const TEST_KEY_HEX: &str =
-    "0000000000000000000000000000000000000000000000000000000000000001";
+const TEST_KEY_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 const PASSWORD: &str = "correct horse 999";
 const PLAINTEXT: &[u8] = b"hello protected world, this is a secret file";
 
@@ -65,10 +64,7 @@ async fn mock_ciphertext_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<V
                 });
             match range {
                 Some((start, end)) => ResponseTemplate::new(206)
-                    .insert_header(
-                        "content-range",
-                        format!("bytes {start}-{end}/{total}"),
-                    )
+                    .insert_header("content-range", format!("bytes {start}-{end}/{total}"))
                     .set_body_bytes(stored[start as usize..=end as usize].to_vec()),
                 None => ResponseTemplate::new(200).set_body_bytes(stored),
             }
@@ -81,10 +77,7 @@ async fn mock_push_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>
     Mock::given(method("POST"))
         .and(path_regex("/internal/file/stream/.*"))
         .respond_with(move |req: &wiremock::Request| {
-            captured
-                .lock()
-                .unwrap()
-                .push(req.body.clone());
+            captured.lock().unwrap().push(req.body.clone());
             ResponseTemplate::new(200)
         })
         .mount(server)
@@ -120,13 +113,10 @@ async fn post_upload(
     boundary: &str,
     delete_token: Option<&str>,
 ) -> (StatusCode, Value) {
-    let mut builder = Request::builder()
-        .method("POST")
-        .uri("/upload")
-        .header(
-            "content-type",
-            format!("multipart/form-data; boundary={boundary}"),
-        );
+    let mut builder = Request::builder().method("POST").uri("/upload").header(
+        "content-type",
+        format!("multipart/form-data; boundary={boundary}"),
+    );
     if let Some(token) = delete_token {
         builder = builder.header("x-delete-token", token);
     }
@@ -184,9 +174,7 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     assert!(stored.len() > PLAINTEXT.len());
     assert_eq!(&stored[..4], b"JBC1");
     assert!(
-        !stored
-            .windows(PLAINTEXT.len())
-            .any(|w| w == PLAINTEXT),
+        !stored.windows(PLAINTEXT.len()).any(|w| w == PLAINTEXT),
         "plaintext must not appear in stored bytes"
     );
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
@@ -315,11 +303,15 @@ async fn reserve_with_password_completes_via_relay() {
     assert!(record.is_protected());
     assert!(record.enc_header.is_some());
     let pushes = captured.lock().unwrap();
-    assert_eq!(juiceback::crypto_file::parse_header(&pushes.concat()).unwrap() as usize, PLAINTEXT.len());
+    assert_eq!(
+        juiceback::crypto_file::parse_header(&pushes.concat()).unwrap() as usize,
+        PLAINTEXT.len()
+    );
 }
 
 #[tokio::test]
-async fn short_password_rejected_at_reserve() {    let state = test_state("http://127.0.0.1:1".into());
+async fn short_password_rejected_at_reserve() {
+    let state = test_state("http://127.0.0.1:1".into());
     let app = common::mock_router(state);
     let resp = app
         .clone()
@@ -339,7 +331,8 @@ async fn short_password_rejected_at_reserve() {    let state = test_state("http:
 }
 
 #[tokio::test]
-async fn plain_relay_still_streams_plaintext() {    let server = MockServer::start().await;
+async fn plain_relay_still_streams_plaintext() {
+    let server = MockServer::start().await;
     let captured = captured_pushes();
     mock_push_endpoint(&server, Arc::clone(&captured)).await;
 
@@ -569,9 +562,7 @@ async fn fetch_with_password_stores_ciphertext_only() {
     Mock::given(method("POST"))
         .and(path_regex("/internal/file/stream/.*"))
         .respond_with(move |req: &wiremock::Request| {
-            cap.lock()
-                .unwrap()
-                .push(req.body.clone());
+            cap.lock().unwrap().push(req.body.clone());
             ResponseTemplate::new(200)
         })
         .mount(&server)
@@ -626,7 +617,10 @@ async fn fetch_with_password_stores_ciphertext_only() {
             .unwrap();
         let status: Value = serde_json::from_slice(&bytes).unwrap();
         if status["status"] == "done" {
-            file_id = status["file"]["id"].as_str().unwrap_or_default().to_string();
+            file_id = status["file"]["id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             break;
         }
         assert_ne!(status["status"], "failed", "fetch job failed: {status}");
@@ -650,12 +644,12 @@ async fn fetch_with_password_stores_ciphertext_only() {
 }
 
 /// Upload a protected file through the relay and return its id.
-async fn upload_protected(
-    app: &axum::Router,
-    state: &Arc<AppState>,
-    boundary: &str,
-) -> String {
-    let body = multipart_body(boundary, &[("password", PASSWORD)], ("secret.txt", PLAINTEXT));
+async fn upload_protected(app: &axum::Router, state: &Arc<AppState>, boundary: &str) -> String {
+    let body = multipart_body(
+        boundary,
+        &[("password", PASSWORD)],
+        ("secret.txt", PLAINTEXT),
+    );
     let (status, json) = post_upload(app, body, boundary, None).await;
     assert_eq!(status, StatusCode::OK, "setup upload failed: {json}");
     let id = json["id"].as_str().unwrap().to_string();
@@ -780,11 +774,15 @@ async fn unlock_page_and_cookie_flow() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        resp.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("accept-ranges")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes")
     );
     assert_eq!(
-        resp.headers().get("cache-control").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok()),
         Some("no-store")
     );
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
@@ -816,7 +814,10 @@ async fn content_password_transports_and_ranges() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/file/{id}/content?password={}", urlencode(PASSWORD)))
+                .uri(format!(
+                    "/file/{id}/content?password={}",
+                    urlencode(PASSWORD)
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -921,7 +922,9 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        resp.headers().get("content-length").and_then(|v| v.to_str().ok()),
+        resp.headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok()),
         Some(total.to_string().as_str())
     );
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
@@ -1146,7 +1149,10 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
     let info: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(info["protected"], true);
     assert!(
-        info["url"].as_str().unwrap_or_default().ends_with(&format!("/f/{id}.txt")),
+        info["url"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with(&format!("/f/{id}.txt")),
         "unexpected url: {}",
         info["url"]
     );
@@ -1245,7 +1251,12 @@ async fn gateway_params_and_unlock_release_working_dek() {
     assert!(!params["salt"].as_str().unwrap_or_default().is_empty());
     assert_eq!(params["chunk_shift"], 16);
     assert_eq!(params["plain_len"], PLAINTEXT.len() as u64);
-    assert!(params["ciphertext_url"].as_str().unwrap().ends_with(&format!("/c/{id}")));
+    assert!(
+        params["ciphertext_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/c/{id}"))
+    );
     assert_eq!(params["filename"], "secret.txt");
 
     // Wrong password: 403, no key.
@@ -1264,7 +1275,9 @@ async fn gateway_params_and_unlock_release_working_dek() {
     assert!(!json.to_string().contains(PASSWORD));
 
     use base64::Engine as _;
-    let dek_raw = base64::engine::general_purpose::STANDARD.decode(&dek_b64).unwrap();
+    let dek_raw = base64::engine::general_purpose::STANDARD
+        .decode(&dek_b64)
+        .unwrap();
     let dek = juiceback::crypto_file::FileKey::from_bytes(&dek_raw).unwrap();
     let stored: Vec<u8> = captured.lock().unwrap().concat();
     let mut plain = Vec::new();

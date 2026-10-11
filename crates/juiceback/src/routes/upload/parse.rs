@@ -42,7 +42,7 @@ pub async fn parse_multipart(
     default_capability: String,
 ) -> Result<UploadParams, AppError> {
     let (default_ttl, allowed_ttl, max_size, danger) = {
-        let jh = state.juicehost_config()?;
+        let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),
@@ -166,12 +166,13 @@ pub async fn parse_multipart(
             };
 
             if protected {
-                let upload_protection =
-                    super::protected::resolve_multipart_protection(state, password.clone(), reservation.as_ref())
-                        .await?
-                        .ok_or_else(|| {
-                            AppError::Internal("protected upload missing credentials".into())
-                        })?;
+                let upload_protection = super::protected::resolve_multipart_protection(
+                    state,
+                    password.clone(),
+                    reservation.as_ref(),
+                )
+                .await?
+                .ok_or_else(|| AppError::Internal("protected upload missing credentials".into()))?;
                 let dek = upload_protection.dek(state)?;
                 let (bytes, header) = if is_gzip {
                     stream_protected_gzip_upload_to_juicehost(

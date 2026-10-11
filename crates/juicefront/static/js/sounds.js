@@ -67,6 +67,11 @@ export function playSound(name, opts) {
   sound(name, opts);
 }
 
+export function setSoundEnabled(on) {
+  applyEnabled(!!on);
+  if (on) sound("toggle");
+}
+
 window.JuiceSounds = {
   play: sound,
   toggle: toggle,

@@ -363,8 +363,7 @@ pub async fn stream_protected_upload_to_juicehost(
         }
     }
 
-    let (spool_tx, spool_handle) =
-        crate::routes::upload::protected::spawn_spool_task(max_size);
+    let (spool_tx, spool_handle) = crate::routes::upload::protected::spawn_spool_task(max_size);
     if spool_tx.send(Ok(first_chunk)).await.is_err() {
         return Err(AppError::TaskPanicked("spool task gone".into()));
     }
@@ -418,8 +417,7 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
     danger: crate::file_validation::ProtectionLevel,
     dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
-    let (spool_tx, spool_handle) =
-        crate::routes::upload::protected::spawn_spool_task(max_size);
+    let (spool_tx, spool_handle) = crate::routes::upload::protected::spawn_spool_task(max_size);
     let wire_cap = max_size;
     let chunk_stream = futures::stream::unfold((field, 0_i64), |(mut f, mut total)| async move {
         match f.chunk().await {
@@ -440,7 +438,14 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
         }
     });
 
-    pipe_gunzip_to_sender(Box::pin(chunk_stream), &spool_tx, filename, danger, max_size).await?;
+    pipe_gunzip_to_sender(
+        Box::pin(chunk_stream),
+        &spool_tx,
+        filename,
+        danger,
+        max_size,
+    )
+    .await?;
     drop(spool_tx);
     let (spool_file, total) = spool_handle
         .await

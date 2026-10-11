@@ -30,6 +30,21 @@ pub struct AdminFileEntry {
     pub url: String,
 
     pub storage_host: Option<String>,
+
+    /// Unique people who viewed this file.
+    pub viewers: i64,
+
+    /// Total view hits for this file.
+    pub views: i64,
+
+    /// Unique people who downloaded this file.
+    pub downloaders: i64,
+
+    /// Total download hits for this file.
+    pub downloads: i64,
+
+    /// Last time anyone viewed or downloaded this file (unix seconds).
+    pub last_viewed_at: Option<i64>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -73,6 +88,15 @@ pub async fn list_files_handler(
         })
         .await?;
 
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let stats = state
+        .db_call("file_stats_for_ids", move |db| {
+            db::file_stats_for_ids(db, &ids)
+        })
+        .await?;
+    let stats_by_id: std::collections::HashMap<&str, &db::FileStatsAggregate> =
+        stats.iter().map(|s| (s.file_id.as_str(), s)).collect();
+
     let files: Vec<AdminFileEntry> = records
         .into_iter()
         .map(|r| {
@@ -92,7 +116,7 @@ pub async fn list_files_handler(
                     crate::utils::truncate_hash(&h).to_string()
                 });
             AdminFileEntry {
-                id: r.id,
+                id: r.id.clone(),
                 filename: r.filename,
                 mime_type: r.mime_type,
                 size_bytes: r.size_bytes,
@@ -101,6 +125,11 @@ pub async fn list_files_handler(
                 uploader_ip_hash: ip_hash,
                 url,
                 storage_host: r.storage_host,
+                viewers: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.viewers),
+                views: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.views),
+                downloaders: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.downloaders),
+                downloads: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.downloads),
+                last_viewed_at: stats_by_id.get(r.id.as_str()).map(|s| s.last_seen_at),
             }
         })
         .collect();
