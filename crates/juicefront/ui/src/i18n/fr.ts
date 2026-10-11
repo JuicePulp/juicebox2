@@ -31,7 +31,7 @@ const fr: TranslationKeys = {
   "upload.retention": "R\u00e9tention\u00a0:",
   "upload.tab_file": "Envoi de fichier",
   "upload.tab_text": "Envoi de texte",
-  "upload.tab_video": "Envoi de vidéo",
+  "upload.tab_video": "Envoi de média",
   "upload.services_title": "Services disponibles",
   "upload.service_files": "Envoi de fichier",
   "upload.service_text": "Coller du texte",

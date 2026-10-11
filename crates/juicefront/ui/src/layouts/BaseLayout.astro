@@ -129,7 +129,7 @@ const currentPath = pathname.replace(LOCALE_PREFIX_RE, "/") || "/";
     <link rel="icon" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="preload" as="font" href="/general-latin.woff2" type="font/woff2" crossorigin />
-    <link rel="preload" as="image" href="/logo_big.webp?v=2" type="image/webp" />
+    <link rel="preload" as="image" href="/mainlogo.avif?v=1" type="image/avif" />
 
     {LOCALES.map((l) => {
       const href = l.code === "en" ? currentPath : `/${l.code}${currentPath === "/" ? "" : currentPath}`;

@@ -47,7 +47,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
 <div class="upload-card" id="upload-card" data-upload-card="" style="view-transition-name: main-card;" aria-labelledby="upload-card-header">
   <header id="upload-card-header" class="upload-header upload-header--centered">
     <h1 class="upload-header__title">
-      <img src="/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high" />
+      <img src="/mainlogo.avif?v=1" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high" />
       Juicebox²
     </h1>
     <p class="upload-header__subtitle">{t(locale, "upload.subtitle")}</p>
@@ -56,7 +56,7 @@ const MORE_MENU_ITEMS = getMoreMenuItems(locale, (path) => lp(locale, path));
   <form class="upload-form" data-upload-form="" data-cobalt-services={cobaltServices.join(",")} method="POST" action="/upload" enctype="multipart/form-data">
     <section class="rttoolbar" data-rttoolbar="" aria-labelledby="upload-card-retention-label">
       <div class="rttoolbar__header">
-        <span id="upload-card-retention-label" class="rttlabel">{t(locale, "upload.retention")}</span>
+        <div class="rttlabel-group"><span class="rtticon"><span set:html={iconSvgHtml("clock", 24)} /></span><span id="upload-card-retention-label" class="rttlabel">{t(locale, "upload.retention")}</span></div>
         <a href="#settings-modal" data-cuelume-open data-host-btn="" class="host-btn host-btn--toolbar" title={t(locale, "upload.settings_aria")} aria-label={t(locale, "upload.settings_aria")}>
           <span set:html={iconSvgHtml("settings", 24)} />
         </a>

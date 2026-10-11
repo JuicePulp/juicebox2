@@ -9,6 +9,7 @@ use axum::{
     body::Body,
     http::Request,
     middleware,
+    response::Response,
     routing::{any, get},
 };
 use mimalloc::MiMalloc;
@@ -52,6 +53,28 @@ fn static_base() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// Long-lived cache for font files served under `/static/assets`.
+///
+/// Fonts are referenced with a `?v=` query string (see the `@font-face`
+/// rules and the preload in `shell_head.html`); bump the version whenever
+/// a font file changes.
+async fn static_font_cache(req: Request<Body>, next: middleware::Next) -> Response<Body> {
+    let is_font = req.uri().path().rsplit('.').next().is_some_and(|ext| {
+        matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "woff2" | "woff" | "ttf" | "otf"
+        )
+    });
+    let mut res = next.run(req).await;
+    if is_font && res.status().is_success() {
+        res.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+    res
 }
 
 fn main() {
@@ -198,7 +221,12 @@ fn main() {
                     "/static/styles",
                     revalidate().service(ServeDir::new(base.join("styles"))),
                 )
-                .nest_service("/static/assets", ServeDir::new(base.join("assets")))
+                .nest_service(
+                    "/static/assets",
+                    tower::ServiceBuilder::new()
+                        .layer(middleware::from_fn(static_font_cache))
+                        .service(ServeDir::new(base.join("assets"))),
+                )
                 .nest_service(
                     "/static/js",
                     revalidate().service(ServeDir::new(base.join("js"))),

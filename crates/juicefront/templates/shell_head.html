@@ -10,8 +10,11 @@
 <meta name="x-commit-ref" content="{{ head.commit_label }}">
 <link rel="icon" href="/static/assets/logo.png">
 <link rel="apple-touch-icon" href="/static/assets/logo.png">
-<link rel="preload" as="font" href="/static/assets/general-latin.woff2" type="font/woff2" crossorigin>
-<link rel="preload" as="image" href="/static/assets/logo_big.webp?v=2" type="image/webp">
+<link rel="preload" as="font" href="/static/assets/general-latin.woff2?v=1" type="font/woff2" crossorigin>
+<link rel="preload" as="font" href="/static/assets/secondary.woff2?v=1" type="font/woff2" crossorigin>
+<link rel="preload" as="font" href="/static/assets/num.woff2?v=1" type="font/woff2" crossorigin>
+<link rel="preload" as="font" href="/static/assets/title.woff2?v=1" type="font/woff2" crossorigin>
+<link rel="preload" as="image" href="/static/assets/mainlogo.avif?v=1" type="image/avif">
 {% for link in head.hreflang %}<link rel="alternate" hreflang="{{ link.code }}" href="{{ link.href }}">
 {% endfor %}<link rel="alternate" hreflang="x-default" href="{{ head.current_path }}">
 <link rel="canonical" href="{{ head.canonical }}">

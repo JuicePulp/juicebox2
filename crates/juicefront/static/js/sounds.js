@@ -12,6 +12,10 @@ function storedEnabled() {
   return true;
 }
 
+export function soundEnabled() {
+  return storedEnabled();
+}
+
 function applyEnabled(on) {
   try {
     setEnabled(on);

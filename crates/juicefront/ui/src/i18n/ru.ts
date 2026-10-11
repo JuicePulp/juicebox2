@@ -28,7 +28,7 @@ const ru = {
   "upload.retention": "Время:",
   "upload.tab_file": "Загрузка Файла",
   "upload.tab_text": "Загрузка Текста",
-  "upload.tab_video": "Загрузка Видео",
+  "upload.tab_video": "Загрузка медиа",
   "upload.services_title": "Доступные сервисы",
   "upload.service_files": "Загрузка файлов",
   "upload.service_text": "Вставка текста",

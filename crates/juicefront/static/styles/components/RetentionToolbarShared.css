@@ -38,7 +38,122 @@
   white-space: nowrap;
 }
 
+.rttlabel-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rtticon {
+  display: inline-flex;
+  flex: none;
+  color: var(--juice-300);
+}
+
+.rtticon svg {
+  display: block;
+}
+
+.rttvalue-container {
+  width: max-content;
+  height: 1.5em;
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex: none;
+}
+
+.rttvalue-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  position: relative;
+  font-family: "Secondary", "Unifont", monospace;
+  font-size: 18px;
+  color: var(--juice-200);
+}
+
+.rttnumber,
+.rttunit-base,
+.rttunit-s {
+  display: inline-block;
+}
+
+.rttnumber {
+  white-space: pre;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rttunit-s {
+  margin-left: -0.3em;
+}
+
+.animate-up-enter {
+  animation: slide-up-enter 0.15s ease-out forwards;
+}
+
+.animate-down-enter {
+  animation: slide-down-enter 0.15s ease-out forwards;
+}
+
+.animate-up-exit {
+  animation: slide-up-exit 0.15s ease-out forwards;
+}
+
+.animate-down-exit {
+  animation: slide-down-exit 0.15s ease-out forwards;
+}
+
+@keyframes slide-up-enter {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-down-enter {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up-exit {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+
+@keyframes slide-down-exit {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
 .rtt-options {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -52,6 +167,47 @@
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+  touch-action: pan-y;
+  cursor: ew-resize;
+}
+
+.rtt-dragthumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  max-width: 70%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  background-color: var(--orange-600);
+  color: #fff;
+  font-family: "Num", "General", "Unifont", monospace;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  z-index: 3;
+}
+
+.rtt-dragthumb.on {
+  opacity: 1;
+}
+
+/* While a drag is held, the strip's checked pill goes visually neutral so
+   the floating chip is the single selected thing on screen. */
+.rtt-options.rtt-dragging .rtt-option:has(input:checked) {
+  background-color: transparent;
+}
+
+.rtt-options.rtt-dragging .rtt-option:has(input:checked) span {
+  color: var(--juice-400);
 }
 
 .rtt-options::-webkit-scrollbar {
@@ -60,6 +216,12 @@
 
 .rtt-options[hidden] {
   display: none !important;
+}
+
+/* Tier grouping for the mobile chip layout. Transparent on desktop so the
+   flat segmented pill renders exactly as before. */
+.rtt-tier {
+  display: contents;
 }
 
 .rtt-option {
@@ -136,8 +298,52 @@
     gap: 0.6rem;
   }
 
+  .rtt-options {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0;
+    border: none;
+    background: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .rtt-tier {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .rtt-option {
+    margin-left: -1px;
+    border: 1px solid var(--juice-700);
+    border-radius: 0;
+    background-color: var(--juice-800);
+  }
+
+  .rtt-tier > .rtt-option:first-child {
+    margin-left: 0;
+    border-top-left-radius: 9999px;
+    border-bottom-left-radius: 9999px;
+  }
+
+  .rtt-tier > .rtt-option:last-child {
+    border-top-right-radius: 9999px;
+    border-bottom-right-radius: 9999px;
+  }
+
+  .rtt-option:has(input:checked) {
+    border-color: transparent;
+    z-index: 1;
+  }
+
   .rtt-option span {
-    padding: 0.45rem 0.2rem;
+    padding: 0.45rem 0.75rem;
+  }
+
+  .rtt-divider {
+    display: none;
   }
 }
 
@@ -148,5 +354,12 @@
 
   .rtt-option span {
     transition: none;
+  }
+
+  .animate-up-enter,
+  .animate-down-enter,
+  .animate-up-exit,
+  .animate-down-exit {
+    animation: none;
   }
 }

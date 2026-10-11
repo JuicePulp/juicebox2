@@ -13,6 +13,10 @@ function storedEnabled(): boolean {
   }
 }
 
+export function soundEnabled(): boolean {
+  return storedEnabled();
+}
+
 export function applySoundEnabled(on: boolean): void {
   try {
     setEnabled(on);
