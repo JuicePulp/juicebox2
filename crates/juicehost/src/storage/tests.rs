@@ -457,6 +457,8 @@ async fn local_freeze_symlink_marker_fails_closed() {
     let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend2.init_cache().await.unwrap();
     assert!(backend2.is_frozen("fr1").await.unwrap());
+}
+
 // Regression: Android app-private storage (Termux) refuses hard links with
 // EPERM, which used to make every local write fail with a 500. The publish
 // path must fall back to a non-overwriting rename.
