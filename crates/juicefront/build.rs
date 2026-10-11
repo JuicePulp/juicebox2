@@ -43,10 +43,7 @@ fn main() {
     let dest = Path::new(&out_dir).join("icon_data.rs");
 
     let mut entries = Vec::new();
-    let mut icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons");
-    if !icons_dir.exists() {
-        icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/src/icons");
-    }
+    let icons_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons");
     if let Ok(dir) = fs::read_dir(&icons_dir) {
         let mut names: Vec<String> = dir
             .filter_map(std::result::Result::ok)

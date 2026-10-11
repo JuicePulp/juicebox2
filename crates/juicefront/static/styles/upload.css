@@ -1542,13 +1542,6 @@ html[data-banned] .upload-tabs {
   ::view-transition-new(page-content) {
     animation: none;
   }
-
-  html[data-astro-transition-fallback="old"]
-    ::view-transition-old(page-content),
-  html[data-astro-transition-fallback="old"]
-    ::view-transition-new(page-content) {
-    animation: none;
-  }
 }
 
 @keyframes smooth-slide-from-right {
@@ -1573,42 +1566,12 @@ html[data-banned] .upload-tabs {
   }
 }
 
-@keyframes smooth-slide-from-left {
-  0% {
-    opacity: 0;
-    transform: translateX(-30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes smooth-slide-to-right {
-  0% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(30px);
-  }
-}
-
 ::view-transition-old(page-content) {
   animation: smooth-slide-to-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 ::view-transition-new(page-content) {
   animation: smooth-slide-from-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-html[data-astro-transition-fallback="old"] ::view-transition-old(page-content) {
-  animation: smooth-slide-to-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-html[data-astro-transition-fallback="old"] ::view-transition-new(page-content) {
-  animation: smooth-slide-from-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .action-btn:active,
