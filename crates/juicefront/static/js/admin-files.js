@@ -41,6 +41,14 @@
         });
     }
 
+    function tierBadge(f) {
+        var st = f.tier_state || (f.hot ? "hot" : (f.tier || "standard"));
+        if (st === "hot") return '<span class="hot-badge">HOT</span>';
+        if (st === "warming") return '<span class="tier-badge tier-warming">WARMING</span>';
+        if (st === "cooling") return '<span class="tier-badge tier-cooling">COOLING</span>';
+        return '<span class="tier-standard">' + esc(f.tier || "standard") + "</span>";
+    }
+
     function renderRows(files) {
         var html = "";
         for (var i = 0; i < files.length; i++) {
@@ -57,7 +65,7 @@
                 "<td nowrap>" + formatTime(f.expires_at) + "</td>" +
                 "<td nowrap>" + statusLabel(f.expires_at) + "</td>" +
                 "<td nowrap title=\"" + String(f.viewers || 0) + " unique viewers, " + String(f.downloads || 0) + " downloads\">" + String(f.views || 0) + "</td>" +
-                "<td>" + (f.hot ? '<span class="hot-badge">HOT</span>' : '<span class="tier-standard">' + esc(f.tier || "standard") + "</span>") + "</td>" +
+                "<td>" + tierBadge(f) + "</td>" +
                 "<td>" +
                     (f.uploader_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.uploader_ip_hash) + '">' + esc(f.uploader_ip_hash) + "</a>"
@@ -66,6 +74,9 @@
                 "<td nowrap>" +
                     '<a href="' + esc(f.url) + '" target="_blank">View</a> | ' +
                     '<a href="/file/' + encodeURIComponent(f.id) + '/info" target="_blank">Info</a> | ' +
+                    '<a href="#" data-warm-link data-file-id="' + esc(f.id) + '">Warm</a> | ' +
+                    '<a href="#" data-cool-link data-file-id="' + esc(f.id) + '">Cool</a> | ' +
+                    '<a href="#" data-freeze-link data-file-id="' + esc(f.id) + '" data-frozen="0">Freeze</a> | ' +
                     '<a href="#" data-delete-link data-file-id="' + esc(f.id) + '">Delete</a>' +
                 "</td></tr>";
         }
@@ -170,6 +181,27 @@
                 var id = link.getAttribute("data-file-id");
                 if (id) deleteFile(id);
             }
+            var warmLink = e.target.closest("[data-warm-link]");
+            if (warmLink) {
+                e.preventDefault();
+                var warmId = warmLink.getAttribute("data-file-id");
+                if (warmId && confirm("Force-promote file " + warmId + " to hot tier now?")) tierAction(warmId, "warm");
+            }
+            var coolLink = e.target.closest("[data-cool-link]");
+            if (coolLink) {
+                e.preventDefault();
+                var coolId = coolLink.getAttribute("data-file-id");
+                if (coolId && confirm("Pull file " + coolId + " back from hot tier?")) tierAction(coolId, "cool");
+            }
+            var freezeLink = e.target.closest("[data-freeze-link]");
+            if (freezeLink) {
+                e.preventDefault();
+                var freezeId = freezeLink.getAttribute("data-file-id");
+                var frozen = freezeLink.getAttribute("data-frozen") === "1";
+                if (freezeId && confirm((frozen ? "Unfreeze file " : "Freeze file ") + freezeId + "?")) {
+                    toggleFreeze(freezeId, frozen, freezeLink);
+                }
+            }
             var banLink = e.target.closest("[data-ban-trigger]");
             if (banLink) {
                 e.preventDefault();
@@ -199,6 +231,36 @@
         });
 
         await doSearch();
+    }
+
+    async function tierAction(id, action) {
+        try {
+            var res = await fetch("/api/admin/file/" + encodeURIComponent(id) + "/" + action, { method: "POST" });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            var body = await res.json().catch(function () { return {}; });
+            var entry = allFiles.find(function (f) { return f.id === id; });
+            if (entry) {
+                entry.tier = body.tier || (action === "warm" ? "hot" : "standard");
+                entry.hot = entry.tier === "hot";
+                entry.tier_state = entry.tier;
+            }
+            renderTable();
+        } catch (err) {
+            alert("Tier change failed: " + (err && err.message ? err.message : err));
+        }
+    }
+
+    async function toggleFreeze(id, frozen, linkEl) {
+        try {
+            var res = await fetch("/api/admin/file/" + encodeURIComponent(id) + (frozen ? "/unfreeze" : "/freeze"), { method: "POST" });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            if (linkEl) {
+                linkEl.setAttribute("data-frozen", frozen ? "0" : "1");
+                linkEl.textContent = frozen ? "Freeze" : "Unfreeze";
+            }
+        } catch (err) {
+            alert("Freeze toggle failed: " + (err && err.message ? err.message : err));
+        }
     }
 
     async function deleteFile(id) {

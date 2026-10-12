@@ -30,7 +30,10 @@ pub use common::{AdminUser, ListParams};
 pub use feedback::{
     AdminFeedbackEntry, AdminFeedbackResponse, delete_feedback_handler, list_feedback_handler,
 };
-pub use files::{AdminFileEntry, AdminFilesResponse, delete_file_handler, list_files_handler};
+pub use files::{
+    AdminFileEntry, AdminFilesResponse, cool_file_handler, delete_file_handler,
+    freeze_file_handler, list_files_handler, unfreeze_file_handler, warm_file_handler,
+};
 pub use hosters::{
     AdminHostersResponse, HosterBanRequest, ban_hoster_handler, list_hosters_handler,
     unban_hoster_handler,
@@ -83,6 +86,22 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
         .route(
             "/api/admin/file/{id}",
             axum::routing::delete(delete_file_handler),
+        )
+        .route(
+            "/api/admin/file/{id}/warm",
+            axum::routing::post(warm_file_handler),
+        )
+        .route(
+            "/api/admin/file/{id}/cool",
+            axum::routing::post(cool_file_handler),
+        )
+        .route(
+            "/api/admin/file/{id}/freeze",
+            axum::routing::post(freeze_file_handler),
+        )
+        .route(
+            "/api/admin/file/{id}/unfreeze",
+            axum::routing::post(unfreeze_file_handler),
         )
         .route(
             "/api/admin/reports",

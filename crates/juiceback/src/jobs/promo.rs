@@ -16,7 +16,7 @@ pub async fn run_promo_loop(state: Arc<AppState>) {
     }
 }
 
-fn official_hosts(state: &AppState) -> HashSet<String> {
+pub(crate) fn official_hosts(state: &AppState) -> HashSet<String> {
     let mut hosts = HashSet::new();
     let mut push = |raw: &str| {
         let trimmed = raw.trim().trim_end_matches('/');
@@ -208,4 +208,65 @@ async fn promote_one(state: &Arc<AppState>, id: &str, host: &str) {
         }
         Err(e) => tracing::warn!("promo: id={id} promote failed: {e}"),
     }
+}
+
+/// Manual override from the admin panel: promote right now, skipping the
+/// velocity gates. The host must still resolve, so pushes stay on official
+/// storage. Returns the R2 key.
+pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<String, String> {
+    let lookup = id.to_string();
+    let record = state
+        .db_call("get_file", move |db| db::get_file(db, &lookup))
+        .await
+        .map_err(|e| format!("database error: {e:?}"))?
+        .ok_or_else(|| "file not found".to_string())?;
+    let official = official_hosts(state);
+    let host = record.storage_host.as_deref().unwrap_or("").trim();
+    let promote_host = if host.is_empty() {
+        state.config.juicehost_url.clone()
+    } else if official.contains(host) {
+        host.to_string()
+    } else {
+        return Err("file lives on an unofficial host".to_string());
+    };
+    if promote_host.is_empty() {
+        return Err("no storage host configured".to_string());
+    }
+    let key =
+        crate::storage_client::promote_file_on_juicehost(state, id, Some(&promote_host), None)
+            .await?;
+    let id_owned = id.to_string();
+    let key_owned = key.clone();
+    state
+        .db_call("promote_mark_hot", move |db| {
+            db::set_file_tier(db, &id_owned, "hot", &key_owned)
+        })
+        .await
+        .map_err(|e| format!("tier update failed: {e:?}"))?;
+    Ok(key)
+}
+
+/// Manual override from the admin panel: pull back from R2 and mark the
+/// file standard again.
+pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), String> {
+    let lookup = id.to_string();
+    let record = state
+        .db_call("get_file", move |db| db::get_file(db, &lookup))
+        .await
+        .map_err(|e| format!("database error: {e:?}"))?
+        .ok_or_else(|| "file not found".to_string())?;
+    let host = record
+        .storage_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty());
+    crate::storage_client::demote_file_on_juicehost(state, id, host).await?;
+    let id_owned = id.to_string();
+    state
+        .db_call("demote_mark_standard", move |db| {
+            db::set_file_tier(db, &id_owned, "standard", "")
+        })
+        .await
+        .map_err(|e| format!("tier update failed: {e:?}"))?;
+    Ok(())
 }

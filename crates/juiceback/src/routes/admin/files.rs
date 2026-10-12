@@ -35,6 +35,8 @@ pub struct AdminFileEntry {
 
     pub hot: bool,
 
+    pub tier_state: String,
+
     
     pub viewers: i64,
 
@@ -56,6 +58,48 @@ pub struct AdminFilesResponse {
     pub items: Vec<AdminFileEntry>,
 
     pub total: i64,
+}
+
+/// Display tier for the admin list. Mirrors the promoter's per-file gates
+/// (minus R2 caps, which are global): a standard file meeting the bar reads
+/// "warming", a hot file missing it reads "cooling".
+fn promo_eligible(
+    config: &crate::config::Config,
+    official: &std::collections::HashSet<String>,
+    record: &db::FileRecord,
+    stats: Option<&&db::FileStatsAggregate>,
+    seen: Option<&(i64, i64, i64)>,
+    now: i64,
+) -> bool {
+    if record.status != "ready" {
+        return false;
+    }
+    if record.expires_at <= now + config.promo_min_ttl_remaining_secs {
+        return false;
+    }
+    let views = stats.map_or(0, |s| s.views);
+    let downloads = stats.map_or(0, |s| s.downloads);
+    let (seen_views, seen_downloads, checked_at) = seen.copied().unwrap_or((0, 0, 0));
+    let delta = (views + downloads).saturating_sub(seen_views + seen_downloads);
+    if delta < config.promo_min_views as i64 {
+        return false;
+    }
+    let elapsed_secs = now.saturating_sub(checked_at).max(1) as f64;
+    if delta as f64 / (elapsed_secs / 60.0) < config.promo_min_views_per_min {
+        return false;
+    }
+    if record.size_bytes <= 0 || record.size_bytes > config.r2_max_promote_bytes as i64 {
+        return false;
+    }
+    let host = record.storage_host.as_deref().unwrap_or("").trim();
+    if host.is_empty() {
+        if config.juicehost_url.trim().is_empty() {
+            return false;
+        }
+    } else if !official.contains(host) {
+        return false;
+    }
+    true
 }
 
 #[utoipa::path(
@@ -94,12 +138,21 @@ pub async fn list_files_handler(
 
     let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
     let stats = state
-        .db_call("file_stats_for_ids", move |db| {
-            db::file_stats_for_ids(db, &ids)
+        .db_call("file_stats_for_ids", {
+            let ids = ids.clone();
+            move |db| db::file_stats_for_ids(db, &ids)
         })
         .await?;
     let stats_by_id: std::collections::HashMap<&str, &db::FileStatsAggregate> =
         stats.iter().map(|s| (s.file_id.as_str(), s)).collect();
+    let promo_seen = state
+        .db_call("promo_state_for_ids", {
+            let ids = ids.clone();
+            move |db| db::read_promo_state(db, &ids)
+        })
+        .await?;
+    let official = crate::jobs::promo::official_hosts(&state);
+    let now = chrono::Utc::now().timestamp();
 
     let files: Vec<AdminFileEntry> = records
         .into_iter()
@@ -119,6 +172,23 @@ pub async fn list_files_handler(
                     let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
                     crate::utils::truncate_hash(&h).to_string()
                 });
+            let tier_state = match (
+                r.tier.as_str(),
+                promo_eligible(
+                    &state.config,
+                    &official,
+                    &r,
+                    stats_by_id.get(r.id.as_str()),
+                    promo_seen.get(r.id.as_str()),
+                    now,
+                ),
+            ) {
+                ("hot", true) => "hot",
+                ("hot", false) => "cooling",
+                (_, true) => "warming",
+                (tier, false) => tier,
+            }
+            .to_string();
             AdminFileEntry {
                 id: r.id.clone(),
                 filename: r.filename,
@@ -131,6 +201,7 @@ pub async fn list_files_handler(
                 storage_host: r.storage_host,
                 tier: r.tier.clone(),
                 hot: r.tier == "hot",
+                tier_state,
                 viewers: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.viewers),
                 views: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.views),
                 downloaders: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.downloaders),
@@ -194,4 +265,128 @@ pub async fn delete_file_handler(
     tracing::info!("admin delete: id={id}");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/admin/file/{id}/warm",
+    params(
+        ("id" = String, Path, description = "The file ID to promote to R2 now"),
+    ),
+    responses(
+        (status = 200, description = "File promoted to hot tier"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "File not found"),
+    ),
+    security(),
+    tag = "Admin",
+)]
+pub async fn warm_file_handler(
+    _admin: AdminUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    crate::jobs::promo::force_promote(&state, &id)
+        .await
+        .map_err(AppError::Internal)?;
+    tracing::info!("admin warm: id={id}");
+    Ok(Json(serde_json::json!({ "tier": "hot" })))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/admin/file/{id}/cool",
+    params(
+        ("id" = String, Path, description = "The file ID to pull back from R2"),
+    ),
+    responses(
+        (status = 200, description = "File demoted to standard tier"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "File not found"),
+    ),
+    security(),
+    tag = "Admin",
+)]
+pub async fn cool_file_handler(
+    _admin: AdminUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    crate::jobs::promo::force_cool(&state, &id)
+        .await
+        .map_err(AppError::Internal)?;
+    tracing::info!("admin cool: id={id}");
+    Ok(Json(serde_json::json!({ "tier": "standard" })))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/admin/file/{id}/freeze",
+    params(
+        ("id" = String, Path, description = "The file ID to freeze"),
+    ),
+    responses(
+        (status = 200, description = "File frozen"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "File not found"),
+    ),
+    security(),
+    tag = "Admin",
+)]
+pub async fn freeze_file_handler(
+    _admin: AdminUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let lookup = id.clone();
+    let record = state
+        .db_call("get_file", move |db| db::get_file(db, &lookup))
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let host = record
+        .storage_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty());
+    crate::storage_client::freeze_file_on_juicehost(&state, &id, host)
+        .await
+        .map_err(AppError::Internal)?;
+    tracing::info!("admin freeze: id={id}");
+    Ok(Json(serde_json::json!({ "frozen": true })))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/admin/file/{id}/unfreeze",
+    params(
+        ("id" = String, Path, description = "The file ID to unfreeze"),
+    ),
+    responses(
+        (status = 200, description = "File unfrozen"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "File not found"),
+    ),
+    security(),
+    tag = "Admin",
+)]
+pub async fn unfreeze_file_handler(
+    _admin: AdminUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let lookup = id.clone();
+    let record = state
+        .db_call("get_file", move |db| db::get_file(db, &lookup))
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let host = record
+        .storage_host
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty());
+    crate::storage_client::unfreeze_file_on_juicehost(&state, &id, host)
+        .await
+        .map_err(AppError::Internal)?;
+    tracing::info!("admin unfreeze: id={id}");
+    Ok(Json(serde_json::json!({ "frozen": false })))
 }
