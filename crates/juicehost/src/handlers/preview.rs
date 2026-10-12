@@ -30,6 +30,7 @@ enum PreviewKind {
     Image,
     Pdf,
     Text,
+    Zip,
     Download,
 }
 
@@ -43,6 +44,8 @@ fn preview_kind(mime: &str) -> PreviewKind {
         PreviewKind::Image
     } else if base == "application/pdf" {
         PreviewKind::Pdf
+    } else if base == "application/zip" {
+        PreviewKind::Zip
     } else if base.starts_with("text/")
         || base.ends_with("+json")
         || base.ends_with("+xml")
@@ -89,6 +92,7 @@ fn escape_html(value: &str) -> String {
 
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
 const PREVIEW_APP_JS: &str = include_str!("../templates/preview_app.js");
+const ZIP_APP_JS: &str = include_str!("../templates/zip_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
@@ -209,7 +213,7 @@ fn absolute_for(base: Option<&str>, path: &str) -> String {
     }
 }
 
-fn is_bot(headers: &HeaderMap) -> bool {
+pub(crate) fn is_bot(headers: &HeaderMap) -> bool {
     if headers
         .get("sec-fetch-mode")
         .and_then(|v| v.to_str().ok())
@@ -241,6 +245,12 @@ struct PreviewPage {
     page_url: String,
     mime: String,
     extension: String,
+    
+    
+    zip_html: Option<String>,
+    
+    
+    text_head: Option<(String, u64, String)>,
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -263,6 +273,19 @@ fn embed_gallery_supported(kind: PreviewKind, extension: &str) -> bool {
     }
 }
 
+
+fn kind_label(kind: PreviewKind) -> &'static str {
+    match kind {
+        PreviewKind::Video => "Video file",
+        PreviewKind::Audio => "Audio file",
+        PreviewKind::Image => "Image file",
+        PreviewKind::Pdf => "PDF file",
+        PreviewKind::Text => "Text file",
+        PreviewKind::Zip => "ZIP archive",
+        PreviewKind::Download => "File",
+    }
+}
+
 fn component_embed_payload(
     page: &PreviewPage,
     abs_raw: &str,
@@ -270,13 +293,26 @@ fn component_embed_payload(
     abs_download: &str,
 ) -> serde_json::Value {
     let name = truncate_chars(&page.filename, 80);
-    let meta = truncate_chars(&format!("{} - {}", page.mime, page.size_label), 160);
+    let meta = truncate_chars(&format!("{} - {}", kind_label(page.kind), page.size_label), 160);
     let heading = format!("## [{name}]({abs_page})\n{meta}");
     let mut container: Vec<serde_json::Value> = Vec::new();
     container.push(serde_json::json!({
         "type": 10,
         "content": heading,
     }));
+    
+    if page.kind == PreviewKind::Text
+        && let Some(snippet) = page
+            .text_head
+            .as_ref()
+            .map(|t| t.2.as_str())
+            .filter(|s| !s.trim().is_empty())
+    {
+        container.push(serde_json::json!({
+            "type": 10,
+            "content": format!("```\n{}\n```", truncate_chars(snippet, 1000)),
+        }));
+    }
     if embed_gallery_supported(page.kind, &page.extension) {
         container.push(serde_json::json!({
             "type": 12,
@@ -284,10 +320,11 @@ fn component_embed_payload(
         }));
     } else {
         let hint = match page.kind {
-            PreviewKind::Audio => "Audio file - open the preview page to listen.",
-            PreviewKind::Pdf => "PDF file - open the preview page to read it.",
-            PreviewKind::Text => "Text file - open the preview page to read it.",
-            _ => "File ready - open the preview page or download it.",
+            PreviewKind::Audio => "Press play to listen, or download it here.",
+            PreviewKind::Pdf => "Press the open button to read more, or download it here.",
+            PreviewKind::Text => "Press the open button to see more, or download it here.",
+            PreviewKind::Zip => "Open the archive to browse what is inside, or download it here.",
+            _ => "Press the open button to see more, or download it here.",
         };
         container.push(serde_json::json!({
             "type": 10,
@@ -382,6 +419,115 @@ fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     tags
 }
 
+
+
+
+
+async fn load_text_head(
+    storage: &Arc<dyn storage::StorageBackend>,
+    id: &str,
+    size: u64,
+) -> Option<(String, u64, String)> {
+    let end = size.min(TEXT_PREVIEW_MAX_BYTES);
+    if end == 0 {
+        return None;
+    }
+    let bytes =
+        super::zip_list::read_range_capped(storage, id, 0, end - 1, TEXT_PREVIEW_MAX_BYTES).await?;
+    
+    
+    let valid = match std::str::from_utf8(&bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    if valid == 0 {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&bytes[..valid]);
+    let snippet: String = raw.chars().take(800).collect();
+    Some((escape_html(&raw), valid as u64, snippet.replace("```", "'''")))
+}
+
+fn download_hero(page: &PreviewPage) -> String {
+    format!(
+        "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} - {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
+        juiceutils::icons::DOWNLOAD_ART,
+        name = escape_html(&page.filename),
+        mime = escape_html(&page.mime),
+        size = escape_html(&page.size_label),
+        dl = escape_html(&page.download_url),
+    )
+}
+
+
+
+
+fn zip_listing_html(
+    archive_id: &str,
+    download_url: &str,
+    entries: &[super::zip_list::ZipEntry],
+) -> String {
+    const SHOWN: usize = 500;
+    let mut rows = String::with_capacity(entries.len().min(SHOWN) * 96);
+    for entry in entries.iter().take(SHOWN) {
+        let size = if entry.is_dir {
+            String::from("-")
+        } else {
+            entry
+                .size
+                .map(human_size)
+                .unwrap_or_else(|| String::from("?"))
+        };
+        let modified = entry.modified.as_deref().unwrap_or("-");
+        let cls = if entry.is_dir { "zip-dir" } else { "zip-file" };
+        let kind_attr = if entry.is_dir {
+            "dir"
+        } else {
+            match entry
+                .name
+                .rsplit('.')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico"
+                | "svg" => "image",
+                _ => "file",
+            }
+        };
+        let dir_attr = if entry.is_dir { "1" } else { "0" };
+        rows.push_str(&format!(
+            "<tr class=\"{cls}\" data-path=\"{}\" data-dir=\"{dir_attr}\" data-kind=\"{kind_attr}\"><td class=\"zip-ico\">{}</td><td class=\"zip-name\">{}</td><td class=\"zip-size\">{}</td><td class=\"zip-mod\">{}</td></tr>",
+            escape_html(&entry.name),
+            juiceutils::icons::file_icon(&entry.name, entry.is_dir),
+            escape_html(&entry.name),
+            escape_html(&size),
+            escape_html(modified),
+        ));
+    }
+    let more = entries.len().saturating_sub(SHOWN);
+    let more_html = if more > 0 {
+        format!("<p class=\"zip-more\">+{more} more files</p>")
+    } else {
+        String::new()
+    };
+    let total: u64 = entries
+        .iter()
+        .filter(|e| !e.is_dir)
+        .filter_map(|e| e.size)
+        .sum();
+    format!(
+        "<div class=\"zip-list\" id=\"zipBrowser\"><nav class=\"zip-crumbs\" id=\"zipCrumbs\"></nav><p class=\"zip-head\">{} files - {}</p><table class=\"zip-table\" id=\"zipTable\" data-archive=\"{}\"><thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>{}</tbody></table>{}<div class=\"zip-lightbox\" id=\"zipLightbox\" hidden><img id=\"zipLightboxImg\" alt=\"\"><p class=\"zip-lightbox-err\" id=\"zipLightboxErr\" hidden></p><button type=\"button\" class=\"zip-lightbox-close\" data-close=\"1\">Close</button></div><a class=\"dl-btn\" href=\"{}\">Download ZIP</a></div>",
+        entries.len(),
+        human_size(total),
+        escape_html(archive_id),
+        rows,
+        more_html,
+        escape_html(download_url),
+    )
+}
+
 fn stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
     match page.kind {
@@ -390,7 +536,8 @@ fn stage_html(page: &PreviewPage) -> String {
             name = escape_html(&page.filename),
         ),
         PreviewKind::Audio => format!(
-            "<div class=\"audio-hero\" aria-hidden=\"true\">&#9835;</div><audio id=\"media\" controls preload=\"metadata\" src=\"{raw}\"></audio>",
+            "<div class=\"audio-hero\" aria-hidden=\"true\">{}</div><audio id=\"media\" controls preload=\"metadata\" src=\"{raw}\"></audio>",
+            juiceutils::icons::AUDIO,
         ),
         PreviewKind::Image => format!(
             "<img id=\"media\" src=\"{raw}\" alt=\"{name}\" loading=\"eager\">",
@@ -400,16 +547,20 @@ fn stage_html(page: &PreviewPage) -> String {
             "<iframe id=\"media\" class=\"pdf-frame\" src=\"{raw}\" title=\"{name}\"></iframe><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the PDF</a></p></noscript>",
             name = escape_html(&page.filename),
         ),
-        PreviewKind::Text => format!(
-            "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" aria-live=\"polite\">Loading preview...</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
-        ),
-        PreviewKind::Download => format!(
-            "<div class=\"dl-hero\"><img class=\"dl-icon\" src=\"https://f.juicey.dev/f/OiG6RoKK.svg\" alt=\"\" aria-hidden=\"true\"><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} - {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
-            name = escape_html(&page.filename),
-            mime = escape_html(&page.mime),
-            size = escape_html(&page.size_label),
-            dl = escape_html(&page.download_url),
-        ),
+        PreviewKind::Text => {
+            let (content, loaded, _) = page.text_head.clone().unwrap_or_else(|| {
+                (
+                    String::from("Loading preview..."),
+                    0,
+                    String::new(),
+                )
+            });
+            format!(
+                "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" data-loaded=\"{loaded}\" aria-live=\"polite\">{content}</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
+            )
+        }
+        PreviewKind::Download => download_hero(page),
+        PreviewKind::Zip => page.zip_html.clone().unwrap_or_else(|| download_hero(page)),
     }
 }
 
@@ -436,7 +587,19 @@ fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
             &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
         .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
-        .replace("__APP_JS__", PREVIEW_APP_JS.trim_end())
+        .replace(
+            "__APP_JS__",
+            
+            
+            
+            if page.kind == PreviewKind::Text {
+                PREVIEW_APP_JS.trim_end()
+            } else if page.kind == PreviewKind::Zip {
+                ZIP_APP_JS.trim_end()
+            } else {
+                ""
+            },
+        )
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
         .replace("__OG_TAGS__", &og_tags(page, &abs_raw, &abs_page))
@@ -469,7 +632,7 @@ pub async fn preview_file_wildcard(
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
     }
-    preview_file_inner(state, headers, method, &id, &ext, viewer.0).await
+    preview_file_inner(state, headers, method, &id, &ext, &path, viewer.0).await
 }
 
 async fn preview_file_inner(
@@ -478,6 +641,7 @@ async fn preview_file_inner(
     method: Method,
     id: &str,
     ext: &str,
+    page_path: &str,
     viewer_ip: Option<String>,
 ) -> Result<Response<Body>, crate::error::JuicehostError> {
     use crate::error::JuicehostError;
@@ -500,7 +664,12 @@ async fn preview_file_inner(
         Err(_) => return Err(JuicehostError::Internal),
     };
 
-    if let Some(shelled) = protected_shell_response(&state, id, ShellMode::Preview).await {
+    let abs_self = request_base_url(&headers)
+        .map(|base| absolute_for(Some(base.as_str()), &format!("/v/{page_path}")));
+
+    if let Some(shelled) =
+        protected_shell_response(&state, id, ShellMode::Preview, abs_self.as_deref()).await
+    {
         return Ok(shelled);
     }
 
@@ -528,8 +697,23 @@ async fn preview_file_inner(
     }
     let mime = storage::guess_mime(&extension);
     let title = format!("{filename} - Juicebox²");
+    let kind = preview_kind(&mime);
+    
+    
+    let zip_html = if kind == PreviewKind::Zip {
+        super::zip_list::load_zip_entries(&state.storage, id, meta.size)
+            .await
+            .map(|entries| zip_listing_html(id, &download_url, &entries))
+    } else {
+        None
+    };
+    let text_head = if kind == PreviewKind::Text {
+        load_text_head(&state.storage, id, meta.size).await
+    } else {
+        None
+    };
     let page = PreviewPage {
-        kind: preview_kind(&mime),
+        kind,
         title,
         filename,
         size_label: human_size(meta.size),
@@ -538,6 +722,8 @@ async fn preview_file_inner(
         page_url,
         mime,
         extension,
+        zip_html,
+        text_head,
     };
     let response = Response::builder()
         .status(axum::http::StatusCode::OK)
@@ -549,6 +735,7 @@ async fn preview_file_inner(
     
     
     if method == Method::GET
+        && !is_bot(&headers)
         && let Some(ip) = viewer_ip.as_deref()
     {
         report_file_hit(&state, id, "view", ip);
@@ -573,7 +760,7 @@ mod tests {
         assert_eq!(preview_kind("application/json"), PreviewKind::Text);
         assert_eq!(preview_kind("application/javascript"), PreviewKind::Text);
         assert_eq!(preview_kind("application/ld+json"), PreviewKind::Text);
-        assert_eq!(preview_kind("application/zip"), PreviewKind::Download);
+        assert_eq!(preview_kind("application/zip"), PreviewKind::Zip);
         assert_eq!(
             preview_kind("application/octet-stream"),
             PreviewKind::Download
@@ -600,6 +787,8 @@ mod tests {
             page_url: "/v/a.mp4".into(),
             mime: "video/mp4".into(),
             extension: "mp4".into(),
+            zip_html: None,
+            text_head: None,
         };
         let html = render_preview(&page, &HeaderMap::new());
         assert!(html.contains("<video"));

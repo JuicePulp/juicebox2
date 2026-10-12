@@ -238,23 +238,13 @@ fn modals_html(
             .unwrap_or_else(|| "standard".to_owned()),
         danger_level: danger.to_owned(),
         max_bytes: config.max_file_size_bytes.unwrap_or(524_288_000),
-        allowed_ttl: config
-            .allowed_ttl_hours
-            .clone()
-            .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec())
-            .iter()
-            .map(|hours| {
-                
-                
-                #[allow(clippy::cast_possible_truncation)]
-                if hours.fract() == 0.0 {
-                    format!("{}", *hours as i64)
-                } else {
-                    format!("{hours}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
+        allowed_ttl: serde_json::to_string(
+            &config
+                .allowed_ttl_hours
+                .clone()
+                .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec()),
+        )
+        .unwrap_or_else(|_| "[]".to_string()),
         default_ttl: config
             .default_ttl_hours
             .unwrap_or(retention::DEFAULT_TTL_HOURS)
@@ -429,7 +419,6 @@ struct HeadCtx {
     body_class: &'static str,
     commit_label: String,
     structured_data: String,
-    discord_embed: String,
     current_path: String,
     hreflang: Vec<Hreflang>,
     live_reload: bool,
@@ -451,44 +440,6 @@ fn og_locale_for(locale: &'static str) -> &'static str {
     }
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
-    }
-    let truncated: String = value.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{truncated}…")
-}
-
-fn component_embed_json(title: &str, description: &str, canonical: &str) -> String {
-    if title.is_empty() || canonical.is_empty() {
-        return String::new();
-    }
-    let name = truncate_chars(title, 80);
-    let desc = truncate_chars(description, 200);
-    let heading = format!("## [{name}]({canonical})\n{desc}");
-    let mut components = vec![serde_json::json!({ "type": 10, "content": heading })];
-    if canonical.len() <= 512 {
-        components.push(serde_json::json!({
-            "type": 1,
-            "components": [{ "type": 2, "style": 5, "url": canonical, "label": "Open" }],
-        }));
-    }
-    let payload = serde_json::json!({
-        "component": { "type": 17, "accent_color": 16760154, "components": components }
-    });
-    let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
-    if serialized.len() > 3000 {
-        let minimal = serde_json::json!({
-            "component": {
-                "type": 17,
-                "components": [{ "type": 10, "content": truncate_chars(title, 120) }],
-            }
-        });
-        serialized = serde_json::to_string(&minimal).unwrap_or_default();
-    }
-    serialized.replace("</", "<\\/")
-}
-
 fn head_ctx(
     locale: &'static str,
     title: String,
@@ -500,7 +451,6 @@ fn head_ctx(
     live_reload: bool,
 ) -> HeadCtx {
     let canonical = absolute_url(headers, full_path);
-    let discord_embed = component_embed_json(&title, &description, &canonical);
     HeadCtx {
         cx: Cx::new(locale),
         lang: locale,
@@ -509,11 +459,10 @@ fn head_ctx(
         title,
         description,
         canonical,
-        og_image: absolute_url(headers, "/static/assets/og-image.png"),
+        og_image: absolute_url(headers, "/static/assets/og-image.png?v=2"),
         body_class,
         commit_label: metadata::commit_label(),
         structured_data: metadata::structured_data_json(),
-        discord_embed,
         current_path: absolute_url(headers, stripped_path),
         hreflang: hreflang_links_absolute(headers, stripped_path),
         live_reload,
@@ -1101,6 +1050,9 @@ pub async fn files_page(
     let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
     let custom_id = data.eff.config.custom_id.unwrap_or(true);
     let timestamp = now_ms();
+    let mut server_files = server_files;
+    // Newest uploads first.
+    server_files.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
     let rows: Vec<FileRow> = server_files
         .into_iter()
         .enumerate()
@@ -2085,74 +2037,4 @@ pub async fn admin_announcement() -> Response<Body> {
         .render()
         .unwrap_or_default(),
     )
-}
-
-#[cfg(test)]
-mod discord_embed_tests {
-    use super::{HeadTpl, component_embed_json, head_ctx};
-    use askama::Template;
-
-    #[test]
-    fn payload_is_a_single_container_within_limits() {
-        let json = component_embed_json(
-            "Juicebox",
-            "Fast, private file hosting.",
-            "https://juicebox.example/",
-        );
-        assert!(!json.is_empty());
-        assert!(json.len() <= 3000);
-        assert!(!json.contains("</"), "must stay inside the script element");
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let component = value.get("component").expect("top-level component");
-        assert_eq!(component.get("type").and_then(serde_json::Value::as_u64), Some(17));
-        let parts = component
-            .get("components")
-            .and_then(serde_json::Value::as_array)
-            .expect("container children");
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].get("type").and_then(serde_json::Value::as_u64), Some(10));
-        let buttons = parts[1]
-            .get("components")
-            .and_then(serde_json::Value::as_array)
-            .expect("action row children");
-        assert_eq!(buttons.len(), 1);
-        assert_eq!(buttons[0].get("style").and_then(serde_json::Value::as_u64), Some(5));
-    }
-
-    #[test]
-    fn script_breakout_is_escaped_but_stays_valid_json() {
-        let json = component_embed_json(
-            "a</script><script>alert(1)</script>",
-            "d",
-            "https://juicebox.example/",
-        );
-        assert!(!json.contains("</script"));
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(value.get("component").is_some());
-    }
-
-    #[test]
-    fn empty_title_or_url_disables_the_embed() {
-        assert!(component_embed_json("", "d", "https://x.example/").is_empty());
-        assert!(component_embed_json("t", "d", "").is_empty());
-    }
-
-    #[test]
-    fn head_renders_the_component_embed_script() {
-        let headers = axum::http::HeaderMap::new();
-        let head = head_ctx(
-            "en",
-            "Juicebox".to_owned(),
-            "Fast, private file hosting.".to_owned(),
-            "",
-            "/",
-            "/",
-            &headers,
-            false,
-        );
-        assert!(!head.discord_embed.is_empty());
-        let html = HeadTpl { head }.render().expect("head renders");
-        assert!(html.contains("id=\"discord:component-embed\""));
-        assert!(html.contains("\"type\":17"));
-    }
 }

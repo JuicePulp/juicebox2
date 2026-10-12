@@ -149,6 +149,32 @@ function markRowProtected(row) {
   badge.innerHTML = iconHTML("key", 24);
   wrap.append(badge, nameEl);
 }
+function wipeFailedReservation(item) {
+  // Best-effort wipe so errored uploads vanish from the file list instead
+  // of lingering as ghost reservations (server row + local registry stub).
+  // Runs once per row; rows without reservation creds are skipped.
+  try {
+    if (!item || item.dataset.wiped) return;
+    item.dataset.wiped = "1";
+    var fid = item.getAttribute("data-file-id") || "";
+    var token = item.getAttribute("data-delete-token") || "";
+    if (fid) {
+      try {
+        var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
+        var next = stored.filter(function (e) { return e && e.id !== fid; });
+        if (next.length !== stored.length) {
+          localStorage.setItem("juicebox_uploads", JSON.stringify(next));
+        }
+      } catch (e) {}
+    }
+    if (fid && token) {
+      fetch("/file/" + encodeURIComponent(fid), {
+        method: "DELETE",
+        headers: { "X-Delete-Token": token },
+      }).catch(function () {});
+    }
+  } catch (e) {}
+}
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
   pill.classList.add("error");
@@ -160,6 +186,7 @@ function failItem(item, pill, fill, status, errorCode, rawMessage) {
   status.textContent = msg;
   announce(t(LOCALE, "upload.announce_failed", { message: msg }));
   playSound("error");
+  wipeFailedReservation(item);
 }
 function animateRowOut(item) {
   item.classList.add("exiting");
@@ -353,6 +380,8 @@ async function ultrafastReserve(file, item, fill, status, pill) {
     }
     var reserve = await reserveRes.json();
     var reserveUrl = reserve.url || "";
+    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
+    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
     try {
       var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
       stored.push({
@@ -439,6 +468,8 @@ async function ultrafastReservePlaceholder(item, fill, status, pill) {
     }
     var reserve = await reserveRes.json();
     var reserveUrl = reserve.url || "";
+    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
+    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
     try {
       var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
       stored.push({

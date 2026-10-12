@@ -56,6 +56,8 @@
                 "<td nowrap>" + formatTime(f.uploaded_at) + "</td>" +
                 "<td nowrap>" + formatTime(f.expires_at) + "</td>" +
                 "<td nowrap>" + statusLabel(f.expires_at) + "</td>" +
+                "<td nowrap title=\"" + String(f.viewers || 0) + " unique viewers, " + String(f.downloads || 0) + " downloads\">" + String(f.views || 0) + "</td>" +
+                "<td>" + (f.hot ? '<span class="hot-badge">HOT</span>' : '<span class="tier-standard">' + esc(f.tier || "standard") + "</span>") + "</td>" +
                 "<td>" +
                     (f.uploader_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.uploader_ip_hash) + '">' + esc(f.uploader_ip_hash) + "</a>"
@@ -95,6 +97,7 @@
             '<thead><tr>' +
             '<th>ID</th><th>Filename</th><th>Size</th><th>Type</th>' +
             '<th>Uploaded</th><th>Expires</th><th>TTL</th>' +
+            '<th>Views</th><th>Tier</th>' +
             '<th>IP Hash</th><th>Actions</th>' +
             "</tr></thead><tbody>" +
             renderRows(toShow) +

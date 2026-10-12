@@ -36,11 +36,11 @@
 <meta name="twitter:image" content="{{ head.og_image }}">
 <meta name="twitter:image:alt" content="{{ head.og_image_alt }}">
 <meta name="twitter:url" content="{{ head.canonical }}">
-{% if head.discord_embed != "" %}<script id="discord:component-embed" type="application/json">{{ head.discord_embed|safe }}</script>
-{% endif %}<script type="application/ld+json">{{ head.structured_data|safe }}</script>
+<script type="application/ld+json">{{ head.structured_data|safe }}</script>
 <link rel="stylesheet" href="/static/bundle.css">
 <script src="/static/js/boot.js"></script>
-<script type="speculationrules" src="/static/speculation.json"></script>
+<script type="speculationrules">{"prefetch": [{"source": "document", "where": {"and": [{"selector_matches": ".act a[href], .select-options-list a[href]"}, {"href_matches": "/*"}, {"not": {"href_matches": "/api/*"}}, {"not": {"href_matches": "/admin*"}}, {"not": {"href_matches": "/static/*"}}, {"not": {"href_matches": "/file/*"}}, {"not": {"href_matches": "/f/*"}}, {"not": {"href_matches": "/v/*"}}, {"not": {"href_matches": "/d/*"}}, {"not": {"href_matches": "/upload*"}}]}, "eagerness": "conservative"}]}</script>
+<!-- speculation rules must be inline (external src unsupported); keep in sync with /static/speculation.json -->
 </head>
 <body{% if head.body_class != "" %} class="{{ head.body_class }}"{% endif %}>
 <a href="#main-content" class="skip-link">{{ head.cx.t("accessibility.skip_main") }}</a>

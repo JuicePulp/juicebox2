@@ -104,7 +104,12 @@ fn hot_r2_url(body: &serde_json::Value) -> Option<String> {
     if valid { Some(url.to_string()) } else { None }
 }
 
-pub(crate) async fn gate_decision(state: &AppState, id: &str, mode: ShellMode) -> GateDecision {
+pub(crate) async fn gate_decision(
+    state: &AppState,
+    id: &str,
+    mode: ShellMode,
+    page_url: Option<&str>,
+) -> GateDecision {
     if state.backend_url.is_none() {
         return GateDecision::ServeLocal;
     }
@@ -112,7 +117,11 @@ pub(crate) async fn gate_decision(state: &AppState, id: &str, mode: ShellMode) -
         BackendStatus::Known(body)
             if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
         {
-            let filename = body.get("filename").and_then(|v| v.as_str()).unwrap_or(id);
+            let filename = body
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .map(hashed_filename)
+                .unwrap_or_else(|| id.to_string());
             let gateway_origin = body
                 .get("gateway_origin")
                 .and_then(|v| v.as_str())
@@ -129,13 +138,14 @@ pub(crate) async fn gate_decision(state: &AppState, id: &str, mode: ShellMode) -
                 .unwrap_or_default();
             let ciphertext_url = hot_r2_url(&body).unwrap_or_else(|| format!("/c/{id}"));
             GateDecision::Respond(render_shell(
-                filename,
+                &filename,
                 id,
                 gateway_origin,
                 &ciphertext_url,
                 &key_version,
                 &size_label,
                 mode,
+                page_url,
             ))
         }
         BackendStatus::Known(body) => match hot_r2_url(&body) {
@@ -158,11 +168,23 @@ pub(crate) async fn protected_shell_response(
     state: &AppState,
     id: &str,
     mode: ShellMode,
+    page_url: Option<&str>,
 ) -> Option<Response<Body>> {
-    match gate_decision(state, id, mode).await {
+    match gate_decision(state, id, mode, page_url).await {
         GateDecision::Respond(resp) => Some(resp),
         GateDecision::HotRedirect(_) | GateDecision::ServeLocal => None,
     }
+}
+
+
+
+
+fn hashed_filename(filename: &str) -> String {
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"juicebox-filename-v1:");
+    hasher.update(filename.as_bytes());
+    hex::encode(hasher.finalize())[..16].to_string()
 }
 
 fn escape_html(value: &str) -> String {
@@ -182,20 +204,55 @@ fn render_shell(
     key_version: &str,
     size_label: &str,
     mode: ShellMode,
+    page_url: Option<&str>,
 ) -> Response<Body> {
-    let extension = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let mime = crate::storage::guess_mime(&extension);
+    
+    
     let content_url = format!(
         "{}/file/{}/content",
         gateway_origin.trim_end_matches('/'),
         id
     );
+    
+    
+    let enc_meta = format!("Encrypted file - {size_label}");
+    let mut og_tags = format!(
+        "<meta property=\"og:title\" content=\"{}\">\n<meta property=\"og:description\" content=\"{}\">\n<meta name=\"twitter:card\" content=\"summary\">",
+        escape_html(filename),
+        escape_html(&enc_meta),
+    );
+    let mut discord_embed = String::new();
+    if let Some(url) = page_url.filter(|u| !u.is_empty()) {
+        og_tags.push_str(&format!(
+            "\n<meta property=\"og:url\" content=\"{}\">",
+            escape_html(url)
+        ));
+        if !filename.is_empty() {
+            let name: String = filename.chars().take(80).collect();
+            let heading = format!("## [{name}]({url})\n{enc_meta}");
+            let payload = serde_json::json!({
+                "component": {
+                    "type": 17,
+                    "accent_color": 16760154,
+                    "components": [
+                        { "type": 10, "content": heading },
+                        { "type": 1, "components": [{ "type": 2, "style": 5, "url": url, "label": "Open" }] },
+                    ],
+                },
+            });
+            let serialized =
+                serde_json::to_string(&payload).unwrap_or_default().replace("</", "<\\/");
+            if !serialized.is_empty() {
+                discord_embed = format!(
+                    "<script id=\"discord:component-embed\" type=\"application/json\">\n{serialized}\n</script>"
+                );
+            }
+        }
+    }
     let html = SHELL_TEMPLATE
         .replace("__HEAD_META__", juiceutils::web::HEAD_META.trim_end())
+        .replace("__OG_TAGS__", &og_tags)
+        .replace("__DISCORD_EMBED__", &discord_embed)
         .replace(
             "__FONT_FACE__",
             &juiceutils::web::font_face_css(TITLE_FONT_DATA_URI.trim()),
@@ -206,6 +263,7 @@ fn render_shell(
             "__BRAND__",
             &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
+        .replace("__DL_ICON_SVG__", juiceutils::icons::DOWNLOAD_ART)
         .replace("__APP_JS__", SHELL_APP_JS.trim_end())
         .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
         .replace("__FILE_ID__", &escape_html(id))
@@ -216,7 +274,7 @@ fn render_shell(
         .replace("__CONTENT_URL__", &escape_html(&content_url))
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))
-        .replace("__MIME__", &escape_html(&mime));
+        .replace("__MIME__", "application/octet-stream");
     
     
     
@@ -228,7 +286,7 @@ fn render_shell(
         .header(header::CACHE_CONTROL, "no-store")
         .header(
             header::CONTENT_SECURITY_POLICY,
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; frame-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            "default-src 'none'; script-src 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; frame-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         )
         .body(Body::from(html))
         .unwrap_or_else(|_| not_found_html().into_response())

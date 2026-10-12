@@ -81,6 +81,31 @@ function buildOptions(fieldset, locale, allowed, def, stored) {
   return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
 }
 
+function domValues(fieldset) {
+  return Array.from(fieldset.querySelectorAll('input[type="radio"]')).map((r) => r.value);
+}
+
+function sameValueSet(a, b) {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((v) => set.has(v));
+}
+
+function applyStoredCheck(fieldset, allowed, def, stored) {
+  var want = null;
+  if (stored !== null && allowed.some((h) => String(h) === stored)) {
+    want = stored;
+  } else if (allowed.includes(def)) {
+    want = String(def);
+  } else if (allowed.length > 0) {
+    want = String(allowed[0]);
+  }
+  if (want === null) return;
+  fieldset.querySelectorAll('input[type="radio"]').forEach(function (r) {
+    r.checked = r.value === want;
+  });
+}
+
 function resolveOptions(card, locale) {
   const fieldset = card.querySelector(".rtt-options");
   if (!fieldset) return null;
@@ -90,6 +115,13 @@ function resolveOptions(card, locale) {
     return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
   }
   const stored = readStoredTtl();
+  // The server already rendered the host's tiers: only refresh the checked
+  // state, never rebuild identical options (keeps JS and no-JS users on the
+  // same host-advertised list).
+  if (sameValueSet(domValues(fieldset), allowed.map(String))) {
+    applyStoredCheck(fieldset, allowed, def, stored);
+    return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
+  }
   return buildOptions(fieldset, locale, allowed, def, stored);
 }
 

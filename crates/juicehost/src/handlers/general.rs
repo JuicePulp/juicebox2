@@ -31,6 +31,17 @@ pub async fn index_handler(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
+
+pub async fn favicon() -> Response {
+    const ICON: &[u8] = include_bytes!("../templates/favicon.png");
+    Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "image/png")
+        .header(axum::http::header::CACHE_CONTROL, "public, max-age=86400")
+        .body(Body::from(ICON))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
 #[utoipa::path(
     get,
     path = "/api/health",

@@ -31,6 +31,10 @@ pub struct AdminFileEntry {
 
     pub storage_host: Option<String>,
 
+    pub tier: String,
+
+    pub hot: bool,
+
     
     pub viewers: i64,
 
@@ -125,6 +129,8 @@ pub async fn list_files_handler(
                 uploader_ip_hash: ip_hash,
                 url,
                 storage_host: r.storage_host,
+                tier: r.tier.clone(),
+                hot: r.tier == "hot",
                 viewers: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.viewers),
                 views: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.views),
                 downloaders: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.downloaders),

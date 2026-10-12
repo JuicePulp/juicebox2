@@ -10,6 +10,7 @@ use futures::StreamExt;
 
 use super::{
     common::backend_request,
+    preview::is_bot,
     shell::{GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
     stats::{ViewerIp, report_file_hit},
 };
@@ -144,7 +145,7 @@ async fn serve_file_inner(
     } else {
         ShellMode::View
     };
-    match gate_decision(&state, &id, mode).await {
+    match gate_decision(&state, &id, mode, None).await {
         GateDecision::Respond(resp) => return Ok(resp),
         GateDecision::HotRedirect(url) => {
             return Response::builder()
@@ -182,6 +183,10 @@ async fn serve_file_inner(
     
     let count_hit = |viewer_ip: &Option<String>| {
         if method != Method::GET {
+            return;
+        }
+        
+        if is_bot(&headers) {
             return;
         }
         let Some(ip) = viewer_ip.as_deref() else {

@@ -2062,6 +2062,7 @@ dependencies = [
  "axum",
  "bytes",
  "dashmap",
+ "flate2",
  "fs2",
  "futures",
  "hex",

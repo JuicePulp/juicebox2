@@ -191,6 +191,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ));
 
     let files_router = Router::new()
+        .route("/api/zipentry/{id}", get(handlers::zip_entry_file))
         .route("/f/{*path}", get(handlers::serve_file_wildcard))
         .route("/d/{*path}", get(handlers::serve_file_download))
         .route("/v/{*path}", get(handlers::preview_file_wildcard))
@@ -205,6 +206,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ));
 
     let public = Router::new()
+        .route("/favicon.ico", get(handlers::favicon))
         .route("/api/health", get(handlers::health))
         .route("/api/ip", get(handlers::ip_handler))
         .route("/api/storage", get(handlers::storage_handler))
