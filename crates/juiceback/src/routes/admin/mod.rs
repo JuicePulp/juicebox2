@@ -140,11 +140,11 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
             axum::routing::get(get_announcement_handler).put(put_announcement_handler),
         )
         .route(
-            "/api/admin/feedback",
+            "/api/admin/feedbacks",
             axum::routing::get(list_feedback_handler),
         )
         .route(
-            "/api/admin/feedback/{id}",
+            "/api/admin/feedbacks/{id}",
             axum::routing::delete(delete_feedback_handler),
         )
         .route(

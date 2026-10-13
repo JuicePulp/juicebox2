@@ -25,9 +25,6 @@ pub(crate) fn official_hosts(state: &AppState) -> HashSet<String> {
         }
     };
     push(&state.config.juicehost_url);
-    // Public faces of this deployment also address its storage (directly or
-    // through the router); without them, files uploaded under the public
-    // host can never go hot, manually or automatically.
     push(&state.config.public_base_url);
     push(&state.config.public_juicehost_url);
     if let Some(router) = state.config.router_base_url.as_deref() {
@@ -137,16 +134,13 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
             continue;
         }
         let host = candidate.storage_host.trim();
-        let promote_host = if host.is_empty() {
-            state.config.juicehost_url.clone()
+        let promote_host: Option<String> = if host.is_empty() {
+            None
         } else if official.contains(host) {
-            host.to_string()
+            Some(host.to_string())
         } else {
             continue;
         };
-        if promote_host.is_empty() {
-            continue;
-        }
         if reserved_count >= state.config.r2_max_hot_files
             || reserved_bytes.saturating_add(candidate.size_bytes as u64)
                 > state.config.r2_max_bytes
@@ -174,8 +168,9 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
         reserved_count += 1;
         let state_clone = Arc::clone(state);
         let id = candidate.id.clone();
+        let host_opt = promote_host.clone();
         tokio::spawn(async move {
-            promote_one(&state_clone, &id, &promote_host).await;
+            promote_one(&state_clone, &id, host_opt.as_deref()).await;
         });
     }
 
@@ -197,8 +192,8 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
     }
 }
 
-async fn promote_one(state: &Arc<AppState>, id: &str, host: &str) {
-    match crate::storage_client::promote_file_on_juicehost(state, id, Some(host), None).await {
+async fn promote_one(state: &Arc<AppState>, id: &str, host: Option<&str>) {
+    match crate::storage_client::promote_file_on_juicehost(state, id, host, None).await {
         Ok(key) => {
             let id_owned = id.to_string();
             let key_owned = key.clone();
@@ -218,9 +213,6 @@ async fn promote_one(state: &Arc<AppState>, id: &str, host: &str) {
     }
 }
 
-/// Manual override from the admin panel: promote right now, skipping the
-/// velocity gates. The host must still resolve, so pushes stay on official
-/// storage. Returns the R2 key.
 pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<String, String> {
     let lookup = id.to_string();
     let record = state
@@ -230,18 +222,18 @@ pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<Str
         .ok_or_else(|| "file not found".to_string())?;
     let official = official_hosts(state);
     let host = record.storage_host.as_deref().unwrap_or("").trim();
-    let promote_host = if host.is_empty() {
-        state.config.juicehost_url.clone()
+    let promote_host: Option<String> = if host.is_empty() {
+        None
     } else if official.contains(host) {
-        host.to_string()
+        Some(host.to_string())
     } else {
         return Err("file lives on an unofficial host".to_string());
     };
-    if promote_host.is_empty() {
+    if promote_host.is_none() && state.config.juicehost_url.trim().is_empty() {
         return Err("no storage host configured".to_string());
     }
     let key =
-        crate::storage_client::promote_file_on_juicehost(state, id, Some(&promote_host), None)
+        crate::storage_client::promote_file_on_juicehost(state, id, promote_host.as_deref(), None)
             .await?;
     let id_owned = id.to_string();
     let key_owned = key.clone();
@@ -254,8 +246,6 @@ pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<Str
     Ok(key)
 }
 
-/// Manual override from the admin panel: pull back from R2 and mark the
-/// file standard again.
 pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), String> {
     let lookup = id.to_string();
     let record = state
