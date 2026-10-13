@@ -53,6 +53,9 @@
         var html = "";
         for (var i = 0; i < files.length; i++) {
             var f = files[i];
+            var tierState = f.tier_state || (f.hot ? "hot" : "standard");
+            var tierAction = (tierState === "hot" || tierState === "warming") ? "cool" : "warm";
+            var tierLabel = tierAction === "cool" ? "Cool" : "Warm";
             var expired = f.expires_at * 1000 <= Date.now();
             var rowClass = expired ? ' class="expired"' : '';
             html +=
@@ -66,6 +69,7 @@
                 "<td nowrap>" + statusLabel(f.expires_at) + "</td>" +
                 "<td nowrap title=\"" + String(f.viewers || 0) + " unique viewers, " + String(f.downloads || 0) + " downloads\">" + String(f.views || 0) + "</td>" +
                 "<td>" + tierBadge(f) + "</td>" +
+                "<td>" + (f.encrypted ? '<span class="enc-badge">ENC</span>' : (f.protected ? '<span class="prot-badge">LOCKED</span>' : '<span class="enc-no">No</span>')) + "</td>" +
                 "<td>" +
                     (f.uploader_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.uploader_ip_hash) + '">' + esc(f.uploader_ip_hash) + "</a>"
@@ -74,8 +78,7 @@
                 "<td nowrap>" +
                     '<a href="' + esc(f.url) + '" target="_blank">View</a> | ' +
                     '<a href="/file/' + encodeURIComponent(f.id) + '/info" target="_blank">Info</a> | ' +
-                    '<a href="#" data-warm-link data-file-id="' + esc(f.id) + '">Warm</a> | ' +
-                    '<a href="#" data-cool-link data-file-id="' + esc(f.id) + '">Cool</a> | ' +
+                    '<a href="#" data-tier-toggle data-file-id="' + esc(f.id) + '" data-tier-action="' + tierAction + '">' + tierLabel + '</a> | ' +
                     '<a href="#" data-freeze-link data-file-id="' + esc(f.id) + '" data-frozen="0">Freeze</a> | ' +
                     '<a href="#" data-delete-link data-file-id="' + esc(f.id) + '">Delete</a>' +
                 "</td></tr>";
@@ -108,7 +111,7 @@
             '<thead><tr>' +
             '<th>ID</th><th>Filename</th><th>Size</th><th>Type</th>' +
             '<th>Uploaded</th><th>Expires</th><th>TTL</th>' +
-            '<th>Views</th><th>Tier</th>' +
+            '<th>Views</th><th>Tier</th><th>Protection</th>' +
             '<th>IP Hash</th><th>Actions</th>' +
             "</tr></thead><tbody>" +
             renderRows(toShow) +
@@ -181,17 +184,12 @@
                 var id = link.getAttribute("data-file-id");
                 if (id) deleteFile(id);
             }
-            var warmLink = e.target.closest("[data-warm-link]");
-            if (warmLink) {
+            var tierLink = e.target.closest("[data-tier-toggle]");
+            if (tierLink) {
                 e.preventDefault();
-                var warmId = warmLink.getAttribute("data-file-id");
-                if (warmId && confirm("Force-promote file " + warmId + " to hot tier now?")) tierAction(warmId, "warm");
-            }
-            var coolLink = e.target.closest("[data-cool-link]");
-            if (coolLink) {
-                e.preventDefault();
-                var coolId = coolLink.getAttribute("data-file-id");
-                if (coolId && confirm("Pull file " + coolId + " back from hot tier?")) tierAction(coolId, "cool");
+                var tierId = tierLink.getAttribute("data-file-id");
+                var action = tierLink.getAttribute("data-tier-action") === "cool" ? "cool" : "warm";
+                if (tierId && confirm((action === "cool" ? "Pull file " : "Force-promote file ") + tierId + (action === "cool" ? " back from hot tier?" : " to hot tier now?"))) tierAction(tierId, action);
             }
             var freezeLink = e.target.closest("[data-freeze-link]");
             if (freezeLink) {

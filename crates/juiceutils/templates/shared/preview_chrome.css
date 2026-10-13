@@ -87,6 +87,8 @@
     .dl-name{font-size:1.1rem;font-weight:700;word-break:break-all}
     .zip-list{display:flex;flex-direction:column;align-items:stretch;gap:.6rem;text-align:left;max-width:46rem;width:100%}
     .zip-head{color:#a29188;font-size:.9rem}
+    .zip-scroll{width:100%;max-height:60vh;overflow:auto}
+    .zip-scroll thead th{position:sticky;top:0}
     .zip-table{width:100%;border-collapse:collapse;font-size:.9rem}
     .zip-table thead th{text-align:left;color:#a29188;font-weight:400;font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;padding:.4rem .6rem;border:1px solid #4a3d33;background:#1c1611}
     .zip-table tbody tr{background:#241d17}

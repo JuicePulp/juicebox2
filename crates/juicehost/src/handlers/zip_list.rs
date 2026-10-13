@@ -203,6 +203,239 @@ pub async fn load_zip_entries(
     parse_entries(&cd, count)
 }
 
+/// Whole-file cap for 7z listings (the format needs random access, so the
+/// bytes must be buffered, not streamed).
+const MAX_7Z_BYTES: u64 = 32 * 1024 * 1024;
+/// Streaming tar scan budget and entry cap.
+const MAX_TAR_SCAN_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_TAR_ENTRIES: usize = 1_000;
+const TAR_CHUNK: u64 = 65_536;
+
+/// List archive contents by filename extension. ZIP reads its central
+/// directory, 7z buffers for random access, tar streams from the front,
+/// gzip exposes its single member. Anything else (rar, …) falls back to
+/// the plain download hero.
+pub async fn load_archive_entries(
+    storage: &Arc<dyn StorageBackend>,
+    id: &str,
+    filename: &str,
+    file_size: u64,
+) -> Option<Vec<ZipEntry>> {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "7z" => load_7z_entries(storage, id, file_size).await,
+        "tar" => load_tar_entries(storage, id, file_size).await,
+        "gz" | "tgz" => load_gz_entry(storage, id, filename, file_size).await,
+        _ => load_zip_entries(storage, id, file_size).await,
+    }
+}
+
+async fn load_7z_entries(
+    storage: &Arc<dyn StorageBackend>,
+    id: &str,
+    file_size: u64,
+) -> Option<Vec<ZipEntry>> {
+    if file_size < 32 || file_size > MAX_7Z_BYTES {
+        return None;
+    }
+    let bytes = read_range_capped(storage, id, 0, file_size - 1, MAX_7Z_BYTES).await?;
+    tokio::task::spawn_blocking(move || {
+        let cursor = std::io::Cursor::new(bytes.to_vec());
+        let reader =
+            sevenz_rust::SevenZReader::new(cursor, file_size, sevenz_rust::Password::empty())
+                .ok()?;
+        let mut out = Vec::new();
+        for f in reader.archive().files.iter() {
+            if f.name.is_empty() || f.is_anti_item {
+                continue;
+            }
+            out.push(ZipEntry {
+                name: f.name.clone(),
+                size: if f.is_directory { None } else { Some(f.size) },
+                is_dir: f.is_directory,
+                modified: None,
+                method: 0xFFFF,
+                comp_size: 0,
+                header_offset: 0,
+            });
+            if out.len() >= MAX_ENTRIES {
+                break;
+            }
+        }
+        if out.is_empty() { None } else { Some(out) }
+    })
+    .await
+    .ok()?
+}
+
+fn parse_octal(raw: &[u8]) -> Option<u64> {
+    let text = std::str::from_utf8(raw).ok()?;
+    let text = text.trim_matches(['\0', ' ']);
+    if text.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(text, 8).ok()
+}
+
+async fn load_tar_entries(
+    storage: &Arc<dyn StorageBackend>,
+    id: &str,
+    file_size: u64,
+) -> Option<Vec<ZipEntry>> {
+    let mut data: Vec<u8> = Vec::new();
+    let mut off: usize = 0;
+    let mut fetched: u64 = 0;
+    let mut out: Vec<ZipEntry> = Vec::new();
+    let mut zero_streak: u8 = 0;
+    loop {
+        while data.len() - off < 512 && fetched < file_size && fetched < MAX_TAR_SCAN_BYTES {
+            let end = (fetched + TAR_CHUNK).min(file_size) - 1;
+            let chunk = read_range_capped(storage, id, fetched, end, TAR_CHUNK).await?;
+            fetched += chunk.len() as u64;
+            data.extend_from_slice(&chunk);
+        }
+        if data.len() - off < 512 {
+            break;
+        }
+        // Compact consumed prefix so memory stays bounded.
+        if off > 1_048_576 {
+            data.drain(..off);
+            off = 0;
+        }
+        let hdr = &data[off..off + 512];
+        if hdr.iter().all(|&b| b == 0) {
+            zero_streak += 1;
+            off += 512;
+            if zero_streak >= 2 {
+                break;
+            }
+            continue;
+        }
+        zero_streak = 0;
+        let ustar = hdr.len() >= 262 && &hdr[257..262] == b"ustar";
+        let name = String::from_utf8_lossy(split_nul(&hdr[..100])).into_owned();
+        let size = parse_octal(split_blank(&hdr[124..136]));
+        let typeflag = hdr[156] as char;
+        if name.trim().is_empty() {
+            break;
+        }
+        if !ustar && off > 0 {
+            // Trailing garbage after real entries: stop, keep what we have.
+            break;
+        }
+        if !ustar && size.is_none() {
+            // Not a tar at all.
+            return None;
+        }
+        let size = size.unwrap_or(0);
+        let is_dir = typeflag == '5' || name.ends_with('/');
+        // Pax/special headers carry no content of their own here; the size
+        // field still tells how far to skip.
+        if matches!(typeflag, 'x' | 'g') {
+            off += 512 + pad512(size);
+            continue;
+        }
+        out.push(ZipEntry {
+            name,
+            size: if is_dir { None } else { Some(size) },
+            is_dir,
+            modified: None,
+            method: 0xFFFF,
+            comp_size: 0,
+            header_offset: 0,
+        });
+        if out.len() >= MAX_TAR_ENTRIES {
+            break;
+        }
+        off += 512 + pad512(size);
+        if off as u64 > fetched && fetched >= file_size {
+            break;
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn split_nul(field: &[u8]) -> &[u8] {
+    match field.iter().position(|&b| b == 0) {
+        Some(pos) => &field[..pos],
+        None => field,
+    }
+}
+
+fn split_blank(field: &[u8]) -> &[u8] {
+    let mut end = field.len();
+    while end > 0 && (field[end - 1] == 0 || field[end - 1] == b' ') {
+        end -= 1;
+    }
+    &field[..end]
+}
+
+fn pad512(size: u64) -> usize {
+    (size as usize).div_ceil(512) * 512
+}
+
+async fn load_gz_entry(
+    storage: &Arc<dyn StorageBackend>,
+    id: &str,
+    filename: &str,
+    file_size: u64,
+) -> Option<Vec<ZipEntry>> {
+    if file_size < 18 {
+        return None;
+    }
+    let head = read_range_capped(storage, id, 0, 4095.min(file_size - 1), 4096).await?;
+    if head.len() < 10 || &head[0..2] != b"\x1f\x8b" || head[2] != 8 {
+        return None;
+    }
+    let flags = head[3];
+    let mut pos = 10usize;
+    if flags & 0x04 != 0 {
+        let xlen = u16::from_le_bytes([*head.get(pos)?, *head.get(pos + 1)?]) as usize;
+        pos += 2 + xlen;
+    }
+    let mut name: Option<String> = None;
+    if flags & 0x08 != 0 {
+        let rest = head.get(pos..)?;
+        let end = rest.iter().position(|&b| b == 0)?;
+        let raw = &rest[..end];
+        if !raw.is_empty() {
+            let text = String::from_utf8_lossy(raw);
+            if !text.chars().any(|c| c.is_control()) {
+                name = Some(text.into_owned());
+            }
+        }
+    }
+    let tail = read_range_capped(storage, id, file_size - 4, file_size - 1, 4).await?;
+    if tail.len() < 4 {
+        return None;
+    }
+    let isize = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]) as u64;
+    let display = match name {
+        Some(n) if !n.trim().is_empty() => n,
+        _ => {
+            let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
+            if stem.trim().is_empty() {
+                "archive contents".to_string()
+            } else {
+                format!("{stem} (decompressed)")
+            }
+        }
+    };
+    Some(vec![ZipEntry {
+        name: display,
+        size: Some(isize),
+        is_dir: false,
+        modified: None,
+        method: 0xFFFF,
+        comp_size: 0,
+        header_offset: 0,
+    }])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

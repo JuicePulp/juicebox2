@@ -37,6 +37,10 @@ pub struct AdminFileEntry {
 
     pub tier_state: String,
 
+    pub encrypted: bool,
+
+    pub protected: bool,
+
     
     pub viewers: i64,
 
@@ -202,6 +206,8 @@ pub async fn list_files_handler(
                 tier: r.tier.clone(),
                 hot: r.tier == "hot",
                 tier_state,
+                encrypted: r.is_encrypted,
+                protected: r.password_hash.is_some(),
                 viewers: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.viewers),
                 views: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.views),
                 downloaders: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.downloaders),

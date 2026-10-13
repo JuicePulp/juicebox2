@@ -25,6 +25,14 @@ pub(crate) fn official_hosts(state: &AppState) -> HashSet<String> {
         }
     };
     push(&state.config.juicehost_url);
+    // Public faces of this deployment also address its storage (directly or
+    // through the router); without them, files uploaded under the public
+    // host can never go hot, manually or automatically.
+    push(&state.config.public_base_url);
+    push(&state.config.public_juicehost_url);
+    if let Some(router) = state.config.router_base_url.as_deref() {
+        push(router);
+    }
     for url in state.config.region_public_juicehosts.values() {
         push(url);
     }

@@ -44,7 +44,11 @@ fn preview_kind(mime: &str) -> PreviewKind {
         PreviewKind::Image
     } else if base == "application/pdf" {
         PreviewKind::Pdf
-    } else if base == "application/zip" {
+    } else if base == "application/zip"
+        || base == "application/x-7z-compressed"
+        || base == "application/x-tar"
+        || base == "application/gzip"
+    {
         PreviewKind::Zip
     } else if base.starts_with("text/")
         || base.ends_with("+json")
@@ -281,7 +285,7 @@ fn kind_label(kind: PreviewKind) -> &'static str {
         PreviewKind::Image => "Image file",
         PreviewKind::Pdf => "PDF file",
         PreviewKind::Text => "Text file",
-        PreviewKind::Zip => "ZIP archive",
+        PreviewKind::Zip => "Archive",
         PreviewKind::Download => "File",
     }
 }
@@ -518,7 +522,7 @@ fn zip_listing_html(
         .filter_map(|e| e.size)
         .sum();
     format!(
-        "<div class=\"zip-list\" id=\"zipBrowser\"><nav class=\"zip-crumbs\" id=\"zipCrumbs\"></nav><p class=\"zip-head\">{} files - {}</p><table class=\"zip-table\" id=\"zipTable\" data-archive=\"{}\"><thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>{}</tbody></table>{}<div class=\"zip-lightbox\" id=\"zipLightbox\" hidden><img id=\"zipLightboxImg\" alt=\"\"><p class=\"zip-lightbox-err\" id=\"zipLightboxErr\" hidden></p><button type=\"button\" class=\"zip-lightbox-close\" data-close=\"1\">Close</button></div><a class=\"dl-btn\" href=\"{}\">Download ZIP</a></div>",
+        "<div class=\"zip-list\" id=\"zipBrowser\"><nav class=\"zip-crumbs\" id=\"zipCrumbs\"></nav><p class=\"zip-head\">{} files - {}</p><div class=\"zip-scroll\"><table class=\"zip-table\" id=\"zipTable\" data-archive=\"{}\"><thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>{}</tbody></table></div>{}<div class=\"zip-lightbox\" id=\"zipLightbox\" hidden><img id=\"zipLightboxImg\" alt=\"\"><p class=\"zip-lightbox-err\" id=\"zipLightboxErr\" hidden></p><button type=\"button\" class=\"zip-lightbox-close\" data-close=\"1\">Close</button></div><a class=\"dl-btn\" href=\"{}\">Download archive</a></div>",
         entries.len(),
         human_size(total),
         escape_html(archive_id),
@@ -701,7 +705,7 @@ async fn preview_file_inner(
     
     
     let zip_html = if kind == PreviewKind::Zip {
-        super::zip_list::load_zip_entries(&state.storage, id, meta.size)
+        super::zip_list::load_archive_entries(&state.storage, id, &filename, meta.size)
             .await
             .map(|entries| zip_listing_html(id, &download_url, &entries))
     } else {
@@ -761,6 +765,9 @@ mod tests {
         assert_eq!(preview_kind("application/javascript"), PreviewKind::Text);
         assert_eq!(preview_kind("application/ld+json"), PreviewKind::Text);
         assert_eq!(preview_kind("application/zip"), PreviewKind::Zip);
+        assert_eq!(preview_kind("application/x-7z-compressed"), PreviewKind::Zip);
+        assert_eq!(preview_kind("application/x-tar"), PreviewKind::Zip);
+        assert_eq!(preview_kind("application/gzip"), PreviewKind::Zip);
         assert_eq!(
             preview_kind("application/octet-stream"),
             PreviewKind::Download
