@@ -263,6 +263,15 @@ export function enhanceHostSelector(locale) {
       if (pwHint) pwHint.hidden = !has;
       const indicators = document.querySelectorAll("[data-upload-password-indicator]");
       for (let i = 0; i < indicators.length; i++) indicators[i].hidden = !has;
+      const cards = document.querySelectorAll("[data-upload-card]");
+      for (let i = 0; i < cards.length; i++) cards[i].classList.toggle("is-encrypted", has);
+      const dropText = document.querySelector("[data-drop-text]");
+      if (dropText) {
+        const plain = dropText.getAttribute("data-drop-text");
+        const enc = dropText.getAttribute("data-drop-text-encrypted");
+        if (has && enc) dropText.textContent = enc;
+        else if (!has && plain) dropText.textContent = plain;
+      }
     };
     pwInput.addEventListener("input", syncPwState);
     syncPwState();

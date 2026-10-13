@@ -35,6 +35,7 @@
   "upload.drop_primary": "Бросайте файлы сюда или кликайте для загрузки",
   "upload.drop_selected": "Файл выбран! Готов к загрузке.",
   "upload.drop_secondary": "Файлы удалятся автоматически",
+  "upload.drop_secondary_encrypted": "Файлы шифруются и удалятся автоматически",
   "upload.drop_max": "Макс. размер: {size}",
   "upload.paste_hint": "Также можно вставить текст или ссылки, чтобы загрузить текст или медиафайлы",
   "upload.drop_offline": "Сервис недоступен",

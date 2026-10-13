@@ -39,6 +39,7 @@
   "upload.drop_primary": "Drop files here or click to upload",
   "upload.drop_selected": "File selected! Ready to upload.",
   "upload.drop_secondary": "Files will be automatically removed",
+  "upload.drop_secondary_encrypted": "Files are encrypted and will be automatically removed",
   "upload.drop_max": "Max upload size: {size}",
   "upload.paste_hint": "You can also paste text or URLs to upload text snippets or media",
   "upload.drop_offline": "Service Unavailable",

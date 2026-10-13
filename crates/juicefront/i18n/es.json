@@ -39,6 +39,7 @@
   "upload.drop_primary": "Arrastra archivos aquí o haz clic para subir",
   "upload.drop_selected": "¡Archivo seleccionado! Listo para subir.",
   "upload.drop_secondary": "Los archivos se eliminarán automáticamente",
+  "upload.drop_secondary_encrypted": "Los archivos se cifran y se eliminarán automáticamente",
   "upload.drop_max": "Tamaño máximo: {size}",
   "upload.paste_hint": "También puedes pegar texto o URLs para subir fragmentos de texto o medios",
   "upload.drop_offline": "Servicio no disponible",

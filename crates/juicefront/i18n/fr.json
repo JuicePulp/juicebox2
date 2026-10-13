@@ -39,6 +39,7 @@
   "upload.drop_primary": "Déposez vos fichiers ici ou cliquez pour envoyer",
   "upload.drop_selected": "Fichier sélectionné ! Prêt à envoyer.",
   "upload.drop_secondary": "Les fichiers seront automatiquement supprimés",
+  "upload.drop_secondary_encrypted": "Les fichiers sont chiffrés et seront automatiquement supprimés",
   "upload.drop_max": "Taille max : {size}",
   "upload.paste_hint": "Vous pouvez aussi coller du texte ou des URL pour téléverser du texte ou des médias",
   "upload.drop_offline": "Service indisponible",

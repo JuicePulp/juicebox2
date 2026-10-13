@@ -150,6 +150,13 @@ body {
   z-index: 1;
 }
 
+.upload-card.is-encrypted {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0) 55%, rgba(249, 115, 22, 0.30) 100%),
+    linear-gradient(180deg, #2e2620 0%, #1a1613 100%);
+  border-color: var(--orange-600, #ea580c);
+}
+
 .upload-header {
   margin: 0 0 2rem;
   text-align: center;

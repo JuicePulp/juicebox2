@@ -30,7 +30,7 @@
 <div class="drop-text">
 <p class="drop-text-primary">{{ cx.t("upload.drop_primary") }}</p>
 <p class="drop-file-selected">{{ cx.t("upload.drop_selected") }}</p>
-<p class="drop-text-secondary">{{ cx.t("upload.drop_secondary") }}</p>
+<p class="drop-text-secondary" data-drop-text="{{ cx.t("upload.drop_secondary") }}" data-drop-text-encrypted="{{ cx.t("upload.drop_secondary_encrypted") }}">{{ cx.t("upload.drop_secondary") }}</p>
 <div class="drop-text-meta" data-drop-max-template="{{ cx.t("upload.drop_max") }}">{{ drop_max_html|safe }}</div>
 </div>
 <div class="drop-zone-offline">

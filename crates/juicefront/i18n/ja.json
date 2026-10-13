@@ -39,6 +39,7 @@
   "upload.drop_primary": "ここにファイルをドロップするか、クリックで選択",
   "upload.drop_selected": "ファイルを選んだね! アップロードの準備OK。",
   "upload.drop_secondary": "ファイルは自動で削除されるよ",
+  "upload.drop_secondary_encrypted": "ファイルは暗号化されて自動で削除されるよ",
   "upload.drop_max": "最大アップロードサイズ: {size}",
   "upload.paste_hint": "テキストやURLを貼り付ければ、スニペットやメディアもアップロードOK",
   "upload.drop_offline": "サービスを利用できません",

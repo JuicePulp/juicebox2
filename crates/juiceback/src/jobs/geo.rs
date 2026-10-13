@@ -112,6 +112,7 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
     if targets.is_empty() {
         return;
     }
+    tracing::info!("geo: resolving {} addresses", targets.len());
 
     // 3. Single batch call.
     let body: Vec<serde_json::Value> = targets
@@ -177,6 +178,7 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
             }
         }
         _ => {
+            tracing::warn!("geo: batch request failed, retrying next tick");
             // Transport failure: everything queued retries next tick.
             for t in &targets {
                 if let Some(id) = t.queue_id {
@@ -185,6 +187,11 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
             }
         }
     }
+    tracing::info!(
+        "geo: sweep done: {} resolved, {} retrying",
+        done_ids.len(),
+        retry_ids.len()
+    );
     if !done_ids.is_empty() {
         let _ = state
             .db_call("geo_delete_done", move |db| {
