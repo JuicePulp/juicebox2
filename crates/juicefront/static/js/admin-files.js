@@ -74,6 +74,7 @@
                     (f.uploader_ip_hash
                         ? '<a href="#" data-ban-trigger data-ban-hash="' + esc(f.uploader_ip_hash) + '">' + esc(f.uploader_ip_hash) + "</a>"
                         : "???") +
+                    (f.uploader_geo ? '<br><span class="tier-standard">' + esc(f.uploader_geo) + "</span>" : "") +
                 "</td>" +
                 "<td nowrap>" +
                     '<a href="' + esc(f.url) + '" target="_blank">View</a> | ' +

@@ -3,10 +3,11 @@ use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 use askama::Template;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Path, Query, State},
+    extract::{ConnectInfo, Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use serde::Deserialize;
 
 use crate::{
     cx::Cx,
@@ -875,6 +876,7 @@ struct FilesTpl {
     files: Vec<FileRow>,
 }
 
+#[derive(Clone)]
 struct FileRow {
     id: String,
     filename: String,
@@ -916,6 +918,135 @@ fn card_action(locale: &str, id: &str, label_key: &str, icon: &str, href: String
     }
 }
 
+#[derive(Deserialize)]
+pub struct RowsPair {
+    pub id: String,
+    pub token: String,
+}
+
+#[derive(Deserialize)]
+pub struct RowsRequest {
+    #[serde(default)]
+    pub pairs: Vec<RowsPair>,
+    pub locale: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "file_rows.html")]
+struct FileRowsTpl {
+    cx: Cx,
+    files: Vec<FileRow>,
+}
+
+#[derive(Template)]
+#[template(path = "file_modals.html")]
+struct FileModalsTpl {
+    cx: Cx,
+    files: Vec<FileRow>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn file_rows(
+    cx: &Cx,
+    locale: &'static str,
+    files: Vec<ServerFile>,
+    default_host: &String,
+    custom_id: bool,
+    timestamp: i64,
+    start_index: usize,
+) -> Vec<FileRow> {
+    files
+        .into_iter()
+        .enumerate()
+        .map(|(offset, file)| {
+            let index = start_index + offset;
+            let host = file.storage_host.clone().unwrap_or_default();
+
+            FileRow {
+                icon: cx.mime_icon(&file.mime_type),
+                meta: format!("{} - {}", cx.fmt_size(file.size_bytes), file.mime_type),
+                show_host: !host.is_empty()
+                    && !format::is_default_host(
+                        &host,
+                        Some(default_host)
+                            .filter(|h| !h.is_empty())
+                            .map(String::as_str),
+                    ),
+                host_short: host
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .to_owned(),
+                can_rename: custom_id && !file.url.is_empty(),
+                expired: file.expires_at * 1000 <= timestamp,
+                ttl_label: format::remaining_label(locale, file.expires_at, timestamp),
+                ttl_pct: format::pct_remaining(file.expires_at, file.uploaded_at, timestamp),
+                short_id: extract_short_id(&file.url),
+                id: file.id,
+                filename: file.filename,
+                size_bytes: file.size_bytes,
+                uploaded_at: file.uploaded_at,
+                expires_at: file.expires_at,
+                url: file.url,
+                delete_token: file.delete_token,
+                storage_host: host,
+                index,
+                protected: file.protected,
+            }
+        })
+        .collect()
+}
+
+pub async fn files_rows_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<RowsRequest>,
+) -> Response<Body> {
+    let locale: &'static str = match body.locale.as_deref() {
+        Some("fr") => "fr",
+        Some("ru") => "ru",
+        Some("es") => "es",
+        Some("ja") => "ja",
+        _ => "en",
+    };
+    let cx = Cx::new(locale);
+    let data = shared(&state, &headers, peer.ip()).await;
+    let pairs: Vec<serde_json::Value> = body
+        .pairs
+        .into_iter()
+        .take(500)
+        .filter(|pair| !pair.id.trim().is_empty() && !pair.token.trim().is_empty())
+        .map(|pair| serde_json::json!({ "id": pair.id, "token": pair.token }))
+        .collect();
+    let files = owned_files_for_pairs(&state, pairs).await;
+    let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
+    let custom_id = data.eff.config.custom_id.unwrap_or(true);
+    let rows = file_rows(
+        &cx,
+        locale,
+        files,
+        &default_host,
+        custom_id,
+        now_ms(),
+        0,
+    );
+    let cards = FileRowsTpl {
+        cx: cx.clone(),
+        files: rows.clone(),
+    }
+    .render()
+    .unwrap_or_default();
+    let modals = FileModalsTpl { cx, files: rows }.render().unwrap_or_default();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json; charset=utf-8")
+        .header("cache-control", "private, no-store")
+        .body(Body::from(
+            serde_json::json!({ "cards": cards, "modals": modals }).to_string(),
+        ))
+        .unwrap_or_default()
+}
+
 async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> {
     let Some(encoded) = cookie_value(headers, "jb_files") else {
         return Vec::new();
@@ -942,6 +1073,13 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
             })
         })
         .collect();
+    owned_files_for_pairs(state, pairs).await
+}
+
+async fn owned_files_for_pairs(
+    state: &AppState,
+    pairs: Vec<serde_json::Value>,
+) -> Vec<ServerFile> {
     if pairs.is_empty() {
         return Vec::new();
     }
@@ -1053,44 +1191,15 @@ pub async fn files_page(
     let mut server_files = server_files;
     // Newest uploads first.
     server_files.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
-    let rows: Vec<FileRow> = server_files
-        .into_iter()
-        .enumerate()
-        .map(|(index, file)| {
-            let host = file.storage_host.clone().unwrap_or_default();
-
-            FileRow {
-                icon: cx.mime_icon(&file.mime_type),
-                meta: format!("{} - {}", cx.fmt_size(file.size_bytes), file.mime_type),
-                show_host: !host.is_empty()
-                    && !format::is_default_host(
-                        &host,
-                        Some(&default_host)
-                            .filter(|h| !h.is_empty())
-                            .map(String::as_str),
-                    ),
-                host_short: host
-                    .trim_start_matches("http://")
-                    .trim_start_matches("https://")
-                    .to_owned(),
-                can_rename: custom_id && !file.url.is_empty(),
-                expired: file.expires_at * 1000 <= timestamp,
-                ttl_label: format::remaining_label(locale, file.expires_at, timestamp),
-                ttl_pct: format::pct_remaining(file.expires_at, file.uploaded_at, timestamp),
-                short_id: extract_short_id(&file.url),
-                id: file.id,
-                filename: file.filename,
-                size_bytes: file.size_bytes,
-                uploaded_at: file.uploaded_at,
-                expires_at: file.expires_at,
-                url: file.url,
-                delete_token: file.delete_token,
-                storage_host: host,
-                index,
-                protected: file.protected,
-            }
-        })
-        .collect();
+    let rows: Vec<FileRow> = file_rows(
+        &cx,
+        locale,
+        server_files,
+        &default_host,
+        custom_id,
+        timestamp,
+        0,
+    );
 
     let actions = vec![
         CardAction {

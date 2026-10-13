@@ -535,6 +535,7 @@ export function initFilesCard() {
   });
   updateEmptyState(card);
   updateOffline(card);
+  backfillMissing(card, locale);
   tickTtl(card, locale);
   setInterval(() => {
     if (document.hidden) return;
@@ -549,6 +550,73 @@ export function initFilesCard() {
     }
   });
   window.addEventListener("juicebox-app-mode", () => {});
+}
+
+async function backfillMissing(card, locale) {
+  // Local uploads the server never saw (cookie-capped, other device state
+  // merged here): fetch server-rendered cards and merge newest-first with
+  // streamed inserts so huge lists stay smooth.
+  const grid = card.querySelector("[data-files-grid]");
+  if (!grid) return;
+  const seen = new Set();
+  grid.querySelectorAll(".file-card").forEach((el) => {
+    const id = el.getAttribute("data-file-id");
+    if (id) seen.add(id);
+  });
+  const missing = getLocalFiles().filter((f) => f.id && !seen.has(f.id) && f.delete_token);
+  if (!missing.length) return;
+  let payload = null;
+  try {
+    const res = await fetch("/files/rows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pairs: missing.slice(0, 500).map((f) => ({ id: f.id, token: f.delete_token })),
+        locale,
+      }),
+    });
+    if (!res.ok) return;
+    payload = await res.json();
+  } catch { return; }
+  if (!payload || (!payload.cards && !payload.modals)) return;
+  const tpl = document.createElement("template");
+  tpl.innerHTML = (payload.cards || "").trim();
+  const nodes = Array.from(tpl.content.querySelectorAll(".file-card"));
+  if (!nodes.length) return;
+  if (payload.modals && payload.modals.trim()) {
+    const mwrap = document.createElement("div");
+    mwrap.innerHTML = payload.modals;
+    card.appendChild(mwrap);
+  }
+  const all = Array.from(grid.querySelectorAll(".file-card")).concat(nodes);
+  all.sort((a, b) => (Number(b.getAttribute("data-uploaded")) || 0) - (Number(a.getAttribute("data-uploaded")) || 0));
+  grid.hidden = false;
+  while (grid.firstChild) grid.removeChild(grid.firstChild);
+  let i = 0;
+  const step = () => {
+    const frag = document.createDocumentFragment();
+    for (let n = 0; n < 40 && i < all.length; n++, i++) frag.appendChild(all[i]);
+    grid.appendChild(frag);
+    if (i < all.length) {
+      requestAnimationFrame(step);
+      return;
+    }
+    nodes.forEach((el) => {
+      const data = {
+        id: el.getAttribute("data-file-id") || "",
+        delete_token: el.getAttribute("data-delete-token") || "",
+        filename: el.getAttribute("data-filename") || "",
+        size_bytes: Number(el.getAttribute("data-size")) || 0,
+        uploaded_at: Number(el.getAttribute("data-uploaded")) || 0,
+        expires_at: Number(el.getAttribute("data-expires")) || 0,
+        url: el.getAttribute("data-url") || "",
+        storage_host: el.getAttribute("data-storage-host") || "",
+      };
+      enhanceCard(card, el, data, locale);
+    });
+    updateEmptyState(card);
+  };
+  step();
 }
 
 function maybeInit() {

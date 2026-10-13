@@ -470,7 +470,15 @@ fn zip_listing_html(
     archive_id: &str,
     download_url: &str,
     entries: &[super::zip_list::ZipEntry],
+    locked: bool,
 ) -> String {
+    if entries.is_empty() && locked {
+        return format!(
+            "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><p class=\"dl-name\">Locked archive</p><p class=\"dl-meta\">Password required to browse - download it to open</p><a class=\"dl-btn\" href=\"{}\">Download</a></div>",
+            juiceutils::icons::DOWNLOAD_ART,
+            escape_html(download_url),
+        );
+    }
     const SHOWN: usize = 500;
     let mut rows = String::with_capacity(entries.len().min(SHOWN) * 96);
     for entry in entries.iter().take(SHOWN) {
@@ -707,7 +715,14 @@ async fn preview_file_inner(
     let zip_html = if kind == PreviewKind::Zip {
         super::zip_list::load_archive_entries(&state.storage, id, &filename, meta.size)
             .await
-            .map(|entries| zip_listing_html(id, &download_url, &entries))
+            .map(|listing| {
+                zip_listing_html(
+                    id,
+                    &download_url,
+                    &listing.entries,
+                    listing.locked,
+                )
+            })
     } else {
         None
     };

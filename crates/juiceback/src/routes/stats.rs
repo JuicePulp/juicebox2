@@ -66,6 +66,31 @@ pub async fn hit_handler(
             db::record_file_hit(db, &body.file_id, &ip_hash, kind, now)
         })
         .await?;
+    // Geo runs detached so hits stay fast: encrypt + queue for the worker.
+    {
+        let geo_state = Arc::clone(&state);
+        let geo_ip = body.ip.clone();
+        tokio::spawn(async move {
+            let Ok(addr) = geo_ip.parse::<std::net::IpAddr>() else {
+                return;
+            };
+            if !crate::storage_client::is_public_ip(addr) {
+                return;
+            }
+            let Some(enc) =
+                crate::utils::encrypt_ip(&geo_ip, &geo_state.config.ip_encryption_key)
+            else {
+                return;
+            };
+            let hash = juiceutils::ban::hash_ip_for_ban(&geo_ip, &geo_state.config.ip_pepper);
+            let now = chrono::Utc::now().timestamp();
+            let _ = geo_state
+                .db_call("geo_enqueue", move |db| {
+                    db::geo::enqueue_geo_ip(db, &enc, &hash, now)
+                })
+                .await;
+        });
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -17,9 +17,11 @@ pub struct ZipEntry {
     pub name: String,
     pub size: Option<u64>,
     pub is_dir: bool,
-
-
+    /// DOS modification stamp as `"YYYY-MM-DD HH:MM"`, if the entry carries
+    /// a sane one.
     pub modified: Option<String>,
+    /// Bit 0 of the entry flags: contents are encrypted.
+    pub encrypted: bool,
 
     pub method: u16,
 
@@ -151,6 +153,7 @@ fn parse_entries(cd: &[u8], count: usize) -> Option<Vec<ZipEntry>> {
         let header_offset = u32le(&cd[pos + 42..pos + 46]);
         let mod_time = u16le(&cd[pos + 12..pos + 14]);
         let mod_date = u16le(&cd[pos + 14..pos + 16]);
+        let enc_flag = u16le(&cd[pos + 8..pos + 10]) & 0x01 != 0;
         let name_len = u16le(&cd[pos + 28..pos + 30]) as usize;
         let extra_len = u16le(&cd[pos + 30..pos + 32]) as usize;
         let comment_len = u16le(&cd[pos + 32..pos + 34]) as usize;
@@ -174,6 +177,7 @@ fn parse_entries(cd: &[u8], count: usize) -> Option<Vec<ZipEntry>> {
                 size,
                 is_dir,
                 modified: dos_datetime(mod_time, mod_date),
+                encrypted: enc_flag,
                 method,
                 comp_size,
                 header_offset,
@@ -215,12 +219,19 @@ const TAR_CHUNK: u64 = 65_536;
 /// directory, 7z buffers for random access, tar streams from the front,
 /// gzip exposes its single member. Anything else (rar, …) falls back to
 /// the plain download hero.
+pub struct ArchiveListing {
+    pub entries: Vec<ZipEntry>,
+    /// True when the archive is password-locked (as opposed to corrupt or
+    /// unsupported): the page can say so instead of failing silently.
+    pub locked: bool,
+}
+
 pub async fn load_archive_entries(
     storage: &Arc<dyn StorageBackend>,
     id: &str,
     filename: &str,
     file_size: u64,
-) -> Option<Vec<ZipEntry>> {
+) -> Option<ArchiveListing> {
     let ext = filename
         .rsplit('.')
         .next()
@@ -228,9 +239,23 @@ pub async fn load_archive_entries(
         .to_ascii_lowercase();
     match ext.as_str() {
         "7z" => load_7z_entries(storage, id, file_size).await,
-        "tar" => load_tar_entries(storage, id, file_size).await,
-        "gz" | "tgz" => load_gz_entry(storage, id, filename, file_size).await,
-        _ => load_zip_entries(storage, id, file_size).await,
+        "tar" => load_tar_entries(storage, id, file_size)
+            .await
+            .map(|entries| ArchiveListing {
+                entries,
+                locked: false,
+            }),
+        "gz" | "tgz" => load_gz_entry(storage, id, filename, file_size)
+            .await
+            .map(|entries| ArchiveListing {
+                entries,
+                locked: false,
+            }),
+        _ => {
+            let entries = load_zip_entries(storage, id, file_size).await?;
+            let locked = entries.iter().any(|e| e.encrypted);
+            Some(ArchiveListing { entries, locked })
+        }
     }
 }
 
@@ -238,38 +263,51 @@ async fn load_7z_entries(
     storage: &Arc<dyn StorageBackend>,
     id: &str,
     file_size: u64,
-) -> Option<Vec<ZipEntry>> {
+) -> Option<ArchiveListing> {
     if file_size < 32 || file_size > MAX_7Z_BYTES {
         return None;
     }
     let bytes = read_range_capped(storage, id, 0, file_size - 1, MAX_7Z_BYTES).await?;
-    tokio::task::spawn_blocking(move || {
+    let parsed = tokio::task::spawn_blocking(move || {
         let cursor = std::io::Cursor::new(bytes.to_vec());
         let reader =
-            sevenz_rust::SevenZReader::new(cursor, file_size, sevenz_rust::Password::empty())
-                .ok()?;
-        let mut out = Vec::new();
-        for f in reader.archive().files.iter() {
-            if f.name.is_empty() || f.is_anti_item {
-                continue;
+            sevenz_rust::SevenZReader::new(cursor, file_size, sevenz_rust::Password::empty());
+        reader.map(|reader| {
+            let mut out = Vec::new();
+            for f in reader.archive().files.iter() {
+                if f.name.is_empty() || f.is_anti_item {
+                    continue;
+                }
+                out.push(ZipEntry {
+                    name: f.name.clone(),
+                    size: if f.is_directory { None } else { Some(f.size) },
+                    is_dir: f.is_directory,
+                    modified: None,
+                    encrypted: false,
+                    method: 0xFFFF,
+                    comp_size: 0,
+                    header_offset: 0,
+                });
+                if out.len() >= MAX_ENTRIES {
+                    break;
+                }
             }
-            out.push(ZipEntry {
-                name: f.name.clone(),
-                size: if f.is_directory { None } else { Some(f.size) },
-                is_dir: f.is_directory,
-                modified: None,
-                method: 0xFFFF,
-                comp_size: 0,
-                header_offset: 0,
-            });
-            if out.len() >= MAX_ENTRIES {
-                break;
-            }
-        }
-        if out.is_empty() { None } else { Some(out) }
+            out
+        })
     })
     .await
-    .ok()?
+    .ok()?;
+    match parsed {
+        Ok(entries) if !entries.is_empty() => Some(ArchiveListing {
+            entries,
+            locked: false,
+        }),
+        Err(sevenz_rust::Error::PasswordRequired) => Some(ArchiveListing {
+            entries: Vec::new(),
+            locked: true,
+        }),
+        _ => None,
+    }
 }
 
 fn parse_octal(raw: &[u8]) -> Option<u64> {
@@ -344,6 +382,7 @@ async fn load_tar_entries(
             size: if is_dir { None } else { Some(size) },
             is_dir,
             modified: None,
+            encrypted: false,
             method: 0xFFFF,
             comp_size: 0,
             header_offset: 0,
@@ -430,6 +469,7 @@ async fn load_gz_entry(
         size: Some(isize),
         is_dir: false,
         modified: None,
+        encrypted: false,
         method: 0xFFFF,
         comp_size: 0,
         header_offset: 0,

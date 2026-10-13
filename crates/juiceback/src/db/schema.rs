@@ -41,7 +41,31 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("files.per_file_dek", m11_files_per_file_dek),
     ("visitor_stats", m12_visitor_stats),
     ("files.hot_tier", m13_files_hot_tier),
+    ("ip_geolocation", m14_ip_geolocation),
 ];
+
+fn m14_ip_geolocation(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ip_location (
+            ip_hash       TEXT PRIMARY KEY,
+            country       TEXT NOT NULL DEFAULT '',
+            region        TEXT NOT NULL DEFAULT '',
+            city          TEXT NOT NULL DEFAULT '',
+            lat           REAL NOT NULL DEFAULT 0,
+            lon           REAL NOT NULL DEFAULT 0,
+            resolved_at   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS geo_queue (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            enc_ip        TEXT NOT NULL,
+            ip_hash       TEXT NOT NULL,
+            attempts      INTEGER NOT NULL DEFAULT 0,
+            enqueued_at   INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_geo_queue_hash ON geo_queue(ip_hash);",
+    )?;
+    Ok(())
+}
 
 fn apply_migrations(conn: &Connection) -> Result<()> {
     schema_version(conn)?;

@@ -191,6 +191,13 @@ fn main() {
             juiceback::jobs::cleanup::run_cleanup_loop(state_cleanup).await;
         });
 
+        {
+            let state_geo = Arc::clone(&state);
+            tokio::spawn(async move {
+                juiceback::jobs::geo::run_geo_loop(state_geo).await;
+            });
+        }
+
         if state.config.r2_enabled {
             let state_promo = Arc::clone(&state);
             tokio::spawn(async move {

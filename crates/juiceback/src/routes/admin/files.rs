@@ -27,6 +27,8 @@ pub struct AdminFileEntry {
 
     pub uploader_ip_hash: Option<String>,
 
+    pub uploader_geo: Option<String>,
+
     pub url: String,
 
     pub storage_host: Option<String>,
@@ -157,6 +159,23 @@ pub async fn list_files_handler(
         .await?;
     let official = crate::jobs::promo::official_hosts(&state);
     let now = chrono::Utc::now().timestamp();
+    let mut full_hash_by_id: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut geo_needed: Vec<String> = Vec::new();
+    for r in &records {
+        if let Some(enc) = r.uploader_ip.as_ref()
+            && let Some(ip) = crate::utils::decrypt_ip(enc, &state.config.ip_encryption_key)
+        {
+            let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
+            geo_needed.push(h.clone());
+            full_hash_by_id.insert(r.id.clone(), h);
+        }
+    }
+    let geo_by_hash = state
+        .db_call("geo_lookup", move |db| {
+            db::geo::ip_locations_for_hashes(db, &geo_needed)
+        })
+        .await?;
 
     let files: Vec<AdminFileEntry> = records
         .into_iter()
@@ -176,6 +195,20 @@ pub async fn list_files_handler(
                     let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
                     crate::utils::truncate_hash(&h).to_string()
                 });
+            let uploader_geo = full_hash_by_id
+                .get(r.id.as_str())
+                .and_then(|h| geo_by_hash.get(h.as_str()))
+                .map(|g| {
+                    let mut parts: Vec<&str> = Vec::new();
+                    if !g.city.is_empty() {
+                        parts.push(g.city.as_str());
+                    }
+                    if !g.country.is_empty() {
+                        parts.push(g.country.as_str());
+                    }
+                    parts.join(", ")
+                })
+                .filter(|s| !s.is_empty());
             let tier_state = match (
                 r.tier.as_str(),
                 promo_eligible(
@@ -201,6 +234,7 @@ pub async fn list_files_handler(
                 uploaded_at: r.uploaded_at,
                 expires_at: r.expires_at,
                 uploader_ip_hash: ip_hash,
+                uploader_geo,
                 url,
                 storage_host: r.storage_host,
                 tier: r.tier.clone(),
