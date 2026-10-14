@@ -474,7 +474,7 @@ fn zip_listing_html(
 ) -> String {
     if entries.is_empty() && locked {
         return format!(
-            "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><p class=\"dl-name\">Locked archive</p><p class=\"dl-meta\">Password required to browse - download it to open</p><a class=\"dl-btn\" href=\"{}\">Download</a></div>",
+            "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><a class=\"dl-btn\" href=\"{}\">Download</a></div>",
             juiceutils::icons::DOWNLOAD_ART,
             escape_html(download_url),
         );
