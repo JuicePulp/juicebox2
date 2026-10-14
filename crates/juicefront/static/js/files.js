@@ -148,7 +148,7 @@ function renameModalHtml(f, locale) {
     '<div id="rename-' + esc(f.id) + '" class="mdloverlay mdl-target rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title-' + esc(f.id) + '">' +
     '<a href="#!" class="mdl-target__backdrop" aria-label="' + esc(t(locale, "modal.close")) + '"></a>' +
     '<div class="mdlcontent"><div class="mdlheader"><h2 id="rename-title-' + esc(f.id) + '" class="mdltitle">' + esc(t(locale, "files.rename")) + '</h2>' +
-    '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">×</a></div>' +
+    '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">x</a></div>' +
     '<form class="rename-form" method="POST" action="/file/' + esc(f.id) + '/rename"><div class="mdlbody">' +
     '<input type="hidden" name="token" value="' + esc(f.delete_token) + '">' +
     '<div class="form-field"><label class="form-label" for="rename-input-' + esc(f.id) + '">' + esc(t(locale, "files.rename_placeholder")) + '</label>' +

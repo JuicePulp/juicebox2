@@ -154,7 +154,7 @@ impl Drop for CleanupOnDrop {
 
 /// (host, port) pairs the operator configured for cobalt. Cobalt builds its
 /// tunnel URLs from its own `API_URL` host, which is loopback on self-hosted
-/// installs — without this carve-out every cobalt fetch dies in the SSRF
+/// installs - without this carve-out every cobalt fetch dies in the SSRF
 /// guard below.
 fn configured_cobalt_hosts(config: &crate::config::Config) -> Vec<(String, u16)> {
     let mut out = Vec::new();

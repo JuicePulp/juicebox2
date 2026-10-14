@@ -94,12 +94,12 @@
         var statusEl = document.getElementById("files-status");
         if (!statusEl) return;
         if (isLoadingMore) {
-            statusEl.textContent = "Loading more… (" + allFiles.length + " / " + currentTotal + ")";
+            statusEl.textContent = "Loading more... (" + allFiles.length + " / " + currentTotal + ")";
             return;
         }
         var filtered = filterByType(allFiles);
         if (currentTotal > allFiles.length) {
-            statusEl.textContent = "Showing " + Math.min(displayedCount, filtered.length) + " of " + filtered.length + " loaded (total: " + currentTotal + ") — scroll for more";
+            statusEl.textContent = "Showing " + Math.min(displayedCount, filtered.length) + " of " + filtered.length + " loaded (total: " + currentTotal + ") - scroll for more";
         } else {
             statusEl.textContent = filtered.length + " file" + (filtered.length !== 1 ? "s" : "");
         }
@@ -201,7 +201,7 @@
             if ("IntersectionObserver" in window) {
                 html += '<div id="files-sentinel" style="height:1px" aria-hidden="true"></div>';
                 if (isLoadingMore) {
-                    html += '<div style="text-align:center;margin:0.75rem 0;color:#888">Loading more…</div>';
+                    html += '<div style="text-align:center;margin:0.75rem 0;color:#888">Loading more...</div>';
                 }
             } else {
                 html += '<div style="text-align:center;margin:0.75rem 0">' +

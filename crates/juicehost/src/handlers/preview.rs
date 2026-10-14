@@ -262,7 +262,7 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
         return value.to_string();
     }
     let truncated: String = value.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{truncated}…")
+    format!("{truncated}...")
 }
 
 fn embed_gallery_supported(kind: PreviewKind, extension: &str) -> bool {
