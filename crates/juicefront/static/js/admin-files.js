@@ -1,5 +1,5 @@
 
-    var PAGE = 50;
+    var PAGE = 200;
     var allFiles = [];
     var displayedCount = 0;
     var currentTotal = 0;
