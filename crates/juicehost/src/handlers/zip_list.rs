@@ -17,10 +17,7 @@ pub struct ZipEntry {
     pub name: String,
     pub size: Option<u64>,
     pub is_dir: bool,
-    /// DOS modification stamp as `"YYYY-MM-DD HH:MM"`, if the entry carries
-    /// a sane one.
     pub modified: Option<String>,
-    /// Bit 0 of the entry flags: contents are encrypted.
     pub encrypted: bool,
 
     pub method: u16,
@@ -207,22 +204,13 @@ pub async fn load_zip_entries(
     parse_entries(&cd, count)
 }
 
-/// Whole-file cap for 7z listings (the format needs random access, so the
-/// bytes must be buffered, not streamed).
 const MAX_7Z_BYTES: u64 = 32 * 1024 * 1024;
-/// Streaming tar scan budget and entry cap.
 const MAX_TAR_SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TAR_ENTRIES: usize = 1_000;
 const TAR_CHUNK: u64 = 65_536;
 
-/// List archive contents by filename extension. ZIP reads its central
-/// directory, 7z buffers for random access, tar streams from the front,
-/// gzip exposes its single member. Anything else (rar, …) falls back to
-/// the plain download hero.
 pub struct ArchiveListing {
     pub entries: Vec<ZipEntry>,
-    /// True when the archive is password-locked (as opposed to corrupt or
-    /// unsupported): the page can say so instead of failing silently.
     pub locked: bool,
 }
 
@@ -306,6 +294,14 @@ async fn load_7z_entries(
             entries: Vec::new(),
             locked: true,
         }),
+        Err(sevenz_rust::Error::UnsupportedCompressionMethod(method))
+            if method == "AES256SHA256" =>
+        {
+            Some(ArchiveListing {
+                entries: Vec::new(),
+                locked: true,
+            })
+        }
         _ => None,
     }
 }
@@ -339,7 +335,6 @@ async fn load_tar_entries(
         if data.len() - off < 512 {
             break;
         }
-        // Compact consumed prefix so memory stays bounded.
         if off > 1_048_576 {
             data.drain(..off);
             off = 0;
@@ -362,17 +357,13 @@ async fn load_tar_entries(
             break;
         }
         if !ustar && off > 0 {
-            // Trailing garbage after real entries: stop, keep what we have.
             break;
         }
         if !ustar && size.is_none() {
-            // Not a tar at all.
             return None;
         }
         let size = size.unwrap_or(0);
         let is_dir = typeflag == '5' || name.ends_with('/');
-        // Pax/special headers carry no content of their own here; the size
-        // field still tells how far to skip.
         if matches!(typeflag, 'x' | 'g') {
             off += 512 + pad512(size);
             continue;
