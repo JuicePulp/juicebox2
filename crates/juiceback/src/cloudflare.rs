@@ -70,7 +70,10 @@ pub fn cache_variants(
     tier: &str,
     r2_key: &str,
 ) -> Vec<String> {
-    let mut urls = vec![crate::utils::public_url(
+    // Edge caches /f/ + /d/ bytes (the cacheable surfaces). /v/ is no-store
+    // HTML but purged anyway in case a Cache Rule ever caches it.
+    // Each host gets all three path variants so no stale bytes survive delete.
+    let mut bases = vec![crate::utils::public_url(
         &config.public_base_url,
         storage_host,
         id,
@@ -82,7 +85,16 @@ pub fn cache_variants(
             .as_deref()
             .filter(|s| !s.trim().is_empty())
         {
-            urls.push(crate::utils::public_url(router, None, id, filename));
+            bases.push(crate::utils::public_url(router, None, id, filename));
+        }
+    }
+    let mut urls = Vec::with_capacity(bases.len() * 3 + 1);
+    for v_url in bases {
+        urls.push(v_url.clone());
+        if let Some(stem) = v_url.split_once("/v/") {
+            // public_url always emits /v/{id}[.ext]; derive byte variants.
+            urls.push(format!("{}/f/{}", stem.0, stem.1));
+            urls.push(format!("{}/d/{}", stem.0, stem.1));
         }
     }
     if tier == "hot" && !r2_key.is_empty() && !config.r2_public_base_url.is_empty() {

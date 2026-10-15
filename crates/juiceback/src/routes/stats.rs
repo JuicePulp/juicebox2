@@ -34,6 +34,10 @@ pub struct HitRequest {
     
     
     pub ip: String,
+    /// Where the hit came from: `preview` (/v/ render), `view` (/f/ GET),
+    /// `download` (/d/ GET). Only preview/view feed embed-promotion.
+    #[serde(default)]
+    pub surface: Option<String>,
 }
 
 #[utoipa::path(
@@ -61,11 +65,25 @@ pub async fn hit_handler(
     }
     let ip_hash = crate::utils::hash_ip_for_ban(&body.ip, &state.config.ip_pepper);
     let now = chrono::Utc::now().timestamp();
+    let hit_file_id = body.file_id.clone();
     state
         .db_call("record_file_hit", move |db| {
-            db::record_file_hit(db, &body.file_id, &ip_hash, kind, now)
+            db::record_file_hit(db, &hit_file_id, &ip_hash, kind, now)
         })
         .await?;
+    // Promote-on-first-embed: preview renders + first non-bot /f/ views seed
+    // R2 for small previewable files. Downloads never qualify. Detached so
+    // hits stay fast; all gates re-checked inside.
+    if kind == db::HitKind::View {
+        let surface = body.surface.as_deref().unwrap_or("view").to_string();
+        if surface == "preview" || surface == "view" {
+            let embed_state = Arc::clone(&state);
+            let embed_id = body.file_id.clone();
+            tokio::spawn(async move {
+                crate::jobs::promo::maybe_embed_promote(&embed_state, &embed_id).await;
+            });
+        }
+    }
     // Geo runs detached so hits stay fast: encrypt + queue for the worker.
     {
         let geo_state = Arc::clone(&state);

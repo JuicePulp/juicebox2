@@ -39,6 +39,8 @@ pub struct AdminFileEntry {
 
     pub tier_state: String,
 
+    pub tier_pinned: bool,
+
     pub encrypted: bool,
 
     pub protected: bool,
@@ -69,6 +71,8 @@ pub struct AdminFilesResponse {
 /// Display tier for the admin list. Mirrors the promoter's per-file gates
 /// (minus R2 caps, which are global): a standard file meeting the bar reads
 /// "warming", a hot file missing it reads "cooling".
+/// Manually pinned files always read their real tier so a manual Warm/Cool
+/// visibly sticks instead of flipping back to warming/cooling.
 fn promo_eligible(
     config: &crate::config::Config,
     official: &std::collections::HashSet<String>,
@@ -77,6 +81,9 @@ fn promo_eligible(
     seen: Option<&(i64, i64, i64)>,
     now: i64,
 ) -> bool {
+    if record.tier_pinned {
+        return false;
+    }
     if record.status != "ready" {
         return false;
     }
@@ -209,23 +216,27 @@ pub async fn list_files_handler(
                     parts.join(", ")
                 })
                 .filter(|s| !s.is_empty());
-            let tier_state = match (
-                r.tier.as_str(),
-                promo_eligible(
-                    &state.config,
-                    &official,
-                    &r,
-                    stats_by_id.get(r.id.as_str()),
-                    promo_seen.get(r.id.as_str()),
-                    now,
-                ),
-            ) {
-                ("hot", true) => "hot",
-                ("hot", false) => "cooling",
-                (_, true) => "warming",
-                (tier, false) => tier,
-            }
-            .to_string();
+            let tier_state = if r.tier_pinned {
+                r.tier.clone()
+            } else {
+                match (
+                    r.tier.as_str(),
+                    promo_eligible(
+                        &state.config,
+                        &official,
+                        &r,
+                        stats_by_id.get(r.id.as_str()),
+                        promo_seen.get(r.id.as_str()),
+                        now,
+                    ),
+                ) {
+                    ("hot", true) => "hot",
+                    ("hot", false) => "cooling",
+                    (_, true) => "warming",
+                    (tier, false) => tier,
+                }
+                .to_string()
+            };
             AdminFileEntry {
                 id: r.id.clone(),
                 filename: r.filename,
@@ -240,6 +251,7 @@ pub async fn list_files_handler(
                 tier: r.tier.clone(),
                 hot: r.tier == "hot",
                 tier_state,
+                tier_pinned: r.tier_pinned,
                 encrypted: r.is_encrypted,
                 protected: r.password_hash.is_some(),
                 viewers: stats_by_id.get(r.id.as_str()).map_or(0, |s| s.viewers),
@@ -330,7 +342,7 @@ pub async fn warm_file_handler(
         .await
         .map_err(AppError::Internal)?;
     tracing::info!("admin warm: id={id}");
-    Ok(Json(serde_json::json!({ "tier": "hot" })))
+    Ok(Json(serde_json::json!({ "tier": "hot", "tier_pinned": true })))
 }
 
 #[utoipa::path(
@@ -356,7 +368,7 @@ pub async fn cool_file_handler(
         .await
         .map_err(AppError::Internal)?;
     tracing::info!("admin cool: id={id}");
-    Ok(Json(serde_json::json!({ "tier": "standard" })))
+    Ok(Json(serde_json::json!({ "tier": "standard", "tier_pinned": true })))
 }
 
 #[utoipa::path(

@@ -30,7 +30,13 @@ pub(crate) async fn viewer_ip_middleware(
     next.run(req).await
 }
 
-pub(crate) fn report_file_hit(state: &AppState, file_id: &str, kind: &'static str, ip: &str) {
+pub(crate) fn report_file_hit(
+    state: &AppState,
+    file_id: &str,
+    kind: &'static str,
+    ip: &str,
+    surface: &'static str,
+) {
     let Some(ref backend_url) = state.backend_url else {
         return;
     };
@@ -41,6 +47,7 @@ pub(crate) fn report_file_hit(state: &AppState, file_id: &str, kind: &'static st
         "file_id": file_id,
         "kind": kind,
         "ip": ip,
+        "surface": surface,
     });
     tokio::spawn(async move {
         let mut request = client.post(url).json(&body).timeout(Duration::from_secs(2));

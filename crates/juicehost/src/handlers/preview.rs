@@ -754,10 +754,12 @@ async fn preview_file_inner(
     
     
     if method == Method::GET
-        && !is_bot(&headers)
+        && (!is_bot(&headers) || is_discordbot(&headers))
         && let Some(ip) = viewer_ip.as_deref()
     {
-        report_file_hit(&state, id, "view", ip);
+        // Preview renders seed embed-promotion (humans + Discord unfurls).
+        // Generic bots stay excluded to avoid promote abuse via curl loops.
+        report_file_hit(&state, id, "view", ip, "preview");
     }
     Ok(response)
 }

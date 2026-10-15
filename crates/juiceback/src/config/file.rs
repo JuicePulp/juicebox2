@@ -211,6 +211,17 @@ pub struct PromoFile {
     pub min_ttl_remaining_secs: i64,
     #[serde(default = "default_promo_dry_run")]
     pub dry_run: bool,
+    /// Promote-on-first-embed: small previewable files go hot on preview
+    /// render / first non-bot view. Velocity promoter still owns sustained
+    /// hot; this only seeds it. Respects `dry_run` above.
+    #[serde(default = "default_embed_enabled")]
+    pub embed_enabled: bool,
+    #[serde(default = "default_embed_max_bytes")]
+    pub embed_max_bytes: u64,
+    #[serde(default = "default_embed_cooldown_secs")]
+    pub embed_cooldown_secs: i64,
+    #[serde(default = "default_embed_min_ttl_remaining_secs")]
+    pub embed_min_ttl_remaining_secs: i64,
 }
 
 fn default_host() -> String {
@@ -345,6 +356,22 @@ const fn default_promo_dry_run() -> bool {
     true
 }
 
+const fn default_embed_enabled() -> bool {
+    true
+}
+
+const fn default_embed_max_bytes() -> u64 {
+    25 * 1024 * 1024
+}
+
+const fn default_embed_cooldown_secs() -> i64 {
+    6 * 3600
+}
+
+const fn default_embed_min_ttl_remaining_secs() -> i64 {
+    3600
+}
+
 impl Default for FileConfig {
     fn default() -> Self {
         Self {
@@ -461,6 +488,10 @@ impl Default for PromoFile {
             min_views_per_min: default_promo_min_views_per_min(),
             min_ttl_remaining_secs: default_promo_min_ttl_remaining_secs(),
             dry_run: default_promo_dry_run(),
+            embed_enabled: default_embed_enabled(),
+            embed_max_bytes: default_embed_max_bytes(),
+            embed_cooldown_secs: default_embed_cooldown_secs(),
+            embed_min_ttl_remaining_secs: default_embed_min_ttl_remaining_secs(),
         }
     }
 }

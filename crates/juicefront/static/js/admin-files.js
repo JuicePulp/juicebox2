@@ -46,10 +46,11 @@
 
     function tierBadge(f) {
         var st = f.tier_state || (f.hot ? "hot" : (f.tier || "standard"));
-        if (st === "hot") return '<span class="hot-badge">HOT</span>';
+        var pinned = f.tier_pinned ? ' <span class="tier-standard" title="Manually set — auto-promoter skips this file">pinned</span>' : '';
+        if (st === "hot") return '<span class="hot-badge">HOT</span>' + pinned;
         if (st === "warming") return '<span class="tier-badge tier-warming">WARMING</span>';
         if (st === "cooling") return '<span class="tier-badge tier-cooling">COOLING</span>';
-        return '<span class="tier-standard">' + esc(f.tier || "standard") + "</span>";
+        return '<span class="tier-standard">' + esc(f.tier || "standard") + "</span>" + pinned;
     }
 
     function renderRows(files) {
@@ -346,6 +347,9 @@
             if (entry) {
                 entry.tier = body.tier || (action === "warm" ? "hot" : "standard");
                 entry.hot = entry.tier === "hot";
+                // Manual Warm/Cool pins the tier server-side; reflect that
+                // locally so the badge stays put until the next manual change.
+                entry.tier_pinned = body.tier_pinned !== undefined ? !!body.tier_pinned : true;
                 entry.tier_state = entry.tier;
             }
             renderTable();

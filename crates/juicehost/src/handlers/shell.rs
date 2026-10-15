@@ -89,19 +89,34 @@ impl ShellMode {
 
 pub(crate) enum GateDecision {
     Respond(Response<Body>),
-    HotRedirect(String),
+    /// Serve bytes from R2 under the existing /f/ (or /d/) URL.
+    /// No public /hot/ endpoint: the R2 key is fetched server-side.
+    HotServe { key: String },
     ServeLocal,
 }
 
-fn hot_r2_url(body: &serde_json::Value) -> Option<String> {
+fn hot_r2_key(body: &serde_json::Value) -> Option<String> {
     if body.get("tier").and_then(|v| v.as_str()) != Some("hot") {
         return None;
     }
-    let url = body.get("r2_url").and_then(|v| v.as_str()).unwrap_or("");
-    let valid = url
-        .parse::<url::Url>()
-        .is_ok_and(|u| u.scheme() == "http" || u.scheme() == "https");
-    if valid { Some(url.to_string()) } else { None }
+    let key = body.get("r2_key").and_then(|v| v.as_str()).unwrap_or("");
+    if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
+        return None;
+    }
+    // Only the promoter-written prefix is served (hot/{id}.{ext}).
+    if !key.starts_with("hot/") {
+        return None;
+    }
+    if !key.split('/').all(|seg| {
+        !seg.is_empty()
+            && seg.len() <= 128
+            && seg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    }) {
+        return None;
+    }
+    Some(key.to_string())
 }
 
 pub(crate) async fn gate_decision(
@@ -136,7 +151,7 @@ pub(crate) async fn gate_decision(
                 .and_then(|v| v.as_u64())
                 .map(super::preview::human_size)
                 .unwrap_or_default();
-            let ciphertext_url = hot_r2_url(&body).unwrap_or_else(|| format!("/c/{id}"));
+            let ciphertext_url = format!("/c/{id}");
             GateDecision::Respond(render_shell(
                 &filename,
                 id,
@@ -148,8 +163,8 @@ pub(crate) async fn gate_decision(
                 page_url,
             ))
         }
-        BackendStatus::Known(body) => match hot_r2_url(&body) {
-            Some(url) => GateDecision::HotRedirect(url),
+        BackendStatus::Known(body) => match hot_r2_key(&body) {
+            Some(key) => GateDecision::HotServe { key },
             None => GateDecision::ServeLocal,
         },
         BackendStatus::Unknown => GateDecision::ServeLocal,
@@ -172,7 +187,7 @@ pub(crate) async fn protected_shell_response(
 ) -> Option<Response<Body>> {
     match gate_decision(state, id, mode, page_url).await {
         GateDecision::Respond(resp) => Some(resp),
-        GateDecision::HotRedirect(_) | GateDecision::ServeLocal => None,
+        GateDecision::HotServe { .. } | GateDecision::ServeLocal => None,
     }
 }
 

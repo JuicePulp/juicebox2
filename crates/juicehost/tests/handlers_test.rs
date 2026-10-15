@@ -1836,7 +1836,7 @@ async fn preview_missing_and_protected() {
 }
 
 #[tokio::test]
-async fn hot_file_redirects_to_r2() {
+async fn hot_file_serves_via_f_without_hot_endpoint() {
     let dir = tempfile::tempdir().unwrap();
     let backend = mock_backend(
         200,
@@ -1844,6 +1844,7 @@ async fn hot_file_redirects_to_r2() {
             "protected": false,
             "filename": "hot.txt",
             "tier": "hot",
+            "r2_key": "hot/hot00001.txt",
             "r2_url": "https://r.example/hot/hot00001.txt",
         }),
     )
@@ -1852,11 +1853,18 @@ async fn hot_file_redirects_to_r2() {
     let app = build_router(state);
     store_bytes(&app, "hot00001", b"local-bytes").await;
 
-    let (status, headers, _) = get_public(&app, "/f/hot00001.txt", None).await;
-    assert_eq!(status, StatusCode::FOUND);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some("https://r.example/hot/hot00001.txt")
+    // No public /hot/ endpoint: /f/ serves bytes directly (here the local
+    // fallback, since tests configure no R2 client). Must not 302 to R2.
+    let (status, headers, body) = get_public(&app, "/f/hot00001.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"local-bytes");
+    let location = headers
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        !location.contains("/hot/"),
+        "must not redirect to /hot/, got: {location}"
     );
 }
 
@@ -1878,7 +1886,7 @@ async fn standard_file_serves_locally() {
 }
 
 #[tokio::test]
-async fn hot_protected_shell_uses_r2_ciphertext() {
+async fn hot_protected_shell_uses_local_ciphertext() {
     let dir = tempfile::tempdir().unwrap();
     let backend = mock_backend(
         200,
@@ -1888,6 +1896,7 @@ async fn hot_protected_shell_uses_r2_ciphertext() {
             "key_version": 1,
             "gateway_origin": "https://box.example",
             "tier": "hot",
+            "r2_key": "hot/sec00001.mp4",
             "r2_url": "https://r.example/hot/sec00001.mp4",
         }),
     )
@@ -1899,7 +1908,9 @@ async fn hot_protected_shell_uses_r2_ciphertext() {
     let (status, _, body) = get_public(&app, "/f/sec00001.mp4", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
-    assert!(page.contains("https://r.example/hot/sec00001.mp4"));
+    // No public /hot/ endpoint: unlock shell must use the local /c/ URL.
+    assert!(page.contains("/c/sec00001"));
+    assert!(!page.contains("https://r.example/hot/"));
 }
 
 #[tokio::test]

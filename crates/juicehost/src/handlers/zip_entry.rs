@@ -63,15 +63,9 @@ pub async fn zip_entry_file(
     
     match gate_decision(&state, &id, ShellMode::View, None).await {
         GateDecision::Respond(_) => return Err(JuicehostError::Forbidden),
-        GateDecision::HotRedirect(url) => {
-            return Response::builder()
-                .status(axum::http::StatusCode::FOUND)
-                .header(header::LOCATION, &url)
-                .header(header::CACHE_CONTROL, "no-store")
-                .body(Body::empty())
-                .map_err(|_| JuicehostError::Internal);
-        }
-        GateDecision::ServeLocal => {}
+        // Zip entries are served from local disk (which always exists for
+        // live files); hot bytes stay under /f/ so there is no /hot/ hop here.
+        GateDecision::HotServe { .. } | GateDecision::ServeLocal => {}
     }
     let meta = state
         .storage

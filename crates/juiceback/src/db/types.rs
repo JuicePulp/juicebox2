@@ -102,6 +102,10 @@ pub struct FileRecord {
 
     pub r2_key: String,
 
+    /// Manual Warm/Cool pins the tier: the auto-promoter skips pinned files
+    /// so a manual choice stays until the next manual change.
+    pub tier_pinned: bool,
+
     pub password_hash: Option<String>,
 
     pub is_encrypted: bool,
@@ -148,6 +152,7 @@ impl FileRecord {
             status: "ready".to_string(),
             tier: "standard".to_string(),
             r2_key: String::new(),
+            tier_pinned: false,
             password_hash: None,
             is_encrypted: false,
             enc_header: None,

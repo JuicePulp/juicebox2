@@ -34,7 +34,11 @@ pub(crate) fn file_cache_control_value(
     match ttl_remaining_secs {
         Some(secs) if secs > 0 => {
             let age = secs.min(state.file_cache_max_age_secs);
-            format!("public, max-age={age}, s-maxage={age}")
+            // File bytes are immutable by ID (overwrite -> Conflict, renew
+            // mints a new ID), so `immutable` is safe and lets edges skip
+            // revalidation for the whole TTL. Expiry is enforced by the
+            // min(ttl_remaining) cap above.
+            format!("public, max-age={age}, s-maxage={age}, immutable")
         }
         _ => FILE_CACHE_CONTROL.to_string(),
     }
@@ -46,6 +50,145 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
         header::HeaderValue::from_static(FILE_CACHE_CONTROL),
     );
     response
+}
+
+/// Serve hot bytes from R2 under the existing /f/ (or /d/) URL.
+/// Returns `None` when R2 is unconfigured or the object can't be read,
+/// so the caller falls back to local disk.
+#[expect(clippy::too_many_arguments)]
+async fn serve_r2_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+    id: &str,
+    key: &str,
+    file_meta: &storage::FileMetadata,
+    force_download: bool,
+    viewer_ip: Option<String>,
+) -> Option<Response<Body>> {
+    let r2 = state.r2.as_ref()?.clone();
+    let etag = file_meta.etag.clone();
+    let total_size = file_meta.size;
+    let mime_str = storage::guess_mime(&file_meta.extension);
+    let download_name = format!("{}.{}", id, file_meta.extension);
+
+    let ttl_remaining = remaining_ttl_secs(state, id).await;
+    let cache_control = file_cache_control_value(state, ttl_remaining);
+    let cache_tag = if cache_control == FILE_CACHE_CONTROL {
+        None
+    } else {
+        Some(format!("juicebox:{id}"))
+    };
+    let with_cache_headers = |mut builder: axum::http::response::Builder| {
+        builder = builder.header(header::CACHE_CONTROL, &cache_control);
+        builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+        builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
+        if let Some(tag) = &cache_tag {
+            builder = builder.header(header::HeaderName::from_static("cache-tag"), tag);
+        }
+        builder
+    };
+    let with_disposition = |mut builder: axum::http::response::Builder| {
+        if force_download {
+            builder = builder.header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{download_name}\""),
+            );
+        }
+        builder
+    };
+    let count_hit = |viewer_ip: &Option<String>| {
+        if *method != Method::GET || is_bot(headers) {
+            return;
+        }
+        if let Some(ip) = viewer_ip.as_deref() {
+            let surface = if force_download { "download" } else { "view" };
+            report_file_hit(
+                state,
+                id,
+                if force_download { "download" } else { "view" },
+                ip,
+                surface,
+            );
+        }
+    };
+
+    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
+        && let Ok(val) = if_none_match.to_str()
+        && val.trim_matches('"') == etag.trim_matches('"')
+    {
+        count_hit(&viewer_ip);
+        return with_cache_headers(
+            Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, &etag),
+        )
+        .body(Body::empty())
+        .ok();
+    }
+
+    let permit = Arc::clone(&state.download_semaphore)
+        .try_acquire_owned()
+        .ok()?;
+    if let Some(range_header) = headers.get(header::RANGE)
+        && let Ok(range_val) = range_header.to_str()
+    {
+        match parse_range(range_val, total_size, state.max_range_response_bytes) {
+            RangeResult::Satisfiable(start, end) => {
+                let range_stream = r2.get_range_stream(key, start, end).await.ok()?;
+                let content_len = end - start + 1;
+                let stream = range_stream.map(move |item| {
+                    let _ = &permit;
+                    item.map_err(|_| {
+                        axum::Error::new(std::io::Error::other("r2 range stream failed"))
+                    })
+                });
+                count_hit(&viewer_ip);
+                return with_disposition(with_cache_headers(
+                    Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header(header::CONTENT_TYPE, &mime_str)
+                        .header(header::CONTENT_LENGTH, content_len)
+                        .header(
+                            header::CONTENT_RANGE,
+                            format!("bytes {start}-{end}/{total_size}"),
+                        )
+                        .header(header::ETAG, &etag)
+                        .header(header::ACCEPT_RANGES, "bytes"),
+                ))
+                .body(Body::from_stream(stream))
+                .ok();
+            }
+            RangeResult::Unsatisfiable => {
+                return with_cache_headers(
+                    Response::builder()
+                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                        .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
+                        .header(header::ACCEPT_RANGES, "bytes"),
+                )
+                .body(Body::empty())
+                .ok();
+            }
+            RangeResult::Ignore => {}
+        }
+    }
+
+    let stream = r2.get_stream(key).await.ok()?;
+    let stream = stream.map(move |item| {
+        let _ = &permit;
+        item.map_err(|_| axum::Error::new(std::io::Error::other("r2 stream failed")))
+    });
+    count_hit(&viewer_ip);
+    with_disposition(with_cache_headers(
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, &mime_str)
+            .header(header::CONTENT_LENGTH, total_size)
+            .header(header::ETAG, &etag)
+            .header(header::ACCEPT_RANGES, "bytes"),
+    ))
+    .body(Body::from_stream(stream))
+    .ok()
 }
 
 #[tracing::instrument(skip_all)]
@@ -145,15 +288,26 @@ async fn serve_file_inner(
     } else {
         ShellMode::View
     };
+    // Temporary /f/ -> R2 route: serve hot bytes under the existing /f/ (or
+    // /d/) URL instead of redirecting to a public /hot/ endpoint.
+    // Falls back to local disk when R2 is unconfigured or unreadable.
     match gate_decision(&state, &id, mode, None).await {
         GateDecision::Respond(resp) => return Ok(resp),
-        GateDecision::HotRedirect(url) => {
-            return Response::builder()
-                .status(StatusCode::FOUND)
-                .header(header::LOCATION, &url)
-                .header(header::CACHE_CONTROL, "no-store")
-                .body(Body::empty())
-                .map_err(|_| JuicehostError::Internal);
+        GateDecision::HotServe { key } => {
+            if let Some(resp) = serve_r2_response(
+                &state,
+                &headers,
+                &method,
+                &id,
+                &key,
+                &file_meta,
+                force_download,
+                viewer_ip.clone(),
+            )
+            .await
+            {
+                return Ok(resp);
+            }
         }
         GateDecision::ServeLocal => {}
     }
@@ -197,6 +351,7 @@ async fn serve_file_inner(
             &id,
             if force_download { "download" } else { "view" },
             ip,
+            if force_download { "download" } else { "view" },
         );
     };
 

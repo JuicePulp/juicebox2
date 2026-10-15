@@ -110,6 +110,13 @@ pub struct Config {
     pub promo_min_views_per_min: f64,
     pub promo_min_ttl_remaining_secs: i64,
     pub promo_dry_run: bool,
+    /// Promote-on-first-embed: async R2 promotion for small previewable files
+    /// on preview render / first non-bot view. Velocity promoter still owns
+    /// sustained hot; embed path only seeds it.
+    pub embed_promote_enabled: bool,
+    pub embed_promote_max_bytes: u64,
+    pub embed_promote_cooldown_secs: i64,
+    pub embed_promote_min_ttl_remaining_secs: i64,
 }
 
 impl std::fmt::Debug for Config {
@@ -190,6 +197,16 @@ impl std::fmt::Debug for Config {
             .field("dte_mint_burst", &self.dte_mint_burst)
             .field("region_public_juicehosts", &self.region_public_juicehosts)
             .field("allow_private_fetch", &self.allow_private_fetch)
+            .field("embed_promote_enabled", &self.embed_promote_enabled)
+            .field("embed_promote_max_bytes", &self.embed_promote_max_bytes)
+            .field(
+                "embed_promote_cooldown_secs",
+                &self.embed_promote_cooldown_secs,
+            )
+            .field(
+                "embed_promote_min_ttl_remaining_secs",
+                &self.embed_promote_min_ttl_remaining_secs,
+            )
             .finish()
     }
 }
@@ -362,6 +379,11 @@ impl Config {
             .ok()
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(file.promo.dry_run);
+        let embed_promote_enabled = file.promo.embed_enabled;
+        let embed_promote_max_bytes = file.promo.embed_max_bytes;
+        let embed_promote_cooldown_secs = file.promo.embed_cooldown_secs.max(60);
+        let embed_promote_min_ttl_remaining_secs =
+            file.promo.embed_min_ttl_remaining_secs.max(0);
 
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
             return Err(
@@ -469,6 +491,10 @@ impl Config {
             promo_min_views_per_min,
             promo_min_ttl_remaining_secs,
             promo_dry_run,
+            embed_promote_enabled,
+            embed_promote_max_bytes,
+            embed_promote_cooldown_secs,
+            embed_promote_min_ttl_remaining_secs,
         })
     }
 }
