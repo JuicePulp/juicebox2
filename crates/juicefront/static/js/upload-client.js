@@ -47,7 +47,12 @@ function reset(snapshot) {
   publish();
 }
 let port = null;
+let workerDead = false;
+let workerHeard = false;
+let workerValidating = false;
 function onWorkerMessage(e) {
+  workerHeard = true;
+  workerValidating = false;
   const msg = e.data || {};
   if (msg.type === "snapshot" && Array.isArray(msg.items)) {
     reset(msg.items);
@@ -59,6 +64,7 @@ function onWorkerMessage(e) {
 }
 function ensurePort() {
   if (typeof window === "undefined") return null;
+  if (workerDead) return null;
   if (port) return port;
   try {
     if (typeof SharedWorker === "undefined") return null;
@@ -67,8 +73,28 @@ function ensurePort() {
       type: "module",
     });
     sw.port.onmessage = onWorkerMessage;
+    // Older browsers accept the options but run the worker as a classic
+    // script, so its static imports throw and the port stays dead silent.
+    // Fail back to main-thread uploads instead of black-holing enqueues.
+    sw.onerror = () => {
+      port = null;
+      workerDead = true;
+      workerValidating = false;
+    };
     sw.port.start();
     port = sw.port;
+    workerValidating = true;
+    workerHeard = false;
+    setTimeout(() => {
+      if (!workerHeard) {
+        if (port) {
+          try { port.close(); } catch {}
+        }
+        port = null;
+        workerDead = true;
+      }
+      workerValidating = false;
+    }, 2000);
   } catch {
     port = null;
   }

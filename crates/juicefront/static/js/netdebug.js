@@ -366,7 +366,10 @@ window.__jbMotion = {
   state: "idle",
   gestures: 0
 };
-window.addEventListener("devicemotion", (e) => {
+// Shake-to-toggle is a touch-device gesture; don't even register the
+// devicemotion listener elsewhere (desktop browsers log a motion-sensor
+// deprecation warning for the registration alone).
+if ("ontouchstart" in window || (navigator.maxTouchPoints > 0)) window.addEventListener("devicemotion", (e) => {
   if (!("ontouchstart" in window))
     return;
   const dbg = window.__jbMotion;
