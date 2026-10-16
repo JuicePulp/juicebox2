@@ -12,7 +12,7 @@ pub mod web;
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(
         path,
-        "/api/health" | "/api/config" | "/api/presence" | "/api/ip" | "/api/device/status"
+        "/api/health" | "/api/config" | "/api/presence" | "/api/ip" | "/api/device/status" | "/robots.txt" | "/agents.txt"
     )
 }
 
@@ -184,6 +184,8 @@ mod tests {
             "/api/presence",
             "/api/ip",
             "/api/device/status",
+            "/robots.txt",
+            "/agents.txt",
         ] {
             assert!(is_noisy_http_path(path), "{path} should be noisy");
         }

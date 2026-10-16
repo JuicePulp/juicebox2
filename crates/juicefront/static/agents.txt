@@ -1,0 +1,23 @@
+# agents.txt — automated-agent guide for Juicebox (https://box.juicey.dev)
+
+What Juicebox is:
+  Juicebox is a free file host. You upload a file and get a short shareable
+  link with a few flavors: preview page, raw file bytes, and forced download.
+  Uploads expire after a configurable retention period (e.g. 30 minutes to
+  7 days).
+
+How to use it:
+  1. Read the machine-readable API contract first:
+     https://box.juicey.dev/api/openapi.json
+  2. Uploads are link-public: anyone with the link can fetch the file until
+     it expires. Do not upload or redistribute illegal, abusive, or malicious
+     content.
+  3. Be polite: cache responses, respect rate limits and retry-after headers,
+     identify your bot with a descriptive User-Agent including contact info.
+
+What is off-limits:
+  - Per /robots.txt content signals: search indexing is fine (yes), but
+    feeding site content into AI models (ai-input) or training/fine-tuning
+    AI models on it (ai-train) is NOT permitted. These restrictions are an
+    express reservation of rights under Article 4 of EU Directive 2019/790.
+  - /admin/ and non-public API routes are not for automated use.

@@ -207,7 +207,9 @@ fn main() {
             .route("/admin/reports", get(handlers::admin_reports))
             .route("/admin/feedback", get(handlers::admin_feedback))
             .route("/admin/announcement", get(handlers::admin_announcement))
-            .route("/static/bundle.css", get(handlers::css_bundle));
+            .route("/static/bundle.css", get(handlers::css_bundle))
+            .route("/robots.txt", get(handlers::robots_txt))
+            .route("/agents.txt", get(handlers::agents_txt));
 
         if let Some(base) = static_base() {
             let cache_policy = if live_reload { "no-store" } else { "no-cache" };
