@@ -265,7 +265,7 @@
   display: flex;
   gap: 0;
   margin-top: 0;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
 }
 
 body.hide-url-variants [data-url-variants] {
