@@ -1326,6 +1326,7 @@ async fn seed_legacy(state: &Arc<AppState>, captured: Arc<Mutex<Vec<Vec<u8>>>>) 
         key_version: 0,
         tier: "standard".into(),
         r2_key: String::new(),
+        tier_pinned: false,
     };
     state
         .db_call("seed_legacy", move |db| {

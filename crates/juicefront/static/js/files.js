@@ -1,6 +1,6 @@
 import { announce, esc, formatSize } from "./util.js";
 import { playSound } from "./sounds.js";
-import { iconHTML, iconForMime } from "./copy.js";
+import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js";
 import { openQrModal } from "./qr.js";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
@@ -148,7 +148,7 @@ function renameModalHtml(f, locale) {
     '<div id="rename-' + esc(f.id) + '" class="mdloverlay mdl-target rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title-' + esc(f.id) + '">' +
     '<a href="#!" class="mdl-target__backdrop" aria-label="' + esc(t(locale, "modal.close")) + '"></a>' +
     '<div class="mdlcontent"><div class="mdlheader"><h2 id="rename-title-' + esc(f.id) + '" class="mdltitle">' + esc(t(locale, "files.rename")) + '</h2>' +
-    '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">×</a></div>' +
+    '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">x</a></div>' +
     '<form class="rename-form" method="POST" action="/file/' + esc(f.id) + '/rename"><div class="mdlbody">' +
     '<input type="hidden" name="token" value="' + esc(f.delete_token) + '">' +
     '<div class="form-field"><label class="form-label" for="rename-input-' + esc(f.id) + '">' + esc(t(locale, "files.rename_placeholder")) + '</label>' +
@@ -327,17 +327,34 @@ function wireRenameModal(card, modal, f, locale) {
       const host = card.querySelector('[data-file-id="' + CSS.escape(f.id) + '"]');
       f.id = data.id;
       f.url = data.url;
+      f.raw_url = data.raw_url || "";
+      f.download_url = data.download_url || "";
       if (host) {
         host.setAttribute("data-file-id", data.id);
         host.setAttribute("data-url", data.url);
-        const urlEl = host.querySelector(".copy-bar .copy-bar__url");
-        if (urlEl) urlEl.textContent = data.url;
+        host.setAttribute("data-raw-url", f.raw_url);
+        host.setAttribute("data-download-url", f.download_url);
+        const group = host.querySelector("[data-url-variants]");
+        if (group) {
+          const setVariantUrl = (variant, value) => {
+            const b = group.querySelector('[data-variant="' + variant + '"]');
+            if (b) b.setAttribute("data-url", value);
+          };
+          setVariantUrl("preview", data.url);
+          setVariantUrl("raw", f.raw_url);
+          setVariantUrl("download", f.download_url);
+          const active = group.querySelector(".url-variant.is-active");
+          applyVariantUrl(host, (active && active.getAttribute("data-url")) || data.url);
+        } else {
+          const urlEl = host.querySelector(".copy-bar .copy-bar__url");
+          if (urlEl) urlEl.textContent = data.url;
+          const qrBtn = host.querySelector(".copy-bar-qr");
+          if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
+        }
         const link = host.querySelector(".copy-bar__text-wrapper")?.closest(".copy-bar");
         if (link) link.setAttribute("aria-label", t(locale, "upload.copy_bar_aria"));
         const editLink = host.querySelector(".copy-bar-edit");
         if (editLink) editLink.href = "#rename-" + data.id;
-        const qrBtn = host.querySelector(".copy-bar-qr");
-        if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
       }
       modal.remove();
       if (location.hash.startsWith("#rename-")) history.replaceState(null, "", location.pathname + location.search);
@@ -402,6 +419,8 @@ function enhanceCard(card, el, f, locale) {
     headerEl?.after(w);
   }
   const qrUrl = f.url || el.getAttribute("data-url") || "";
+  const rawUrl = f.raw_url || el.getAttribute("data-raw-url") || "";
+  const dlUrl = f.download_url || el.getAttribute("data-download-url") || "";
   const qrWrap = el.querySelector(".copy-bar-wrapper");
   if (qrWrap && qrUrl) {
     let qrBtn = qrWrap.querySelector(".copy-bar-qr");
@@ -419,6 +438,13 @@ function enhanceCard(card, el, f, locale) {
         });
       }
     }
+  }
+  if (qrWrap && qrUrl && rawUrl && !el.querySelector("[data-url-variants]")) {
+    const toggle = makeUrlVariantToggle(
+      { preview: qrUrl, raw: rawUrl, download: dlUrl },
+      urlVariantLabels(locale),
+    );
+    if (toggle) qrWrap.after(toggle);
   }
   if (customIdEnabled() && f.delete_token) {
     const w = el.querySelector(".copy-bar-wrapper");
@@ -535,6 +561,7 @@ export function initFilesCard() {
   });
   updateEmptyState(card);
   updateOffline(card);
+  backfillMissing(card, locale);
   tickTtl(card, locale);
   setInterval(() => {
     if (document.hidden) return;
@@ -549,6 +576,70 @@ export function initFilesCard() {
     }
   });
   window.addEventListener("juicebox-app-mode", () => {});
+}
+
+async function backfillMissing(card, locale) {
+  const grid = card.querySelector("[data-files-grid]");
+  if (!grid) return;
+  const seen = new Set();
+  grid.querySelectorAll(".file-card").forEach((el) => {
+    const id = el.getAttribute("data-file-id");
+    if (id) seen.add(id);
+  });
+  const missing = getLocalFiles().filter((f) => f.id && !seen.has(f.id) && f.delete_token);
+  if (!missing.length) return;
+  let payload = null;
+  try {
+    const res = await fetch("/files/rows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pairs: missing.slice(0, 500).map((f) => ({ id: f.id, token: f.delete_token })),
+        locale,
+      }),
+    });
+    if (!res.ok) return;
+    payload = await res.json();
+  } catch { return; }
+  if (!payload || (!payload.cards && !payload.modals)) return;
+  const tpl = document.createElement("template");
+  tpl.innerHTML = (payload.cards || "").trim();
+  const nodes = Array.from(tpl.content.querySelectorAll(".file-card"));
+  if (!nodes.length) return;
+  if (payload.modals && payload.modals.trim()) {
+    const mwrap = document.createElement("div");
+    mwrap.innerHTML = payload.modals;
+    card.appendChild(mwrap);
+  }
+  const all = Array.from(grid.querySelectorAll(".file-card")).concat(nodes);
+  all.sort((a, b) => (Number(b.getAttribute("data-uploaded")) || 0) - (Number(a.getAttribute("data-uploaded")) || 0));
+  grid.hidden = false;
+  while (grid.firstChild) grid.removeChild(grid.firstChild);
+  let i = 0;
+  const step = () => {
+    const frag = document.createDocumentFragment();
+    for (let n = 0; n < 40 && i < all.length; n++, i++) frag.appendChild(all[i]);
+    grid.appendChild(frag);
+    if (i < all.length) {
+      requestAnimationFrame(step);
+      return;
+    }
+    nodes.forEach((el) => {
+      const data = {
+        id: el.getAttribute("data-file-id") || "",
+        delete_token: el.getAttribute("data-delete-token") || "",
+        filename: el.getAttribute("data-filename") || "",
+        size_bytes: Number(el.getAttribute("data-size")) || 0,
+        uploaded_at: Number(el.getAttribute("data-uploaded")) || 0,
+        expires_at: Number(el.getAttribute("data-expires")) || 0,
+        url: el.getAttribute("data-url") || "",
+        storage_host: el.getAttribute("data-storage-host") || "",
+      };
+      enhanceCard(card, el, data, locale);
+    });
+    updateEmptyState(card);
+  };
+  step();
 }
 
 function maybeInit() {

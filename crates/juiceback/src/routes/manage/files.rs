@@ -33,6 +33,8 @@ pub struct FileInfoResponse {
     pub uploaded_at: i64,
     pub expires_at: i64,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     #[serde(default)]
     pub delete_token: String,
     pub storage_host: Option<String>,
@@ -46,7 +48,7 @@ pub struct FileInfoResponse {
 impl FileInfoResponse {
     #[must_use]
     pub fn from_record(record: FileRecord, config: &crate::config::Config) -> Self {
-        let url = crate::utils::share_link(
+        let (url, raw_url, download_url) = crate::utils::share_links(
             config,
             record.storage_host.as_deref(),
             &record.id,
@@ -62,6 +64,8 @@ impl FileInfoResponse {
             uploaded_at: record.uploaded_at,
             expires_at: record.expires_at,
             url,
+            raw_url,
+            download_url,
             delete_token: String::new(),
             storage_host: record.storage_host,
             status: record.status,
@@ -447,13 +451,18 @@ pub async fn resolve_alias_handler(
                 .db_call("get_file", move |db| db::get_file(db, &id))
                 .await?;
             if let Some(rec) = record {
-                let url = crate::utils::share_link(
+                let (url, raw_url, download_url) = crate::utils::share_links(
                     &state.config,
                     rec.storage_host.as_deref(),
                     &new_id,
                     &rec.filename,
                 );
-                Ok(Json(serde_json::json!({ "new_id": new_id, "url": url })))
+                Ok(Json(serde_json::json!({
+                    "new_id": new_id,
+                    "url": url,
+                    "raw_url": raw_url,
+                    "download_url": download_url,
+                })))
             } else {
                 Err(AppError::NotFound)
             }

@@ -81,6 +81,31 @@ function buildOptions(fieldset, locale, allowed, def, stored) {
   return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
 }
 
+function domValues(fieldset) {
+  return Array.from(fieldset.querySelectorAll('input[type="radio"]')).map((r) => r.value);
+}
+
+function sameValueSet(a, b) {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((v) => set.has(v));
+}
+
+function applyStoredCheck(fieldset, allowed, def, stored) {
+  var want = null;
+  if (stored !== null && allowed.some((h) => String(h) === stored)) {
+    want = stored;
+  } else if (allowed.includes(def)) {
+    want = String(def);
+  } else if (allowed.length > 0) {
+    want = String(allowed[0]);
+  }
+  if (want === null) return;
+  fieldset.querySelectorAll('input[type="radio"]').forEach(function (r) {
+    r.checked = r.value === want;
+  });
+}
+
 function resolveOptions(card, locale) {
   const fieldset = card.querySelector(".rtt-options");
   if (!fieldset) return null;
@@ -90,6 +115,10 @@ function resolveOptions(card, locale) {
     return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
   }
   const stored = readStoredTtl();
+  if (sameValueSet(domValues(fieldset), allowed.map(String))) {
+    applyStoredCheck(fieldset, allowed, def, stored);
+    return Array.from(fieldset.querySelectorAll('input[type="radio"]'));
+  }
   return buildOptions(fieldset, locale, allowed, def, stored);
 }
 
@@ -301,16 +330,37 @@ export function enhanceRetention(card, locale = "en") {
   fieldset.addEventListener("change", onChange);
 
   let drag = null;
-  const indexFromX = (clientX) => {
-    const rect = fieldset.getBoundingClientRect();
-    if (rect.width <= 0) return lastIndex < 0 ? 0 : lastIndex;
-    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-    return Math.min(radios.length - 1, Math.max(0, Math.floor((x / rect.width) * radios.length)));
+  let endTimers = [];
+  const labelOf = new Map(radios.map((r) => [r, r.closest("label")]));
+  const optionFromPoint = (clientX, clientY) => {
+    const el = document.elementFromPoint(clientX, clientY);
+    const hit = el ? el.closest("label.rtt-option") : null;
+    if (hit && fieldset.contains(hit)) {
+      const at = radios.findIndex((r) => labelOf.get(r) === hit);
+      if (at >= 0) return { index: at, label: hit };
+    }
+    let best = -1;
+    let bestD = Infinity;
+    for (let k = 0; k < radios.length; k++) {
+      const lab = labelOf.get(radios[k]);
+      if (!lab) continue;
+      const rect = lab.getBoundingClientRect();
+      const dx = clientX - (rect.left + rect.width / 2);
+      const dy = clientY - (rect.top + rect.height / 2);
+      const dist = dx * dx + dy * dy;
+      if (dist < bestD) {
+        bestD = dist;
+        best = k;
+      }
+    }
+    return { index: best, label: best >= 0 ? labelOf.get(radios[best]) : null };
   };
   const onPointerDown = (e) => {
-    if (drag || e.pointerType !== "mouse" || e.button !== 0) return;
-    if (getComputedStyle(fieldset).flexDirection !== "row") return;
-    drag = { id: e.pointerId, startX: e.clientX, moved: false };
+    if (drag) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    for (const t of endTimers) clearTimeout(t);
+    endTimers = [];
+    drag = { id: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, touch: e.pointerType !== "mouse" };
   };
   const ensureThumb = () => {
     let thumb = fieldset.querySelector(".rtt-dragthumb");
@@ -328,12 +378,6 @@ export function enhanceRetention(card, locale = "en") {
     const span = label ? label.querySelector("span") : null;
     return (span && span.textContent || "").trim();
   };
-  const moveThumb = (clientX) => {
-    const thumb = ensureThumb();
-    const fieldRect = fieldset.getBoundingClientRect();
-    const x = Math.min(Math.max(clientX, fieldRect.left), fieldRect.right);
-    thumb.style.left = (x - fieldRect.left) + "px";
-  };
   const moveThumbToSelection = (thumb) => {
     const checked = fieldset.querySelector('input[name="ttl_hours"]:checked');
     const label = checked ? checked.closest("label") : null;
@@ -341,10 +385,27 @@ export function enhanceRetention(card, locale = "en") {
     const fieldRect = fieldset.getBoundingClientRect();
     const labelRect = label.getBoundingClientRect();
     thumb.style.left = (labelRect.left + labelRect.width / 2 - fieldRect.left) + "px";
+    thumb.style.top = (labelRect.top + labelRect.height / 2 - fieldRect.top) + "px";
+    thumb.style.maxWidth = "none";
+    thumb.style.width = labelRect.width + "px";
+    thumb.style.height = labelRect.height + "px";
+    thumb.style.borderRadius = getComputedStyle(label).borderRadius;
+  };
+  const moveThumbFree = (clientX) => {
+    const thumb = ensureThumb();
+    const fieldRect = fieldset.getBoundingClientRect();
+    const x = Math.min(Math.max(clientX, fieldRect.left), fieldRect.right);
+    thumb.style.transition = "none";
+    thumb.style.width = "";
+    thumb.style.height = "";
+    thumb.style.borderRadius = "";
+    thumb.style.maxWidth = "";
+    thumb.style.top = "";
+    thumb.style.left = (x - fieldRect.left) + "px";
   };
   const onPointerMove = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
-    if (!drag.moved && Math.abs(e.clientX - drag.startX) < 8) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 8) return;
     if (!drag.moved) {
       drag.moved = true;
       try {
@@ -353,14 +414,20 @@ export function enhanceRetention(card, locale = "en") {
       fieldset.classList.add("rtt-dragging");
       const thumb = ensureThumb();
       thumb.textContent = currentLabelText();
+      thumb.style.transition = "none";
       thumb.classList.add("on");
     }
     drag.moved = true;
     e.preventDefault();
-    applyIndex(indexFromX(e.clientX));
+    const hit = optionFromPoint(e.clientX, e.clientY);
+    if (hit.index >= 0) applyIndex(hit.index);
     const thumb = ensureThumb();
     thumb.textContent = currentLabelText();
-    moveThumb(e.clientX);
+    if (drag.touch) {
+      moveThumbToSelection(thumb);
+    } else {
+      moveThumbFree(e.clientX);
+    }
   };
   const endDrag = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -369,15 +436,15 @@ export function enhanceRetention(card, locale = "en") {
     fieldset.classList.remove("rtt-dragging");
     const thumb = fieldset.querySelector(".rtt-dragthumb");
     if (thumb && wasDrag) {
-      thumb.style.transition = "left 0.18s ease-out, opacity 0.15s ease-out";
+      thumb.style.transition = "left 0.18s ease-out, top 0.18s ease-out, width 0.18s ease-out, height 0.18s ease-out, border-radius 0.18s ease-out, opacity 0.15s ease-out";
       moveThumbToSelection(thumb);
-      window.setTimeout(() => {
+      endTimers.push(window.setTimeout(() => {
         thumb.style.transition = "opacity 0.15s ease-out";
         thumb.classList.remove("on");
-      }, 190);
-      window.setTimeout(() => {
+      }, 190));
+      endTimers.push(window.setTimeout(() => {
         thumb.remove();
-      }, 380);
+      }, 380));
     } else if (thumb) {
       thumb.remove();
     }

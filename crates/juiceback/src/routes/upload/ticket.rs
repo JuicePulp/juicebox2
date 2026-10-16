@@ -105,6 +105,15 @@ pub fn public_url_for(state: &Arc<AppState>, record: &FileRecord) -> String {
     )
 }
 
+pub fn public_urls_for(state: &Arc<AppState>, record: &FileRecord) -> (String, String, String) {
+    crate::utils::share_links(
+        &state.config,
+        record.storage_host.as_deref(),
+        &record.id,
+        &record.filename,
+    )
+}
+
 pub fn encrypted_client_ip(
     state: &Arc<AppState>,
     headers: &HeaderMap,

@@ -230,6 +230,8 @@ async function reserveQuickLink(item, signal) {
   return {
     id: reserve.id || "",
     url: reserve.url || "",
+    rawUrl: reserve.raw_url || "",
+    downloadUrl: reserve.download_url || "",
     deleteToken: reserve.delete_token || ""
   };
 }
@@ -240,6 +242,8 @@ function startDirectUpload(item, file, controls) {
   const run = (async () => {
     let reserveId = "";
     let reserveUrl = "";
+    let reserveRawUrl = "";
+    let reserveDownloadUrl = "";
     let reserveDeleteToken = "";
     if (item.quickLink) {
       try {
@@ -247,9 +251,11 @@ function startDirectUpload(item, file, controls) {
         if (reserve) {
           reserveId = reserve.id;
           reserveUrl = reserve.url;
+          reserveRawUrl = reserve.rawUrl;
+          reserveDownloadUrl = reserve.downloadUrl;
           reserveDeleteToken = reserve.deleteToken;
           if (reserveUrl)
-            update({ id: item.id, reserveUrl, serverId: reserveId });
+            update({ id: item.id, reserveUrl, reserveRawUrl, reserveDownloadUrl, serverId: reserveId });
         }
       } catch {}
       if (runState.cancelled)
@@ -300,12 +306,18 @@ function startDirectUpload(item, file, controls) {
           } catch {}
           if (reserveUrl && !res.url)
             res.url = reserveUrl;
+          if (reserveRawUrl && !res.raw_url)
+            res.raw_url = reserveRawUrl;
+          if (reserveDownloadUrl && !res.download_url)
+            res.download_url = reserveDownloadUrl;
           if (reserveDeleteToken && !res.delete_token)
             res.delete_token = reserveDeleteToken;
           update({
             id: item.id,
             serverId: res.id || reserveId || "",
             url: res.url || "",
+            rawUrl: res.raw_url || "",
+            downloadUrl: res.download_url || "",
             deleteToken: res.delete_token || "",
             expiresAt: res.expires_at ? Number(res.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
             protected: !!res.protected,
@@ -445,12 +457,14 @@ function startDirectTicketUpload(item, file, controls) {
       const uploadUrl = reserve.upload_url || "";
       const fileId = reserve.file_id || "";
       const shareUrl = reserve.url || "";
+      const shareRawUrl = reserve.raw_url || "";
+      const shareDownloadUrl = reserve.download_url || "";
       if (!ticket || !uploadUrl || !fileId) {
         update({ id: item.id, errorCode: "RESERVE_FAILED", state: "error" });
         return;
       }
       if (shareUrl)
-        update({ id: item.id, reserveUrl: shareUrl, serverId: fileId });
+        update({ id: item.id, reserveUrl: shareUrl, reserveRawUrl: shareRawUrl, reserveDownloadUrl: shareDownloadUrl, serverId: fileId });
       update({ id: item.id, state: "uploading", progress: 0 });
       const progress = new LiveProgress((pct) => {
         update({ id: item.id, progress: Math.min(pct, 99.4) });
@@ -516,6 +530,8 @@ function startDirectTicketUpload(item, file, controls) {
         id: item.id,
         serverId: data.id || fileId,
         url: data.url || shareUrl,
+        rawUrl: data.raw_url || shareRawUrl,
+        downloadUrl: data.download_url || shareDownloadUrl,
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
         protected: !!data.protected,
@@ -582,6 +598,8 @@ function startDirectParallelUpload(item, file, controls) {
     const ticket = reserve.ticket || "";
     const fileId = reserve.file_id || "";
     const shareUrl = reserve.url || "";
+    const shareRawUrl = reserve.raw_url || "";
+    const shareDownloadUrl = reserve.download_url || "";
     const parts = Array.isArray(reserve.parts) ? reserve.parts : [];
     const step = parts.length ? Math.ceil(file.size / parts.length) : 0;
     let splitOk = ticket && fileId && parts.length >= 2;
@@ -599,7 +617,7 @@ function startDirectParallelUpload(item, file, controls) {
       return;
     }
     if (shareUrl)
-      update({ id: item.id, reserveUrl: shareUrl, serverId: fileId });
+      update({ id: item.id, reserveUrl: shareUrl, reserveRawUrl: shareRawUrl, reserveDownloadUrl: shareDownloadUrl, serverId: fileId });
     update({ id: item.id, state: "uploading", progress: 0 });
     const loaded = new Array(parts.length).fill(0);
     const progress = new LiveProgress((pct) => {
@@ -695,6 +713,8 @@ function startDirectParallelUpload(item, file, controls) {
       id: item.id,
       serverId: data.id || fileId,
       url: data.url || shareUrl,
+      rawUrl: data.raw_url || shareRawUrl,
+      downloadUrl: data.download_url || shareDownloadUrl,
       deleteToken: data.delete_token || "",
       expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
       protected: !!data.protected,
@@ -1047,6 +1067,8 @@ function startTusUpload(item, file, controls) {
     update({ id: item.id, state: "uploading", progress: 0 });
     let reserveId = "";
     let reserveUrl = "";
+    let reserveRawUrl = "";
+    let reserveDownloadUrl = "";
     let reserveDeleteToken = "";
     let reserveReady = Promise.resolve();
     if (item.quickLink) {
@@ -1056,9 +1078,11 @@ function startTusUpload(item, file, controls) {
           if (reserve) {
             reserveId = reserve.id;
             reserveUrl = reserve.url;
+            reserveRawUrl = reserve.rawUrl;
+            reserveDownloadUrl = reserve.downloadUrl;
             reserveDeleteToken = reserve.deleteToken;
             if (reserveUrl)
-              update({ id: item.id, reserveUrl, serverId: reserveId });
+              update({ id: item.id, reserveUrl, reserveRawUrl, reserveDownloadUrl, serverId: reserveId });
           }
         } catch {}
       })();
@@ -1298,6 +1322,10 @@ function startTusUpload(item, file, controls) {
       const data = merged.data;
       if (reserveUrl && !data.url)
         data.url = reserveUrl;
+      if (reserveRawUrl && !data.raw_url)
+        data.raw_url = reserveRawUrl;
+      if (reserveDownloadUrl && !data.download_url)
+        data.download_url = reserveDownloadUrl;
       if (reserveDeleteToken && !data.delete_token)
         data.delete_token = reserveDeleteToken;
       update({ id: item.id, state: "finalizing" });
@@ -1305,6 +1333,8 @@ function startTusUpload(item, file, controls) {
         id: item.id,
         serverId: data.id || reserveId || "",
         url: data.url,
+        rawUrl: data.raw_url || "",
+        downloadUrl: data.download_url || "",
         deleteToken: data.delete_token || "",
         expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
         protected: !!data.protected,

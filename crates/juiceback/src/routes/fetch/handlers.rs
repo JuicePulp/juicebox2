@@ -218,7 +218,7 @@ pub async fn fetch_status_handler(
             .db_call("get_file", move |db| db::get_file(db, &file_id))
             .await?;
         if let Some(record) = record {
-            let url = crate::utils::share_link(
+            let (url, raw_url, download_url) = crate::utils::share_links(
                 &state.config,
                 record.storage_host.as_deref(),
                 &record.id,
@@ -232,6 +232,8 @@ pub async fn fetch_status_handler(
                 mime_type: record.mime_type,
                 size_bytes: record.size_bytes,
                 url,
+                raw_url,
+                download_url,
                 expires_at: record.expires_at,
                 delete_token: record.delete_token,
                 protected,

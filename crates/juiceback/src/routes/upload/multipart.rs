@@ -32,6 +32,8 @@ pub struct ReserveUploadRequest {
 pub struct ReserveResponse {
     pub id: String,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     pub delete_token: String,
     pub status: String,
     pub protected: bool,
@@ -117,7 +119,7 @@ pub async fn reserve_upload_handler(
     let record =
         super::ticket::insert_owned_pending(&state, &user_id, record, "own_reserved_file").await?;
 
-    let public_url = super::ticket::public_url_for(&state, &record);
+    let (public_url, raw_url, download_url) = super::ticket::public_urls_for(&state, &record);
 
     tracing::info!("reserve: id={} host={:?}", file_id, selected_host);
 
@@ -126,6 +128,8 @@ pub async fn reserve_upload_handler(
         Json(ReserveResponse {
             id: file_id,
             url: public_url,
+            raw_url,
+            download_url,
             delete_token,
             status: "uploading".to_string(),
             protected: record.is_protected(),
@@ -138,6 +142,8 @@ fn build_upload_response(
     headers: &HeaderMap,
     record: &FileRecord,
     public_url: &str,
+    raw_url: &str,
+    download_url: &str,
     wants_html: bool,
     ttl_seconds: i64,
     now: i64,
@@ -146,6 +152,8 @@ fn build_upload_response(
         return Ok(noscript::upload_redirect(
             headers,
             public_url,
+            raw_url,
+            download_url,
             &record.filename,
             &record.delete_token,
             &record.id,
@@ -164,6 +172,8 @@ fn build_upload_response(
 
     let mut resp = Json(UploadResponse {
         url: public_url.to_string(),
+        raw_url: raw_url.to_string(),
+        download_url: download_url.to_string(),
         id: record.id.clone(),
         filename: record.filename.clone(),
         size_bytes: record.size_bytes,
@@ -356,17 +366,14 @@ pub async fn upload_handler(
         );
     }
 
-    let public_url = crate::utils::share_link(
-        &state.config,
-        record.storage_host.as_deref(),
-        &record.id,
-        &record.filename,
-    );
+    let (public_url, raw_url, download_url) = super::ticket::public_urls_for(&state, &record);
 
     build_upload_response(
         &headers,
         &record,
         &public_url,
+        &raw_url,
+        &download_url,
         wants_html,
         params.ttl_seconds,
         now,

@@ -34,6 +34,8 @@ pub struct HitRequest {
     
     
     pub ip: String,
+    #[serde(default)]
+    pub surface: Option<String>,
 }
 
 #[utoipa::path(
@@ -61,11 +63,46 @@ pub async fn hit_handler(
     }
     let ip_hash = crate::utils::hash_ip_for_ban(&body.ip, &state.config.ip_pepper);
     let now = chrono::Utc::now().timestamp();
+    let hit_file_id = body.file_id.clone();
     state
         .db_call("record_file_hit", move |db| {
-            db::record_file_hit(db, &body.file_id, &ip_hash, kind, now)
+            db::record_file_hit(db, &hit_file_id, &ip_hash, kind, now)
         })
         .await?;
+    if kind == db::HitKind::View {
+        let surface = body.surface.as_deref().unwrap_or("view").to_string();
+        if surface == "preview" || surface == "view" {
+            let embed_state = Arc::clone(&state);
+            let embed_id = body.file_id.clone();
+            tokio::spawn(async move {
+                crate::jobs::promo::maybe_embed_promote(&embed_state, &embed_id).await;
+            });
+        }
+    }
+    {
+        let geo_state = Arc::clone(&state);
+        let geo_ip = body.ip.clone();
+        tokio::spawn(async move {
+            let Ok(addr) = geo_ip.parse::<std::net::IpAddr>() else {
+                return;
+            };
+            if !crate::storage_client::is_public_ip(addr) {
+                return;
+            }
+            let Some(enc) =
+                crate::utils::encrypt_ip(&geo_ip, &geo_state.config.ip_encryption_key)
+            else {
+                return;
+            };
+            let hash = juiceutils::ban::hash_ip_for_ban(&geo_ip, &geo_state.config.ip_pepper);
+            let now = chrono::Utc::now().timestamp();
+            let _ = geo_state
+                .db_call("geo_enqueue", move |db| {
+                    db::geo::enqueue_geo_ip(db, &enc, &hash, now)
+                })
+                .await;
+        });
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

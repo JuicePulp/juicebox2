@@ -48,6 +48,10 @@ pub struct FetchFileResponse {
 
     pub url: String,
 
+    pub raw_url: String,
+
+    pub download_url: String,
+
     pub expires_at: i64,
 
     pub delete_token: String,
