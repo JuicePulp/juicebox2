@@ -1,6 +1,9 @@
 const KEY = "jb_haptics_v1";
 const PATTERNS = {
-  tick: 8,
+  // `tick` is the tiny Pixel-style blip for stepwise scrubbers
+  // (e.g. retention toolbar). 10ms is the smallest duration that
+  // reliably fires on Pixel hardware; shorter bursts get dropped.
+  tick: 10,
   tap: 16,
   send: [12, 30, 16],
   success: [14, 60, 14],
