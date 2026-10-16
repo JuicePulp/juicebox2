@@ -12,6 +12,32 @@ function scrubTick(direction) {
   } catch {}
 }
 
+// Tiny Pixel-style tick for retention steps. Throttled so fast drags
+// produce discrete ticks instead of one merged buzz (vibrate() replaces
+// the previous pattern while it is still playing).
+let lastRetentionBuzzAt = 0;
+const RETENTION_TICK_MIN_MS = 30;
+function retentionTick() {
+  const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  if (now - lastRetentionBuzzAt < RETENTION_TICK_MIN_MS) return;
+  lastRetentionBuzzAt = now;
+  haptic("tick");
+}
+
+function lockPageScroll() {
+  try {
+    document.body.classList.add("rtt-scrolllock");
+    document.documentElement.classList.add("rtt-scrolllock");
+  } catch {}
+}
+
+function unlockPageScroll() {
+  try {
+    document.body.classList.remove("rtt-scrolllock");
+    document.documentElement.classList.remove("rtt-scrolllock");
+  } catch {}
+}
+
 const TTL_STORAGE_KEY = "juicebox_ttl_hours";
 
 function readStoredTtl() {
@@ -68,6 +94,9 @@ function buildOptions(fieldset, locale, allowed, def, stored) {
     prevTier = tier;
     const label = document.createElement("label");
     label.className = "rtt-option";
+    // Retention owns its haptics (throttled Pixel tick); skip the
+    // global pointerdown tap buzz for these labels.
+    label.setAttribute("data-no-buzz", "");
     const input = document.createElement("input");
     input.type = "radio";
     input.name = "ttl_hours";
@@ -161,6 +190,11 @@ export function enhanceRetention(card, locale = "en") {
   if (!toolbar || !fieldset) return;
   const radios = resolveOptions(card, locale);
   if (!radios || radios.length === 0) return;
+  // Cover server-rendered labels too (buildOptions already tags the ones
+  // it creates): retention owns its haptics, skip the global tap buzz.
+  try {
+    fieldset.querySelectorAll("label.rtt-option:not([data-no-buzz])").forEach((el) => el.setAttribute("data-no-buzz", ""));
+  } catch {}
   const labelGroup = toolbar.querySelector(".rttlabel-group");
   const labels = radios.map((r) => (r.nextElementSibling && r.nextElementSibling.textContent || "").trim());
   const valueWrap = labelGroup ? ensureValueWrap(labelGroup) : null;
@@ -314,7 +348,7 @@ export function enhanceRetention(card, locale = "en") {
     storeTtl(radio.value);
     setValue(i);
     scrubTick(lastDirection);
-    haptic("tick");
+    retentionTick();
   };
   const onChange = (e) => {
     const target = e.target;
@@ -323,6 +357,7 @@ export function enhanceRetention(card, locale = "en") {
       const direction = orderOf(target.value) >= orderOf(lastTicked) ? "forward" : "back";
       lastTicked = target.value;
       playSound("select", { emphasis: "subtle", direction });
+      retentionTick();
       const i = radios.findIndex((r) => r.value === target.value);
       if (i >= 0) setValue(i);
     }
@@ -361,6 +396,14 @@ export function enhanceRetention(card, locale = "en") {
     for (const t of endTimers) clearTimeout(t);
     endTimers = [];
     drag = { id: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, touch: e.pointerType !== "mouse" };
+    // On touch, capture immediately so the browser never starts a page
+    // scroll gesture from this touch. Without this, the page can scroll
+    // during the 8px slop before we capture in onPointerMove.
+    if (drag.touch) {
+      try {
+        fieldset.setPointerCapture(e.pointerId);
+      } catch {}
+    }
   };
   const ensureThumb = () => {
     let thumb = fieldset.querySelector(".rtt-dragthumb");
@@ -411,6 +454,7 @@ export function enhanceRetention(card, locale = "en") {
       try {
         fieldset.setPointerCapture(e.pointerId);
       } catch {}
+      lockPageScroll();
       fieldset.classList.add("rtt-dragging");
       const thumb = ensureThumb();
       thumb.textContent = currentLabelText();
@@ -433,6 +477,7 @@ export function enhanceRetention(card, locale = "en") {
     if (!drag || e.pointerId !== drag.id) return;
     const wasDrag = drag.moved;
     drag = null;
+    unlockPageScroll();
     fieldset.classList.remove("rtt-dragging");
     const thumb = fieldset.querySelector(".rtt-dragthumb");
     if (thumb && wasDrag) {
@@ -453,10 +498,19 @@ export function enhanceRetention(card, locale = "en") {
       haptic("tap");
     }
   };
+  // Belt-and-braces: while a scrub drag is active, kill the browser's
+  // touch-scroll gesture. pointermove preventDefault() alone does not stop
+  // scrolling; this non-passive touchmove blocker plus touch-action:none
+  // in CSS plus the body scroll lock together keep the page still on
+  // mobile while dragging the retention setting.
+  const blockTouchMove = (e) => {
+    if (drag && drag.moved) e.preventDefault();
+  };
   fieldset.addEventListener("pointerdown", onPointerDown);
   fieldset.addEventListener("pointermove", onPointerMove);
   fieldset.addEventListener("pointerup", endDrag);
   fieldset.addEventListener("pointercancel", endDrag);
+  fieldset.addEventListener("touchmove", blockTouchMove, { passive: false });
   return {
     destroy() {
       fieldset.removeEventListener("change", onChange);
@@ -464,6 +518,8 @@ export function enhanceRetention(card, locale = "en") {
       fieldset.removeEventListener("pointermove", onPointerMove);
       fieldset.removeEventListener("pointerup", endDrag);
       fieldset.removeEventListener("pointercancel", endDrag);
+      fieldset.removeEventListener("touchmove", blockTouchMove);
+      unlockPageScroll();
       drag = null;
       fieldset.classList.remove("rtt-dragging");
       clearTimeout(cleanupTimer);
