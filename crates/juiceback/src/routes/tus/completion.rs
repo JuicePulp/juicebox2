@@ -201,7 +201,7 @@ pub(crate) async fn finish_tus_upload(
         })
         .await?;
 
-    let public_url = crate::utils::share_link(
+    let (public_url, raw_url, download_url) = crate::utils::share_links(
         &state.config,
         record.storage_host.as_deref(),
         &record.id,
@@ -213,6 +213,8 @@ pub(crate) async fn finish_tus_upload(
     Ok(serde_json::to_value(crate::routes::upload::UploadResponse {
         id: record.id,
         url: public_url,
+        raw_url,
+        download_url,
         filename: record.filename,
         size_bytes: record.size_bytes,
         mime_type: record.mime_type,

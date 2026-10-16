@@ -3,10 +3,11 @@ use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 use askama::Template;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Path, Query, State},
+    extract::{ConnectInfo, Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use serde::Deserialize;
 
 use crate::{
     cx::Cx,
@@ -238,23 +239,13 @@ fn modals_html(
             .unwrap_or_else(|| "standard".to_owned()),
         danger_level: danger.to_owned(),
         max_bytes: config.max_file_size_bytes.unwrap_or(524_288_000),
-        allowed_ttl: config
-            .allowed_ttl_hours
-            .clone()
-            .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec())
-            .iter()
-            .map(|hours| {
-                
-                
-                #[allow(clippy::cast_possible_truncation)]
-                if hours.fract() == 0.0 {
-                    format!("{}", *hours as i64)
-                } else {
-                    format!("{hours}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
+        allowed_ttl: serde_json::to_string(
+            &config
+                .allowed_ttl_hours
+                .clone()
+                .unwrap_or_else(|| retention::DEFAULT_ALLOWED_TTL_HOURS.to_vec()),
+        )
+        .unwrap_or_else(|_| "[]".to_string()),
         default_ttl: config
             .default_ttl_hours
             .unwrap_or(retention::DEFAULT_TTL_HOURS)
@@ -429,7 +420,6 @@ struct HeadCtx {
     body_class: &'static str,
     commit_label: String,
     structured_data: String,
-    discord_embed: String,
     current_path: String,
     hreflang: Vec<Hreflang>,
     live_reload: bool,
@@ -451,44 +441,6 @@ fn og_locale_for(locale: &'static str) -> &'static str {
     }
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
-    }
-    let truncated: String = value.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{truncated}…")
-}
-
-fn component_embed_json(title: &str, description: &str, canonical: &str) -> String {
-    if title.is_empty() || canonical.is_empty() {
-        return String::new();
-    }
-    let name = truncate_chars(title, 80);
-    let desc = truncate_chars(description, 200);
-    let heading = format!("## [{name}]({canonical})\n{desc}");
-    let mut components = vec![serde_json::json!({ "type": 10, "content": heading })];
-    if canonical.len() <= 512 {
-        components.push(serde_json::json!({
-            "type": 1,
-            "components": [{ "type": 2, "style": 5, "url": canonical, "label": "Open" }],
-        }));
-    }
-    let payload = serde_json::json!({
-        "component": { "type": 17, "accent_color": 16760154, "components": components }
-    });
-    let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
-    if serialized.len() > 3000 {
-        let minimal = serde_json::json!({
-            "component": {
-                "type": 17,
-                "components": [{ "type": 10, "content": truncate_chars(title, 120) }],
-            }
-        });
-        serialized = serde_json::to_string(&minimal).unwrap_or_default();
-    }
-    serialized.replace("</", "<\\/")
-}
-
 fn head_ctx(
     locale: &'static str,
     title: String,
@@ -500,7 +452,6 @@ fn head_ctx(
     live_reload: bool,
 ) -> HeadCtx {
     let canonical = absolute_url(headers, full_path);
-    let discord_embed = component_embed_json(&title, &description, &canonical);
     HeadCtx {
         cx: Cx::new(locale),
         lang: locale,
@@ -509,11 +460,10 @@ fn head_ctx(
         title,
         description,
         canonical,
-        og_image: absolute_url(headers, "/static/assets/og-image.png"),
+        og_image: absolute_url(headers, "/static/assets/og-image.png?v=2"),
         body_class,
         commit_label: metadata::commit_label(),
         structured_data: metadata::structured_data_json(),
-        discord_embed,
         current_path: absolute_url(headers, stripped_path),
         hreflang: hreflang_links_absolute(headers, stripped_path),
         live_reload,
@@ -675,6 +625,8 @@ struct UploadedFile {
     icon: String,
     size_str: String,
     url: String,
+    raw_url: String,
+    download_url: String,
     delete_token: String,
 }
 
@@ -716,6 +668,8 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
         icon: format::icon_for_mime(&mime).to_owned(),
         size_str: format::format_size(size),
         url: json_str(&value, "url", 2048),
+        raw_url: json_str(&value, "raw_url", 2048),
+        download_url: json_str(&value, "download_url", 2048),
         delete_token: json_str(&value, "delete_token", 200),
     })
 }
@@ -926,6 +880,7 @@ struct FilesTpl {
     files: Vec<FileRow>,
 }
 
+#[derive(Clone)]
 struct FileRow {
     id: String,
     filename: String,
@@ -935,6 +890,8 @@ struct FileRow {
     uploaded_at: i64,
     expires_at: i64,
     url: String,
+    raw_url: String,
+    download_url: String,
     delete_token: String,
     storage_host: String,
     show_host: bool,
@@ -967,6 +924,137 @@ fn card_action(locale: &str, id: &str, label_key: &str, icon: &str, href: String
     }
 }
 
+#[derive(Deserialize)]
+pub struct RowsPair {
+    pub id: String,
+    pub token: String,
+}
+
+#[derive(Deserialize)]
+pub struct RowsRequest {
+    #[serde(default)]
+    pub pairs: Vec<RowsPair>,
+    pub locale: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "file_rows.html")]
+struct FileRowsTpl {
+    cx: Cx,
+    files: Vec<FileRow>,
+}
+
+#[derive(Template)]
+#[template(path = "file_modals.html")]
+struct FileModalsTpl {
+    cx: Cx,
+    files: Vec<FileRow>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn file_rows(
+    cx: &Cx,
+    locale: &'static str,
+    files: Vec<ServerFile>,
+    default_host: &String,
+    custom_id: bool,
+    timestamp: i64,
+    start_index: usize,
+) -> Vec<FileRow> {
+    files
+        .into_iter()
+        .enumerate()
+        .map(|(offset, file)| {
+            let index = start_index + offset;
+            let host = file.storage_host.clone().unwrap_or_default();
+
+            FileRow {
+                icon: cx.mime_icon(&file.mime_type),
+                meta: format!("{} - {}", cx.fmt_size(file.size_bytes), file.mime_type),
+                show_host: !host.is_empty()
+                    && !format::is_default_host(
+                        &host,
+                        Some(default_host)
+                            .filter(|h| !h.is_empty())
+                            .map(String::as_str),
+                    ),
+                host_short: host
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .to_owned(),
+                can_rename: custom_id && !file.url.is_empty(),
+                expired: file.expires_at * 1000 <= timestamp,
+                ttl_label: format::remaining_label(locale, file.expires_at, timestamp),
+                ttl_pct: format::pct_remaining(file.expires_at, file.uploaded_at, timestamp),
+                short_id: extract_short_id(&file.url),
+                id: file.id,
+                filename: file.filename,
+                size_bytes: file.size_bytes,
+                uploaded_at: file.uploaded_at,
+                expires_at: file.expires_at,
+                url: file.url,
+                raw_url: file.raw_url,
+                download_url: file.download_url,
+                delete_token: file.delete_token,
+                storage_host: host,
+                index,
+                protected: file.protected,
+            }
+        })
+        .collect()
+}
+
+pub async fn files_rows_handler(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<RowsRequest>,
+) -> Response<Body> {
+    let locale: &'static str = match body.locale.as_deref() {
+        Some("fr") => "fr",
+        Some("ru") => "ru",
+        Some("es") => "es",
+        Some("ja") => "ja",
+        _ => "en",
+    };
+    let cx = Cx::new(locale);
+    let data = shared(&state, &headers, peer.ip()).await;
+    let pairs: Vec<serde_json::Value> = body
+        .pairs
+        .into_iter()
+        .take(500)
+        .filter(|pair| !pair.id.trim().is_empty() && !pair.token.trim().is_empty())
+        .map(|pair| serde_json::json!({ "id": pair.id, "token": pair.token }))
+        .collect();
+    let files = owned_files_for_pairs(&state, pairs).await;
+    let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
+    let custom_id = data.eff.config.custom_id.unwrap_or(true);
+    let rows = file_rows(
+        &cx,
+        locale,
+        files,
+        &default_host,
+        custom_id,
+        now_ms(),
+        0,
+    );
+    let cards = FileRowsTpl {
+        cx: cx.clone(),
+        files: rows.clone(),
+    }
+    .render()
+    .unwrap_or_default();
+    let modals = FileModalsTpl { cx, files: rows }.render().unwrap_or_default();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json; charset=utf-8")
+        .header("cache-control", "private, no-store")
+        .body(Body::from(
+            serde_json::json!({ "cards": cards, "modals": modals }).to_string(),
+        ))
+        .unwrap_or_default()
+}
+
 async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> {
     let Some(encoded) = cookie_value(headers, "jb_files") else {
         return Vec::new();
@@ -993,6 +1081,13 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
             })
         })
         .collect();
+    owned_files_for_pairs(state, pairs).await
+}
+
+async fn owned_files_for_pairs(
+    state: &AppState,
+    pairs: Vec<serde_json::Value>,
+) -> Vec<ServerFile> {
     if pairs.is_empty() {
         return Vec::new();
     }
@@ -1101,44 +1196,17 @@ pub async fn files_page(
     let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
     let custom_id = data.eff.config.custom_id.unwrap_or(true);
     let timestamp = now_ms();
-    let rows: Vec<FileRow> = server_files
-        .into_iter()
-        .enumerate()
-        .map(|(index, file)| {
-            let host = file.storage_host.clone().unwrap_or_default();
-
-            FileRow {
-                icon: cx.mime_icon(&file.mime_type),
-                meta: format!("{} - {}", cx.fmt_size(file.size_bytes), file.mime_type),
-                show_host: !host.is_empty()
-                    && !format::is_default_host(
-                        &host,
-                        Some(&default_host)
-                            .filter(|h| !h.is_empty())
-                            .map(String::as_str),
-                    ),
-                host_short: host
-                    .trim_start_matches("http://")
-                    .trim_start_matches("https://")
-                    .to_owned(),
-                can_rename: custom_id && !file.url.is_empty(),
-                expired: file.expires_at * 1000 <= timestamp,
-                ttl_label: format::remaining_label(locale, file.expires_at, timestamp),
-                ttl_pct: format::pct_remaining(file.expires_at, file.uploaded_at, timestamp),
-                short_id: extract_short_id(&file.url),
-                id: file.id,
-                filename: file.filename,
-                size_bytes: file.size_bytes,
-                uploaded_at: file.uploaded_at,
-                expires_at: file.expires_at,
-                url: file.url,
-                delete_token: file.delete_token,
-                storage_host: host,
-                index,
-                protected: file.protected,
-            }
-        })
-        .collect();
+    let mut server_files = server_files;
+    server_files.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
+    let rows: Vec<FileRow> = file_rows(
+        &cx,
+        locale,
+        server_files,
+        &default_host,
+        custom_id,
+        timestamp,
+        0,
+    );
 
     let actions = vec![
         CardAction {
@@ -2085,74 +2153,4 @@ pub async fn admin_announcement() -> Response<Body> {
         .render()
         .unwrap_or_default(),
     )
-}
-
-#[cfg(test)]
-mod discord_embed_tests {
-    use super::{HeadTpl, component_embed_json, head_ctx};
-    use askama::Template;
-
-    #[test]
-    fn payload_is_a_single_container_within_limits() {
-        let json = component_embed_json(
-            "Juicebox",
-            "Fast, private file hosting.",
-            "https://juicebox.example/",
-        );
-        assert!(!json.is_empty());
-        assert!(json.len() <= 3000);
-        assert!(!json.contains("</"), "must stay inside the script element");
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let component = value.get("component").expect("top-level component");
-        assert_eq!(component.get("type").and_then(serde_json::Value::as_u64), Some(17));
-        let parts = component
-            .get("components")
-            .and_then(serde_json::Value::as_array)
-            .expect("container children");
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].get("type").and_then(serde_json::Value::as_u64), Some(10));
-        let buttons = parts[1]
-            .get("components")
-            .and_then(serde_json::Value::as_array)
-            .expect("action row children");
-        assert_eq!(buttons.len(), 1);
-        assert_eq!(buttons[0].get("style").and_then(serde_json::Value::as_u64), Some(5));
-    }
-
-    #[test]
-    fn script_breakout_is_escaped_but_stays_valid_json() {
-        let json = component_embed_json(
-            "a</script><script>alert(1)</script>",
-            "d",
-            "https://juicebox.example/",
-        );
-        assert!(!json.contains("</script"));
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(value.get("component").is_some());
-    }
-
-    #[test]
-    fn empty_title_or_url_disables_the_embed() {
-        assert!(component_embed_json("", "d", "https://x.example/").is_empty());
-        assert!(component_embed_json("t", "d", "").is_empty());
-    }
-
-    #[test]
-    fn head_renders_the_component_embed_script() {
-        let headers = axum::http::HeaderMap::new();
-        let head = head_ctx(
-            "en",
-            "Juicebox".to_owned(),
-            "Fast, private file hosting.".to_owned(),
-            "",
-            "/",
-            "/",
-            &headers,
-            false,
-        );
-        assert!(!head.discord_embed.is_empty());
-        let html = HeadTpl { head }.render().expect("head renders");
-        assert!(html.contains("id=\"discord:component-embed\""));
-        assert!(html.contains("\"type\":17"));
-    }
 }

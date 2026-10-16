@@ -366,7 +366,7 @@ window.__jbMotion = {
   state: "idle",
   gestures: 0
 };
-window.addEventListener("devicemotion", (e) => {
+if ("ontouchstart" in window || (navigator.maxTouchPoints > 0)) window.addEventListener("devicemotion", (e) => {
   if (!("ontouchstart" in window))
     return;
   const dbg = window.__jbMotion;

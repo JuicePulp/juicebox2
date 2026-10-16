@@ -200,8 +200,6 @@
   opacity: 1;
 }
 
-/* While a drag is held, the strip's checked pill goes visually neutral so
-   the floating chip is the single selected thing on screen. */
 .rtt-options.rtt-dragging .rtt-option:has(input:checked) {
   background-color: transparent;
 }
@@ -218,8 +216,6 @@
   display: none !important;
 }
 
-/* Tier grouping for the mobile chip layout. Transparent on desktop so the
-   flat segmented pill renders exactly as before. */
 .rtt-tier {
   display: contents;
 }
@@ -292,7 +288,7 @@
   background-color: var(--juice-700);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 480px) {
   .rttoolbar {
     padding: 0.6rem 0.75rem;
     gap: 0.6rem;
@@ -307,6 +303,7 @@
     background: none;
     border-radius: 0;
     overflow: visible;
+    touch-action: none;
   }
 
   .rtt-tier {

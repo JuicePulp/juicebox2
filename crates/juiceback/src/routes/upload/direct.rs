@@ -14,6 +14,7 @@ use super::{
     ticket::{
         check_mint_limit, clamp_ttl_seconds, device_connected, encrypted_client_ip,
         insert_owned_pending, mint_ticket, notify_device, pinned_region_host, public_url_for,
+        public_urls_for,
         reject_blocked_filename, ticket_ttl_secs,
     },
 };
@@ -30,6 +31,8 @@ pub struct DirectUploadReserveResponse {
     pub file_id: String,
     pub upload_url: String,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     pub expires_at: i64,
 }
 
@@ -188,7 +191,7 @@ pub async fn direct_upload_reserve_handler(
         .await;
     }
 
-    let public_url = public_url_for(&state, &record);
+    let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
     let upload_url = format!(
         "{}/internal/file/upload/{}",
         region_juicehost
@@ -202,6 +205,8 @@ pub async fn direct_upload_reserve_handler(
         file_id,
         upload_url,
         url: public_url,
+        raw_url,
+        download_url,
         expires_at: record.expires_at,
     }))
 }
@@ -317,7 +322,7 @@ pub async fn direct_upload_complete_handler(
         }
     }
 
-    let public_url = public_url_for(&state, &file);
+    let (public_url, raw_url, download_url) = public_urls_for(&state, &file);
     let protected = file.is_protected();
     let is_encrypted = file.is_encrypted;
     let cookie_hdr = noscript::file_cookie_header(
@@ -330,6 +335,8 @@ pub async fn direct_upload_complete_handler(
     let mut resp = Json(UploadResponse {
         id: file_id,
         url: public_url,
+        raw_url,
+        download_url,
         filename: file.filename,
         size_bytes,
         mime_type: file.mime_type,

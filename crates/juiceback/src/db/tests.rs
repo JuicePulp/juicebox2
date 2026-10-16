@@ -939,7 +939,7 @@ fn renew_ids_are_atomic_in_transaction() {
 #[test]
 fn hot_tier_migration_and_promo_flow() {
     let conn = setup_db();
-    assert!(schema_version(&conn).unwrap() >= 13);
+    assert!(schema_version(&conn).unwrap() >= 16);
 
     let rec = FileRecord::new(
         "hot1".into(),
@@ -956,6 +956,7 @@ fn hot_tier_migration_and_promo_flow() {
     let got = get_file(&conn, "hot1").unwrap().unwrap();
     assert_eq!(got.tier, "standard");
     assert!(got.r2_key.is_empty());
+    assert!(!got.tier_pinned);
 
     let (count, bytes) = hot_usage(&conn).unwrap();
     assert_eq!((count, bytes), (0, 0));
@@ -968,6 +969,7 @@ fn hot_tier_migration_and_promo_flow() {
     let got = get_file(&conn, "hot1").unwrap().unwrap();
     assert_eq!(got.tier, "hot");
     assert_eq!(got.r2_key, "hot/hot1.mp4");
+    assert!(!got.tier_pinned);
 
     let (count, bytes) = hot_usage(&conn).unwrap();
     assert_eq!((count, bytes), (1, 1024));
@@ -983,4 +985,80 @@ fn hot_tier_migration_and_promo_flow() {
     conn.execute("DELETE FROM files WHERE id = 'hot1'", [])
         .unwrap();
     assert_eq!(prune_promo_state(&conn).unwrap(), 1);
+}
+
+#[test]
+fn manual_tier_pins_and_skips_auto_promo() {
+    let conn = setup_db();
+    let rec = FileRecord::new(
+        "pin1".into(),
+        "clip.mp4".into(),
+        "video/mp4".into(),
+        2048,
+        "tok-pin".into(),
+        1000,
+        9_999_999_999,
+        None,
+        Some("https://f.juicey.dev".into()),
+    );
+    insert_file(&conn, &rec).unwrap();
+    assert_eq!(
+        list_promo_candidates(&conn, 9_999_999_000, 500)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    set_file_tier_manual(&conn, "pin1", "standard", "").unwrap();
+    let got = get_file(&conn, "pin1").unwrap().unwrap();
+    assert_eq!(got.tier, "standard");
+    assert!(got.tier_pinned);
+    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
+        .unwrap()
+        .is_empty());
+
+    set_file_tier_manual(&conn, "pin1", "hot", "hot/pin1.mp4").unwrap();
+    let got = get_file(&conn, "pin1").unwrap().unwrap();
+    assert_eq!(got.tier, "hot");
+    assert_eq!(got.r2_key, "hot/pin1.mp4");
+    assert!(got.tier_pinned);
+    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
+        .unwrap()
+        .is_empty());
+
+    set_file_tier_manual(&conn, "pin1", "standard", "").unwrap();
+    let got = get_file(&conn, "pin1").unwrap().unwrap();
+    assert!(got.tier_pinned);
+    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn embed_mime_allowlist_skips_archives() {
+    use crate::jobs::promo::embed_mime_eligible;
+    assert!(embed_mime_eligible("image/png"));
+    assert!(embed_mime_eligible("image/jpeg; charset=utf-8"));
+    assert!(embed_mime_eligible("video/mp4"));
+    assert!(embed_mime_eligible("application/pdf"));
+    assert!(embed_mime_eligible("text/plain"));
+    assert!(embed_mime_eligible("application/json"));
+    assert!(embed_mime_eligible("application/ld+json"));
+    assert!(!embed_mime_eligible("application/zip"));
+    assert!(!embed_mime_eligible("application/x-7z-compressed"));
+    assert!(!embed_mime_eligible("application/octet-stream"));
+    assert!(!embed_mime_eligible("video/webm"));
+    assert!(!embed_mime_eligible("audio/mpeg"));
+    assert!(!embed_mime_eligible(""));
+}
+
+#[test]
+fn embed_cooldown_gates_repeat_attempts() {
+    let conn = setup_db();
+    assert!(super::promo::embed_attempt_due(&conn, "e1", 10_000, 21_600).unwrap());
+    super::promo::record_embed_attempt(&conn, "e1", 10_000).unwrap();
+    assert!(!super::promo::embed_attempt_due(&conn, "e1", 10_001, 21_600).unwrap());
+    assert!(super::promo::embed_attempt_due(&conn, "e1", 10_000 + 21_600, 21_600).unwrap());
+    super::promo::record_embed_attempt(&conn, "e1", 20_000).unwrap();
+    assert!(!super::promo::embed_attempt_due(&conn, "e1", 20_001, 21_600).unwrap());
 }

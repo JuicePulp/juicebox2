@@ -384,6 +384,7 @@ impl LocalBackend {
                 .await
                 .map_err(|e| StorageError::Io(format!("create target failed: {e}")))?;
 
+            let mut dst_off = 0u64;
             for part_id in part_ids {
                 let part_path = self.resolve_path(part_id).ok_or(StorageError::NotFound)?;
                 ensure_not_frozen(self, part_id).await?;
@@ -397,9 +398,9 @@ impl LocalBackend {
                         "part {part_id} is not a regular file"
                     )));
                 }
-                tokio::io::copy(&mut part, &mut target_file)
-                    .await
-                    .map_err(|e| StorageError::Io(format!("copy part {part_id} failed: {e}")))?;
+                dst_off =
+                    copy_part_fast(&mut part, &mut target_file, meta.len(), dst_off, part_id)
+                        .await?;
             }
 
             target_file
@@ -479,6 +480,95 @@ impl LocalBackend {
         }
         Ok(file)
     }
+}
+
+async fn copy_part_fast(
+    part: &mut tokio::fs::File,
+    target_file: &mut tokio::fs::File,
+    part_len: u64,
+    mut dst_off: u64,
+    part_id: &str,
+) -> Result<u64, StorageError> {
+    use std::os::fd::AsRawFd;
+    const CHUNK: u64 = 32 * 1024 * 1024;
+    let mut src_off: libc::off_t = 0;
+    let mut remaining = part_len;
+    let mut out_off: libc::off_t = dst_off as libc::off_t;
+    let mut kernel_done = true;
+    while remaining > 0 {
+        let want = remaining.min(CHUNK) as libc::size_t;
+        let mut in_off = src_off;
+        let rc = unsafe {
+            libc::copy_file_range(
+                part.as_raw_fd(),
+                &mut in_off,
+                target_file.as_raw_fd(),
+                &mut out_off,
+                want,
+                0,
+            )
+        };
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            match err.raw_os_error() {
+                Some(code)
+                    if code == libc::ENOSYS
+                        || code == libc::EXDEV
+                        || code == libc::EINVAL
+                        || code == libc::EPERM
+                        || code == libc::EOPNOTSUPP =>
+                {
+                    kernel_done = false;
+                    break;
+                }
+                Some(code) if code == libc::EINTR => continue,
+                _ => {
+                    return Err(StorageError::Io(format!(
+                        "copy part {part_id} failed: {err}"
+                    )));
+                }
+            }
+        }
+        if rc == 0 {
+            return Err(StorageError::Io(format!(
+                "copy part {part_id} hit unexpected EOF"
+            )));
+        }
+        let n = rc as u64;
+        src_off = in_off;
+        dst_off = out_off as u64;
+        remaining -= n;
+    }
+    if !kernel_done {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+        part.seek(std::io::SeekFrom::Start(src_off as u64))
+            .await
+            .map_err(|e| StorageError::Io(format!("seek part {part_id} failed: {e}")))?;
+        target_file
+            .seek(std::io::SeekFrom::Start(dst_off))
+            .await
+            .map_err(|e| StorageError::Io(format!("seek target failed: {e}")))?;
+        let mut buf = vec![0u8; 1 << 20];
+        while remaining > 0 {
+            let want = remaining.min(buf.len() as u64) as usize;
+            let n = part
+                .read(&mut buf[..want])
+                .await
+                .map_err(|e| StorageError::Io(format!("read part {part_id} failed: {e}")))?;
+            if n == 0 {
+                return Err(StorageError::Io(format!(
+                    "copy part {part_id} hit unexpected EOF"
+                )));
+            }
+            target_file
+                .write_all(&buf[..n])
+                .await
+                .map_err(|e| StorageError::Io(format!("write target failed: {e}")))?;
+            remaining -= n as u64;
+            dst_off += n as u64;
+        }
+    }
+    Ok(dst_off)
 }
 
 #[async_trait::async_trait]

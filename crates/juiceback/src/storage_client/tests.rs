@@ -111,6 +111,10 @@ fn test_state() -> Arc<AppState> {
         promo_min_views_per_min: 10.0,
         promo_min_ttl_remaining_secs: 3600,
         promo_dry_run: true,
+        embed_promote_enabled: true,
+        embed_promote_max_bytes: 25 * 1024 * 1024,
+        embed_promote_cooldown_secs: 21600,
+        embed_promote_min_ttl_remaining_secs: 3600,
     };
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("x-juicehost-api-key", "my_api_key".parse().unwrap());

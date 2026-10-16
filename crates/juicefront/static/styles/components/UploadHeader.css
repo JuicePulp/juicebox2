@@ -66,8 +66,6 @@
   image-rendering: crisp-edges;
 }
 
-/* The 64px logo plus the pixel title only just fits a ~320px viewport;
-   drop the logo (keep the wordmark) when the header gets narrower. */
 @container (max-width: 320px) {
   .upload-header__logo {
     display: none;

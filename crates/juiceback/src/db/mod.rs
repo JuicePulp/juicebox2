@@ -6,6 +6,7 @@ pub mod common;
 pub mod feedback;
 pub mod fetch_jobs;
 pub mod files;
+pub mod geo;
 pub mod hosters;
 pub mod maintenance;
 pub mod paginated;

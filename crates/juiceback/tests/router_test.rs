@@ -96,6 +96,7 @@ async fn resolve_hot_file_reports_r2_url() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["tier"], "hot");
     assert_eq!(json["r2_url"], "https://r.juicey.dev/hot/hot00001.mp4");
+    assert_eq!(json["r2_key"], "hot/hot00001.mp4");
 }
 
 #[tokio::test]

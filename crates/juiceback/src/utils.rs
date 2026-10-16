@@ -28,7 +28,7 @@ pub fn is_valid_id(id: &str) -> bool {
     )
 }
 
-pub use juiceutils::{ids::normalize_custom_id, urls::public_url};
+pub use juiceutils::{ids::normalize_custom_id, urls::public_url, urls::public_url_for_route};
 
 #[must_use]
 pub fn is_official_host(config: &crate::config::Config, host: &str) -> bool {
@@ -52,6 +52,17 @@ pub fn share_link(
     id: &str,
     filename: &str,
 ) -> String {
+    share_link_for(config, "v", storage_host, id, filename)
+}
+
+#[must_use]
+pub fn share_link_for(
+    config: &crate::config::Config,
+    route: &str,
+    storage_host: Option<&str>,
+    id: &str,
+    filename: &str,
+) -> String {
     if let Some(router) = config
         .router_base_url
         .as_deref()
@@ -59,10 +70,24 @@ pub fn share_link(
     {
         let official = storage_host.map_or(true, |h| is_official_host(config, h));
         if official {
-            return public_url(router, None, id, filename);
+            return public_url_for_route(route, router, None, id, filename);
         }
     }
-    public_url(&config.public_base_url, storage_host, id, filename)
+    public_url_for_route(route, &config.public_base_url, storage_host, id, filename)
+}
+
+#[must_use]
+pub fn share_links(
+    config: &crate::config::Config,
+    storage_host: Option<&str>,
+    id: &str,
+    filename: &str,
+) -> (String, String, String) {
+    (
+        share_link_for(config, "v", storage_host, id, filename),
+        share_link_for(config, "f", storage_host, id, filename),
+        share_link_for(config, "d", storage_host, id, filename),
+    )
 }
 
 pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {

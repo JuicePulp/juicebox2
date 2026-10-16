@@ -8,7 +8,8 @@
       mode: "__MODE__",
       keyVersion: "__KEY_VERSION__",
       filename: "__FILENAME__",
-      mime: "__MIME__"
+      mime: "__MIME__",
+      dlIcon: '__DL_ICON_SVG__'
     };
     var PLAIN_CHUNK = 65536, NONCE = 12, TAG = 16, HEADER = 13;
     var STORED_FULL = NONCE + PLAIN_CHUNK + TAG;
@@ -202,7 +203,7 @@
       if (!res.ok) throw new Error("Unlock failed (" + res.status + ").");
       var body = await res.json();
       var key = await importDek(body.dek);
-      return { key: key, plainLen: body.plain_len };
+      return { key: key, plainLen: body.plain_len, filename: body.filename || CFG.filename, mime: body.mime_type || CFG.mime };
     }
 
     async function v1Download(key, plainLen) {
@@ -256,16 +257,16 @@
       card.hidden = true;
       var hero = document.createElement("div");
       hero.className = "dl-hero";
-      var icon = document.createElement("div");
-      icon.className = "dl-icon";
-      icon.setAttribute("aria-hidden", "true");
-      icon.textContent = "\u21E9";
+      var iconWrap = document.createElement("div");
+      iconWrap.className = "dl-icon";
+      iconWrap.setAttribute("aria-hidden", "true");
+      try { iconWrap.innerHTML = CFG.dlIcon; } catch (e) {}
       var name = document.createElement("p");
       name.className = "dl-name";
       name.textContent = CFG.filename;
       var meta = document.createElement("p");
       meta.className = "dl-meta";
-      meta.textContent = mimeLabel + " \u00B7 " + sizeLabel;
+      meta.textContent = mimeLabel + " - " + sizeLabel;
       var dlBtn = document.createElement("a");
       dlBtn.className = "dl-btn";
       dlBtn.href = "#";
@@ -275,7 +276,7 @@
         say("Downloading...");
         onDownload().catch(function (err) { say(err.message, true); });
       });
-      hero.appendChild(icon);
+      hero.appendChild(iconWrap);
       hero.appendChild(name);
       hero.appendChild(meta);
       hero.appendChild(dlBtn);
@@ -466,6 +467,19 @@
       }
     }
 
+    function dismissPrompt() {
+      if (!card || card.dataset.dismissed) return;
+      card.dataset.dismissed = "1";
+      card.hidden = true;
+    }
+    function revealName(filename, mime) {
+      if (!filename) return;
+      CFG.filename = filename;
+      if (mime) CFG.mime = mime;
+      document.title = filename + " - Juicebox²";
+      var fname = document.querySelector(".topbar .fname");
+      if (fname) { fname.textContent = filename; fname.setAttribute("title", filename); }
+    }
     async function go() {
       var password = pwInput.value;
       if (!password) { say("Enter the password first.", true); return; }
@@ -477,6 +491,8 @@
           pwInput.value = "";
           held = { v1: true, key: unlocked.key, plainLen: unlocked.plainLen };
           enableTopbar();
+          revealName(unlocked.filename, unlocked.mime);
+          dismissPrompt();
           if (CFG.mode === "download") {
             await v1Download(unlocked.key, unlocked.plainLen);
           } else if (CFG.mode === "view") {
@@ -487,6 +503,19 @@
         } else {
           held = { v1: false, password: password };
           enableTopbar();
+          try {
+            var metaRes = await fetch(CFG.gateway + "/api/gateway/unlock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: CFG.id, password: password }),
+              cache: "no-store"
+            });
+            if (metaRes.ok) {
+              var meta = await metaRes.json();
+              revealName(meta.filename, meta.mime_type);
+            }
+          } catch (e) {}
+          dismissPrompt();
           await legacyFlow(password);
           pwInput.value = "";
         }

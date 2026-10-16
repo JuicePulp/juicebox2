@@ -42,7 +42,7 @@ pub fn finish_reservation(
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
     delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
     password_hash, is_encrypted, enc_header, dek_wrapped, dek_salt, dek_escrow, key_version, \
-    tier, r2_key";
+    tier, r2_key, tier_pinned";
 
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
@@ -72,13 +72,14 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
         key_version: row.get(17).unwrap_or(0),
         tier: row.get(18).unwrap_or_else(|_| "standard".to_string()),
         r2_key: row.get(19).unwrap_or_default(),
+        tier_pinned: row.get::<_, i64>(20).unwrap_or(0) != 0,
     })
 }
 
 pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)"
+            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
         ),
         params![
             record.id,
@@ -101,6 +102,7 @@ pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
             record.key_version,
             record.tier,
             record.r2_key,
+            i64::from(record.tier_pinned),
         ],
     )?;
     Ok(())

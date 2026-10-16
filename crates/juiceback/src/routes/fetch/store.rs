@@ -152,14 +152,49 @@ impl Drop for CleanupOnDrop {
     }
 }
 
+fn configured_cobalt_hosts(config: &crate::config::Config) -> Vec<(String, u16)> {
+    let mut out = Vec::new();
+    let configured = [&config.cobalt_api_url]
+        .into_iter()
+        .chain(config.cobalt_session_api_url.as_ref());
+    for raw in configured {
+        if let Ok(parsed) = url::Url::parse(raw.trim())
+            && let Some(host) = parsed.host_str()
+            && let Some(port) = parsed.port_or_known_default()
+        {
+            out.push((host.to_ascii_lowercase(), port));
+        }
+    }
+    out
+}
+
+fn tunnel_url_host_port(url: &str) -> Option<(String, u16)> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return None;
+    }
+    Some((
+        parsed.host_str()?.to_ascii_lowercase(),
+        parsed.port_or_known_default()?,
+    ))
+}
+
 async fn fetch_tunnel_response(
     client: &reqwest::Client,
+    state: &Arc<AppState>,
     initial_url: &str,
     allow_private: bool,
 ) -> Result<reqwest::Response, String> {
-    let mut url = crate::storage_client::check_outbound_url(initial_url, allow_private)
-        .await
-        .map_err(|e| format!("refusing to fetch media from unsafe URL: {e}"))?;
+    let trusted_cobalt = tunnel_url_host_port(initial_url)
+        .map(|hp| configured_cobalt_hosts(&state.config).contains(&hp))
+        .unwrap_or(false);
+    let mut url = if trusted_cobalt {
+        initial_url.trim().to_string()
+    } else {
+        crate::storage_client::check_outbound_url(initial_url, allow_private)
+            .await
+            .map_err(|e| format!("refusing to fetch media from unsafe URL: {e}"))?
+    };
     for _ in 0..=5 {
         let resp = client
             .get(&url)
@@ -214,7 +249,8 @@ async fn transfer_to_juicehost(
         ByteSource::Tunnel(url) => {
             let client = state.http.clone();
             let resp =
-                fetch_tunnel_response(&client, url, state.config.allow_private_fetch).await?;
+                fetch_tunnel_response(&client, state, url, state.config.allow_private_fetch)
+                    .await?;
             let len = resp.content_length().map(|l| l as u64);
             if len == Some(0) {
                 return Err(empty_stream_message(source_url));
@@ -510,5 +546,24 @@ async fn finalize_stored_file(
             Ok(record.id)
         }
         _ => Err("reservation vanished during finalization".into()),
+    }
+}
+
+#[cfg(test)]
+mod tunnel_host_tests {
+    use super::tunnel_url_host_port;
+
+    #[test]
+    fn parses_tunnel_host_port() {
+        assert_eq!(
+            tunnel_url_host_port("http://127.0.0.1:7272/tunnel?id=x"),
+            Some(("127.0.0.1".to_string(), 7272))
+        );
+        assert_eq!(
+            tunnel_url_host_port("https://cobalt.example.com/stream"),
+            Some(("cobalt.example.com".to_string(), 443))
+        );
+        assert!(tunnel_url_host_port("ftp://127.0.0.1:7272/x").is_none());
+        assert!(tunnel_url_host_port("not a url").is_none());
     }
 }

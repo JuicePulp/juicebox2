@@ -67,6 +67,7 @@ pub async fn file_status_handler(
                 "gateway_origin": state.config.juiceback_origin,
                 "tier": record.tier,
                 "r2_url": r2_url,
+                "r2_key": record.r2_key,
             })))
         }
         Ok(None) => Err(AppError::NotFound),
@@ -126,6 +127,7 @@ pub async fn resolve_file_handler(
             "storage_host": record.storage_host,
             "tier": record.tier,
             "r2_url": r2_url_for(&state.config, &record),
+            "r2_key": record.r2_key,
             "filename": record.filename,
         }))),
         Ok(None) => Err(AppError::NotFound),

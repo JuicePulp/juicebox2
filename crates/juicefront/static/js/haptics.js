@@ -16,6 +16,12 @@ export function hapticsEnabled() {
     return true;
   }
 }
+export function setHapticsEnabled(on) {
+  try {
+    localStorage.setItem(KEY, on ? "1" : "0");
+  } catch {}
+  if (on) haptic("tap");
+}
 export function haptic(name) {
   if (!hapticsEnabled() || !hapticsSupported())
     return;

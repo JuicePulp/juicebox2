@@ -7,6 +7,8 @@ import {
   extIcon,
   makeCopyBar,
   copyBarStrings,
+  attachUrlVariantsAfter,
+  urlVariantLabels,
   createDeleteButton,
   vanityMsg,
 } from "./copy.js";
@@ -149,6 +151,29 @@ function markRowProtected(row) {
   badge.innerHTML = iconHTML("key", 24);
   wrap.append(badge, nameEl);
 }
+function wipeFailedReservation(item) {
+  try {
+    if (!item || item.dataset.wiped) return;
+    item.dataset.wiped = "1";
+    var fid = item.getAttribute("data-file-id") || "";
+    var token = item.getAttribute("data-delete-token") || "";
+    if (fid) {
+      try {
+        var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
+        var next = stored.filter(function (e) { return e && e.id !== fid; });
+        if (next.length !== stored.length) {
+          localStorage.setItem("juicebox_uploads", JSON.stringify(next));
+        }
+      } catch (e) {}
+    }
+    if (fid && token) {
+      fetch("/file/" + encodeURIComponent(fid), {
+        method: "DELETE",
+        headers: { "X-Delete-Token": token },
+      }).catch(function () {});
+    }
+  } catch (e) {}
+}
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
   item.classList.add("error");
   pill.classList.add("error");
@@ -160,6 +185,7 @@ function failItem(item, pill, fill, status, errorCode, rawMessage) {
   status.textContent = msg;
   announce(t(LOCALE, "upload.announce_failed", { message: msg }));
   playSound("error");
+  wipeFailedReservation(item);
 }
 function animateRowOut(item) {
   item.classList.add("exiting");
@@ -201,7 +227,13 @@ function showQuickLink(item, row) {
   if (!item.reserveUrl || row.hasAttribute("data-quick-link")) return;
   if (item.state === "done") return;
   row.setAttribute("data-quick-link", "");
-  getRowParts(row).pill.after(makeCopyBar(item.reserveUrl, copyBarStrings(LOCALE)));
+  var quickBar = makeCopyBar(item.reserveUrl, copyBarStrings(LOCALE));
+  getRowParts(row).pill.after(quickBar);
+  attachUrlVariantsAfter(
+    quickBar,
+    { preview: item.reserveUrl, raw: item.reserveRawUrl, download: item.reserveDownloadUrl },
+    urlVariantLabels(LOCALE),
+  );
 }
 function completeRow(item, row) {
   var parts = getRowParts(row);
@@ -231,6 +263,12 @@ function completeRow(item, row) {
     pill.after(makeCopyBar(item.url || "", copyBarStrings(LOCALE)));
   }
   copyBar = pill.nextElementSibling;
+
+  attachUrlVariantsAfter(
+    copyBar,
+    { preview: item.url, raw: item.rawUrl, download: item.downloadUrl },
+    urlVariantLabels(LOCALE),
+  );
 
   if (row.hasAttribute("data-quick-link")) {
     setTimeout(function () {
@@ -353,6 +391,10 @@ async function ultrafastReserve(file, item, fill, status, pill) {
     }
     var reserve = await reserveRes.json();
     var reserveUrl = reserve.url || "";
+    var reserveRawUrl = reserve.raw_url || "";
+    var reserveDownloadUrl = reserve.download_url || "";
+    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
+    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
     try {
       var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
       stored.push({
@@ -362,6 +404,8 @@ async function ultrafastReserve(file, item, fill, status, pill) {
         size_bytes: file.size,
         uploaded_at: Math.floor(Date.now() / 1000),
         url: reserveUrl,
+        raw_url: reserveRawUrl,
+        download_url: reserveDownloadUrl,
         expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
         delete_token: reserve.delete_token || "",
       });
@@ -369,7 +413,13 @@ async function ultrafastReserve(file, item, fill, status, pill) {
     } catch {}
     if (reserveUrl) {
       item.setAttribute("data-quick-link", "");
-      pill.after(makeCopyBar(reserveUrl, copyBarStrings(LOCALE)));
+      var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
+      pill.after(reserveBar);
+      attachUrlVariantsAfter(
+        reserveBar,
+        { preview: reserveUrl, raw: reserveRawUrl, download: reserveDownloadUrl },
+        urlVariantLabels(LOCALE),
+      );
     }
     fill.style.setProperty("--progress", "0%");
     status.textContent = t(LOCALE, "upload.waiting_for_app");
@@ -439,6 +489,10 @@ async function ultrafastReservePlaceholder(item, fill, status, pill) {
     }
     var reserve = await reserveRes.json();
     var reserveUrl = reserve.url || "";
+    var reserveRawUrl = reserve.raw_url || "";
+    var reserveDownloadUrl = reserve.download_url || "";
+    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
+    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
     try {
       var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
       stored.push({
@@ -448,6 +502,8 @@ async function ultrafastReservePlaceholder(item, fill, status, pill) {
         size_bytes: 0,
         uploaded_at: Math.floor(Date.now() / 1000),
         url: reserveUrl,
+        raw_url: reserveRawUrl,
+        download_url: reserveDownloadUrl,
         expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
         delete_token: reserve.delete_token || "",
       });
@@ -455,7 +511,13 @@ async function ultrafastReservePlaceholder(item, fill, status, pill) {
     } catch {}
     if (reserveUrl) {
       item.setAttribute("data-quick-link", "");
-      pill.after(makeCopyBar(reserveUrl, copyBarStrings(LOCALE)));
+      var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
+      pill.after(reserveBar);
+      attachUrlVariantsAfter(
+        reserveBar,
+        { preview: reserveUrl, raw: reserveRawUrl, download: reserveDownloadUrl },
+        urlVariantLabels(LOCALE),
+      );
     }
     fill.style.setProperty("--progress", "0%");
     status.textContent = t(LOCALE, "upload.waiting_for_app");
@@ -492,6 +554,8 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
           var realName = data.filename || "upload";
           var realSize = data.size_bytes || 0;
           var realUrl = data.url || "";
+          var realRawUrl = data.raw_url || "";
+          var realDownloadUrl = data.download_url || "";
           var realMime = data.mime_type || "";
           var nameEl = item.querySelector(".file-name");
           if (nameEl) nameEl.textContent = realName;
@@ -521,6 +585,11 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
           var copyBar = pill.nextElementSibling;
           if (copyBar && copyBar.classList.contains("copy-bar")) {
             copyBar.style.marginTop = "0.75rem";
+            attachUrlVariantsAfter(
+              copyBar,
+              { preview: realUrl, raw: realRawUrl, download: realDownloadUrl },
+              urlVariantLabels(LOCALE),
+            );
           }
           var delBtn = item.querySelector(".delete-btn");
           if (delBtn && fileId && deleteToken) {
@@ -544,6 +613,8 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
               stored[idx].mime_type = realMime;
               stored[idx].size_bytes = realSize;
               stored[idx].url = realUrl;
+              stored[idx].raw_url = realRawUrl;
+              stored[idx].download_url = realDownloadUrl;
             } else {
               stored.push({
                 id: fileId,
@@ -552,6 +623,8 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
                 size_bytes: realSize,
                 uploaded_at: Math.floor(Date.now() / 1000),
                 url: realUrl,
+                raw_url: realRawUrl,
+                download_url: realDownloadUrl,
                 expires_at: data.expires_at || Math.floor(Date.now() / 1000) + ttlHours() * 3600,
                 delete_token: deleteToken,
               });
@@ -730,7 +803,13 @@ function completeCobaltRow(file, item, fill, status, pill) {
   var spinner = pill.querySelector(".spinner");
   if (spinner) spinner.remove();
   pill.style.display = "none";
-  pill.after(makeCopyBar(file.url, copyBarStrings(LOCALE)));
+  var cobaltBar = makeCopyBar(file.url, copyBarStrings(LOCALE));
+  pill.after(cobaltBar);
+  attachUrlVariantsAfter(
+    cobaltBar,
+    { preview: file.url, raw: file.raw_url, download: file.download_url },
+    urlVariantLabels(LOCALE),
+  );
   var copyBar = pill.nextElementSibling;
   if (copyBar && copyBar.classList.contains("copy-bar")) {
     copyBar.style.marginTop = "0.75rem";
@@ -898,7 +977,13 @@ function addUploadedItem(data) {
   item.querySelector(".file-size").textContent = formatSize(data.size_bytes);
   if (data.id) item.setAttribute("data-file-id", data.id);
   var actionArea = item.querySelector(".file-action-area");
-  actionArea.appendChild(makeCopyBar(data.url, copyBarStrings(LOCALE)));
+  var uploadedBar = makeCopyBar(data.url, copyBarStrings(LOCALE));
+  actionArea.appendChild(uploadedBar);
+  attachUrlVariantsAfter(
+    uploadedBar,
+    { preview: data.url, raw: data.raw_url, download: data.download_url },
+    urlVariantLabels(LOCALE),
+  );
   if (data.id && data.delete_token) {
     actionArea.appendChild(
       createDeleteButton({
@@ -920,7 +1005,19 @@ function enhanceServerFiles() {
     var token = el.getAttribute("data-delete-token") || "";
     var url = el.getAttribute("data-url") || "";
     var link = el.querySelector("a.copy-bar");
-    if (link) link.replaceWith(makeCopyBar(url, copyBarStrings(LOCALE)));
+    if (link) {
+      var serverBar = makeCopyBar(url, copyBarStrings(LOCALE));
+      link.replaceWith(serverBar);
+      attachUrlVariantsAfter(
+        serverBar,
+        {
+          preview: url,
+          raw: el.getAttribute("data-raw-url") || "",
+          download: el.getAttribute("data-download-url") || "",
+        },
+        urlVariantLabels(LOCALE),
+      );
+    }
     var noscript = el.querySelector("noscript");
     if (noscript) {
       noscript.replaceWith(

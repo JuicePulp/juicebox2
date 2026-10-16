@@ -173,9 +173,23 @@
 </div>
 <div class="form-field">
 <label class="select-option select-option--toggle" data-cuelume-toggle>
+<input type="checkbox" data-haptics-toggle="" aria-label="{{ cx.t("settings.haptics") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("settings.haptics") }}</span><span class="select-option__desc">{{ cx.t("settings.haptics_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle" data-cuelume-toggle>
 <input type="checkbox" data-motion-toggle="" aria-label="{{ cx.t("settings.motion") }}">
 <span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
 <span class="select-option__text"><span class="select-option__label">{{ cx.t("settings.motion") }}</span><span class="select-option__desc">{{ cx.t("settings.motion_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle" data-cuelume-toggle>
+<input type="checkbox" data-link-variants-toggle="" aria-label="{{ cx.t("settings.link_variants") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("settings.link_variants") }}</span><span class="select-option__desc">{{ cx.t("settings.link_variants_desc") }}</span></span>
 </label>
 </div>
 </section>

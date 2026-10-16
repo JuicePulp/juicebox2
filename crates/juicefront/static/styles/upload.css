@@ -205,6 +205,30 @@ body {
     0 0 20px rgba(249, 115, 22, 0.15);
 }
 
+.drop-zone canvas.dither-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  animation: encrypted-fade 0.5s ease-out;
+}
+
+@keyframes encrypted-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-zone canvas.dither-layer {
+    animation: none;
+  }
+}
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
@@ -334,6 +358,28 @@ html[data-banned] .upload-tabs {
   display: none !important;
 }
 
+.drop-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.drop-lock {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--orange-500);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+.drop-lock[hidden] {
+  display: none;
+}
+
 .drop-icon {
   width: 64px;
   height: 64px;
@@ -421,12 +467,6 @@ html[data-banned] .upload-tabs {
   border-bottom: none;
 }
 
-/* Single tab strip shared by JS and no-JS: the File | Video | Text labels
- * below the retention toolbar always come from this one element.
- */
-
-/* Tabs are always visible, so whatever panel sits below loses its top
-   corners at every width. */
 .upload-form .drop-zone,
 .upload-form .text-editor {
   border-top-left-radius: 0;
@@ -508,32 +548,52 @@ html[data-banned] .upload-tabs {
   color: var(--juice-500);
 }
 
-.upload-tab {
+.upload-tab,
+.url-variant {
   flex: 1;
-  padding: 0.6rem 0.6rem;
   text-align: center;
   background: var(--juice-800);
-  box-shadow:
-    inset 2px 0 0 0 var(--juice-700),
-    inset -2px 0 0 0 var(--juice-700),
-    inset 0 2px 0 0 var(--juice-700);
   color: var(--juice-400);
-  font-size: 0.85rem;
-
   cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background 0.15s,
     color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
+  box-shadow:
+    inset 1px 0 0 0 var(--juice-700),
+    inset -1px 0 0 0 var(--juice-700);
+}
+
+.upload-tab:hover,
+.url-variant:hover {
+  background: var(--juice-700);
+  color: var(--juice-200);
+}
+
+.upload-tab {
+  padding: 0.6rem 0.6rem;
+  font-size: 0.85rem;
+  box-shadow:
+    inset 1px 0 0 0 var(--juice-700),
+    inset -1px 0 0 0 var(--juice-700),
+    inset 0 2px 0 0 var(--juice-700);
 }
 
 .upload-tab:first-child {
   border-top-left-radius: 0.5rem;
+  box-shadow:
+    inset 2px 0 0 0 var(--juice-700),
+    inset -1px 0 0 0 var(--juice-700),
+    inset 0 2px 0 0 var(--juice-700);
 }
 
 .upload-tab:last-child {
   border-top-right-radius: 0.5rem;
+  box-shadow:
+    inset 1px 0 0 0 var(--juice-700),
+    inset -2px 0 0 0 var(--juice-700),
+    inset 0 2px 0 0 var(--juice-700);
 }
 
 .upload-tab:hover {
@@ -725,7 +785,6 @@ html[data-banned] .upload-tabs {
   font-family: "Title", "Unifont", monospace;
   text-transform: uppercase;
   color: var(--orange-500);
-  /* Same pixel-style outline as the header title, scaled to this size. */
   text-shadow:
     2px 0 0 #000,
     -2px 0 0 #000,
@@ -829,7 +888,6 @@ html[data-banned] .upload-tabs {
   cursor: pointer;
 }
 
-/* display:inline-flex above would defeat the hidden attribute otherwise */
 .cobalt-option[hidden] {
   display: none;
 }
@@ -1707,14 +1765,12 @@ html[data-banned] .upload-tabs {
   }
 }
 
-/* Desktop: Check and Apply sit glued together as one unit. */
 @media (min-width: 769px) {
   .host-check-btn {
     border-bottom-right-radius: 0 !important;
   }
 
   .host-apply-btn {
-    /* .mdlbtn is a pill (9999px); match the check button's 0.5rem corners */
     border-radius: 0 !important;
     border-bottom-right-radius: 0.5rem !important;
   }

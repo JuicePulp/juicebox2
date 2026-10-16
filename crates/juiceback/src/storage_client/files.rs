@@ -87,6 +87,72 @@ pub async fn demote_file_on_juicehost(
     }
 }
 
+pub async fn freeze_file_on_juicehost(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+) -> Result<(), String> {
+    let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
+    if custom_host.is_none() && state.config.juicehost_url.is_empty() {
+        return Ok(());
+    }
+    let client = StorageClient::resolve(state, custom_host).await?;
+
+    let headers = client.headers_with(None)?;
+
+    let resp = client
+        .http()
+        .post(format!("{}/internal/file/{}/freeze", client.base_url(), id))
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| format!("juicehost freeze request failed: {e}"))?;
+
+    if resp.status().is_success() {
+        tracing::info!("juicehost freeze: id={id} ok");
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        Err(format!(
+            "juicehost freeze failed: status={status} body={body_text}"
+        ))
+    }
+}
+
+pub async fn unfreeze_file_on_juicehost(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+) -> Result<(), String> {
+    let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
+    if custom_host.is_none() && state.config.juicehost_url.is_empty() {
+        return Ok(());
+    }
+    let client = StorageClient::resolve(state, custom_host).await?;
+
+    let headers = client.headers_with(None)?;
+
+    let resp = client
+        .http()
+        .post(format!("{}/internal/file/{}/unfreeze", client.base_url(), id))
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| format!("juicehost unfreeze request failed: {e}"))?;
+
+    if resp.status().is_success() {
+        tracing::info!("juicehost unfreeze: id={id} ok");
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        Err(format!(
+            "juicehost unfreeze failed: status={status} body={body_text}"
+        ))
+    }
+}
+
 pub async fn promote_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,

@@ -1,6 +1,7 @@
 pub mod ban;
 pub mod config;
 pub mod file_validation;
+pub mod icons;
 pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
@@ -124,7 +125,7 @@ pub async fn add_security_headers(
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
                 HeaderValue::from_static(
-                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
+                    "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
                 ),
             );
         }
@@ -133,7 +134,7 @@ pub async fn add_security_headers(
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:",
+                "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; connect-src 'self' http: https: ws: wss:",
             ),
         );
     }

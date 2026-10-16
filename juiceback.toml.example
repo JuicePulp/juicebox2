@@ -102,6 +102,13 @@ min_views = 50
 min_views_per_min = 10.0
 min_ttl_remaining_secs = 3600
 dry_run = true
+# Promote-on-first-embed: small previewable files (image/*, video/mp4, pdf,
+# text/*) go hot on /v/ render or first non-bot /f/ view. Respects dry_run.
+# Never pins: velocity + manual still own the tier. Skips archives/binaries.
+embed_enabled = true
+embed_max_bytes = 26214400
+embed_cooldown_secs = 21600
+embed_min_ttl_remaining_secs = 3600
 
 [sentry]
 # DSN is env-only: SENTRY_DSN (or SENTRY_DSN_JUICEBACK).

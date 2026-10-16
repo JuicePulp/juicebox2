@@ -44,6 +44,13 @@ pub enum ParamsResponse {
     },
 }
 
+fn hashed_filename(filename: &str) -> String {
+    let mut input = Vec::with_capacity(32 + filename.len());
+    input.extend_from_slice(b"juicebox-filename-v1:");
+    input.extend_from_slice(filename.as_bytes());
+    blake3::hash(&input).to_hex().to_string()[..16].to_string()
+}
+
 fn ciphertext_url_for(state: &Arc<AppState>, id: &str) -> String {
     format!(
         "{}/c/{}",
@@ -94,13 +101,13 @@ pub async fn params_handler(
             plain_len,
             cipher_len,
             ciphertext_url: ciphertext_url_for(&state, &record.id),
-            filename: record.filename.clone(),
+            filename: hashed_filename(&record.filename),
             mime_type: record.mime_type.clone(),
         }))
     } else {
         Ok(Json(ParamsResponse::Legacy {
             id: record.id.clone(),
-            filename: record.filename.clone(),
+            filename: hashed_filename(&record.filename),
             mime_type: record.mime_type.clone(),
             plain_len: record.size_bytes,
         }))
@@ -118,6 +125,8 @@ struct UnlockResponse {
     dek: String,
     plain_len: u64,
     chunk_shift: u8,
+    filename: String,
+    mime_type: String,
 }
 
 #[utoipa::path(
@@ -148,9 +157,31 @@ pub async fn unlock_handler(
         .await?
         .ok_or(AppError::NotFound)?;
     if !record.uses_per_file_key() {
-        
-        
-        return Err(AppError::NotFound);
+        let password = body.password.clone();
+        let hash = record.password_hash.clone().unwrap_or_default();
+        let hash_empty = hash.is_empty();
+        let ok = tokio::task::spawn_blocking(move || {
+            crate::auth::verify_password(&password, &hash).map_err(AppError::Internal)
+        })
+        .await
+        .map_err(|_| AppError::Internal("unlock task panicked".into()))??;
+        if hash_empty || !ok {
+            return Err(AppError::Forbidden("invalid password".into()));
+        }
+        let mut resp = Json(UnlockResponse {
+            dek: String::new(),
+            plain_len: u64::try_from(record.size_bytes.max(0))
+                .map_err(|_| AppError::Internal("bad file size".into()))?,
+            chunk_shift: 0,
+            filename: record.filename.clone(),
+            mime_type: record.mime_type.clone(),
+        })
+        .into_response();
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        );
+        return Ok(resp);
     }
 
     let ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
@@ -193,6 +224,8 @@ pub async fn unlock_handler(
         dek: dek_b64,
         plain_len,
         chunk_shift: crypto_file::CHUNK_SHIFT,
+        filename: record.filename.clone(),
+        mime_type: record.mime_type.clone(),
     })
     .into_response();
     resp.headers_mut().insert(

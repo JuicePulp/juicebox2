@@ -13,7 +13,7 @@ use super::{
     common::UploadResponse,
     ticket::{
         check_mint_limit, clamp_ttl_seconds, encrypted_client_ip, insert_owned_pending,
-        mint_ticket, pinned_region_host, public_url_for, reject_blocked_filename,
+        mint_ticket, pinned_region_host, public_url_for, public_urls_for, reject_blocked_filename,
         ticket_ttl_secs,
     },
 };
@@ -57,6 +57,8 @@ pub struct DirectParallelReserveResponse {
     pub ticket: String,
     pub file_id: String,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     pub expires_at: i64,
     pub parts: Vec<DirectParallelPart>,
 }
@@ -179,11 +181,13 @@ pub async fn direct_parallel_reserve_handler(
         ttl_secs,
     )?;
 
-    let public_url = public_url_for(&state, &record);
+    let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
     Ok(Json(DirectParallelReserveResponse {
         ticket: parent_ticket,
         file_id,
         url: public_url,
+        raw_url,
+        download_url,
         expires_at: record.expires_at,
         parts,
     }))
@@ -245,7 +249,7 @@ pub async fn direct_parallel_complete_handler(
         ));
     }
 
-    let public_url = public_url_for(&state, &file);
+    let (public_url, raw_url, download_url) = public_urls_for(&state, &file);
     let flag_protected = file.is_protected();
     let flag_encrypted = file.is_encrypted;
     let ready_response = || {
@@ -259,6 +263,8 @@ pub async fn direct_parallel_complete_handler(
         let mut resp = Json(UploadResponse {
             id: file_id.clone(),
             url: public_url.clone(),
+            raw_url: raw_url.clone(),
+            download_url: download_url.clone(),
             filename: file.filename.clone(),
             size_bytes: file.size_bytes,
             mime_type: file.mime_type.clone(),

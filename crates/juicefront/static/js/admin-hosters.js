@@ -4,7 +4,7 @@
     var currentTotal = 0;
 
     function formatTime(sec) {
-        if (!sec) return "—";
+        if (!sec) return "-";
         return new Date(sec * 1000).toLocaleString();
     }
 

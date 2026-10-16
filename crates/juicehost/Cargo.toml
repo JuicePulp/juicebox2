@@ -18,6 +18,7 @@ axum.workspace = true
 bytes.workspace = true
 dashmap.workspace = true
 fs2.workspace = true
+flate2.workspace = true
 futures.workspace = true
 hex.workspace = true
 infer.workspace = true
@@ -43,6 +44,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 utoipa.workspace = true
+sevenz-rust = { version = "0.6.1", features = ["aes256"] }
 
 [dev-dependencies]
 tempfile.workspace = true

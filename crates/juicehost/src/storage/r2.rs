@@ -44,6 +44,80 @@ impl R2Store {
         format!("hot/{id}.")
     }
 
+    fn valid_key(key: &str) -> bool {
+        if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
+            return false;
+        }
+        key.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg.len() <= 128
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+    }
+
+    async fn get_path(&self, key: &str) -> Result<object_store::GetResult, StorageError> {
+        if !Self::valid_key(key) {
+            return Err(StorageError::NotFound);
+        }
+        self.client
+            .get(&object_store::path::Path::from(key))
+            .await
+            .map_err(|e| match e {
+                object_store::Error::NotFound { .. } => StorageError::NotFound,
+                e => StorageError::Io(format!("R2 get failed: {e}")),
+            })
+    }
+
+    pub async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
+        let data = self
+            .get_path(key)
+            .await?
+            .bytes()
+            .await
+            .map_err(|e| StorageError::Io(format!("R2 read failed: {e}")))?;
+        Ok(data)
+    }
+
+    pub async fn get_stream(&self, key: &str) -> Result<crate::storage::ByteStream, StorageError> {
+        let stream = self
+            .get_path(key)
+            .await?
+            .into_stream()
+            .map(|r| r.map_err(|e| StorageError::Io(format!("R2 read failed: {e}"))));
+        Ok(Box::pin(stream))
+    }
+
+    pub async fn get_range_stream(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<crate::storage::ByteStream, StorageError> {
+        if !Self::valid_key(key) {
+            return Err(StorageError::NotFound);
+        }
+        let result = self
+            .client
+            .get_opts(
+                &object_store::path::Path::from(key),
+                object_store::GetOptions {
+                    range: Some(object_store::GetRange::Bounded(start..end + 1)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                object_store::Error::NotFound { .. } => StorageError::NotFound,
+                e => StorageError::Io(format!("R2 range get failed: {e}")),
+            })?;
+        let stream = result
+            .into_stream()
+            .map(|r| r.map_err(|e| StorageError::Io(format!("R2 range read failed: {e}"))));
+        Ok(Box::pin(stream))
+    }
+
     pub async fn put_bytes(&self, key: &str, bytes: Bytes, content_type: &str) -> Result<(), StorageError> {
         let mut attributes = object_store::Attributes::new();
         if !content_type.is_empty() {

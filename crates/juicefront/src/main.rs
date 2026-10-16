@@ -10,7 +10,7 @@ use axum::{
     http::Request,
     middleware,
     response::Response,
-    routing::{any, get},
+    routing::{any, get, post},
 };
 use mimalloc::MiMalloc;
 use sentry::integrations::tower::NewSentryLayer;
@@ -166,6 +166,7 @@ fn main() {
             .route("/{locale}/files/", get(handlers::files_page))
             .route("/files.html", get(handlers::files_page))
             .route("/{locale}/files.html", get(handlers::files_page))
+            .route("/files/rows", post(handlers::files_rows_handler))
             .route("/download", get(handlers::download_page))
             .route("/download/", get(handlers::download_page))
             .route("/{locale}/download", get(handlers::download_page))

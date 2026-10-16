@@ -39,8 +39,9 @@ allow_http = false
 
 [r2]
 # Hot-tier overflow (e.g. Cloudflare R2) for popular files. Promoted copies
-# are written here by juiceback's velocity promoter; serving redirects to
-# the public base URL. All unset = hot-tier disabled.
+# are written here by juiceback's velocity / embed promoters; hot bytes are
+# served from R2 under the existing /f/ + /d/ + /c/ URLs (no public /hot/
+# endpoint — the bucket can stay private). All unset = hot-tier disabled.
 # bucket = "juicebox-hot"
 # endpoint = "https://<account-id>.r2.cloudflarestorage.com"
 # region = "auto"
@@ -60,8 +61,13 @@ tcp_max_concurrent_requests = 512
 [features]
 quick_link = true
 custom_id = true
+# Edge cache for /f/ + /d/ bytes (Cloudflare in front). Responses carry
+# `public, max-age=min(ttl_remaining, max_age), s-maxage=..., immutable`
+# (bytes are immutable by ID) plus `cache-tag: juicebox:{id}`.
+# Cache /f/* + /d/* at the edge, bypass /v/* + /api/* + /file/*.
+# Default off: responses are `no-store`.
 file_cache_enabled = false
-file_cache_max_age_secs = 3600
+file_cache_max_age_secs = 86400
 default_ttl_hours = 24.0
 allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
 
