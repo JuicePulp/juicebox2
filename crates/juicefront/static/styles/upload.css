@@ -552,7 +552,6 @@ html[data-banned] .upload-tabs {
 .url-variant {
   flex: 1;
   text-align: center;
-  background: var(--juice-800);
   color: var(--juice-400);
   cursor: pointer;
   user-select: none;
@@ -563,6 +562,14 @@ html[data-banned] .upload-tabs {
   box-shadow:
     inset 1px 0 0 0 var(--juice-700),
     inset -1px 0 0 0 var(--juice-700);
+}
+
+.upload-tab {
+  background: var(--juice-800);
+}
+
+.url-variant {
+  background: var(--juice-900);
 }
 
 .upload-tab:hover,
