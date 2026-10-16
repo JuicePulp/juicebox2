@@ -1,6 +1,3 @@
-/* Archive browser: folder navigation + image lightbox, all client-side.
- * Rows carry data-path / data-dir / data-kind; the table carries the
- * archive id. No requests except lightbox image loads. */
 (function () {
   "use strict";
   var table = document.getElementById("zipTable");

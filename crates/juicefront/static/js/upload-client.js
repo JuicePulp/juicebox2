@@ -73,9 +73,6 @@ function ensurePort() {
       type: "module",
     });
     sw.port.onmessage = onWorkerMessage;
-    // Older browsers accept the options but run the worker as a classic
-    // script, so its static imports throw and the port stays dead silent.
-    // Fail back to main-thread uploads instead of black-holing enqueues.
     sw.onerror = () => {
       port = null;
       workerDead = true;

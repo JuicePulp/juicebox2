@@ -10,6 +10,8 @@ use crate::{error::AppError, state::AppState};
 pub struct UploadResponse {
     pub id: String,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     pub filename: String,
     pub size_bytes: i64,
     pub mime_type: String,

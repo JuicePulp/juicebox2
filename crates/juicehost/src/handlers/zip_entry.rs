@@ -1,11 +1,5 @@
 
 
-
-
-
-
-
-
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
@@ -21,7 +15,6 @@ use super::{
     zip_list,
 };
 use crate::{error::JuicehostError, state::AppState, storage::{self, valid_component}};
-
 
 const MAX_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -63,8 +56,6 @@ pub async fn zip_entry_file(
     
     match gate_decision(&state, &id, ShellMode::View, None).await {
         GateDecision::Respond(_) => return Err(JuicehostError::Forbidden),
-        // Zip entries are served from local disk (which always exists for
-        // live files); hot bytes stay under /f/ so there is no /hot/ hop here.
         GateDecision::HotServe { .. } | GateDecision::ServeLocal => {}
     }
     let meta = state

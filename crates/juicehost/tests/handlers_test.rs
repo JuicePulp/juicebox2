@@ -1853,8 +1853,6 @@ async fn hot_file_serves_via_f_without_hot_endpoint() {
     let app = build_router(state);
     store_bytes(&app, "hot00001", b"local-bytes").await;
 
-    // No public /hot/ endpoint: /f/ serves bytes directly (here the local
-    // fallback, since tests configure no R2 client). Must not 302 to R2.
     let (status, headers, body) = get_public(&app, "/f/hot00001.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"local-bytes");
@@ -1908,7 +1906,6 @@ async fn hot_protected_shell_uses_local_ciphertext() {
     let (status, _, body) = get_public(&app, "/f/sec00001.mp4", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
-    // No public /hot/ endpoint: unlock shell must use the local /c/ URL.
     assert!(page.contains("/c/sec00001"));
     assert!(!page.contains("https://r.example/hot/"));
 }

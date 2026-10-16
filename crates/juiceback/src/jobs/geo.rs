@@ -1,21 +1,12 @@
-//! IP geolocation worker.
-//!
-//! Resolves unknown uploader/viewer IPs through one rate-limited batch call
-//! per minute (ip-api.com allows 45 req/min on the free tier; we make one).
-//! Raw IPs never touch the database: the queue holds the same encrypted
-//! blobs as `files.uploader_ip`, results are keyed by ban-hash.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{db, state::AppState};
 
-/// One batch per tick, far below the 45 req/min free limit.
 const BATCH_MAX: usize = 100;
 const GEO_ENDPOINT: &str = "http://ip-api.com/batch";
 
 pub async fn run_geo_loop(state: Arc<AppState>) {
-    // Resolve anything already queued (e.g. after a restart) without
-    // waiting a full tick first.
     geo_sweep_once(&state).await;
     let mut ticker = tokio::time::interval(Duration::from_secs(60));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -41,7 +32,6 @@ fn is_routable(ip: &str) -> bool {
 async fn geo_sweep_once(state: &Arc<AppState>) {
     let mut targets: Vec<Target> = Vec::new();
 
-    // 1. Queued viewer IPs first (oldest).
     let queued = state
         .db_call("geo_dequeue", move |db| {
             db::geo::dequeue_geo_batch(db, BATCH_MAX as i64)
@@ -57,7 +47,6 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
                 ip_hash: row.ip_hash,
             }),
             _ => {
-                // Undecryptable or non-public: drop, never geo-storable.
                 let id = row.id;
                 let _ = state
                     .db_call("geo_drop", move |db| db::geo::delete_geo_queue(db, &[id]))
@@ -69,7 +58,6 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
         }
     }
 
-    // 2. Backfill uploader IPs missing geo with the remaining budget.
     if targets.len() < BATCH_MAX {
         let enc_ips = state
             .db_call("geo_uploader_sample", move |db| {
@@ -114,7 +102,6 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
     }
     tracing::info!("geo: resolving {} addresses", targets.len());
 
-    // 3. Single batch call.
     let body: Vec<serde_json::Value> = targets
         .iter()
         .map(|t| {
@@ -179,7 +166,6 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
         }
         _ => {
             tracing::warn!("geo: batch request failed, retrying next tick");
-            // Transport failure: everything queued retries next tick.
             for t in &targets {
                 if let Some(id) = t.queue_id {
                     retry_ids.push(id);

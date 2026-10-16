@@ -625,6 +625,8 @@ struct UploadedFile {
     icon: String,
     size_str: String,
     url: String,
+    raw_url: String,
+    download_url: String,
     delete_token: String,
 }
 
@@ -666,6 +668,8 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
         icon: format::icon_for_mime(&mime).to_owned(),
         size_str: format::format_size(size),
         url: json_str(&value, "url", 2048),
+        raw_url: json_str(&value, "raw_url", 2048),
+        download_url: json_str(&value, "download_url", 2048),
         delete_token: json_str(&value, "delete_token", 200),
     })
 }
@@ -886,6 +890,8 @@ struct FileRow {
     uploaded_at: i64,
     expires_at: i64,
     url: String,
+    raw_url: String,
+    download_url: String,
     delete_token: String,
     storage_host: String,
     show_host: bool,
@@ -987,6 +993,8 @@ fn file_rows(
                 uploaded_at: file.uploaded_at,
                 expires_at: file.expires_at,
                 url: file.url,
+                raw_url: file.raw_url,
+                download_url: file.download_url,
                 delete_token: file.delete_token,
                 storage_host: host,
                 index,
@@ -1189,7 +1197,6 @@ pub async fn files_page(
     let custom_id = data.eff.config.custom_id.unwrap_or(true);
     let timestamp = now_ms();
     let mut server_files = server_files;
-    // Newest uploads first.
     server_files.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
     let rows: Vec<FileRow> = file_rows(
         &cx,

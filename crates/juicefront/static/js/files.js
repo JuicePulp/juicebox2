@@ -1,6 +1,6 @@
 import { announce, esc, formatSize } from "./util.js";
 import { playSound } from "./sounds.js";
-import { iconHTML, iconForMime } from "./copy.js";
+import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js";
 import { openQrModal } from "./qr.js";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
@@ -327,17 +327,34 @@ function wireRenameModal(card, modal, f, locale) {
       const host = card.querySelector('[data-file-id="' + CSS.escape(f.id) + '"]');
       f.id = data.id;
       f.url = data.url;
+      f.raw_url = data.raw_url || "";
+      f.download_url = data.download_url || "";
       if (host) {
         host.setAttribute("data-file-id", data.id);
         host.setAttribute("data-url", data.url);
-        const urlEl = host.querySelector(".copy-bar .copy-bar__url");
-        if (urlEl) urlEl.textContent = data.url;
+        host.setAttribute("data-raw-url", f.raw_url);
+        host.setAttribute("data-download-url", f.download_url);
+        const group = host.querySelector("[data-url-variants]");
+        if (group) {
+          const setVariantUrl = (variant, value) => {
+            const b = group.querySelector('[data-variant="' + variant + '"]');
+            if (b) b.setAttribute("data-url", value);
+          };
+          setVariantUrl("preview", data.url);
+          setVariantUrl("raw", f.raw_url);
+          setVariantUrl("download", f.download_url);
+          const active = group.querySelector(".url-variant.is-active");
+          applyVariantUrl(host, (active && active.getAttribute("data-url")) || data.url);
+        } else {
+          const urlEl = host.querySelector(".copy-bar .copy-bar__url");
+          if (urlEl) urlEl.textContent = data.url;
+          const qrBtn = host.querySelector(".copy-bar-qr");
+          if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
+        }
         const link = host.querySelector(".copy-bar__text-wrapper")?.closest(".copy-bar");
         if (link) link.setAttribute("aria-label", t(locale, "upload.copy_bar_aria"));
         const editLink = host.querySelector(".copy-bar-edit");
         if (editLink) editLink.href = "#rename-" + data.id;
-        const qrBtn = host.querySelector(".copy-bar-qr");
-        if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
       }
       modal.remove();
       if (location.hash.startsWith("#rename-")) history.replaceState(null, "", location.pathname + location.search);
@@ -402,6 +419,8 @@ function enhanceCard(card, el, f, locale) {
     headerEl?.after(w);
   }
   const qrUrl = f.url || el.getAttribute("data-url") || "";
+  const rawUrl = f.raw_url || el.getAttribute("data-raw-url") || "";
+  const dlUrl = f.download_url || el.getAttribute("data-download-url") || "";
   const qrWrap = el.querySelector(".copy-bar-wrapper");
   if (qrWrap && qrUrl) {
     let qrBtn = qrWrap.querySelector(".copy-bar-qr");
@@ -419,6 +438,13 @@ function enhanceCard(card, el, f, locale) {
         });
       }
     }
+  }
+  if (qrWrap && qrUrl && rawUrl && !el.querySelector("[data-url-variants]")) {
+    const toggle = makeUrlVariantToggle(
+      { preview: qrUrl, raw: rawUrl, download: dlUrl },
+      urlVariantLabels(locale),
+    );
+    if (toggle) qrWrap.after(toggle);
   }
   if (customIdEnabled() && f.delete_token) {
     const w = el.querySelector(".copy-bar-wrapper");
@@ -553,9 +579,6 @@ export function initFilesCard() {
 }
 
 async function backfillMissing(card, locale) {
-  // Local uploads the server never saw (cookie-capped, other device state
-  // merged here): fetch server-rendered cards and merge newest-first with
-  // streamed inserts so huge lists stay smooth.
   const grid = card.querySelector("[data-files-grid]");
   if (!grid) return;
   const seen = new Set();

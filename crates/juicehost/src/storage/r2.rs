@@ -70,7 +70,6 @@ impl R2Store {
             })
     }
 
-    /// Fetch a whole R2 object (temporary /f/ -> R2 route, no public /hot/ URL).
     pub async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
         let data = self
             .get_path(key)
@@ -81,7 +80,6 @@ impl R2Store {
         Ok(data)
     }
 
-    /// Stream a whole R2 object.
     pub async fn get_stream(&self, key: &str) -> Result<crate::storage::ByteStream, StorageError> {
         let stream = self
             .get_path(key)
@@ -91,7 +89,6 @@ impl R2Store {
         Ok(Box::pin(stream))
     }
 
-    /// Stream a byte range from R2 (`start`/`end` inclusive).
     pub async fn get_range_stream(
         &self,
         key: &str,

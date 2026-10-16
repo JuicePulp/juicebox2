@@ -153,7 +153,6 @@
   color: inherit;
 }
 
-/* QR button (qr-code icon) next to the copy bar -- same look as the edit button */
 .copy-bar-qr {
   display: flex;
   align-items: center;
@@ -174,7 +173,6 @@
   text-decoration: none;
 }
 
-/* QR is the last action when there is no edit button (e.g. rename disabled) */
 .copy-bar-wrapper .copy-bar-qr:last-child {
   border-radius: 0 0.5rem 0.5rem 0;
 }
@@ -261,4 +259,69 @@
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
+}
+
+.url-variants {
+  display: flex;
+  gap: 0;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+
+body.hide-url-variants [data-url-variants] {
+  display: none;
+}
+
+body:not(.hide-url-variants) .copy-bar-wrapper:has(+ .url-variants) > :is(.file-card-link, .copy-bar, .copy-bar-qr, .copy-bar-edit),
+body:not(.hide-url-variants) .copy-bar:has(+ .url-variants),
+body:not(.hide-url-variants) .copy-bar--rounded:has(+ .url-variants) {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+body:not(.hide-url-variants) .copy-bar-wrapper:has(+ .url-variants),
+body:not(.hide-url-variants) .copy-bar:has(+ .url-variants) {
+  margin-bottom: 0;
+}
+
+.url-variant {
+  display: block;
+  padding: 0.3rem 0.25rem;
+  font-family: "General", "Unifont", monospace;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-decoration: none;
+  box-shadow:
+    inset 1px 0 0 0 var(--juice-700),
+    inset -1px 0 0 0 var(--juice-700),
+    inset 0 -2px 0 0 var(--juice-700);
+  border: none;
+  border-radius: 0;
+}
+
+.url-variant:first-child {
+  border-bottom-left-radius: 0.5rem;
+  box-shadow:
+    inset 2px 0 0 0 var(--juice-700),
+    inset -1px 0 0 0 var(--juice-700),
+    inset 0 -2px 0 0 var(--juice-700);
+}
+
+.url-variant:last-child {
+  border-bottom-right-radius: 0.5rem;
+  box-shadow:
+    inset 1px 0 0 0 var(--juice-700),
+    inset -2px 0 0 0 var(--juice-700),
+    inset 0 -2px 0 0 var(--juice-700);
+}
+
+.url-variant.is-active {
+  background: var(--orange-500-15);
+  color: var(--orange-500);
+  box-shadow:
+    inset 2px 0 0 0 var(--orange-600),
+    inset -2px 0 0 0 var(--orange-600),
+    inset 0 -2px 0 0 var(--orange-600);
+  position: relative;
+  z-index: 1;
 }

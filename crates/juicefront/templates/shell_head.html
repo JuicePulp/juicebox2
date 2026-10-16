@@ -40,7 +40,6 @@
 <link rel="stylesheet" href="/static/bundle.css">
 <script src="/static/js/boot.js"></script>
 <script type="speculationrules">{"prefetch": [{"source": "document", "where": {"and": [{"selector_matches": ".act a[href], .select-options-list a[href]"}, {"href_matches": "/*"}, {"not": {"href_matches": "/api/*"}}, {"not": {"href_matches": "/admin*"}}, {"not": {"href_matches": "/static/*"}}, {"not": {"href_matches": "/file/*"}}, {"not": {"href_matches": "/f/*"}}, {"not": {"href_matches": "/v/*"}}, {"not": {"href_matches": "/d/*"}}, {"not": {"href_matches": "/upload*"}}]}, "eagerness": "conservative"}]}</script>
-<!-- speculation rules must be inline (external src unsupported); keep in sync with /static/speculation.json -->
 </head>
 <body{% if head.body_class != "" %} class="{{ head.body_class }}"{% endif %}>
 <a href="#main-content" class="skip-link">{{ head.cx.t("accessibility.skip_main") }}</a>

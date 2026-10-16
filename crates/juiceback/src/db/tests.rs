@@ -969,7 +969,6 @@ fn hot_tier_migration_and_promo_flow() {
     let got = get_file(&conn, "hot1").unwrap().unwrap();
     assert_eq!(got.tier, "hot");
     assert_eq!(got.r2_key, "hot/hot1.mp4");
-    // Auto promote must not pin: manual choice is the only pinner.
     assert!(!got.tier_pinned);
 
     let (count, bytes) = hot_usage(&conn).unwrap();
@@ -1003,7 +1002,6 @@ fn manual_tier_pins_and_skips_auto_promo() {
         Some("https://f.juicey.dev".into()),
     );
     insert_file(&conn, &rec).unwrap();
-    // Auto candidate before any manual action.
     assert_eq!(
         list_promo_candidates(&conn, 9_999_999_000, 500)
             .unwrap()
@@ -1011,7 +1009,6 @@ fn manual_tier_pins_and_skips_auto_promo() {
         1
     );
 
-    // Manual Cool pins standard: auto-promoter must skip it afterwards.
     set_file_tier_manual(&conn, "pin1", "standard", "").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();
     assert_eq!(got.tier, "standard");
@@ -1020,7 +1017,6 @@ fn manual_tier_pins_and_skips_auto_promo() {
         .unwrap()
         .is_empty());
 
-    // Manual Warm pins hot.
     set_file_tier_manual(&conn, "pin1", "hot", "hot/pin1.mp4").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();
     assert_eq!(got.tier, "hot");
@@ -1030,7 +1026,6 @@ fn manual_tier_pins_and_skips_auto_promo() {
         .unwrap()
         .is_empty());
 
-    // Second manual change (back to standard) stays pinned too.
     set_file_tier_manual(&conn, "pin1", "standard", "").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();
     assert!(got.tier_pinned);
@@ -1049,7 +1044,6 @@ fn embed_mime_allowlist_skips_archives() {
     assert!(embed_mime_eligible("text/plain"));
     assert!(embed_mime_eligible("application/json"));
     assert!(embed_mime_eligible("application/ld+json"));
-    // Skipped: archives, binaries, other video containers.
     assert!(!embed_mime_eligible("application/zip"));
     assert!(!embed_mime_eligible("application/x-7z-compressed"));
     assert!(!embed_mime_eligible("application/octet-stream"));
@@ -1065,7 +1059,6 @@ fn embed_cooldown_gates_repeat_attempts() {
     super::promo::record_embed_attempt(&conn, "e1", 10_000).unwrap();
     assert!(!super::promo::embed_attempt_due(&conn, "e1", 10_001, 21_600).unwrap());
     assert!(super::promo::embed_attempt_due(&conn, "e1", 10_000 + 21_600, 21_600).unwrap());
-    // Recording preserves velocity counters path (row exists, sweep still works).
     super::promo::record_embed_attempt(&conn, "e1", 20_000).unwrap();
     assert!(!super::promo::embed_attempt_due(&conn, "e1", 20_001, 21_600).unwrap());
 }

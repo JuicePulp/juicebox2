@@ -347,8 +347,6 @@
             if (entry) {
                 entry.tier = body.tier || (action === "warm" ? "hot" : "standard");
                 entry.hot = entry.tier === "hot";
-                // Manual Warm/Cool pins the tier server-side; reflect that
-                // locally so the badge stays put until the next manual change.
                 entry.tier_pinned = body.tier_pinned !== undefined ? !!body.tier_pinned : true;
                 entry.tier_state = entry.tier;
             }

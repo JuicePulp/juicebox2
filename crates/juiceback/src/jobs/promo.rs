@@ -2,8 +2,6 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{db, state::AppState};
 
-/// MIME allowlist for promote-on-first-embed: previewable types only.
-/// Archives / binaries never qualify, no matter how often they're embedded.
 #[must_use]
 pub fn embed_mime_eligible(mime: &str) -> bool {
     let base = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -22,15 +20,10 @@ pub fn embed_mime_eligible(mime: &str) -> bool {
         || base.ends_with("+xml")
 }
 
-/// Promote-on-first-embed: seed R2 for small previewable files on preview
-/// render / first non-bot view. Fire-and-forget from the stats hit path;
-/// all gates re-checked here. Never pins: velocity + manual still own the tier.
-/// Respects `promo_dry_run` (logs only).
 pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
     if !state.config.r2_enabled || !state.config.embed_promote_enabled {
         return;
     }
-    // No public-base-URL gate (see promo_sweep_once): /f/ proxies R2.
     let now = chrono::Utc::now().timestamp();
     let lookup = id.to_string();
     let record = match state
@@ -152,9 +145,6 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
     if !state.config.r2_enabled {
         return;
     }
-    // No public-base-URL gate: hot bytes are served from R2 under the
-    // existing /f/ + /d/ + /c/ URLs (no public /hot/ endpoint), so the S3
-    // copy is useful even when no public R2 domain is configured.
     let now = chrono::Utc::now().timestamp();
     let min_expires_at = now + state.config.promo_min_ttl_remaining_secs;
 

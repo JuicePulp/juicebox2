@@ -4,8 +4,6 @@
     if (textview) {
       var raw = textview.getAttribute("data-raw") || "";
       var stride = __TEXT_MAX__;
-      // Byte offset the server already rendered (SSR first chunk); the
-      // loader continues from here instead of refetching it.
       var loaded = parseInt(textview.getAttribute("data-loaded") || "0", 10) || 0;
       var total = null;
       var loading = false;
@@ -28,8 +26,6 @@
         done = true;
       }
       async function loadPlain() {
-        // Last resort: single plain fetch (capped, so giant files cannot
-        // blow up the tab if the ranged path keeps misbehaving).
         if (total !== null && total > 4 * 1024 * 1024) { fail(); return; }
         try {
           var res = await fetch(raw);
@@ -58,9 +54,6 @@
           parseTotal(res);
           var buf = new Uint8Array(await res.arrayBuffer());
           if (buf.length === 0) {
-            // Empty first body: transient backend hiccup (seen while an
-            // upload is still finalizing). Retry once without Range instead
-            // of hanging on "Loading preview..." forever.
             loading = false;
             if (loaded === 0 && !retriedPlain) {
               retriedPlain = true;

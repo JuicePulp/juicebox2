@@ -468,14 +468,11 @@
     }
 
     function dismissPrompt() {
-      // The file is decrypted: the whole prompt box goes away. Anything the
-      // user still needs (download button, status) lives on after this.
       if (!card || card.dataset.dismissed) return;
       card.dataset.dismissed = "1";
       card.hidden = true;
     }
     function revealName(filename, mime) {
-      // Post-decrypt: swap the hashed display label for the real name.
       if (!filename) return;
       CFG.filename = filename;
       if (mime) CFG.mime = mime;

@@ -26,7 +26,7 @@
 <div class="upload-mode-file" data-mode-file="">
 <label class="drop-zone" data-drop-zone="" for="dropzone-input">
 <div class="animated-grid-container" aria-hidden="true"><div class="animated-grid"></div></div>
-<div class="drop-icon-wrapper"><span class="drop-icon">{{ cx.icon("upload", 64)|safe }}</span></div>
+<div class="drop-icon-wrapper"><span class="drop-icon">{{ cx.icon("upload", 64)|safe }}</span><span class="drop-lock" data-upload-lock="" hidden aria-hidden="true">{{ cx.icon("lock", 64)|safe }}</span></div>
 <div class="drop-text">
 <p class="drop-text-primary">{{ cx.t("upload.drop_primary") }}</p>
 <p class="drop-file-selected">{{ cx.t("upload.drop_selected") }}</p>
@@ -140,13 +140,14 @@
 </div>
 {% if let Some(f) = uploaded %}<noscript>
 <style>[data-component="upload-card"] { display: none !important; }</style>
-<div class="file-item complete" role="listitem" data-file-id="{{ f.id }}" data-delete-token="{{ f.delete_token }}" data-url="{{ f.url }}" data-server-rendered="">
+<div class="file-item complete" role="listitem" data-file-id="{{ f.id }}" data-delete-token="{{ f.delete_token }}" data-url="{{ f.url }}" data-raw-url="{{ f.raw_url }}" data-download-url="{{ f.download_url }}" data-server-rendered="">
 <div class="file-item-header">
 <div class="file-card-icon">{{ cx.icon(f.icon.as_str(), 24)|safe }}</div>
 <div class="file-info-left"><span class="file-name">{{ f.filename }}</span><span class="file-size">{{ f.size_str }}</span></div>
 </div>
 <div class="file-action-area complete">
 <a href="{{ f.url }}" class="copy-bar" target="_blank" rel="noopener" aria-label="{{ cx.t("upload.open_link_aria") }}"><div class="copy-bar__text-wrapper"><span class="copy-bar__url">{{ f.url }}</span></div></a>
+<div class="url-variants" data-url-variants="" role="group" aria-label="{{ cx.t("files.url_variants") }}"><a class="url-variant is-active" data-variant="preview" href="{{ f.url }}" target="_blank" rel="noopener">{{ cx.t("files.url_preview") }}</a><a class="url-variant" data-variant="raw" href="{{ f.raw_url }}" target="_blank" rel="noopener">{{ cx.t("files.url_raw") }}</a><a class="url-variant" data-variant="download" href="{{ f.download_url }}" target="_blank" rel="noopener">{{ cx.t("files.url_download") }}</a></div>
 <form method="POST" action="/file/{{ f.id }}/delete">
 <input type="hidden" name="token" value="{{ f.delete_token }}">
 <button type="submit" data-cuelume-close data-cuelume-emphasis="strong" class="delete-btn" aria-label="{{ cx.t("upload.delete_file_aria") }}"><span class="file-card-icon">{{ cx.icon("trash", 24)|safe }}</span></button>

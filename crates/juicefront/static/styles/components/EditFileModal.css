@@ -77,9 +77,6 @@
   animation: mdlslide-out 0.2s ease-out;
 }
 
-/* Settings modal keeps a stable viewport-relative height so switching tabs
-   (connection/upload/preferences) never resizes it vertically; the body
-   scrolls internally instead. */
 #settings-modal .mdlcontent {
   height: min(680px, calc(100vh - 2rem));
 }

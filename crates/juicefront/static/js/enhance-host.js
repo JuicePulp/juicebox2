@@ -1,6 +1,8 @@
 import { formatMaxSize } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
 import { setSoundEnabled } from "./sounds.js";
+import { hapticsEnabled, setHapticsEnabled } from "./haptics.js";
+import { paintDitherOverlay, clearDitherOverlay, repaintDitherOverlay } from "./dither.js";
 
 var MOTION_KEY = "juicebox_reduce_motion";
 var SOUND_KEY = "juicebox_sound";
@@ -263,8 +265,23 @@ export function enhanceHostSelector(locale) {
       if (pwHint) pwHint.hidden = !has;
       const indicators = document.querySelectorAll("[data-upload-password-indicator]");
       for (let i = 0; i < indicators.length; i++) indicators[i].hidden = !has;
-      const cards = document.querySelectorAll("[data-upload-card]");
-      for (let i = 0; i < cards.length; i++) cards[i].classList.toggle("is-encrypted", has);
+      const zones = document.querySelectorAll("[data-drop-zone]");
+      const locks = document.querySelectorAll("[data-upload-lock]");
+      for (let i = 0; i < zones.length; i++) {
+        zones[i].classList.toggle("is-encrypted", has);
+        if (has) {
+          paintDitherOverlay(zones[i]);
+          if (!zones[i].dataset.ditherObserved) {
+            zones[i].dataset.ditherObserved = "1";
+            new ResizeObserver(() => {
+              if (zones[i].classList.contains("is-encrypted")) repaintDitherOverlay(zones[i]);
+            }).observe(zones[i]);
+          }
+        } else {
+          clearDitherOverlay(zones[i]);
+        }
+      }
+      for (let i = 0; i < locks.length; i++) locks[i].hidden = !has;
       const dropText = document.querySelector("[data-drop-text]");
       if (dropText) {
         const plain = dropText.getAttribute("data-drop-text");
@@ -309,11 +326,32 @@ export function enhanceHostSelector(locale) {
       setSoundEnabled(soundToggle.checked);
     });
   }
+  const hapticsToggle = document.querySelector("[data-haptics-toggle]");
+  if (hapticsToggle) {
+    hapticsToggle.checked = hapticsEnabled();
+    hapticsToggle.addEventListener("change", () => {
+      setHapticsEnabled(hapticsToggle.checked);
+    });
+  }
   const motionToggle = document.querySelector("[data-motion-toggle]");
   if (motionToggle) {
     motionToggle.checked = readMotionReduced();
     motionToggle.addEventListener("change", () => {
       applyMotionReduced(motionToggle.checked);
+    });
+  }
+  const linkVariantsToggle = document.querySelector("[data-link-variants-toggle]");
+  if (linkVariantsToggle) {
+    try {
+      linkVariantsToggle.checked = localStorage.getItem("juicebox_link_variants") !== "false";
+    } catch {
+      linkVariantsToggle.checked = true;
+    }
+    linkVariantsToggle.addEventListener("change", () => {
+      try {
+        localStorage.setItem("juicebox_link_variants", linkVariantsToggle.checked ? "true" : "false");
+      } catch {}
+      document.body.classList.toggle("hide-url-variants", !linkVariantsToggle.checked);
     });
   }
   updateDangerLevelDisplay(readDangerLevel(), locale);

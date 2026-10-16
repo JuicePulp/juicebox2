@@ -121,12 +121,24 @@ export function initRipple() {
   document.addEventListener("mousedown", (e) => {
     if (!isJsActive())
       return;
+    if (e.button !== 0)
+      return;
     const btn = findButton(e.target);
     if (!btn)
       return;
     createRipple(btn, e);
   });
   document.addEventListener("mouseup", () => {
+    if (!isJsActive())
+      return;
+    releaseRipple();
+  });
+  document.addEventListener("contextmenu", () => {
+    if (!isJsActive())
+      return;
+    releaseRipple();
+  });
+  window.addEventListener("blur", () => {
     if (!isJsActive())
       return;
     releaseRipple();

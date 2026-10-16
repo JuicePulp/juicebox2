@@ -68,11 +68,6 @@ pub struct AdminFilesResponse {
     pub total: i64,
 }
 
-/// Display tier for the admin list. Mirrors the promoter's per-file gates
-/// (minus R2 caps, which are global): a standard file meeting the bar reads
-/// "warming", a hot file missing it reads "cooling".
-/// Manually pinned files always read their real tier so a manual Warm/Cool
-/// visibly sticks instead of flipping back to warming/cooling.
 fn promo_eligible(
     config: &crate::config::Config,
     official: &std::collections::HashSet<String>,

@@ -482,11 +482,6 @@ impl LocalBackend {
     }
 }
 
-/// Kernel-side copy for concat assembly: `copy_file_range` moves bytes
-/// without a userspace round-trip (and XFS reflinks internally when it can),
-/// which is what used to stall big uploads at 99%. Falls back to a plain
-/// positioned copy on filesystems without support. Returns the new target
-/// offset.
 async fn copy_part_fast(
     part: &mut tokio::fs::File,
     target_file: &mut tokio::fs::File,
@@ -503,7 +498,6 @@ async fn copy_part_fast(
     while remaining > 0 {
         let want = remaining.min(CHUNK) as libc::size_t;
         let mut in_off = src_off;
-        // SAFETY: both fds are open files we hold; offsets are stack-owned.
         let rc = unsafe {
             libc::copy_file_range(
                 part.as_raw_fd(),

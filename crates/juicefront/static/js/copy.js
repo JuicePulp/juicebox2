@@ -81,6 +81,99 @@ export function copyBarStrings(locale) {
   };
 }
 
+export function urlVariantLabels(locale) {
+  return {
+    group: t(locale, "files.url_variants"),
+    preview: t(locale, "files.url_preview"),
+    raw: t(locale, "files.url_raw"),
+    download: t(locale, "files.url_download"),
+  };
+}
+
+export function urlVariantsEnabled() {
+  try {
+    return localStorage.getItem("juicebox_link_variants") !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function applyUrlVariantsVisibility() {
+  if (typeof document === "undefined") return;
+  document.body.classList.toggle("hide-url-variants", !urlVariantsEnabled());
+}
+
+export function makeUrlVariantToggle(variants, labels) {
+  if (!variants || !variants.raw || !urlVariantsEnabled()) return null;
+  labels = labels || {};
+  var group = document.createElement("div");
+  group.className = "url-variants";
+  group.setAttribute("data-url-variants", "");
+  group.setAttribute("role", "group");
+  if (labels.group) group.setAttribute("aria-label", labels.group);
+  var defs = [
+    ["preview", variants.preview, labels.preview],
+    ["raw", variants.raw, labels.raw],
+    ["download", variants.download, labels.download],
+  ];
+  for (var i = 0; i < defs.length; i++) {
+    (function (key, url, label) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "url-variant" + (key === "preview" ? " is-active" : "");
+      btn.setAttribute("data-variant", key);
+      btn.setAttribute("data-url", url || "");
+      btn.textContent = label || key;
+      group.appendChild(btn);
+    })(defs[i][0], defs[i][1], defs[i][2]);
+  }
+  return group;
+}
+
+function switchUrlVariant(btn) {
+  var group = btn.closest("[data-url-variants]");
+  if (!group) return;
+  var buttons = group.querySelectorAll(".url-variant");
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].classList.toggle("is-active", buttons[i] === btn);
+  }
+  var url = btn.getAttribute("data-url") || "";
+  if (!url) return;
+  var scope = btn.closest(".copy-bar-wrapper") || group.parentElement;
+  applyVariantUrl(scope, url);
+}
+
+export function applyVariantUrl(scope, url) {
+  if (!scope || !url) return;
+  var links = scope.querySelectorAll(".file-card-link");
+  for (var j = 0; j < links.length; j++) {
+    links[j].setAttribute("href", url);
+    var text = links[j].querySelector(".file-card-link-text");
+    if (text) text.textContent = url;
+  }
+  var bars = scope.querySelectorAll(".copy-bar__url");
+  for (var k = 0; k < bars.length; k++) bars[k].textContent = url;
+  var qrs = scope.querySelectorAll(".copy-bar-qr");
+  for (var m = 0; m < qrs.length; m++) qrs[m].setAttribute("data-qr-url", url);
+}
+
+export function attachUrlVariantsAfter(anchor, variants, labels) {
+  if (!anchor || !anchor.parentElement || !variants || !variants.raw) return null;
+  if (anchor.parentElement.querySelector(":scope > [data-url-variants]")) return null;
+  var toggle = makeUrlVariantToggle(variants, labels || {});
+  if (!toggle) return null;
+  anchor.after(toggle);
+  return toggle;
+}
+
+if (typeof document !== "undefined") {
+  applyUrlVariantsVisibility();
+  document.addEventListener("click", function (e) {
+    var target = e.target instanceof Element ? e.target.closest(".url-variant") : null;
+    if (target && target.getAttribute("data-url") !== null) switchUrlVariant(target);
+  });
+}
+
 export function makeCopyBar(url, strings) {
   strings = strings || {};
   var btn = document.createElement("button");

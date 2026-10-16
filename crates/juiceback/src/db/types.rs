@@ -102,8 +102,6 @@ pub struct FileRecord {
 
     pub r2_key: String,
 
-    /// Manual Warm/Cool pins the tier: the auto-promoter skips pinned files
-    /// so a manual choice stays until the next manual change.
     pub tier_pinned: bool,
 
     pub password_hash: Option<String>,

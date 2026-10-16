@@ -87,7 +87,6 @@ pub async fn demote_file_on_juicehost(
     }
 }
 
-/// Freeze a file on its juicehost (admin override). Mirrors demote auth.
 pub async fn freeze_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
@@ -121,7 +120,6 @@ pub async fn freeze_file_on_juicehost(
     }
 }
 
-/// Unfreeze a file on its juicehost (admin override).
 pub async fn unfreeze_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,

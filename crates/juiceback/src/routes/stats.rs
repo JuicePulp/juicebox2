@@ -34,8 +34,6 @@ pub struct HitRequest {
     
     
     pub ip: String,
-    /// Where the hit came from: `preview` (/v/ render), `view` (/f/ GET),
-    /// `download` (/d/ GET). Only preview/view feed embed-promotion.
     #[serde(default)]
     pub surface: Option<String>,
 }
@@ -71,9 +69,6 @@ pub async fn hit_handler(
             db::record_file_hit(db, &hit_file_id, &ip_hash, kind, now)
         })
         .await?;
-    // Promote-on-first-embed: preview renders + first non-bot /f/ views seed
-    // R2 for small previewable files. Downloads never qualify. Detached so
-    // hits stay fast; all gates re-checked inside.
     if kind == db::HitKind::View {
         let surface = body.surface.as_deref().unwrap_or("view").to_string();
         if surface == "preview" || surface == "view" {
@@ -84,7 +79,6 @@ pub async fn hit_handler(
             });
         }
     }
-    // Geo runs detached so hits stay fast: encrypt + queue for the worker.
     {
         let geo_state = Arc::clone(&state);
         let geo_ip = body.ip.clone();

@@ -31,7 +31,6 @@ pub async fn index_handler(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-
 pub async fn favicon() -> Response {
     const ICON: &[u8] = include_bytes!("../templates/favicon.png");
     Response::builder()
@@ -209,8 +208,6 @@ pub(crate) async fn serve_stored_bytes(
     if !is_valid_id(id) {
         return Err(JuicehostError::BadRequest);
     }
-    // Temporary /c/ -> R2 route (same as /f/): hot ciphertext streams from
-    // R2 under the existing /c/ URL, no public /hot/ endpoint.
     if let super::shell::BackendStatus::Known(body) =
         super::shell::backend_file_status(state, id).await
         && body.get("tier").and_then(|v| v.as_str()) == Some("hot")

@@ -89,8 +89,6 @@ impl ShellMode {
 
 pub(crate) enum GateDecision {
     Respond(Response<Body>),
-    /// Serve bytes from R2 under the existing /f/ (or /d/) URL.
-    /// No public /hot/ endpoint: the R2 key is fetched server-side.
     HotServe { key: String },
     ServeLocal,
 }
@@ -103,7 +101,6 @@ fn hot_r2_key(body: &serde_json::Value) -> Option<String> {
     if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
         return None;
     }
-    // Only the promoter-written prefix is served (hot/{id}.{ext}).
     if !key.starts_with("hot/") {
         return None;
     }
@@ -190,9 +187,6 @@ pub(crate) async fn protected_shell_response(
         GateDecision::HotServe { .. } | GateDecision::ServeLocal => None,
     }
 }
-
-
-
 
 fn hashed_filename(filename: &str) -> String {
     use sha2::Digest as _;

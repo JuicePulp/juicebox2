@@ -124,7 +124,6 @@
       font-weight:700;
     }
     .dl-btn:hover{background:#fb923c}
-    /* Mobile: fullscreen-alike stage, condensed topbar, fullscreen prompt. */
     @media (max-width:640px){
       .topbar{gap:.5rem;padding:.5rem .6rem}
       .brand{font-size:.85rem}

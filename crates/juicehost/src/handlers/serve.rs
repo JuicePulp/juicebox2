@@ -34,10 +34,6 @@ pub(crate) fn file_cache_control_value(
     match ttl_remaining_secs {
         Some(secs) if secs > 0 => {
             let age = secs.min(state.file_cache_max_age_secs);
-            // File bytes are immutable by ID (overwrite -> Conflict, renew
-            // mints a new ID), so `immutable` is safe and lets edges skip
-            // revalidation for the whole TTL. Expiry is enforced by the
-            // min(ttl_remaining) cap above.
             format!("public, max-age={age}, s-maxage={age}, immutable")
         }
         _ => FILE_CACHE_CONTROL.to_string(),
@@ -52,9 +48,6 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
     response
 }
 
-/// Serve hot bytes from R2 under the existing /f/ (or /d/) URL.
-/// Returns `None` when R2 is unconfigured or the object can't be read,
-/// so the caller falls back to local disk.
 #[expect(clippy::too_many_arguments)]
 async fn serve_r2_response(
     state: &AppState,
@@ -288,9 +281,6 @@ async fn serve_file_inner(
     } else {
         ShellMode::View
     };
-    // Temporary /f/ -> R2 route: serve hot bytes under the existing /f/ (or
-    // /d/) URL instead of redirecting to a public /hot/ endpoint.
-    // Falls back to local disk when R2 is unconfigured or unreadable.
     match gate_decision(&state, &id, mode, None).await {
         GateDecision::Respond(resp) => return Ok(resp),
         GateDecision::HotServe { key } => {

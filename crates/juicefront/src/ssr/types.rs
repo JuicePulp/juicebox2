@@ -16,6 +16,10 @@ pub struct ServerFile {
     #[serde(default)]
     pub url: String,
     #[serde(default)]
+    pub raw_url: String,
+    #[serde(default)]
+    pub download_url: String,
+    #[serde(default)]
     pub delete_token: String,
     pub storage_host: Option<String>,
     #[serde(default)]

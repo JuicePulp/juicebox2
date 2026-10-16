@@ -44,9 +44,6 @@ pub enum ParamsResponse {
     },
 }
 
-/// Opaque pre-unlock display label. Must match juicehost's shell hashing so
-/// every surface that has not seen the password agrees. Real names are only
-/// revealed through the password-gated unlock response.
 fn hashed_filename(filename: &str) -> String {
     let mut input = Vec::with_capacity(32 + filename.len());
     input.extend_from_slice(b"juicebox-filename-v1:");
@@ -128,7 +125,6 @@ struct UnlockResponse {
     dek: String,
     plain_len: u64,
     chunk_shift: u8,
-    /// Real filename + type. Only ever sent after a correct password.
     filename: String,
     mime_type: String,
 }
@@ -161,9 +157,6 @@ pub async fn unlock_handler(
         .await?
         .ok_or(AppError::NotFound)?;
     if !record.uses_per_file_key() {
-        // Password-only (legacy) files carry no data key: verify the
-        // password and reveal the real name/type for post-decrypt UI.
-        // (Matches the content endpoint's posture: no attempt limiter.)
         let password = body.password.clone();
         let hash = record.password_hash.clone().unwrap_or_default();
         let hash_empty = hash.is_empty();

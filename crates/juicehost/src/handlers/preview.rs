@@ -277,7 +277,6 @@ fn embed_gallery_supported(kind: PreviewKind, extension: &str) -> bool {
     }
 }
 
-
 fn kind_label(kind: PreviewKind) -> &'static str {
     match kind {
         PreviewKind::Video => "Video file",
@@ -423,10 +422,6 @@ fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     tags
 }
 
-
-
-
-
 async fn load_text_head(
     storage: &Arc<dyn storage::StorageBackend>,
     id: &str,
@@ -462,9 +457,6 @@ fn download_hero(page: &PreviewPage) -> String {
         dl = escape_html(&page.download_url),
     )
 }
-
-
-
 
 fn zip_listing_html(
     archive_id: &str,
@@ -757,8 +749,6 @@ async fn preview_file_inner(
         && (!is_bot(&headers) || is_discordbot(&headers))
         && let Some(ip) = viewer_ip.as_deref()
     {
-        // Preview renders seed embed-promotion (humans + Discord unfurls).
-        // Generic bots stay excluded to avoid promote abuse via curl loops.
         report_file_hit(&state, id, "view", ip, "preview");
     }
     Ok(response)

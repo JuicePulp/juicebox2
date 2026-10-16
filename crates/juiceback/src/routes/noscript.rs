@@ -323,6 +323,8 @@ pub fn remove_file_cookie_header(existing: &HeaderMap, id: &str) -> HeaderValue 
 pub fn upload_redirect(
     headers: &HeaderMap,
     public_url: &str,
+    raw_url: &str,
+    download_url: &str,
     filename: &str,
     delete_token: &str,
     file_id: &str,
@@ -334,6 +336,8 @@ pub fn upload_redirect(
     let payload = serde_json::json!({
         "id": file_id,
         "url": public_url,
+        "raw_url": raw_url,
+        "download_url": download_url,
         "filename": filename,
         "mime_type": mime_type,
         "size_bytes": size_bytes,

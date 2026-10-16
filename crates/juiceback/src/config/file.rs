@@ -211,9 +211,6 @@ pub struct PromoFile {
     pub min_ttl_remaining_secs: i64,
     #[serde(default = "default_promo_dry_run")]
     pub dry_run: bool,
-    /// Promote-on-first-embed: small previewable files go hot on preview
-    /// render / first non-bot view. Velocity promoter still owns sustained
-    /// hot; this only seeds it. Respects `dry_run` above.
     #[serde(default = "default_embed_enabled")]
     pub embed_enabled: bool,
     #[serde(default = "default_embed_max_bytes")]

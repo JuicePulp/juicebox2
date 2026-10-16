@@ -152,10 +152,6 @@ impl Drop for CleanupOnDrop {
     }
 }
 
-/// (host, port) pairs the operator configured for cobalt. Cobalt builds its
-/// tunnel URLs from its own `API_URL` host, which is loopback on self-hosted
-/// installs - without this carve-out every cobalt fetch dies in the SSRF
-/// guard below.
 fn configured_cobalt_hosts(config: &crate::config::Config) -> Vec<(String, u16)> {
     let mut out = Vec::new();
     let configured = [&config.cobalt_api_url]
@@ -189,10 +185,6 @@ async fn fetch_tunnel_response(
     initial_url: &str,
     allow_private: bool,
 ) -> Result<reqwest::Response, String> {
-    // Tunnel URLs come from our own authenticated cobalt instances, so a
-    // (host, port) match against operator config bypasses the public-IP
-    // check for this first hop only. Every redirect below is still strictly
-    // validated, so a compromised/malicious hop cannot pivot to intranet.
     let trusted_cobalt = tunnel_url_host_port(initial_url)
         .map(|hp| configured_cobalt_hosts(&state.config).contains(&hp))
         .unwrap_or(false);

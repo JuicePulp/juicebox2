@@ -1,8 +1,3 @@
-//! IP geolocation cache + resolver queue.
-//!
-//! Raw IPs are never stored here: rows are keyed by ban-hash, exactly like
-//! the rest of the codebase. A background worker resolves unknown hashes
-//! through one rate-limited batch call per minute (ip-api.com allows 45).
 
 use std::collections::{HashMap, HashSet};
 
@@ -60,7 +55,6 @@ pub fn delete_geo_queue(conn: &Connection, ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
-/// Failures stay queued for retry; poison rows die after 10 attempts.
 pub fn bump_geo_attempts(conn: &Connection, ids: &[i64]) -> Result<()> {
     if ids.is_empty() {
         return Ok(());
@@ -132,7 +126,6 @@ pub fn ip_locations_for_hashes(
     Ok(out)
 }
 
-/// Distinct uploader IPs (still encrypted) for the backfill pass.
 pub fn uploader_ips_sample(conn: &Connection, limit: i64) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT uploader_ip FROM files

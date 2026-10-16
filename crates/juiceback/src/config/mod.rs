@@ -110,9 +110,6 @@ pub struct Config {
     pub promo_min_views_per_min: f64,
     pub promo_min_ttl_remaining_secs: i64,
     pub promo_dry_run: bool,
-    /// Promote-on-first-embed: async R2 promotion for small previewable files
-    /// on preview render / first non-bot view. Velocity promoter still owns
-    /// sustained hot; embed path only seeds it.
     pub embed_promote_enabled: bool,
     pub embed_promote_max_bytes: u64,
     pub embed_promote_cooldown_secs: i64,
