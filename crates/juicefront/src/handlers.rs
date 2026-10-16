@@ -560,6 +560,23 @@ pub async fn css_bundle() -> Response<Body> {
         .unwrap_or_default()
 }
 
+fn plain_text_response(body: &'static str) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/plain; charset=utf-8")
+        .header("cache-control", "no-cache")
+        .body(Body::from(body))
+        .unwrap_or_default()
+}
+
+pub async fn robots_txt() -> Response<Body> {
+    plain_text_response(include_str!("../static/robots.txt"))
+}
+
+pub async fn agents_txt() -> Response<Body> {
+    plain_text_response(include_str!("../static/agents.txt"))
+}
+
 fn locale_from_path(path: Option<Path<String>>) -> Option<&'static str> {
     match path {
         Some(Path(code)) => match code.as_str() {
