@@ -82,6 +82,10 @@ pub struct FileRecord {
 
     pub mime_type: String,
 
+    pub title: String,
+
+    pub author: String,
+
     pub size_bytes: i64,
 
     pub storage_path: String,
@@ -141,6 +145,8 @@ impl FileRecord {
             id,
             filename,
             mime_type,
+            title: String::new(),
+            author: String::new(),
             size_bytes,
             delete_token,
             uploaded_at,

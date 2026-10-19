@@ -703,6 +703,7 @@ fn ytdlp_args_are_wired_correctly() {
     assert!(s.contains("bv*+ba/b"));
     assert!(s.contains("--cookies /tmp/cookies.txt"));
     assert!(s.contains("--remote-components ejs:github"));
+    assert!(s.contains("--write-info-json"));
     assert!(s.contains("/tmp/potdir/"));
     assert_eq!(
         args.last().unwrap(),

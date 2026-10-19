@@ -44,6 +44,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("ip_geolocation", m14_ip_geolocation),
     ("files.tier_pinned", m15_files_tier_pinned),
     ("promo_state.embed_attempt", m16_promo_state_embed_attempt),
+    ("files.video_meta", m17_files_video_meta),
 ];
 
 fn m14_ip_geolocation(conn: &Connection) -> Result<()> {
@@ -279,6 +280,22 @@ fn m16_promo_state_embed_attempt(conn: &Connection) -> Result<()> {
     if !has_column(conn, "promo_state", "embed_attempt_at")? {
         conn.execute(
             "ALTER TABLE promo_state ADD COLUMN embed_attempt_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn m17_files_video_meta(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "title")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN title TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "author")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN author TEXT NOT NULL DEFAULT ''",
             [],
         )?;
     }

@@ -283,7 +283,7 @@ async fn serve_file_inner(
     };
     match gate_decision(&state, &id, mode, None).await {
         GateDecision::Respond(resp) => return Ok(resp),
-        GateDecision::HotServe { key } => {
+        GateDecision::HotServe { key, .. } => {
             if let Some(resp) = serve_r2_response(
                 &state,
                 &headers,
@@ -299,7 +299,7 @@ async fn serve_file_inner(
                 return Ok(resp);
             }
         }
-        GateDecision::ServeLocal => {}
+        GateDecision::ServeLocal { .. } => {}
     }
 
     let etag = &file_meta.etag;

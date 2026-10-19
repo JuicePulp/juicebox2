@@ -1310,6 +1310,8 @@ async fn seed_legacy(state: &Arc<AppState>, captured: Arc<Mutex<Vec<Vec<u8>>>>) 
         id: id.clone(),
         filename: "secret.txt".into(),
         mime_type: "text/plain".into(),
+        title: String::new(),
+        author: String::new(),
         size_bytes: PLAINTEXT.len() as i64,
         delete_token: uuid::Uuid::new_v4().to_string(),
         uploaded_at: chrono::Utc::now().timestamp(),

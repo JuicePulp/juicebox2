@@ -10,7 +10,7 @@ use axum::{
 };
 
 use super::{
-    shell::{ShellMode, protected_shell_response},
+    shell::{BackendFileMeta, ShellMode, protected_shell_response},
     stats::{ViewerIp, report_file_hit},
 };
 use crate::{
@@ -243,6 +243,8 @@ struct PreviewPage {
     kind: PreviewKind,
     title: String,
     filename: String,
+    display_name: String,
+    author: Option<String>,
     size_label: String,
     raw_url: String,
     download_url: String,
@@ -255,6 +257,20 @@ struct PreviewPage {
     
     
     text_head: Option<(String, u64, String)>,
+}
+
+fn resolved_display_name(meta: Option<&BackendFileMeta>, filename: &str) -> String {
+    meta.and_then(BackendFileMeta::display_name)
+        .map_or_else(
+            || {
+                if filename.trim().is_empty() {
+                    "file".to_string()
+                } else {
+                    filename.to_string()
+                }
+            },
+            |name| truncate_chars(name, 120),
+        )
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -295,7 +311,7 @@ fn component_embed_payload(
     abs_page: &str,
     abs_download: &str,
 ) -> serde_json::Value {
-    let name = truncate_chars(&page.filename, 80);
+    let name = truncate_chars(&page.display_name, 80);
     let meta = truncate_chars(&format!("{} - {}", kind_label(page.kind), page.size_label), 160);
     let heading = format!("## [{name}]({abs_page})\n{meta}");
     let mut container: Vec<serde_json::Value> = Vec::new();
@@ -317,9 +333,13 @@ fn component_embed_payload(
         }));
     }
     if embed_gallery_supported(page.kind, &page.extension) {
+        let mut item = serde_json::json!({ "media": { "url": abs_raw } });
+        if let Some(author) = page.author.as_deref() {
+            item["description"] = serde_json::Value::String(truncate_chars(author, 80));
+        }
         container.push(serde_json::json!({
             "type": 12,
-            "items": [{ "media": { "url": abs_raw }, "description": name }],
+            "items": [item],
         }));
     } else {
         let hint = match page.kind {
@@ -361,7 +381,7 @@ fn component_embed_script(
     let mut payload = component_embed_payload(page, abs_raw, abs_page, abs_download);
     let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
     if serialized.len() > 3000 {
-        let name = truncate_chars(&page.filename, 40);
+        let name = truncate_chars(&page.display_name, 40);
         let meta = truncate_chars(&format!("{} - {}", page.mime, page.size_label), 80);
         payload = serde_json::json!({
             "component": {
@@ -384,7 +404,7 @@ fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     let description = format!("{} - {}", page.mime, page.size_label);
     let mut tags = format!(
         "<meta property=\"og:title\" content=\"{title}\">\n<meta property=\"og:description\" content=\"{desc}\">\n<meta property=\"og:url\" content=\"{url}\">\n<meta property=\"og:type\" content=\"website\">",
-        title = escape_html(&page.filename),
+        title = escape_html(&page.display_name),
         desc = escape_html(&description),
         url = escape_html(abs_page),
     );
@@ -532,24 +552,30 @@ fn zip_listing_html(
     )
 }
 
+fn author_attr(page: &PreviewPage, attr: &str) -> String {
+    page.author.as_deref().map_or_else(String::new, |author| {
+        format!(" {attr}=\"{}\"", escape_html(author))
+    })
+}
+
 fn stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
     match page.kind {
         PreviewKind::Video => format!(
-            "<video id=\"media\" controls playsinline preload=\"metadata\" src=\"{raw}\" aria-label=\"{name}\"></video>",
-            name = escape_html(&page.filename),
+            "<video id=\"media\" controls playsinline preload=\"metadata\" src=\"{raw}\"{label}></video>",
+            label = author_attr(page, "aria-label"),
         ),
         PreviewKind::Audio => format!(
             "<div class=\"audio-hero\" aria-hidden=\"true\">{}</div><audio id=\"media\" controls preload=\"metadata\" src=\"{raw}\"></audio>",
             juiceutils::icons::AUDIO,
         ),
         PreviewKind::Image => format!(
-            "<img id=\"media\" src=\"{raw}\" alt=\"{name}\" loading=\"eager\">",
-            name = escape_html(&page.filename),
+            "<img id=\"media\" src=\"{raw}\"{label} loading=\"eager\">",
+            label = author_attr(page, "alt"),
         ),
         PreviewKind::Pdf => format!(
-            "<iframe id=\"media\" class=\"pdf-frame\" src=\"{raw}\" title=\"{name}\"></iframe><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the PDF</a></p></noscript>",
-            name = escape_html(&page.filename),
+            "<iframe id=\"media\" class=\"pdf-frame\" src=\"{raw}\"{label}></iframe><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the PDF</a></p></noscript>",
+            label = author_attr(page, "title"),
         ),
         PreviewKind::Text => {
             let (content, loaded, _) = page.text_head.clone().unwrap_or_else(|| {
@@ -671,9 +697,9 @@ async fn preview_file_inner(
     let abs_self = request_base_url(&headers)
         .map(|base| absolute_for(Some(base.as_str()), &format!("/v/{page_path}")));
 
-    if let Some(shelled) =
-        protected_shell_response(&state, id, ShellMode::Preview, abs_self.as_deref()).await
-    {
+    let (shelled, backend_meta) =
+        protected_shell_response(&state, id, ShellMode::Preview, abs_self.as_deref()).await;
+    if let Some(shelled) = shelled {
         return Ok(shelled);
     }
 
@@ -687,6 +713,8 @@ async fn preview_file_inner(
     } else {
         format!("{id}.{extension}")
     };
+    let display_name = resolved_display_name(backend_meta.as_ref(), &filename);
+    let author = backend_meta.as_ref().and_then(|meta| meta.author.clone());
     let raw_url = format!("/f/{filename}");
     let page_url = format!("/v/{filename}");
     let download_url = format!("/d/{filename}");
@@ -700,7 +728,7 @@ async fn preview_file_inner(
             .map_err(|_| JuicehostError::Internal);
     }
     let mime = storage::guess_mime(&extension);
-    let title = format!("{filename} - Juicebox²");
+    let title = format!("{display_name} - Juicebox²");
     let kind = preview_kind(&mime);
     
     
@@ -727,6 +755,8 @@ async fn preview_file_inner(
         kind,
         title,
         filename,
+        display_name,
+        author,
         size_label: human_size(meta.size),
         raw_url,
         download_url,
@@ -793,8 +823,10 @@ mod tests {
     fn stage_has_no_card_chrome() {
         let page = PreviewPage {
             kind: PreviewKind::Video,
-            title: "a.mp4 - Juicebox²".into(),
+            title: "My Clip.mp4 - Juicebox²".into(),
             filename: "a.mp4".into(),
+            display_name: "My Clip.mp4".into(),
+            author: Some("jawed".into()),
             size_label: "1.0 MB".into(),
             raw_url: "/f/a.mp4".into(),
             download_url: "/d/a.mp4".into(),
@@ -810,5 +842,52 @@ mod tests {
         assert!(!html.contains("preview-card"));
         assert!(html.contains("discord:component-embed"));
         assert!(html.contains("twitter:card"));
+        assert!(html.contains("## [My Clip.mp4]"));
+        assert!(html.contains("\"description\":\"jawed\""));
+        assert!(html.contains("aria-label=\"jawed\""));
+    }
+
+    #[test]
+    fn missing_author_omits_alt_and_description() {
+        let page = PreviewPage {
+            kind: PreviewKind::Video,
+            title: "a.mp4 - Juicebox²".into(),
+            filename: "a.mp4".into(),
+            display_name: "a.mp4".into(),
+            author: None,
+            size_label: "1.0 MB".into(),
+            raw_url: "/f/a.mp4".into(),
+            download_url: "/d/a.mp4".into(),
+            page_url: "/v/a.mp4".into(),
+            mime: "video/mp4".into(),
+            extension: "mp4".into(),
+            zip_html: None,
+            text_head: None,
+        };
+        let html = render_preview(&page, &HeaderMap::new());
+        assert!(html.contains("<video"));
+        assert!(!html.contains("aria-label"));
+        assert!(!html.contains("\"description\":"));
+    }
+
+    #[test]
+    fn display_name_prefers_title_then_filename_then_canonical() {
+        let meta = BackendFileMeta {
+            filename: Some("Me at the zoo-jNQXAC9IVRw.mp4".into()),
+            title: Some("Me at the zoo".into()),
+            author: Some("jawed".into()),
+        };
+        assert_eq!(resolved_display_name(Some(&meta), "X8yBKzsg.mp4"), "Me at the zoo");
+
+        let meta = BackendFileMeta {
+            filename: Some("My Clip.mp4".into()),
+            ..BackendFileMeta::default()
+        };
+        assert_eq!(resolved_display_name(Some(&meta), "abc123.mp4"), "My Clip.mp4");
+
+        let meta = BackendFileMeta::default();
+        assert_eq!(resolved_display_name(Some(&meta), "abc123.mp4"), "abc123.mp4");
+        assert_eq!(resolved_display_name(None, "abc123.mp4"), "abc123.mp4");
+        assert_eq!(resolved_display_name(None, ""), "file");
     }
 }
