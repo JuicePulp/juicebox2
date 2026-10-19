@@ -2,6 +2,7 @@ use std::{collections::HashMap, net::IpAddr, sync::Mutex, time::Instant};
 
 use crate::{
     config::Config,
+    page_cache::PageCache,
     ssr::{
         announce::AnnouncementCache,
         ban::BanStatus,
@@ -21,5 +22,6 @@ pub struct AppState {
     pub rustdoc_exists: bool,
     pub live_reload: bool,
     pub boot_id: String,
+    pub page_cache: PageCache,
     pub shutdown: std::sync::Arc<tokio::sync::Notify>,
 }

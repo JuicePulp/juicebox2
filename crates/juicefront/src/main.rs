@@ -7,7 +7,7 @@ use std::{
 use axum::{
     Router,
     body::Body,
-    http::Request,
+    extract::{Request, State},
     middleware,
     response::Response,
     routing::{any, get, post},
@@ -17,11 +17,10 @@ use sentry::integrations::tower::NewSentryLayer;
 use tokio::net::TcpSocket;
 use tower_http::{
     compression::{
-        CompressionLayer,
+        CompressionLayer, CompressionLevel,
         predicate::{DefaultPredicate, NotForContentType, Predicate},
     },
     services::{ServeDir, ServeFile},
-    set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
 };
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
@@ -33,6 +32,7 @@ mod handlers;
 mod i18n;
 mod icons;
 mod live;
+mod page_cache;
 mod proxy;
 mod ssr;
 mod state;
@@ -55,18 +55,37 @@ fn static_base() -> Option<std::path::PathBuf> {
     None
 }
 
-async fn static_font_cache(req: Request<Body>, next: middleware::Next) -> Response<Body> {
-    let is_font = req.uri().path().rsplit('.').next().is_some_and(|ext| {
-        matches!(
-            ext.to_ascii_lowercase().as_str(),
-            "woff2" | "woff" | "ttf" | "otf"
-        )
-    });
+async fn static_cache_policy(
+    State(state): State<Arc<state::AppState>>,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> Response<Body> {
+    let versioned = req
+        .uri()
+        .query()
+        .is_some_and(|query| query.split('&').any(|part| part.starts_with("v=")));
+    let is_font = req
+        .uri()
+        .path()
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|ext| matches!(ext.as_str(), "woff2" | "woff" | "ttf" | "otf"));
+    let live_reload = state.live_reload;
     let mut res = next.run(req).await;
-    if is_font && res.status().is_success() {
+    if res.status().is_success() {
+        let policy = if live_reload {
+            "no-store"
+        } else if is_font || versioned {
+            // Versioned by ?v=<release> or a content hash: safe to pin forever.
+            "public, max-age=31536000, immutable"
+        } else {
+            // Unversioned (mostly admin) assets: short TTL, then revalidate.
+            "public, max-age=300"
+        };
         res.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
-            axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            axum::http::HeaderValue::from_static(policy),
         );
     }
     res
@@ -123,6 +142,7 @@ fn main() {
             rustdoc_exists,
             live_reload,
             boot_id: uuid::Uuid::new_v4().to_string(),
+            page_cache: page_cache::PageCache::new(),
             shutdown: Arc::clone(&shutdown),
         });
         tracing::info!(
@@ -141,6 +161,7 @@ fn main() {
             .gzip(true)
             .br(true)
             .zstd(true)
+            .quality(CompressionLevel::Fastest)
             .compress_when(
                 DefaultPredicate::new()
                     .and(NotForContentType::new("video/"))
@@ -214,27 +235,25 @@ fn main() {
             .route("/agents.txt", get(handlers::agents_txt));
 
         if let Some(base) = static_base() {
-            let cache_policy = if live_reload { "no-store" } else { "no-cache" };
-            let revalidate = || {
-                tower::ServiceBuilder::new().layer(SetResponseHeaderLayer::overriding(
-                    axum::http::header::CACHE_CONTROL,
-                    axum::http::HeaderValue::from_static(cache_policy),
-                ))
+            let static_cache = || {
+                tower::ServiceBuilder::new()
+                    .layer(middleware::from_fn_with_state(
+                        Arc::clone(&state),
+                        static_cache_policy,
+                    ))
             };
             pages = pages
                 .nest_service(
                     "/static/styles",
-                    revalidate().service(ServeDir::new(base.join("styles"))),
+                    static_cache().service(ServeDir::new(base.join("styles"))),
                 )
                 .nest_service(
                     "/static/assets",
-                    tower::ServiceBuilder::new()
-                        .layer(middleware::from_fn(static_font_cache))
-                        .service(ServeDir::new(base.join("assets"))),
+                    static_cache().service(ServeDir::new(base.join("assets"))),
                 )
                 .nest_service(
                     "/static/js",
-                    revalidate().service(ServeDir::new(base.join("js"))),
+                    static_cache().service(ServeDir::new(base.join("js"))),
                 )
                 .route_service(
                     "/static/speculation.json",
@@ -248,6 +267,11 @@ fn main() {
         }
 
         pages = pages.layer(compression);
+        // Outside the compression layer: entries hold already-compressed bytes.
+        pages = pages.layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            page_cache::middleware,
+        ));
 
         let app = Router::new()
             .merge(pages)
@@ -265,7 +289,7 @@ fn main() {
                     if juiceutils::is_noisy_http_path(request.uri().path()) {
                         tracing::Span::none()
                     } else {
-                        tracing::info_span!(
+                        tracing::debug_span!(
                             "http.request",
                             method = %request.method(),
                             path = request.uri().path(),
@@ -287,6 +311,7 @@ fn main() {
             .expect("Failed to bind to address");
         let listener = socket.listen(1024).expect("Failed to listen");
         tracing::info!("Listening on http://{addr}");
+        page_cache::spawn_refresh(Arc::clone(&state));
         {
             let shutdown = Arc::clone(&shutdown);
             tokio::spawn(async move {

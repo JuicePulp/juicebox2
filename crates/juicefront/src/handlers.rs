@@ -12,6 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use bytes::Bytes;
 use futures::StreamExt;
 use serde::Deserialize;
 
@@ -32,6 +33,7 @@ pub struct Shell {
     pub i18n_json: String,
     pub icons_json: String,
     pub extra_scripts: Vec<String>,
+    pub asset_version: &'static str,
 }
 
 pub struct Hreflang {
@@ -130,7 +132,7 @@ async fn cached_backend_offline(state: &AppState) -> bool {
     !healthy
 }
 
-async fn cached_ban(state: &AppState, headers: &HeaderMap, peer: IpAddr) -> ban::BanStatus {
+pub(crate) async fn cached_ban(state: &AppState, headers: &HeaderMap, peer: IpAddr) -> ban::BanStatus {
     let ip = juiceutils::proxy::client_ip(headers, peer, &state.config.trusted_proxies);
     if let Ok(cache) = state.ban_cache.lock()
         && let Some((at, status)) = cache.get(&ip)
@@ -448,6 +450,7 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
         i18n_json: i18n::embedded_json(locale).replace("</", "<\\/"),
         icons_json: crate::icons::bundle_json(crate::icons::RUNTIME_ICONS).replace("</", "<\\/"),
         extra_scripts,
+        asset_version: env!("CARGO_PKG_VERSION"),
     }
 }
 
@@ -470,6 +473,7 @@ struct HeadCtx {
     current_path: String,
     hreflang: Vec<Hreflang>,
     live_reload: bool,
+    asset_version: &'static str,
 }
 
 #[derive(Template)]
@@ -514,6 +518,7 @@ fn head_ctx(
         current_path: absolute_url(headers, stripped_path),
         hreflang: hreflang_links_absolute(headers, stripped_path),
         live_reload,
+        asset_version: env!("CARGO_PKG_VERSION"),
     }
 }
 
@@ -606,12 +611,92 @@ const CSS_BUNDLE: &str = concat!(
     include_str!("../static/styles/components/DocsPage.css"),
 );
 
-pub async fn css_bundle() -> Response<Body> {
-    Response::builder()
+struct CssAssets {
+    identity: Bytes,
+    gzip: Bytes,
+    br: Bytes,
+    zstd: Bytes,
+    etag: String,
+}
+
+static CSS_ASSETS: std::sync::OnceLock<CssAssets> = std::sync::OnceLock::new();
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn css_assets() -> &'static CssAssets {
+    CSS_ASSETS.get_or_init(|| {
+        use std::io::Write as _;
+        let source = CSS_BUNDLE.as_bytes();
+        let gzip = (|| -> std::io::Result<Vec<u8>> {
+            let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
+            encoder.write_all(source)?;
+            encoder.finish()
+        })()
+        .unwrap_or_else(|_| source.to_vec());
+        let br = (|| -> std::io::Result<Vec<u8>> {
+            let mut writer = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+            writer.write_all(source)?;
+            Ok(writer.into_inner())
+        })()
+        .unwrap_or_else(|_| source.to_vec());
+        let zstd = (|| -> std::io::Result<Vec<u8>> {
+            let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 3)?;
+            encoder.write_all(source)?;
+            encoder.finish()
+        })()
+        .unwrap_or_else(|_| source.to_vec());
+        CssAssets {
+            identity: Bytes::from_static(source),
+            gzip: gzip.into(),
+            br: br.into(),
+            zstd: zstd.into(),
+            etag: format!("\"{:016x}\"", fnv1a(source)),
+        }
+    })
+}
+
+pub async fn css_bundle(headers: HeaderMap, uri: axum::http::Uri) -> Response<Body> {
+    let assets = css_assets();
+    let accept = headers
+        .get("accept-encoding")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (body, encoding) = if accept.contains("zstd") {
+        (&assets.zstd, Some("zstd"))
+    } else if accept.contains("br") {
+        (&assets.br, Some("br"))
+    } else if accept.contains("gzip") {
+        (&assets.gzip, Some("gzip"))
+    } else {
+        (&assets.identity, None)
+    };
+    let versioned = uri
+        .query()
+        .is_some_and(|query| query.split('&').any(|part| part.starts_with("v=")));
+    let cache_control = if versioned {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=3600"
+    };
+    let mut builder = Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/css; charset=utf-8")
-        .header("cache-control", "no-cache")
-        .body(Body::from(CSS_BUNDLE))
+        .header("cache-control", cache_control)
+        .header("etag", assets.etag.as_str())
+        .header("vary", "Accept-Encoding");
+    if let Some(encoding) = encoding {
+        builder = builder.header("content-encoding", encoding);
+    }
+    builder
+        .body(Body::from(body.clone()))
         .unwrap_or_default()
 }
 

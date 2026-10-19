@@ -15,6 +15,7 @@
 <link rel="preload" as="font" href="/static/assets/num.woff2?v=1" type="font/woff2" crossorigin>
 <link rel="preload" as="font" href="/static/assets/title.woff2?v=1" type="font/woff2" crossorigin>
 <link rel="preload" as="image" href="/static/assets/mainlogo.avif?v=1" type="image/avif">
+<link rel="preconnect" href="https://f.juicey.dev">
 {% for link in head.hreflang %}<link rel="alternate" hreflang="{{ link.code }}" href="{{ link.href }}">
 {% endfor %}<link rel="alternate" hreflang="x-default" href="{{ head.current_path }}">
 <link rel="canonical" href="{{ head.canonical }}">
@@ -37,8 +38,8 @@
 <meta name="twitter:image:alt" content="{{ head.og_image_alt }}">
 <meta name="twitter:url" content="{{ head.canonical }}">
 <script type="application/ld+json">{{ head.structured_data|safe }}</script>
-<link rel="stylesheet" href="/static/bundle.css">
-<script src="/static/js/boot.js"></script>
+<link rel="stylesheet" href="/static/bundle.css?v={{ head.asset_version }}">
+<script src="/static/js/boot.js?v={{ head.asset_version }}"></script>
 <script type="speculationrules">{"prefetch": [{"source": "document", "where": {"and": [{"selector_matches": ".act a[href], .select-options-list a[href]"}, {"href_matches": "/*"}, {"not": {"href_matches": "/api/*"}}, {"not": {"href_matches": "/admin*"}}, {"not": {"href_matches": "/static/*"}}, {"not": {"href_matches": "/file/*"}}, {"not": {"href_matches": "/f/*"}}, {"not": {"href_matches": "/v/*"}}, {"not": {"href_matches": "/d/*"}}, {"not": {"href_matches": "/upload*"}}]}, "eagerness": "conservative"}]}</script>
 </head>
 <body{% if head.body_class != "" %} class="{{ head.body_class }}"{% endif %}>

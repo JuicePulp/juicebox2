@@ -13,7 +13,10 @@ askama.workspace = true
 async-stream.workspace = true
 axum.workspace = true
 base64.workspace = true
+brotli.workspace = true
 bytes.workspace = true
+dashmap.workspace = true
+flate2.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -34,6 +37,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
+zstd.workspace = true
 
 [lints]
 workspace = true
