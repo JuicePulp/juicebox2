@@ -97,6 +97,7 @@ fn main() {
         };
 
         let state = Arc::new(AppState::new(&config, storage));
+        juicehost::handlers::stats::start_flusher(Arc::clone(&state));
 
         if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {
             let ban_state = Arc::clone(&state);

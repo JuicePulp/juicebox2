@@ -1,5 +1,7 @@
 
 
+use std::time::{Duration, Instant};
+
 use axum::{
     body::Body,
     http::{StatusCode, header},
@@ -32,7 +34,15 @@ impl BackendStatus {
     }
 }
 
+const FILE_STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
+const FILE_STATUS_CACHE_MAX_ENTRIES: usize = 8_192;
+
 pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
+    if let Some(entry) = state.file_status_cache.get(id)
+        && entry.0.elapsed() < FILE_STATUS_CACHE_TTL
+    {
+        return BackendStatus::Known(entry.1.clone());
+    }
     let Some(backend_url) = state.backend_url.as_ref() else {
         return BackendStatus::Unavailable;
     };
@@ -47,7 +57,20 @@ pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendSt
         return BackendStatus::Unavailable;
     }
     match resp.json::<serde_json::Value>().await {
-        Ok(body) => BackendStatus::Known(body),
+        Ok(body) => {
+            if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
+                state
+                    .file_status_cache
+                    .retain(|_, (at, _)| at.elapsed() < FILE_STATUS_CACHE_TTL);
+                if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
+                    state.file_status_cache.clear();
+                }
+            }
+            state
+                .file_status_cache
+                .insert(id.to_owned(), (Instant::now(), body.clone()));
+            BackendStatus::Known(body)
+        }
         Err(_) => BackendStatus::Unavailable,
     }
 }

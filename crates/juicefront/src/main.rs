@@ -118,6 +118,8 @@ fn main() {
             host_cache: HashMap::new().into(),
             announcement_cache: HashMap::new().into(),
             github_cache: Mutex::new((None, String::new())),
+            health_cache: Mutex::new(None),
+            ban_cache: Mutex::new(HashMap::new()),
             rustdoc_exists,
             live_reload,
             boot_id: uuid::Uuid::new_v4().to_string(),

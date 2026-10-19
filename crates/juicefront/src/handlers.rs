@@ -1,4 +1,9 @@
-use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use askama::Template;
 use axum::{
@@ -7,6 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
+use futures::StreamExt;
 use serde::Deserialize;
 
 use crate::{
@@ -105,6 +111,53 @@ fn query_map(uri: &axum::http::Uri) -> HashMap<String, String> {
         .collect()
 }
 
+const HEALTH_CACHE_TTL: Duration = Duration::from_secs(1);
+const BAN_CACHE_TTL: Duration = Duration::from_secs(10);
+const BAN_CACHE_MAX_ENTRIES: usize = 4096;
+
+async fn cached_backend_offline(state: &AppState) -> bool {
+    if let Ok(cache) = state.health_cache.lock()
+        && let Some((at, healthy)) = *cache
+        && at.elapsed() < HEALTH_CACHE_TTL
+    {
+        return !healthy;
+    }
+    let healthy =
+        health::check_backend_health(&state.http, &state.config.juiceback_url).await;
+    if let Ok(mut cache) = state.health_cache.lock() {
+        *cache = Some((Instant::now(), healthy));
+    }
+    !healthy
+}
+
+async fn cached_ban(state: &AppState, headers: &HeaderMap, peer: IpAddr) -> ban::BanStatus {
+    let ip = juiceutils::proxy::client_ip(headers, peer, &state.config.trusted_proxies);
+    if let Ok(cache) = state.ban_cache.lock()
+        && let Some((at, status)) = cache.get(&ip)
+        && at.elapsed() < BAN_CACHE_TTL
+    {
+        return status.clone();
+    }
+    let status = ban::check_user_ban(
+        &state.http,
+        &state.config.juiceback_url,
+        headers,
+        peer,
+        &state.config.trusted_proxies,
+    )
+    .await;
+    if let Ok(mut cache) = state.ban_cache.lock() {
+        if cache.len() >= BAN_CACHE_MAX_ENTRIES {
+            cache.retain(|_, (at, _)| at.elapsed() < BAN_CACHE_TTL);
+            if cache.len() >= BAN_CACHE_MAX_ENTRIES {
+                cache.clear();
+            }
+        }
+        cache.insert(ip, (Instant::now(), status.clone()));
+    }
+    status
+}
+
 struct Shared {
     offline: bool,
     ban: ban::BanStatus,
@@ -115,14 +168,8 @@ async fn shared(state: &AppState, headers: &HeaderMap, peer: IpAddr) -> Shared {
     let cookie_host =
         host::read_cookie_host(headers.get("cookie").and_then(|value| value.to_str().ok()));
     let (offline, ban, eff) = tokio::join!(
-        async { !health::check_backend_health(&state.http, &state.config.juiceback_url).await },
-        ban::check_user_ban(
-            &state.http,
-            &state.config.juiceback_url,
-            headers,
-            peer,
-            &state.config.trusted_proxies,
-        ),
+        cached_backend_offline(state),
+        cached_ban(state, headers, peer),
         host::resolve_effective_config(state, cookie_host.as_deref()),
     );
     let data = Shared { offline, ban, eff };
@@ -482,16 +529,24 @@ fn flags_html(offline: bool, banned: bool) -> String {
     )
 }
 
-fn stream_page(
+async fn stream_page(
     status: StatusCode,
     stream: impl futures::Stream<Item = Result<bytes::Bytes, std::convert::Infallible>> + Send + 'static,
 ) -> Response<Body> {
+    // Compression of a chunked response can add a delayed-ACK stall per page.
+    // Rendering into one buffer gives the compression layer a fixed-size body
+    // and avoids sending the head as a separate tiny TCP write.
+    let mut stream = Box::pin(stream);
+    let mut body = Vec::with_capacity(128 * 1024);
+    while let Some(Ok(chunk)) = stream.next().await {
+        body.extend_from_slice(&chunk);
+    }
     Response::builder()
         .status(status)
         .header("content-type", "text/html; charset=utf-8")
         .header("cache-control", "private, max-age=10")
         .header("vary", "Cookie")
-        .body(Body::from_stream(stream))
+        .body(Body::from(body))
         .unwrap_or_default()
 }
 
@@ -875,7 +930,7 @@ pub async fn index(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[derive(Template)]
@@ -1271,7 +1326,7 @@ pub async fn files_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 fn content_actions(locale: &str, cx: &Cx) -> Vec<CardAction> {
@@ -1458,7 +1513,7 @@ pub async fn download_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[derive(Template)]
@@ -1481,14 +1536,7 @@ pub async fn banned_page(
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
     let cx = Cx::new(locale);
-    let ban = ban::check_user_ban(
-        &state.http,
-        &state.config.juiceback_url,
-        &headers,
-        peer.ip(),
-        &state.config.trusted_proxies,
-    )
-    .await;
+    let ban = cached_ban(&state, &headers, peer.ip()).await;
     if !ban.banned {
         return redirect_to(&cx.lp("/"));
     }
@@ -1527,7 +1575,7 @@ pub async fn banned_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[derive(Template)]
@@ -1615,7 +1663,7 @@ pub async fn report_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 pub async fn feedback_page(
@@ -1675,7 +1723,7 @@ pub async fn feedback_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[derive(Template)]
@@ -1753,7 +1801,7 @@ pub async fn faq_page(
         .unwrap_or_default(),
     ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[derive(Template)]
@@ -1819,7 +1867,7 @@ pub async fn docs_page(
             .unwrap_or_default(),
         ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 #[allow(clippy::unused_async)]
@@ -1858,7 +1906,7 @@ async fn legal_page(
             .unwrap_or_default(),
         ));
     };
-    stream_page(StatusCode::OK, stream)
+    stream_page(StatusCode::OK, stream).await
 }
 
 pub async fn terms_page(
@@ -2006,7 +2054,7 @@ pub async fn not_found_page(
             .unwrap_or_default(),
         ));
     };
-    stream_page(StatusCode::NOT_FOUND, stream)
+    stream_page(StatusCode::NOT_FOUND, stream).await
 }
 
 #[derive(Template)]

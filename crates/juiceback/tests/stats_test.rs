@@ -277,3 +277,39 @@ async fn stats_overview_counts_visitors_uploaders_and_file_views() {
     assert_eq!(item["downloaders"], 0);
     assert!(item["last_viewed_at"].as_i64().unwrap() > 0);
 }
+
+#[tokio::test]
+async fn stats_hit_batch_aggregates_counts() {
+    let state = common::test_state();
+    let app = build_router(state.clone());
+    let (key, val) = api_key_header();
+
+    let resp = app
+        .clone()
+        .oneshot(json_post(
+            "/internal/stats/hit-batch",
+            serde_json::json!({
+                "hits": [
+                    {"file_id": "batch1", "kind": "view", "ip": "192.0.2.10", "count": 2},
+                    {"file_id": "batch1", "kind": "download", "ip": "192.0.2.10", "count": 3},
+                    {"file_id": "batch1", "kind": "view", "ip": "192.0.2.11", "count": 4}
+                ]
+            }),
+            Some((key, val)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let conn = state.db.get().unwrap();
+    let (views, downloads): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(views), 0), COALESCE(SUM(downloads), 0)
+             FROM file_stats WHERE file_id = 'batch1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(views, 6);
+    assert_eq!(downloads, 3);
+}

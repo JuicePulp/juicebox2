@@ -343,6 +343,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/internal/ban-snapshot", get(ban_snapshot_handler))
         .route("/internal/stats/hit", post(stats::hit_handler))
+        .route(
+            "/internal/stats/hit-batch",
+            post(stats::hit_batch_handler),
+        )
         .route("/internal/stats/visit", post(stats::visit_handler))
         .route("/file/{id}/delete", post(manage::delete_file_form_handler))
         .route("/file/{id}/rename", post(manage::rename_file_form_handler))
