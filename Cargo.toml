@@ -8,7 +8,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "2.1.0"
+version = "2.1.12"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
@@ -28,6 +28,7 @@ askama = "0.14"
 axum = { version = "0.8", features = ["multipart", "ws"] }
 base64 = "0.23"
 blake3 = "1"
+brotli = "8"
 bytes = "1"
 chrono = "0.4"
 dashmap = "6"
@@ -81,4 +82,5 @@ url = "2"
 utoipa = { version = "5", features = ["axum_extras"] }
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 zeroize = "1"
+zstd = "0.14"
 wiremock = "0.6"
