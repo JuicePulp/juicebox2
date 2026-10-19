@@ -1,7 +1,13 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use dashmap::DashMap;
 
 use crate::{
     config::Config,
+    handlers::stats::HitKey,
     storage::{R2Store, StorageBackend},
 };
 
@@ -52,6 +58,10 @@ pub struct AppState {
     pub r2: Option<Arc<R2Store>>,
 
     pub backend_client: reqwest::Client,
+
+    pub file_status_cache: Arc<DashMap<String, (Instant, serde_json::Value)>>,
+
+    pub hit_buffer: Arc<DashMap<HitKey, u64>>,
 }
 
 impl AppState {
@@ -111,6 +121,8 @@ impl AppState {
                 .timeout(Duration::from_secs(2))
                 .build()
                 .expect("fixed backend HTTP client configuration must be valid"),
+            file_status_cache: Arc::new(DashMap::new()),
+            hit_buffer: Arc::new(DashMap::new()),
         }
     }
 }

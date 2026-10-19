@@ -3,10 +3,10 @@ use std::{
     sync::atomic::Ordering,
 };
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::StreamExt;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 use super::{
     ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
@@ -321,7 +321,7 @@ impl LocalBackend {
 
         let temp_path = self.temp_path(id);
         let result = async {
-            let mut file = tokio::fs::OpenOptions::new()
+            let file = tokio::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temp_path)
@@ -333,15 +333,18 @@ impl LocalBackend {
                         StorageError::Io(format!("create temp failed: {e}"))
                     }
                 })?;
+            // Coalesce the small chunks produced by HTTP uploads into fewer
+            // disk writes. 512 KiB per active upload is cheap at 16 uploads.
+            let mut file = BufWriter::with_capacity(512 * 1024, file);
             let mut total = 0u64;
             while let Some(chunk) = data.next().await {
                 let chunk = chunk?;
                 total = total.saturating_add(chunk.len() as u64);
-                tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+                file.write_all(&chunk)
                     .await
                     .map_err(|e| StorageError::Io(format!("write failed: {e}")))?;
             }
-            tokio::io::AsyncWriteExt::flush(&mut file)
+            file.flush()
                 .await
                 .map_err(|e| StorageError::Io(format!("flush failed: {e}")))?;
             drop(file);
@@ -667,16 +670,13 @@ impl StorageBackend for LocalBackend {
                 if remaining == 0 {
                     return None;
                 }
-                let mut buf = vec![0u8; remaining.min(64 * 1024) as usize];
-                match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
+                let mut buf = BytesMut::with_capacity(remaining.min(64 * 1024) as usize);
+                match tokio::io::AsyncReadExt::read_buf(&mut file, &mut buf).await {
                     Ok(0) => Some((
                         Err(StorageError::Io("unexpected EOF reading range".into())),
                         (file, 0),
                     )),
-                    Ok(n) => {
-                        buf.truncate(n);
-                        Some((Ok(Bytes::from(buf)), (file, remaining - n as u64)))
-                    }
+                    Ok(n) => Some((Ok(buf.split().freeze()), (file, remaining - n as u64))),
                     Err(e) => Some((
                         Err(StorageError::Io(format!("read failed: {e}"))),
                         (file, 0),
@@ -794,13 +794,12 @@ impl StorageBackend for LocalBackend {
         ensure_not_frozen(self, id).await?;
         let file = self.open_regular(&path).await?;
         let stream = futures::stream::unfold(file, |mut file| async move {
-            let mut buf = vec![0u8; 64 * 1024];
-            match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
+            // read_buf fills uninitialised BytesMut capacity, avoiding a
+            // zeroed 64 KiB allocation for every chunk of a download.
+            let mut buf = BytesMut::with_capacity(256 * 1024);
+            match tokio::io::AsyncReadExt::read_buf(&mut file, &mut buf).await {
                 Ok(0) => None,
-                Ok(n) => {
-                    buf.truncate(n);
-                    Some((Ok(Bytes::from(buf)), file))
-                }
+                Ok(_) => Some((Ok(buf.split().freeze()), file)),
                 Err(e) => Some((Err(StorageError::Io(format!("read failed: {e}"))), file)),
             }
         });

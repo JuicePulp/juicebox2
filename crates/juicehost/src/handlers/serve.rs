@@ -32,8 +32,12 @@ pub(crate) fn file_cache_control_value(
         return FILE_CACHE_CONTROL.to_string();
     }
     match ttl_remaining_secs {
-        Some(secs) if secs > 0 => {
-            let age = secs.min(state.file_cache_max_age_secs);
+        Some(secs) if secs > 5 => {
+            // The status response is cached for a few seconds, so leave a
+            // safety margin to avoid an edge cache outliving the file.
+            let age = secs
+                .saturating_sub(5)
+                .min(state.file_cache_max_age_secs);
             format!("public, max-age={age}, s-maxage={age}, immutable")
         }
         _ => FILE_CACHE_CONTROL.to_string(),

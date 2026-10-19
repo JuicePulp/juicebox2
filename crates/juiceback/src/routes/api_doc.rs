@@ -20,7 +20,7 @@ use crate::{
         },
         presence::{DeviceListResponse, PresenceDevice},
         register::{RegisterRequest, RegisterResponse},
-        stats::{HitRequest, VisitRequest},
+        stats::{HitBatchRequest, HitRequest, VisitRequest},
         upload::{ReserveResponse, ReserveUploadRequest, UploadResponse},
     },
 };
@@ -84,6 +84,7 @@ use crate::{
         crate::routes::health::ban_snapshot_handler,
 
         crate::routes::stats::hit_handler,
+        crate::routes::stats::hit_batch_handler,
         crate::routes::stats::visit_handler,
 
         crate::routes::fetch::handlers::fetch_start_handler,
@@ -177,6 +178,7 @@ use crate::{
         RegisterRequest,
         RegisterResponse,
         HitRequest,
+        HitBatchRequest,
         VisitRequest,
         crate::routes::fetch::FetchStartRequest,
         crate::routes::fetch::FetchStartResponse,

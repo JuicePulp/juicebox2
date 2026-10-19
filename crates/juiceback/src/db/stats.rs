@@ -48,9 +48,21 @@ pub fn record_file_hit(
     kind: HitKind,
     now: i64,
 ) -> Result<()> {
+    record_file_hit_count(conn, file_id, ip_hash, kind, 1, now)
+}
+
+pub fn record_file_hit_count(
+    conn: &Connection,
+    file_id: &str,
+    ip_hash: &str,
+    kind: HitKind,
+    count: u64,
+    now: i64,
+) -> Result<()> {
+    let count = i64::try_from(count).unwrap_or(i64::MAX);
     let (views, downloads) = match kind {
-        HitKind::View => (1, 0),
-        HitKind::Download => (0, 1),
+        HitKind::View => (count, 0),
+        HitKind::Download => (0, count),
     };
     conn.execute(
         "INSERT INTO file_stats (file_id, ip_hash, first_seen_at, last_seen_at, views, downloads)
