@@ -89,8 +89,46 @@ impl ShellMode {
 
 pub(crate) enum GateDecision {
     Respond(Response<Body>),
-    HotServe { key: String },
-    ServeLocal,
+    HotServe {
+        key: String,
+        meta: Option<BackendFileMeta>,
+    },
+    ServeLocal {
+        meta: Option<BackendFileMeta>,
+    },
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BackendFileMeta {
+    pub filename: Option<String>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+}
+
+impl BackendFileMeta {
+    #[must_use]
+    pub(crate) fn display_name(&self) -> Option<&str> {
+        self.title
+            .as_deref()
+            .or(self.filename.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    }
+}
+
+fn backend_file_meta(body: &serde_json::Value) -> BackendFileMeta {
+    let field = |key: &str| {
+        body.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    BackendFileMeta {
+        filename: field("filename"),
+        title: field("title"),
+        author: field("author"),
+    }
 }
 
 fn hot_r2_key(body: &serde_json::Value) -> Option<String> {
@@ -123,7 +161,7 @@ pub(crate) async fn gate_decision(
     page_url: Option<&str>,
 ) -> GateDecision {
     if state.backend_url.is_none() {
-        return GateDecision::ServeLocal;
+        return GateDecision::ServeLocal { meta: None };
     }
     match backend_file_status(state, id).await {
         BackendStatus::Known(body)
@@ -160,11 +198,14 @@ pub(crate) async fn gate_decision(
                 page_url,
             ))
         }
-        BackendStatus::Known(body) => match hot_r2_key(&body) {
-            Some(key) => GateDecision::HotServe { key },
-            None => GateDecision::ServeLocal,
-        },
-        BackendStatus::Unknown => GateDecision::ServeLocal,
+        BackendStatus::Known(body) => {
+            let meta = Some(backend_file_meta(&body));
+            match hot_r2_key(&body) {
+                Some(key) => GateDecision::HotServe { key, meta },
+                None => GateDecision::ServeLocal { meta },
+            }
+        }
+        BackendStatus::Unknown => GateDecision::ServeLocal { meta: None },
         BackendStatus::Unavailable => {
             let mut resp = not_found_html().into_response();
             resp.headers_mut().insert(
@@ -181,10 +222,10 @@ pub(crate) async fn protected_shell_response(
     id: &str,
     mode: ShellMode,
     page_url: Option<&str>,
-) -> Option<Response<Body>> {
+) -> (Option<Response<Body>>, Option<BackendFileMeta>) {
     match gate_decision(state, id, mode, page_url).await {
-        GateDecision::Respond(resp) => Some(resp),
-        GateDecision::HotServe { .. } | GateDecision::ServeLocal => None,
+        GateDecision::Respond(resp) => (Some(resp), None),
+        GateDecision::HotServe { meta, .. } | GateDecision::ServeLocal { meta } => (None, meta),
     }
 }
 

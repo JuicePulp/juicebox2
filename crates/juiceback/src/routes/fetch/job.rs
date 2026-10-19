@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use super::{
     bun::{bun_fetch_configured, run_bun_tier},
+    meta,
     store::download_and_store,
-    types::{ByteSource, FetchResult},
+    types::{ByteSource, FetchMeta, FetchResult},
     ytdlp::{run_ytdlp_tier, ytdlp_enabled},
 };
 use crate::{
@@ -320,6 +321,12 @@ pub(crate) async fn fetch_via(
             url: tunnel_url,
             filename,
         } => {
+            let meta = FetchMeta {
+                title: None,
+                author: filename
+                    .as_deref()
+                    .and_then(meta::author_from_cobalt_filename),
+            };
             download_and_store(
                 state,
                 user_id,
@@ -327,6 +334,7 @@ pub(crate) async fn fetch_via(
                 source_url,
                 ByteSource::Tunnel(tunnel_url),
                 filename.as_deref(),
+                meta,
                 opts,
                 max_size,
                 default_ttl_hours,

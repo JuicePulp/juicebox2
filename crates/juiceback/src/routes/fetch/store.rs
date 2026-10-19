@@ -3,7 +3,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::{
-    types::{ByteSource, FetchResult},
+    meta::clean_meta_value,
+    types::{ByteSource, FetchMeta, FetchResult},
     validation::{empty_stream_message, sanitize_filename},
 };
 use crate::{
@@ -24,6 +25,7 @@ pub(crate) async fn download_and_store(
     source_url: &str,
     byte_source: ByteSource,
     filename: Option<&str>,
+    meta: FetchMeta,
     opts: &FetchOptions,
     max_size: u64,
     ttl_hours: f64,
@@ -57,6 +59,12 @@ pub(crate) async fn download_and_store(
         encrypted_ip,
         None,
     );
+    record.title = meta.title.as_deref().and_then(clean_meta_value).unwrap_or_default();
+    record.author = meta
+        .author
+        .as_deref()
+        .and_then(clean_meta_value)
+        .unwrap_or_default();
     
     
     let setup = match password.filter(|p| !p.is_empty()) {
@@ -96,7 +104,7 @@ pub(crate) async fn download_and_store(
         &mime_type,
         &delete_token,
         source_url,
-        &byte_source,
+        byte_source,
         max_size,
         setup.as_ref().map(|setup| setup.dek.clone()),
     )
@@ -237,7 +245,7 @@ async fn transfer_to_juicehost(
     mime_type: &str,
     capability: &str,
     source_url: &str,
-    byte_source: &ByteSource,
+    byte_source: ByteSource,
     max_size: u64,
     dek: Option<crate::crypto_file::FileKey>,
 ) -> Result<(u64, Option<String>), String> {
@@ -245,11 +253,11 @@ async fn transfer_to_juicehost(
     let (mut stream, _precheck_len): (
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>,
         Option<u64>,
-    ) = match &byte_source {
+    ) = match byte_source {
         ByteSource::Tunnel(url) => {
             let client = state.http.clone();
             let resp =
-                fetch_tunnel_response(&client, state, url, state.config.allow_private_fetch)
+                fetch_tunnel_response(&client, state, &url, state.config.allow_private_fetch)
                     .await?;
             let len = resp.content_length().map(|l| l as u64);
             if len == Some(0) {
@@ -268,34 +276,7 @@ async fn transfer_to_juicehost(
                 len,
             )
         }
-        ByteSource::BunService {
-            fetch_url,
-            api_key,
-            payload_url,
-            audio_only,
-            max_height,
-        } => {
-            let client = state.http.clone();
-            let resp = client
-                .post(fetch_url.as_str())
-                .bearer_auth(api_key.as_str())
-                .timeout(std::time::Duration::from_secs(
-                    crate::constants::FETCH_JOB_TIMEOUT_SECS,
-                ))
-                .json(&serde_json::json!({
-                    "url": payload_url,
-                    "audio_only": audio_only,
-                    "max_height": max_height,
-                }))
-                .send()
-                .await
-                .map_err(|e| format!("bun-fetch request failed: {e}"))?;
-            if !resp.status().is_success() {
-                return Err(format!(
-                    "bun-fetch returned status {}",
-                    resp.status()
-                ));
-            }
+        ByteSource::BunResponse(resp) => {
             let len = resp.content_length().map(|l| l as u64);
             if len == Some(0) {
                 return Err(empty_stream_message(source_url));
@@ -314,7 +295,7 @@ async fn transfer_to_juicehost(
             )
         }
         ByteSource::LocalFile(path) => {
-            let meta = tokio::fs::metadata(path)
+            let meta = tokio::fs::metadata(&path)
                 .await
                 .map_err(|e| format!("yt-dlp output missing: {e}"))?;
             let size = meta.len();
@@ -324,7 +305,7 @@ async fn transfer_to_juicehost(
             if size > max_size {
                 return Err("file exceeds this server's maximum file size".into());
             }
-            let file = tokio::fs::File::open(path)
+            let file = tokio::fs::File::open(&path)
                 .await
                 .map_err(|e| format!("failed to open yt-dlp output: {e}"))?;
             (

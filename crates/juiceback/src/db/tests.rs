@@ -838,6 +838,8 @@ fn legacy_files_table_gains_new_columns() {
     assert!(cols.contains(&"password_hash".to_string()));
     assert!(cols.contains(&"is_encrypted".to_string()));
     assert!(cols.contains(&"enc_header".to_string()));
+    assert!(cols.contains(&"title".to_string()));
+    assert!(cols.contains(&"author".to_string()));
     assert_eq!(schema_version(&conn).unwrap(), migration_count());
 }
 
@@ -890,6 +892,46 @@ fn protected_record_roundtrips_with_defaults_for_plain() {
     assert!(!got.is_encrypted);
     assert_eq!(got.password_hash, None);
     assert_eq!(got.enc_header, None);
+}
+
+#[test]
+fn video_meta_roundtrips_and_defaults_empty() {
+    let conn = setup_db();
+
+    let mut record = FileRecord::new(
+        "clipped".into(),
+        "clip.mp4".into(),
+        "video/mp4".into(),
+        12,
+        "tok-clip".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    record.title = "Me at the zoo".into();
+    record.author = "jawed".into();
+    insert_file(&conn, &record).unwrap();
+
+    let got = get_file(&conn, "clipped").unwrap().unwrap();
+    assert_eq!(got.title, "Me at the zoo");
+    assert_eq!(got.author, "jawed");
+
+    let plain = FileRecord::new(
+        "plainmeta".into(),
+        "a.txt".into(),
+        "text/plain".into(),
+        3,
+        "tok-plainmeta".into(),
+        1000,
+        2000,
+        None,
+        None,
+    );
+    insert_file(&conn, &plain).unwrap();
+    let got = get_file(&conn, "plainmeta").unwrap().unwrap();
+    assert!(got.title.is_empty());
+    assert!(got.author.is_empty());
 }
 
 #[test]

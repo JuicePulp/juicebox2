@@ -115,6 +115,41 @@ function ttlHours() {
   var checked = form ? form.querySelector('input[name="ttl_hours"]:checked') : null;
   return Number(checked ? checked.value : 0) || 24;
 }
+
+function cobaltFetchUrls() {
+  var cobaltTextarea = getCobaltTextareaRef();
+  var value = cobaltTextarea ? cobaltTextarea.value : "";
+  var lines = value.split(/\r?\n/);
+  var count = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var url = lines[i].trim();
+    if (!url) continue;
+    startCobaltFetch(url);
+    count++;
+  }
+  if (count > 0 && cobaltTextarea) cobaltTextarea.value = "";
+  return count;
+}
+
+function cobaltHasUrls() {
+  var cobaltTextarea = getCobaltTextareaRef();
+  if (!cobaltTextarea) return true;
+  return cobaltTextarea.value.trim().length > 0;
+}
+
+function handleCobaltKeydown(e) {
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  if (e.shiftKey) {
+    var el = getCobaltTextareaRef();
+    if (!el) return;
+    var pos = el.selectionStart;
+    el.setRangeText("\n", pos, pos, "end");
+    return;
+  }
+  cobaltFetchUrls();
+}
 function setEmpty(visible) {
   if (emptyTextRef) emptyTextRef.classList.toggle("visible", visible);
 }
@@ -1302,12 +1337,12 @@ export function initUploadCard() {
   var cobaltFetch = card.querySelector("[data-cobalt-fetch]");
   if (cobaltFetch) {
     cobaltFetch.addEventListener("click", function () {
-      var cobaltTextarea = getCobaltTextareaRef();
-      var url = cobaltTextarea ? cobaltTextarea.value.trim() : "";
-      if (!url) return;
-      startCobaltFetch(url);
-      if (cobaltTextarea) cobaltTextarea.value = "";
+      cobaltFetchUrls();
     });
+  }
+  var cobaltTextarea = getCobaltTextareaRef();
+  if (cobaltTextarea) {
+    cobaltTextarea.addEventListener("keydown", handleCobaltKeydown);
   }
 
   document.addEventListener("paste", onPaste);

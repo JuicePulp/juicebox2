@@ -1,6 +1,7 @@
 pub mod bun;
 pub mod handlers;
 pub mod job;
+pub mod meta;
 pub mod store;
 pub mod types;
 pub mod validation;

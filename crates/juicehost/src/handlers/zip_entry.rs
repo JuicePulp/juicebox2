@@ -56,7 +56,7 @@ pub async fn zip_entry_file(
     
     match gate_decision(&state, &id, ShellMode::View, None).await {
         GateDecision::Respond(_) => return Err(JuicehostError::Forbidden),
-        GateDecision::HotServe { .. } | GateDecision::ServeLocal => {}
+        GateDecision::HotServe { .. } | GateDecision::ServeLocal { .. } => {}
     }
     let meta = state
         .storage

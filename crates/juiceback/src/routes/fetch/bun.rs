@@ -1,11 +1,12 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use super::{
+    meta::{decoded_header_value, title_from_bun_filename, youtube_oembed_metadata},
     store::download_and_store,
     types::{ByteSource, FetchResult},
 };
 use crate::{
-    cobalt::FetchOptions,
+    cobalt::{self, FetchOptions},
     db,
     state::AppState,
 };
@@ -51,19 +52,48 @@ pub(crate) async fn run_bun_tier(
         .await;
 
     tracing::info!("tier via bun-fetch ({}): fetching {}", fetch_url, source_url);
+
+    let resp = state
+        .http
+        .post(fetch_url.as_str())
+        .bearer_auth(api_key.as_str())
+        .timeout(Duration::from_secs(
+            crate::constants::FETCH_JOB_TIMEOUT_SECS,
+        ))
+        .json(&serde_json::json!({
+            "url": source_url,
+            "audio_only": opts.audio_only,
+            "max_height": bun_max_height(&opts.video_quality),
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("bun-fetch request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("bun-fetch returned status {}", resp.status()));
+    }
+
+    let filename = resp
+        .headers()
+        .get("x-bun-fetch-filename")
+        .and_then(|v| v.to_str().ok())
+        .map(decoded_header_value);
+
+    let mut meta = youtube_oembed_metadata(&state.http, source_url).await;
+    if meta.title.is_none() {
+        let video_id = cobalt::parse_youtube_video_id(source_url);
+        meta.title = filename
+            .as_deref()
+            .and_then(|name| title_from_bun_filename(name, video_id.as_deref()));
+    }
+
     download_and_store(
         state,
         user_id,
         job_id,
         source_url,
-        ByteSource::BunService {
-            fetch_url: fetch_url.clone(),
-            api_key: api_key.clone(),
-            payload_url: source_url.to_string(),
-            audio_only: opts.audio_only,
-            max_height: bun_max_height(&opts.video_quality),
-        },
-        None,
+        ByteSource::BunResponse(resp),
+        filename.as_deref(),
+        meta,
         opts,
         max_size,
         default_ttl_hours,

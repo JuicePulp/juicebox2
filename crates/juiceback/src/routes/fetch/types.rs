@@ -94,13 +94,14 @@ pub(crate) type FetchResult = Result<String, String>;
 pub(crate) enum ByteSource {
     Tunnel(String),
 
-    BunService {
-        fetch_url: String,
-        api_key: String,
-        payload_url: String,
-        audio_only: bool,
-        max_height: u32,
-    },
+    BunResponse(reqwest::Response),
 
     LocalFile(PathBuf),
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FetchMeta {
+    pub title: Option<String>,
+
+    pub author: Option<String>,
 }

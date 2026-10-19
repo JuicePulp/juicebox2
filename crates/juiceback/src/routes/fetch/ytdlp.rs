@@ -43,6 +43,66 @@ fn ytdlp_js_runtime() -> String {
     std::env::var("YTDLP_JS_RUNTIME").unwrap_or_else(|_| "deno".into())
 }
 
+fn belongs_to_video(path: &std::path::Path, video_id: &str) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let stem = match name.strip_suffix(".info.json") {
+        Some(stem) => stem,
+        None => name.rsplit_once('.').map_or(name, |(stem, _)| stem),
+    };
+    stem == video_id || stem.ends_with(&format!("-{video_id}"))
+}
+
+fn parse_ytdlp_meta(raw: &[u8]) -> super::types::FetchMeta {
+    let Ok(body) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return super::types::FetchMeta::default();
+    };
+    let pick = |key: &str| body.get(key).and_then(|v| v.as_str());
+    super::types::FetchMeta {
+        title: pick("title").and_then(super::meta::clean_meta_value),
+        author: pick("uploader")
+            .or_else(|| pick("channel"))
+            .and_then(super::meta::clean_meta_value),
+    }
+}
+
+async fn read_ytdlp_meta(
+    out_dir: &str,
+    media_path: &std::path::Path,
+    video_id: &str,
+) -> (super::types::FetchMeta, Option<PathBuf>) {
+    let expected = media_path.with_extension("info.json");
+    let mut info_path = tokio::fs::metadata(&expected)
+        .await
+        .ok()
+        .is_some()
+        .then_some(expected);
+    if info_path.is_none()
+        && let Ok(mut rd) = tokio::fs::read_dir(out_dir).await
+    {
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            let p = entry.path();
+            let is_info = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".info.json"));
+            if is_info && belongs_to_video(&p, video_id) {
+                info_path = Some(p);
+                break;
+            }
+        }
+    }
+    let Some(info_path) = info_path else {
+        return (super::types::FetchMeta::default(), None);
+    };
+    let meta = match tokio::fs::read(&info_path).await {
+        Ok(raw) => parse_ytdlp_meta(&raw),
+        Err(_) => super::types::FetchMeta::default(),
+    };
+    (meta, Some(info_path))
+}
+
 #[must_use]
 pub fn build_ytdlp_args_for_test(
     proxy: &str,
@@ -73,6 +133,7 @@ fn build_ytdlp_args(
         "--merge-output-format".to_string(),
         "mp4".to_string(),
         "--no-playlist".to_string(),
+        "--write-info-json".to_string(),
         "--no-progress".to_string(),
         "-q".to_string(),
         "--js-runtimes".to_string(),
@@ -148,7 +209,7 @@ pub(crate) async fn run_ytdlp_tier(
         };
         while let Some(entry) = rd.next_entry().await.map_err(|e| e.to_string())? {
             let p = entry.path();
-            if p.file_stem().and_then(|s| s.to_str()) == Some(video_id.as_str()) {
+            if belongs_to_video(&p, &video_id) {
                 let _ = tokio::fs::remove_file(&p).await;
             }
         }
@@ -205,7 +266,11 @@ pub(crate) async fn run_ytdlp_tier(
         };
         while let Some(entry) = rd.next_entry().await.map_err(|e| e.to_string())? {
             let p = entry.path();
-            if p.file_stem().and_then(|s| s.to_str()) == Some(video_id.as_str()) {
+            let is_info = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".info.json"));
+            if !is_info && belongs_to_video(&p, &video_id) {
                 produced = Some(p);
                 break;
             }
@@ -242,6 +307,8 @@ pub(crate) async fn run_ytdlp_tier(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "video.mp4".into());
 
+    let (meta, info_path) = read_ytdlp_meta(&out_dir, &path, &video_id).await;
+
     let result = download_and_store(
         state,
         user_id,
@@ -249,6 +316,7 @@ pub(crate) async fn run_ytdlp_tier(
         source_url,
         ByteSource::LocalFile(path.clone()),
         Some(&name),
+        meta,
         opts,
         max_size,
         default_ttl_hours,
@@ -258,5 +326,39 @@ pub(crate) async fn run_ytdlp_tier(
     .await;
 
     let _ = tokio::fs::remove_file(&path).await;
+    if let Some(info_path) = info_path {
+        let _ = tokio::fs::remove_file(info_path).await;
+    }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn belongs_to_video_matches_titled_outputs() {
+        let p = std::path::Path::new("/tmp/x/Me at the zoo-jNQXAC9IVRw.mp4");
+        assert!(belongs_to_video(p, "jNQXAC9IVRw"));
+        let info = std::path::Path::new("/tmp/x/Me at the zoo-jNQXAC9IVRw.info.json");
+        assert!(belongs_to_video(info, "jNQXAC9IVRw"));
+        let dotted = std::path::Path::new("/tmp/x/Mr. Beast-dQw4w9WgXcQ.info.json");
+        assert!(belongs_to_video(dotted, "dQw4w9WgXcQ"));
+        let bare = std::path::Path::new("/tmp/x/dQw4w9WgXcQ.mp4");
+        assert!(belongs_to_video(bare, "dQw4w9WgXcQ"));
+        let other = std::path::Path::new("/tmp/x/Other-xxxxxxxxxxx.mp4");
+        assert!(!belongs_to_video(other, "dQw4w9WgXcQ"));
+    }
+
+    #[test]
+    fn parse_ytdlp_meta_reads_title_and_uploader() {
+        let raw = br#"{"title":"Me at the zoo","uploader":"jawed","channel":"jawed"}"#;
+        let meta = parse_ytdlp_meta(raw);
+        assert_eq!(meta.title.as_deref(), Some("Me at the zoo"));
+        assert_eq!(meta.author.as_deref(), Some("jawed"));
+
+        let meta = parse_ytdlp_meta(b"not json");
+        assert!(meta.title.is_none());
+        assert!(meta.author.is_none());
+    }
 }
