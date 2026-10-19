@@ -55,7 +55,7 @@
   "upload.text_cancel": "Cancel",
   "upload.text_upload": "Upload as .txt",
   "upload.text_submit": "Upload as text file",
-  "upload.cobalt_placeholder": "Paste a YouTube, TikTok or other media link here. Add more links on new lines, Enter fetches, Shift + Enter adds a line...",
+  "upload.cobalt_placeholder": "Add your video links from YouTube, TikTok, or other social platforms to upload them into Juicebox!",
   "upload.cobalt_fetch": "Fetch",
   "upload.cobalt_queued": "Queued...",
   "upload.cobalt_fetching": "Fetching media...",
