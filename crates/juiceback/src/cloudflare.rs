@@ -7,7 +7,7 @@ pub async fn purge_urls(config: Arc<Config>, urls: Vec<String>) {
 }
 
 pub async fn purge_tags(config: Arc<Config>, tags: Vec<String>) {
-    purge_cache(config, serde_json::json!({ "purge_by_tags": tags }), "tags").await;
+    purge_cache(config, serde_json::json!({ "tags": tags }), "tags").await;
 }
 
 async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'static str) {
@@ -19,7 +19,7 @@ async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'stati
         .and_then(|v| v.as_array())
         .is_some_and(Vec::is_empty))
         || (body
-            .get("purge_by_tags")
+            .get("tags")
             .and_then(|v| v.as_array())
             .is_some_and(Vec::is_empty))
     {
