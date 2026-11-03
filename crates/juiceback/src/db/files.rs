@@ -13,13 +13,15 @@ pub fn finish_reservation(
 ) -> Result<FinishReservationResult> {
     let affected = if let Some(ip) = uploader_ip {
         db.execute(
-            "UPDATE files SET filename = ?1, mime_type = ?2, size_bytes = ?3, uploader_ip = ?6, status = 'ready' \
+            "UPDATE files SET filename = ?1, mime_type = ?2, size_bytes = ?3, uploader_ip = ?6, status = 'ready', \
+             expires_at = expires_at + CASE WHEN uploaded_at > 0 AND unixepoch() > uploaded_at THEN unixepoch() - uploaded_at ELSE 0 END \
              WHERE id = ?4 AND delete_token = ?5 AND status = 'uploading'",
             params![filename, mime_type, size_bytes, id, delete_token, ip],
         )?
     } else {
         db.execute(
-            "UPDATE files SET filename = ?1, mime_type = ?2, size_bytes = ?3, status = 'ready' \
+            "UPDATE files SET filename = ?1, mime_type = ?2, size_bytes = ?3, status = 'ready', \
+             expires_at = expires_at + CASE WHEN uploaded_at > 0 AND unixepoch() > uploaded_at THEN unixepoch() - uploaded_at ELSE 0 END \
              WHERE id = ?4 AND delete_token = ?5 AND status = 'uploading'",
             params![filename, mime_type, size_bytes, id, delete_token],
         )?
@@ -142,7 +144,9 @@ pub async fn finish_file(
     state
         .db_call("finish_file", move |db| {
             let affected = db.execute(
-                "UPDATE files SET status = 'ready' WHERE id = ?1 AND status = 'uploading'",
+                "UPDATE files SET status = 'ready', \
+                 expires_at = expires_at + CASE WHEN uploaded_at > 0 AND unixepoch() > uploaded_at THEN unixepoch() - uploaded_at ELSE 0 END \
+                 WHERE id = ?1 AND status = 'uploading'",
                 params![id],
             )?;
             if affected == 0 {
@@ -297,7 +301,7 @@ pub fn list_expired_batch(
     limit: usize,
 ) -> Result<Vec<FileRecord>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {FILE_COLUMNS} FROM files WHERE expires_at < unixepoch() AND id > ?1 ORDER BY id LIMIT ?2"
+        "SELECT {FILE_COLUMNS} FROM files WHERE expires_at < unixepoch() AND status != 'uploading' AND id > ?1 ORDER BY id LIMIT ?2"
     ))?;
     let rows = stmt.query_map(params![after_id, limit as i64], row_to_file_record)?;
     rows.collect()

@@ -1251,9 +1251,12 @@ async fn gateway_params_and_unlock_release_working_dek() {
         params["ciphertext_url"]
             .as_str()
             .unwrap()
-            .ends_with(&format!("/c/{id}"))
+            .ends_with(&format!("/f/{id}"))
     );
-    assert_eq!(params["filename"], "secret.txt");
+    let filename = params["filename"].as_str().unwrap_or_default();
+    assert_eq!(filename.len(), 16);
+    assert!(filename.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_ne!(filename, "secret.txt");
 
     
     let (status, _, _) = post_gateway_unlock(&app, &id, "wrong password").await;

@@ -96,12 +96,19 @@
 </select>
 </label>
 <label class="cobalt-option" data-cobalt-container-row="">
-<span>{{ cx.t("upload.cobalt_container") }}</span>
+<span>{{ cx.t("upload.cobalt_format") }}</span>
 <select data-cuelume-select data-cobalt-container="">
 <option value="auto" selected>Auto</option>
 <option value="mp4">MP4</option>
 <option value="webm">WebM</option>
 <option value="mkv">MKV</option>
+</select>
+</label>
+<label class="cobalt-option" data-cobalt-better-audio-row="" hidden>
+<span>{{ cx.t("upload.cobalt_better_audio") }}</span>
+<select data-cuelume-select data-cobalt-better-audio-mode="">
+<option value="enhanced" selected>Enhanced</option>
+<option value="standard">Standard</option>
 </select>
 </label>
 <label class="cobalt-option" data-cobalt-format-row="" hidden>
@@ -112,13 +119,7 @@
 <option value="opus">Opus</option>
 <option value="ogg">OGG</option>
 <option value="wav">WAV</option>
-</select>
-</label>
-<label class="cobalt-option" data-cobalt-better-audio-row="" hidden>
-<span>{{ cx.t("upload.cobalt_better_audio") }}</span>
-<select data-cuelume-select data-cobalt-better-audio-mode="">
-<option value="standard" selected>Standard</option>
-<option value="enhanced">Enhanced</option>
+<option value="flac">FLAC</option>
 </select>
 </label>
 </div>

@@ -23,6 +23,8 @@ pub struct ReserveUploadRequest {
     pub mime_type: Option<String>,
     pub ttl_hours: Option<f64>,
     pub host: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<u64>,
     
     
     pub password: Option<String>,
@@ -58,12 +60,13 @@ pub async fn reserve_upload_handler(
     headers: HeaderMap,
     Json(body): Json<ReserveUploadRequest>,
 ) -> Result<(StatusCode, Json<ReserveResponse>), AppError> {
-    let (default_ttl, allowed_ttl, danger) = {
+    let (default_ttl, allowed_ttl, danger, max_file_size) = {
         let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),
             jh.danger_level,
+            jh.max_file_size_bytes,
         )
     };
 
@@ -85,6 +88,10 @@ pub async fn reserve_upload_handler(
         .filter(|h| !h.is_empty());
 
     let file_id = nanoid::nanoid!(8);
+    let declared_size = body.file_size.unwrap_or(0);
+    if declared_size > max_file_size {
+        return Err(AppError::PayloadTooLarge);
+    }
 
     let encrypted_ip = super::ticket::encrypted_client_ip(&state, &headers, addr);
 
@@ -100,7 +107,7 @@ pub async fn reserve_upload_handler(
         file_id.clone(),
         filename,
         mime_type,
-        0,
+        declared_size as i64,
         delete_token.clone(),
         now,
         now + ttl_seconds,

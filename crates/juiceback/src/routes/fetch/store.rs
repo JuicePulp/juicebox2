@@ -32,16 +32,27 @@ pub(crate) async fn download_and_store(
     encrypted_ip: Option<String>,
     password: Option<String>,
 ) -> FetchResult {
-    let filename = sanitize_filename(filename, opts.audio_only);
-    let fallback_mime: &str = if opts.audio_only {
+    let transcode_flac = opts.audio_only && opts.audio_format == "flac";
+    let filename = if transcode_flac {
+        with_extension(sanitize_filename(filename, opts.audio_only), "flac")
+    } else {
+        sanitize_filename(filename, opts.audio_only)
+    };
+    let fallback_mime: &str = if transcode_flac {
+        "audio/flac"
+    } else if opts.audio_only {
         "audio/mpeg"
     } else {
         "video/mp4"
     };
-    let mime_type = mime_guess::from_path(&filename)
-        .first()
-        .map(|m| m.to_string())
-        .unwrap_or_else(|| fallback_mime.to_string());
+    let mime_type = if transcode_flac {
+        "audio/flac".to_string()
+    } else {
+        mime_guess::from_path(&filename)
+            .first()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| fallback_mime.to_string())
+    };
 
     let file_id = nanoid::nanoid!(8);
     let delete_token = uuid::Uuid::new_v4().to_string();
@@ -94,6 +105,32 @@ pub(crate) async fn download_and_store(
         file_id: file_id.clone(),
         delete_token: delete_token.clone(),
         active: true,
+    };
+
+    let (byte_source, _flac_guard) = if transcode_flac {
+        let input = spool_for_transcode(state, job_id, source_url, byte_source, max_size).await?;
+        let _ = state
+            .db_call("update_fetch_job_progress", {
+                let job_id = job_id.to_string();
+                move |db| {
+                    db::update_fetch_job_progress(
+                        db,
+                        &job_id,
+                        "converting",
+                        "processing",
+                        0,
+                        0,
+                    )
+                }
+            })
+            .await;
+        let output = transcode_to_flac(input.path(), max_size).await?;
+        (
+            ByteSource::LocalFile(output.path().to_path_buf()),
+            Some(output),
+        )
+    } else {
+        (byte_source, None)
     };
 
     let result = transfer_to_juicehost(
@@ -162,15 +199,15 @@ impl Drop for CleanupOnDrop {
 
 fn configured_cobalt_hosts(config: &crate::config::Config) -> Vec<(String, u16)> {
     let mut out = Vec::new();
-    let configured = [&config.cobalt_api_url]
-        .into_iter()
-        .chain(config.cobalt_session_api_url.as_ref());
-    for raw in configured {
-        if let Ok(parsed) = url::Url::parse(raw.trim())
+    for endpoint in &config.cobalt_endpoints {
+        if let Ok(parsed) = url::Url::parse(endpoint.url.trim())
             && let Some(host) = parsed.host_str()
             && let Some(port) = parsed.port_or_known_default()
         {
-            out.push((host.to_ascii_lowercase(), port));
+            let host_port = (host.to_ascii_lowercase(), port);
+            if !out.contains(&host_port) {
+                out.push(host_port);
+            }
         }
     }
     out
@@ -237,6 +274,181 @@ async fn fetch_tunnel_response(
     Err("media redirect limit exceeded".into())
 }
 
+enum SpoolInput {
+    Temp(tempfile::NamedTempFile),
+    Existing(std::path::PathBuf),
+}
+
+impl SpoolInput {
+    fn path(&self) -> &std::path::Path {
+        match self {
+            Self::Temp(file) => file.path(),
+            Self::Existing(path) => path,
+        }
+    }
+}
+
+fn with_extension(filename: String, extension: &str) -> String {
+    let mut path = std::path::PathBuf::from(filename);
+    path.set_extension(extension);
+    path.to_string_lossy().into_owned()
+}
+
+async fn spool_for_transcode(
+    state: &Arc<AppState>,
+    job_id: &str,
+    source_url: &str,
+    byte_source: ByteSource,
+    max_size: u64,
+) -> Result<SpoolInput, String> {
+    match byte_source {
+        ByteSource::LocalFile(path) => Ok(SpoolInput::Existing(path)),
+        ByteSource::Tunnel(url) => {
+            let resp = fetch_tunnel_response(
+                &state.http,
+                state,
+                &url,
+                state.config.allow_private_fetch,
+            )
+            .await?;
+            spool_response(state, job_id, source_url, resp, max_size).await
+        }
+        ByteSource::BunResponse(resp) => {
+            spool_response(state, job_id, source_url, resp, max_size).await
+        }
+    }
+}
+
+async fn spool_response(
+    state: &Arc<AppState>,
+    job_id: &str,
+    source_url: &str,
+    resp: reqwest::Response,
+    max_size: u64,
+) -> Result<SpoolInput, String> {
+    let total_hint = resp.content_length().map(|l| l as u64);
+    if let Some(len) = total_hint {
+        if len == 0 {
+            return Err(empty_stream_message(source_url));
+        }
+        if len > max_size {
+            return Err("file exceeds this server's maximum file size".into());
+        }
+    }
+
+    let _ = state
+        .db_call("update_fetch_job_progress", {
+            let job_id = job_id.to_string();
+            let total = total_hint.unwrap_or(0) as i64;
+            move |db| {
+                db::update_fetch_job_progress(db, &job_id, "transcode", "downloading", 0, total)
+            }
+        })
+        .await;
+
+    let temp = tempfile::NamedTempFile::new()
+        .map_err(|e| format!("audio conversion spool failed: {e}"))?;
+    let file = temp
+        .reopen()
+        .map_err(|e| format!("audio conversion spool failed: {e}"))?;
+    let mut out = tokio::fs::File::from_std(file);
+    let mut stream = resp.bytes_stream();
+    let mut total: u64 = 0;
+    let mut last_progress = std::time::Instant::now() - std::time::Duration::from_secs(1);
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("media download failed mid-stream: {e}"))?;
+        total += chunk.len() as u64;
+        if total > max_size {
+            return Err("file exceeds this server's maximum file size".into());
+        }
+
+        tokio::io::AsyncWriteExt::write_all(&mut out, &chunk)
+            .await
+            .map_err(|e| format!("audio conversion spool failed: {e}"))?;
+
+        if last_progress.elapsed() >= std::time::Duration::from_millis(750) {
+            last_progress = std::time::Instant::now();
+            let job_id_owned = job_id.to_string();
+            let total_bytes = total_hint.unwrap_or(0);
+            let _ = state
+                .db_call("update_fetch_job_progress", move |db| {
+                    db::update_fetch_job_progress(
+                        db,
+                        &job_id_owned,
+                        "transcode",
+                        "downloading",
+                        total as i64,
+                        total_bytes as i64,
+                    )
+                })
+                .await;
+        }
+    }
+
+    tokio::io::AsyncWriteExt::flush(&mut out)
+        .await
+        .map_err(|e| format!("audio conversion spool failed: {e}"))?;
+    if total == 0 {
+        return Err(empty_stream_message(source_url));
+    }
+    Ok(SpoolInput::Temp(temp))
+}
+
+async fn transcode_to_flac(
+    input: &std::path::Path,
+    max_size: u64,
+) -> Result<tempfile::NamedTempFile, String> {
+    let output = tempfile::NamedTempFile::new()
+        .map_err(|e| format!("audio conversion temp file failed: {e}"))?;
+    let ffmpeg = std::env::var("FFMPEG_BIN").unwrap_or_else(|_| "ffmpeg".into());
+    let result = tokio::process::Command::new(&ffmpeg)
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-nostdin")
+        .arg("-y")
+        .arg("-i")
+        .arg(input)
+        .arg("-vn")
+        .arg("-map_metadata")
+        .arg("0")
+        .arg("-c:a")
+        .arg("flac")
+        .arg("-f")
+        .arg("flac")
+        .arg(output.path())
+        .output()
+        .await
+        .map_err(|e| format!("audio conversion failed to start: {e}"))?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let detail: String = stderr
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("unknown ffmpeg error")
+            .trim()
+            .chars()
+            .take(300)
+            .collect();
+        return Err(format!("audio conversion failed: {detail}"));
+    }
+
+    let size = tokio::fs::metadata(output.path())
+        .await
+        .map_err(|e| format!("audio conversion output unreadable: {e}"))?
+        .len();
+    if size == 0 {
+        return Err("audio conversion produced an empty file".into());
+    }
+    if size > max_size {
+        return Err("converted file exceeds this server's maximum file size".into());
+    }
+    Ok(output)
+}
+
 async fn transfer_to_juicehost(
     state: &Arc<AppState>,
     job_id: &str,
@@ -250,7 +462,7 @@ async fn transfer_to_juicehost(
     dek: Option<crate::crypto_file::FileKey>,
 ) -> Result<(u64, Option<String>), String> {
     use tokio::io::AsyncReadExt as _;
-    let (mut stream, _precheck_len): (
+    let (mut stream, total_hint): (
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>,
         Option<u64>,
     ) = match byte_source {
@@ -317,7 +529,7 @@ async fn transfer_to_juicehost(
                         Err(e) => Some((Err(format!("failed reading yt-dlp output: {e}")), file)),
                     }
                 })),
-                None,
+                Some(size),
             )
         }
     };
@@ -325,6 +537,7 @@ async fn transfer_to_juicehost(
     if let Some(dek) = dek {
         return transfer_protected_to_juicehost(
             state,
+            job_id,
             file_id,
             filename,
             mime_type,
@@ -332,10 +545,21 @@ async fn transfer_to_juicehost(
             &mut stream,
             max_size,
             source_url,
+            total_hint,
             &dek,
         )
         .await;
     }
+
+    let _ = state
+        .db_call("update_fetch_job_progress", {
+            let job_id = job_id.to_string();
+            let total = total_hint.unwrap_or(0) as i64;
+            move |db| {
+                db::update_fetch_job_progress(db, &job_id, "transfer", "downloading", 0, total)
+            }
+        })
+        .await;
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, String>>(
         crate::constants::STREAM_CHANNEL_CAPACITY,
@@ -355,6 +579,7 @@ async fn transfer_to_juicehost(
             None,
             &UploadMode::Standard,
             Some(&push_capability),
+            None,
         )
         .await
     });
@@ -371,6 +596,7 @@ async fn transfer_to_juicehost(
         if last_progress.elapsed() >= std::time::Duration::from_millis(750) {
             last_progress = std::time::Instant::now();
             let job_id_owned = job_id.to_string();
+            let total_bytes = total_hint.unwrap_or(0);
             let _ = state
                 .db_call("update_fetch_job_progress", move |db| {
                     db::update_fetch_job_progress(
@@ -379,6 +605,7 @@ async fn transfer_to_juicehost(
                         "transfer",
                         "downloading",
                         total as i64,
+                        total_bytes as i64,
                     )
                 })
                 .await;
@@ -390,6 +617,7 @@ async fn transfer_to_juicehost(
 
     {
         let job_id_owned = job_id.to_string();
+        let total_bytes = total_hint.unwrap_or(0);
         let _ = state
             .db_call("update_fetch_job_progress_final", move |db| {
                 db::update_fetch_job_progress(
@@ -398,6 +626,7 @@ async fn transfer_to_juicehost(
                     "transfer",
                     "downloading",
                     total as i64,
+                    total_bytes as i64,
                 )
             })
             .await;
@@ -422,6 +651,7 @@ async fn transfer_to_juicehost(
 )]
 async fn transfer_protected_to_juicehost(
     state: &Arc<AppState>,
+    job_id: &str,
     file_id: &str,
     filename: &str,
     mime_type: &str,
@@ -431,12 +661,45 @@ async fn transfer_protected_to_juicehost(
     >,
     max_size: u64,
     source_url: &str,
+    total_hint: Option<u64>,
     dek: &crate::crypto_file::FileKey,
 ) -> Result<(u64, Option<String>), String> {
+    let _ = state
+        .db_call("update_fetch_job_progress", {
+            let job_id = job_id.to_string();
+            let total = total_hint.unwrap_or(0) as i64;
+            move |db| {
+                db::update_fetch_job_progress(db, &job_id, "transfer", "downloading", 0, total)
+            }
+        })
+        .await;
     let (spool_tx, spool_handle) =
         crate::routes::upload::protected::spawn_spool_task(max_size as i64);
+    let mut received: u64 = 0;
+    let mut last_progress = std::time::Instant::now() - std::time::Duration::from_secs(1);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("media download failed mid-stream: {e}"))?;
+        received += chunk.len() as u64;
+        if received > max_size {
+            return Err("file exceeds this server's maximum file size".into());
+        }
+        if last_progress.elapsed() >= std::time::Duration::from_millis(750) {
+            last_progress = std::time::Instant::now();
+            let job_id_owned = job_id.to_string();
+            let total_bytes = total_hint.unwrap_or(0);
+            let _ = state
+                .db_call("update_fetch_job_progress", move |db| {
+                    db::update_fetch_job_progress(
+                        db,
+                        &job_id_owned,
+                        "transfer",
+                        "downloading",
+                        received as i64,
+                        total_bytes as i64,
+                    )
+                })
+                .await;
+        }
         if spool_tx.send(Ok(chunk)).await.is_err() {
             break;
         }
@@ -448,6 +711,22 @@ async fn transfer_protected_to_juicehost(
         .map_err(|e| format!("spool failed: {e:?}"))?;
     if total == 0 {
         return Err(empty_stream_message(source_url));
+    }
+    {
+        let job_id_owned = job_id.to_string();
+        let total_bytes = total_hint.unwrap_or(0);
+        let _ = state
+            .db_call("update_fetch_job_progress_final", move |db| {
+                db::update_fetch_job_progress(
+                    db,
+                    &job_id_owned,
+                    "transfer",
+                    "downloading",
+                    total as i64,
+                    total_bytes as i64,
+                )
+            })
+            .await;
     }
     let header = crate::routes::upload::protected::push_encrypted_file(
         state,
@@ -532,7 +811,13 @@ async fn finalize_stored_file(
 
 #[cfg(test)]
 mod tunnel_host_tests {
-    use super::tunnel_url_host_port;
+    use super::{tunnel_url_host_port, with_extension};
+
+    #[test]
+    fn flac_extension_replaces_container_extension() {
+        assert_eq!(with_extension("song.wav".into(), "flac"), "song.flac");
+        assert_eq!(with_extension("song".into(), "flac"), "song.flac");
+    }
 
     #[test]
     fn parses_tunnel_host_port() {

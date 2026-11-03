@@ -3,13 +3,14 @@
     var CFG = {
       id: "__FILE_ID__",
       gateway: "__GATEWAY_ORIGIN__",
-      cipherUrl: "__CIPHERTEXT_URL__",
+      cipherUrl: "__CIPHERTEXT_URL__?inline=1",
       contentUrl: "__CONTENT_URL__",
       mode: "__MODE__",
       keyVersion: "__KEY_VERSION__",
       filename: "__FILENAME__",
       mime: "__MIME__",
-      dlIcon: '__DL_ICON_SVG__'
+      dlIcon: '__DL_ICON_SVG__',
+      checkIcon: '__CHECK_ICON_SVG__'
     };
     var PLAIN_CHUNK = 65536, NONCE = 12, TAG = 16, HEADER = 13;
     var STORED_FULL = NONCE + PLAIN_CHUNK + TAG;
@@ -147,6 +148,9 @@
       pre.textContent = text;
       stage.appendChild(pre);
     }
+    function showRawBlob(blob) {
+      window.location.replace(URL.createObjectURL(blob));
+    }
     function kindOf(mime) {
       var base = (mime || "").split(";")[0].trim();
       if (base.indexOf("video/") === 0) return "video";
@@ -163,9 +167,9 @@
           var writable = await handle.createWritable();
           await getStream(writable);
           await writable.close();
-          return;
+          return true;
         } catch (e) {
-          if (e && e.name === "AbortError") { say("Save cancelled."); return; }
+          if (e && e.name === "AbortError") { say("Save cancelled."); return false; }
           
         }
       }
@@ -178,6 +182,7 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      return true;
     }
 
     async function v1Unlock(password) {
@@ -206,10 +211,31 @@
       return { key: key, plainLen: body.plain_len, filename: body.filename || CFG.filename, mime: body.mime_type || CFG.mime };
     }
 
+    function beginDownload() {
+      if (CFG.mode !== "download" || !card) return;
+      card.hidden = false;
+      card.classList.remove("done");
+      card.classList.add("is-downloading");
+      say("Downloading...");
+    }
+    function cancelDownload() {
+      if (CFG.mode !== "download" || !card) return;
+      card.classList.remove("is-downloading");
+    }
+    function downloadComplete() {
+      if (CFG.mode !== "download") { say("Download complete."); return; }
+      if (!card) return;
+      card.hidden = false;
+      card.classList.remove("is-downloading");
+      card.classList.add("done");
+      card.innerHTML = '<div class="done-check" role="status" aria-label="Download complete">' + CFG.checkIcon + '</div>';
+    }
+
     async function v1Download(key, plainLen) {
+      beginDownload();
       var totalChunks = Math.max(1, Math.ceil(plainLen / PLAIN_CHUNK));
       var done = 0;
-      await saveDownload(async function (writable) {
+      var saved = await saveDownload(async function (writable) {
         if (plainLen === 0) {
           var stored = await fetchRange(CFG.cipherUrl, HEADER, NONCE + TAG);
           await decryptChunk(key, stored);
@@ -226,7 +252,8 @@
           progress(done / totalChunks);
         }
       });
-      say("Download complete.");
+      if (!saved) { cancelDownload(); return; }
+      downloadComplete();
     }
 
     
@@ -293,8 +320,7 @@
         return;
       }
       say("Decrypting...");
-      var blob = await decryptFull(h.key, h.plainLen);
-      renderNative(blob, kindOf(CFG.mime), function () { return v1Download(h.key, h.plainLen); });
+      showRawBlob(await decryptFull(h.key, h.plainLen));
     }
 
     
@@ -344,6 +370,7 @@
     
     async function downloadHeld(h) {
       if (h.v1) return v1Download(h.key, h.plainLen);
+      beginDownload();
       var res = await fetch(CFG.contentUrl, { headers: { "X-File-Password": h.password }, cache: "no-store" });
       if (res.status === 403) throw new Error("Wrong password.");
       if (!res.ok) throw new Error("Download failed (" + res.status + ").");
@@ -354,7 +381,7 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
-      say("Download complete.");
+      downloadComplete();
     }
 
     async function openHeld(h) {
@@ -408,6 +435,7 @@
     async function legacyFlow(password) {
       var headers = { "X-File-Password": password };
       if (CFG.mode === "download") {
+        beginDownload();
         say("Downloading...");
         var res;
         try {
@@ -422,7 +450,7 @@
         document.body.appendChild(a);
         a.click();
         setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
-        say("Download complete.");
+        downloadComplete();
         return;
       }
       var kind = kindOf(CFG.mime);
@@ -439,7 +467,7 @@
           });
           return;
         }
-        renderNative(blob0, kind, function () { return downloadHeld(held); });
+        showRawBlob(blob0);
         return;
       }
       if (kind === "text") {
@@ -467,11 +495,6 @@
       }
     }
 
-    function dismissPrompt() {
-      if (!card || card.dataset.dismissed) return;
-      card.dataset.dismissed = "1";
-      card.hidden = true;
-    }
     function revealName(filename, mime) {
       if (!filename) return;
       CFG.filename = filename;
@@ -492,7 +515,6 @@
           held = { v1: true, key: unlocked.key, plainLen: unlocked.plainLen };
           enableTopbar();
           revealName(unlocked.filename, unlocked.mime);
-          dismissPrompt();
           if (CFG.mode === "download") {
             await v1Download(unlocked.key, unlocked.plainLen);
           } else if (CFG.mode === "view") {
@@ -515,17 +537,20 @@
               revealName(meta.filename, meta.mime_type);
             }
           } catch (e) {}
-          dismissPrompt();
           await legacyFlow(password);
           pwInput.value = "";
         }
       } catch (e) {
+        if (card) card.classList.remove("is-downloading");
         say(e.message || "Unlock failed.", true);
       } finally {
         btn.disabled = false;
       }
     }
-    btn.addEventListener("click", go);
-    pwInput.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+    var unlockForm = document.getElementById("unlockform");
+    if (unlockForm) unlockForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      go();
+    });
     pwInput.focus();
   })();

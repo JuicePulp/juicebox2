@@ -363,7 +363,7 @@ pub async fn cool_file_handler(
         .await
         .map_err(AppError::Internal)?;
     tracing::info!("admin cool: id={id}");
-    Ok(Json(serde_json::json!({ "tier": "standard", "tier_pinned": true })))
+    Ok(Json(serde_json::json!({ "tier": "standard", "tier_pinned": false })))
 }
 
 #[utoipa::path(

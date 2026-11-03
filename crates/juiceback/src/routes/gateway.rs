@@ -53,7 +53,7 @@ fn hashed_filename(filename: &str) -> String {
 
 fn ciphertext_url_for(state: &Arc<AppState>, id: &str) -> String {
     format!(
-        "{}/c/{}",
+        "{}/f/{}",
         state.config.public_base_url.trim_end_matches('/'),
         id
     )
@@ -156,6 +156,9 @@ pub async fn unlock_handler(
         .db_call("get_gateway_file", move |db| db::get_file(db, &lookup))
         .await?
         .ok_or(AppError::NotFound)?;
+    if !record.is_protected() {
+        return Err(AppError::NotFound);
+    }
     if !record.uses_per_file_key() {
         let password = body.password.clone();
         let hash = record.password_hash.clone().unwrap_or_default();

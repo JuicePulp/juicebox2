@@ -58,15 +58,17 @@
   "upload.cobalt_placeholder": "YouTubeやTikTokなどのメディアリンクをここにペタッと...",
   "upload.cobalt_fetch": "取得",
   "upload.cobalt_queued": "キューに追加中...",
+  "upload.cobalt_contacting": "取得サーバーに接続中...",
   "upload.cobalt_fetching": "メディアを取得中...",
+  "upload.cobalt_downloading": "ダウンロード中... {percent}%",
+  "upload.cobalt_converting": "音声を変換中...",
   "upload.cobalt_relay": "予備のサーバー経由で回収中...",
   "upload.cobalt_retry": "YouTubeがこの動画を制限してるみたい。リトライ中 (試行 {n})...",
   "upload.cobalt_gone": "取得ジョブが期限切れになっちゃった。もう一回やってみて。",
   "upload.cobalt_audio_only": "音声のみ",
   "upload.cobalt_quality": "画質:",
   "upload.cobalt_format": "形式:",
-  "upload.cobalt_container": "コンテナ:",
-  "upload.cobalt_better_audio": "音質:",
+  "upload.cobalt_better_audio": "品質:",
   "upload.initializing": "準備中...",
   "upload.initializing_tus": "TUSを準備中...",
   "upload.uploading": "アップロード中... {percent}%",
@@ -347,6 +349,8 @@
   "hostsel.applied": "ホストを適用したよ",
   "hostsel.add_title": "ノードを運営する?",
   "hostsel.add_desc": "自分でJuiceHostノードを運営してここに載せよう。",
-  "hostsel.add_btn": "自分で追加"
+  "hostsel.add_btn": "自分で追加",
+  "upload.zipping": "フォルダを圧縮中…",
+  "error.folder_empty": "そのフォルダにはファイルがありません。"
  }
 }

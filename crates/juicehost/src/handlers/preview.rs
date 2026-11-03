@@ -10,6 +10,8 @@ use axum::{
 };
 
 use super::{
+    audio_embed::{self, AudioEmbedInfo},
+    common::backend_request,
     shell::{BackendFileMeta, ShellMode, protected_shell_response},
     stats::{ViewerIp, report_file_hit},
 };
@@ -97,26 +99,51 @@ fn escape_html(value: &str) -> String {
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
 const PREVIEW_APP_JS: &str = include_str!("../templates/preview_app.js");
 const ZIP_APP_JS: &str = include_str!("../templates/zip_app.js");
+const LIVE_UPLOAD_JS: &str = include_str!("../templates/live_upload.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
 const BOT_UA_TOKENS: &[&str] = &[
     "curl",
     "wget",
+    // ComputerCraft's http API (CC: Tweaked, CraftOS-PC, and the original
+    // ComputerCraft) only sends a User-Agent, never an Accept header, so the
+    // Accept-based fallback below can't spot it. Match the UA directly or
+    // /v/ preview links get served as HTML instead of redirecting to raw.
+    "computercraft",
+    "cc-tweaked",
+    "craftos",
+    "opencomputers",
+    "lua-http",
+    "luasocket",
+    "lua-socket",
     "httpie",
     "aria2",
     "axel",
     "python-urllib",
     "python-requests",
+    "httpx",
+    "aiohttp",
     "go-http-client",
     "okhttp",
+    "reqwest",
+    "hyper",
     "libwww-perl",
     "scrapy",
     "node-fetch",
+    "node/",
     "undici",
+    "bun/",
+    "deno/",
     "got",
     "axios",
     "httpclient",
+    "java/",
+    "java-http-client",
+    "postmanruntime",
+    "insomnia",
+    "restclient",
+    "http.rb",
     "perl",
     "ruby",
     "php",
@@ -182,6 +209,23 @@ const BOT_UA_TOKENS: &[&str] = &[
     "archiver",
 ];
 
+/// Tokens that identify a real browser when we have no `Accept` header to go
+/// on. Bot tokens are checked first, so crawlers that also claim to be Mozilla
+/// are still classified as bots.
+const BROWSER_UA_TOKENS: &[&str] = &[
+    "mozilla",
+    "applewebkit",
+    "gecko/",
+    "trident/",
+    "presto/",
+    "edg/",
+    "opr/",
+];
+
+fn looks_like_browser(ua: &str) -> bool {
+    BROWSER_UA_TOKENS.iter().any(|token| ua.contains(token))
+}
+
 fn is_discordbot(headers: &HeaderMap) -> bool {
     headers
         .get(header::USER_AGENT)
@@ -233,10 +277,24 @@ pub(crate) fn is_bot(headers: &HeaderMap) -> bool {
     if BOT_UA_TOKENS.iter().any(|token| ua.contains(token)) {
         return true;
     }
-    match headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()) {
-        Some(accept) => !accept.contains("text/html"),
-        None => ua.is_empty(),
+    match headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+    {
+        Some(accept) if !accept.is_empty() => !accept.contains("text/html"),
+        // Clients like ComputerCraft's http API send a User-Agent but no
+        // Accept header at all. Treat missing or empty Accept as non-browser
+        // unless the UA looks like an actual browser.
+        _ => !looks_like_browser(&ua),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UploadInfo {
+    total: u64,
+    uploaded: u64,
+    complete: bool,
 }
 
 struct PreviewPage {
@@ -249,6 +307,7 @@ struct PreviewPage {
     raw_url: String,
     download_url: String,
     page_url: String,
+    file_id: String,
     mime: String,
     extension: String,
     
@@ -257,6 +316,19 @@ struct PreviewPage {
     
     
     text_head: Option<(String, u64, String)>,
+
+    uploading: Option<UploadInfo>,
+}
+
+/// Path segment used by `/f/`, `/d/`, and `/v/`. These routes resolve the
+/// leading ID, so the segment must start with the file ID rather than the
+/// original upload name.
+fn canonical_url_name(id: &str, extension: &str) -> String {
+    if extension.is_empty() {
+        id.to_string()
+    } else {
+        format!("{id}.{extension}")
+    }
 }
 
 fn resolved_display_name(meta: Option<&BackendFileMeta>, filename: &str) -> String {
@@ -310,6 +382,7 @@ fn component_embed_payload(
     abs_raw: &str,
     abs_page: &str,
     abs_download: &str,
+    audio_video_url: Option<&str>,
 ) -> serde_json::Value {
     let name = truncate_chars(&page.display_name, 80);
     let meta = truncate_chars(&format!("{} - {}", kind_label(page.kind), page.size_label), 160);
@@ -340,6 +413,21 @@ fn component_embed_payload(
         container.push(serde_json::json!({
             "type": 12,
             "items": [item],
+        }));
+    } else if page.kind == PreviewKind::Audio
+        && let Some(url) = audio_video_url
+    {
+        let mut item = serde_json::json!({ "media": { "url": url } });
+        if let Some(author) = page.author.as_deref() {
+            item["description"] = serde_json::Value::String(truncate_chars(author, 80));
+        }
+        container.push(serde_json::json!({
+            "type": 12,
+            "items": [item],
+        }));
+        container.push(serde_json::json!({
+            "type": 10,
+            "content": "Audio preview, or download it here.",
         }));
     } else {
         let hint = match page.kind {
@@ -377,8 +465,10 @@ fn component_embed_script(
     abs_raw: &str,
     abs_page: &str,
     abs_download: &str,
+    audio_video_url: Option<&str>,
 ) -> String {
-    let mut payload = component_embed_payload(page, abs_raw, abs_page, abs_download);
+    let mut payload =
+        component_embed_payload(page, abs_raw, abs_page, abs_download, audio_video_url);
     let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
     if serialized.len() > 3000 {
         let name = truncate_chars(&page.display_name, 40);
@@ -399,7 +489,19 @@ fn component_embed_script(
     )
 }
 
-fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
+struct AudioEmbedUrls {
+    video: String,
+    poster: String,
+    width: u32,
+    height: u32,
+}
+
+fn og_tags(
+    page: &PreviewPage,
+    abs_raw: &str,
+    abs_page: &str,
+    audio_urls: Option<&AudioEmbedUrls>,
+) -> String {
     use std::fmt::Write as _;
     let description = format!("{} - {}", page.mime, page.size_label);
     let mut tags = format!(
@@ -418,12 +520,23 @@ fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
             );
         }
         PreviewKind::Audio => {
-            let _ = write!(
-                tags,
-                "\n<meta property=\"og:audio\" content=\"{url}\">\n<meta property=\"og:audio:type\" content=\"{mime}\">",
-                url = escape_html(abs_raw),
-                mime = escape_html(&page.mime),
-            );
+            if let Some(urls) = audio_urls {
+                let _ = write!(
+                    tags,
+                    "\n<meta property=\"og:video\" content=\"{url}\">\n<meta property=\"og:video:secure_url\" content=\"{url}\">\n<meta property=\"og:video:type\" content=\"video/mp4\">\n<meta property=\"og:video:width\" content=\"{width}\">\n<meta property=\"og:video:height\" content=\"{height}\">\n<meta property=\"og:image\" content=\"{poster}\">",
+                    url = escape_html(&urls.video),
+                    width = urls.width,
+                    height = urls.height,
+                    poster = escape_html(&urls.poster),
+                );
+            } else {
+                let _ = write!(
+                    tags,
+                    "\n<meta property=\"og:audio\" content=\"{url}\">\n<meta property=\"og:audio:type\" content=\"{mime}\">",
+                    url = escape_html(abs_raw),
+                    mime = escape_html(&page.mime),
+                );
+            }
         }
         PreviewKind::Image => {
             let _ = write!(
@@ -436,6 +549,7 @@ fn og_tags(page: &PreviewPage, abs_raw: &str, abs_page: &str) -> String {
     }
     let card = match page.kind {
         PreviewKind::Image | PreviewKind::Video => "summary_large_image",
+        PreviewKind::Audio if audio_urls.is_some() => "player",
         _ => "summary",
     };
     let _ = write!(tags, "\n<meta name=\"twitter:card\" content=\"{card}\">");
@@ -467,13 +581,41 @@ async fn load_text_head(
     Some((escape_html(&raw), valid as u64, snippet.replace("```", "'''")))
 }
 
+async fn backend_uploading_meta(state: &AppState, id: &str) -> Option<(String, u64)> {
+    let backend_url = state.backend_url.as_ref()?;
+    let status_url = format!("{backend_url}/internal/file/{id}/status");
+    let resp = backend_request(state, status_url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    if body.get("status").and_then(|s| s.as_str()) != Some("uploading") {
+        return None;
+    }
+    let filename = body
+        .get("filename")
+        .and_then(|s| s.as_str())
+        .unwrap_or("upload")
+        .to_string();
+    let total = body
+        .get("size_bytes")
+        .and_then(|s| s.as_i64())
+        .unwrap_or(0)
+        .max(0) as u64;
+    Some((filename, total))
+}
+
 fn download_hero(page: &PreviewPage) -> String {
+    let upload_note = page.uploading.map_or_else(String::new, |_| {
+        "<p class=\"dl-upload-note\">This file is currently uploading! I can't show you a preview of the file while it happens for good measures.</p>".to_string()
+    });
     format!(
-        "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} - {size}</p><a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
+        "<div class=\"dl-hero\"><div class=\"dl-icon\" aria-hidden=\"true\">{}</div><p class=\"dl-name\">{name}</p><p class=\"dl-meta\">{mime} - {size}</p>{upload_note}<a class=\"dl-btn\" href=\"{dl}\">Download</a></div>",
         juiceutils::icons::DOWNLOAD_ART,
         name = escape_html(&page.filename),
         mime = escape_html(&page.mime),
         size = escape_html(&page.size_label),
+        upload_note = upload_note,
         dl = escape_html(&page.download_url),
     )
 }
@@ -585,8 +727,13 @@ fn stage_html(page: &PreviewPage) -> String {
                     String::new(),
                 )
             });
+            let uploading_attr = if page.uploading.is_some() {
+                " data-uploading=\"1\""
+            } else {
+                ""
+            };
             format!(
-                "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" data-loaded=\"{loaded}\" aria-live=\"polite\">{content}</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
+                "<pre id=\"textview\" class=\"text-view\" data-raw=\"{raw}\" data-loaded=\"{loaded}\"{uploading_attr} aria-live=\"polite\">{content}</pre><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the raw file</a> (text preview needs JavaScript).</p></noscript>",
             )
         }
         PreviewKind::Download => download_hero(page),
@@ -594,7 +741,11 @@ fn stage_html(page: &PreviewPage) -> String {
     }
 }
 
-fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
+fn render_preview(
+    page: &PreviewPage,
+    headers: &HeaderMap,
+    audio_embed: Option<&AudioEmbedInfo>,
+) -> String {
     let notice = format!(
         " Juicebox preview page for {} - this HTML is a preview, NOT the raw file. Raw bytes: {}. Bots are redirected to the raw file. ",
         page.filename, page.raw_url,
@@ -603,8 +754,33 @@ fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
     let abs_raw = absolute_for(base.as_deref(), &page.raw_url);
     let abs_page = absolute_for(base.as_deref(), &page.page_url);
     let abs_download = absolute_for(base.as_deref(), &page.download_url);
+    let audio_urls = audio_embed.and_then(|info| {
+        let base = base.as_deref()?;
+        Some(AudioEmbedUrls {
+            video: absolute_for(Some(base), &info.video_path),
+            poster: absolute_for(Some(base), &info.poster_path),
+            width: info.width,
+            height: info.height,
+        })
+    });
+    let (upload_hidden, upload_label, upload_width) = page.uploading.map_or_else(
+        || ("hidden".to_string(), String::new(), "0".to_string()),
+        |upload| {
+            let percent = if upload.total == 0 {
+                0
+            } else {
+                upload.uploaded.saturating_mul(100) / upload.total
+            };
+            let label = if upload.complete {
+                "Finalizing upload".to_string()
+            } else {
+                format!("Uploading {percent}%")
+            };
+            (String::new(), label, percent.min(100).to_string())
+        },
+    );
     PREVIEW_TEMPLATE
-        .replace("__CURL_NOTICE__", &notice)
+        .replace("__CURL_NOTICE__", &escape_html(&notice))
         .replace("__HEAD_META__", juiceutils::web::HEAD_META.trim_end())
         .replace(
             "__FONT_FACE__",
@@ -632,16 +808,30 @@ fn render_preview(page: &PreviewPage, headers: &HeaderMap) -> String {
         )
         .replace("__TITLE__", &escape_html(&page.title))
         .replace("__TEXT_MAX__", &TEXT_PREVIEW_MAX_BYTES.to_string())
-        .replace("__OG_TAGS__", &og_tags(page, &abs_raw, &abs_page))
+        .replace(
+            "__OG_TAGS__",
+            &og_tags(page, &abs_raw, &abs_page, audio_urls.as_ref()),
+        )
         .replace(
             "__DISCORD_EMBED__",
-            &component_embed_script(page, &abs_raw, &abs_page, &abs_download),
+            &component_embed_script(
+                page,
+                &abs_raw,
+                &abs_page,
+                &abs_download,
+                audio_urls.as_ref().map(|urls| urls.video.as_str()),
+            ),
         )
         .replace("__FILENAME__", &escape_html(&page.filename))
         .replace("__SIZE__", &escape_html(&page.size_label))
         .replace("__RAW_URL__", &escape_html(&page.raw_url))
         .replace("__DOWNLOAD_URL__", &escape_html(&page.download_url))
         .replace("__STAGE__", &stage_html(page))
+        .replace("__UPLOAD_HIDDEN__", &upload_hidden)
+        .replace("__UPLOAD_LABEL__", &escape_html(&upload_label))
+        .replace("__UPLOAD_WIDTH__", &upload_width)
+        .replace("__FILE_ID__", &escape_html(&page.file_id))
+        .replace("__LIVE_JS__", LIVE_UPLOAD_JS.trim_end())
 }
 
 #[tracing::instrument(skip_all)]
@@ -689,47 +879,192 @@ async fn preview_file_inner(
                 .map_err(|_| JuicehostError::Internal);
         }
         Err(crate::error::StorageError::NotFound) => {
-            return Ok(not_found_html().into_response());
+            let live = state.live_uploads.progress(id);
+            let backend = if live.is_none() {
+                backend_uploading_meta(&state, id).await
+            } else {
+                None
+            };
+            if live.is_none() && backend.is_none() {
+                return Ok(not_found_html().into_response());
+            }
+
+            let (mut filename, mut mime, total, uploaded, complete) = match live {
+                Some(progress) => (
+                    progress.filename,
+                    progress.mime,
+                    progress.total_size,
+                    progress.uploaded,
+                    progress.complete,
+                ),
+                None => {
+                    let (name, size) = backend.unwrap_or_default();
+                    (name, String::new(), size, 0, false)
+                }
+            };
+            if filename.trim().is_empty() {
+                filename = "upload".to_string();
+            }
+            let extension = if ext.is_empty() {
+                storage::extract_extension(&filename).to_ascii_lowercase()
+            } else {
+                ext.to_ascii_lowercase()
+            };
+            if mime.trim().is_empty() {
+                mime = storage::guess_mime(&extension);
+            }
+            // URLs are addressed by the file ID, not the original upload
+            // name. Using the display name here made the live preview's
+            // download/raw links point at a non-existent ID while the upload
+            // was still in progress.
+            let canonical = canonical_url_name(id, &extension);
+            let raw_url = format!("/f/{canonical}");
+            let download_url = format!("/d/{canonical}");
+            let page_url = format!("/v/{canonical}");
+
+            if is_bot(&headers) && !is_discordbot(&headers) {
+                // Clients that cannot render the HTML preview (curl, wget,
+                // bot fetchers) get the bytes directly instead of a redirect,
+                // so a plain `curl -O /v/<id>` downloads the file without
+                // needing `-L`. The raw handler sets an inline
+                // Content-Disposition carrying the original filename.
+                let mut response = super::serve::serve_file_inner(
+                    Arc::clone(&state),
+                    headers.clone(),
+                    method.clone(),
+                    id.to_string(),
+                    false,
+                    viewer_ip.clone(),
+                )
+                .await?;
+                // The same preview URL serves an HTML page to browsers and
+                // raw bytes to everything else, so it must never be cached at
+                // the edge: one client type would poison it for the other.
+                response.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static(NO_STORE),
+                );
+                response.headers_mut().insert(
+                    axum::http::HeaderName::from_static("cdn-cache-control"),
+                    axum::http::HeaderValue::from_static(NO_STORE),
+                );
+                return Ok(response);
+            }
+
+            let detected = preview_kind(&mime);
+            // Binary/media previews cannot be parsed reliably before the
+            // upload finishes. Keep the download CTA and the live progress
+            // meter instead of showing a broken player/image.
+            let kind = if detected == PreviewKind::Text {
+                PreviewKind::Text
+            } else {
+                PreviewKind::Download
+            };
+            let page = PreviewPage {
+                kind,
+                title: format!("{} - Juicebox²", truncate_chars(&filename, 120)),
+                filename: filename.clone(),
+                display_name: truncate_chars(&filename, 120),
+                author: None,
+                size_label: if total == 0 {
+                    "uploading".to_string()
+                } else {
+                    human_size(total)
+                },
+                raw_url,
+                download_url,
+                page_url,
+                file_id: id.to_string(),
+                mime,
+                extension,
+                zip_html: None,
+                text_head: None,
+                uploading: Some(UploadInfo {
+                    total,
+                    uploaded,
+                    complete,
+                }),
+            };
+            let response = Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CACHE_CONTROL, NO_STORE)
+                .body(Body::from(render_preview(&page, &headers, None)))
+                .map_err(|_| JuicehostError::Internal)?;
+            if method == Method::GET
+                && (!is_bot(&headers) || is_discordbot(&headers))
+                && let Some(ip) = viewer_ip.as_deref()
+            {
+                report_file_hit(&state, id, "view", ip, "preview");
+            }
+            return Ok(response);
         }
         Err(_) => return Err(JuicehostError::Internal),
     };
-
-    let abs_self = request_base_url(&headers)
-        .map(|base| absolute_for(Some(base.as_str()), &format!("/v/{page_path}")));
-
-    let (shelled, backend_meta) =
-        protected_shell_response(&state, id, ShellMode::Preview, abs_self.as_deref()).await;
-    if let Some(shelled) = shelled {
-        return Ok(shelled);
-    }
 
     let extension = if ext.is_empty() {
         meta.extension.clone()
     } else {
         ext.to_ascii_lowercase()
     };
-    let filename = if extension.is_empty() {
-        id.to_string()
-    } else {
-        format!("{id}.{extension}")
-    };
-    let display_name = resolved_display_name(backend_meta.as_ref(), &filename);
-    let author = backend_meta.as_ref().and_then(|meta| meta.author.clone());
+    let filename = canonical_url_name(id, &extension);
     let raw_url = format!("/f/{filename}");
-    let page_url = format!("/v/{filename}");
-    let download_url = format!("/d/{filename}");
 
     if is_bot(&headers) && !is_discordbot(&headers) {
-        return Response::builder()
-            .status(axum::http::StatusCode::FOUND)
-            .header(header::LOCATION, &raw_url)
-            .header(header::CACHE_CONTROL, NO_STORE)
-            .body(Body::empty())
-            .map_err(|_| JuicehostError::Internal);
+        // See the live-upload branch above: serve the file directly so
+        // `curl -O /v/<id>` works without following a redirect.
+        let mut response = super::serve::serve_file_inner(
+            Arc::clone(&state),
+            headers.clone(),
+            method.clone(),
+            id.to_string(),
+            false,
+            viewer_ip.clone(),
+        )
+        .await?;
+        // See the live-upload branch above: the preview URL is shared by
+        // browsers and non-browsers, so it must not be edge-cached.
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static(NO_STORE),
+        );
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("cdn-cache-control"),
+            axum::http::HeaderValue::from_static(NO_STORE),
+        );
+        return Ok(response);
     }
+
+    let abs_self = request_base_url(&headers)
+        .map(|base| absolute_for(Some(base.as_str()), &format!("/v/{page_path}")));
+    let (shelled, backend_meta) =
+        protected_shell_response(&state, id, ShellMode::Preview, abs_self.as_deref()).await;
+    if let Some(shelled) = shelled {
+        return Ok(shelled);
+    }
+
+    let display_name = resolved_display_name(backend_meta.as_ref(), &filename);
+    let author = backend_meta.as_ref().and_then(|meta| meta.author.clone());
+    let page_url = format!("/v/{filename}");
+    let download_url = format!("/d/{filename}");
     let mime = storage::guess_mime(&extension);
     let title = format!("{display_name} - Juicebox²");
     let kind = preview_kind(&mime);
+    let audio_embed = if kind == PreviewKind::Audio && is_discordbot(&headers) {
+        audio_embed::prepare_for_discord(
+            &state,
+            id,
+            &meta,
+            &display_name,
+            author.as_deref(),
+            backend_meta
+                .as_ref()
+                .and_then(|meta| meta.filename.as_deref()),
+        )
+        .await
+    } else {
+        None
+    };
     
     
     let zip_html = if kind == PreviewKind::Zip {
@@ -761,16 +1096,22 @@ async fn preview_file_inner(
         raw_url,
         download_url,
         page_url,
+        file_id: id.to_string(),
         mime,
         extension,
         zip_html,
         text_head,
+        uploading: None,
     };
     let response = Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, NO_STORE)
-        .body(Body::from(render_preview(&page, &headers)))
+        .body(Body::from(render_preview(
+            &page,
+            &headers,
+            audio_embed.as_ref(),
+        )))
         .map_err(|_| JuicehostError::Internal)?;
     
     
@@ -787,6 +1128,80 @@ async fn preview_file_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn computer_craft_is_treated_as_non_browser() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::USER_AGENT,
+            "computercraft/1.109.2".parse().expect("ua"),
+        );
+        assert!(is_bot(&headers));
+
+        headers.insert(
+            header::USER_AGENT,
+            "CraftOS-PC/2.8.0 (Windows)".parse().expect("ua"),
+        );
+        assert!(is_bot(&headers));
+
+        // A browser navigating the preview page keeps getting HTML, even
+        // though it also sends a non-empty non-bot UA.
+        headers.insert(
+            header::USER_AGENT,
+            "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/130.0"
+                .parse()
+                .expect("ua"),
+        );
+        headers.insert(
+            header::ACCEPT,
+            "text/html,application/xhtml+xml".parse().expect("accept"),
+        );
+        assert!(!is_bot(&headers));
+    }
+
+    #[test]
+    fn missing_or_empty_accept_defaults_to_raw_for_non_browsers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::USER_AGENT,
+            "some-lua-client/1.0".parse().expect("ua"),
+        );
+        assert!(is_bot(&headers));
+
+        headers.insert(header::ACCEPT, "".parse().expect("accept"));
+        assert!(is_bot(&headers));
+
+        // A browser UA without an Accept header still gets the preview page.
+        headers.insert(
+            header::USER_AGENT,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36"
+                .parse()
+                .expect("ua"),
+        );
+        headers.remove(header::ACCEPT);
+        assert!(!is_bot(&headers));
+    }
+
+    #[test]
+    fn known_clients_win_over_text_html_accept() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            "text/html,application/xhtml+xml".parse().expect("accept"),
+        );
+        for ua in [
+            "curl/8.5.0",
+            "OpenComputers/1.8",
+            "LuaSocket/3.1",
+            "python-httpx/0.27",
+            "Java/17.0.2",
+            "PostmanRuntime/7.39",
+            "node/20.0",
+        ] {
+            headers.insert(header::USER_AGENT, ua.parse().expect("ua"));
+            assert!(is_bot(&headers), "{ua} should be treated as a bot");
+        }
+    }
 
     #[test]
     fn kind_by_mime() {
@@ -831,12 +1246,14 @@ mod tests {
             raw_url: "/f/a.mp4".into(),
             download_url: "/d/a.mp4".into(),
             page_url: "/v/a.mp4".into(),
+            file_id: "a".into(),
             mime: "video/mp4".into(),
             extension: "mp4".into(),
             zip_html: None,
             text_head: None,
+            uploading: None,
         };
-        let html = render_preview(&page, &HeaderMap::new());
+        let html = render_preview(&page, &HeaderMap::new(), None);
         assert!(html.contains("<video"));
         assert!(html.contains("/f/a.mp4"));
         assert!(!html.contains("preview-card"));
@@ -859,15 +1276,61 @@ mod tests {
             raw_url: "/f/a.mp4".into(),
             download_url: "/d/a.mp4".into(),
             page_url: "/v/a.mp4".into(),
+            file_id: "a".into(),
             mime: "video/mp4".into(),
             extension: "mp4".into(),
             zip_html: None,
             text_head: None,
+            uploading: None,
         };
-        let html = render_preview(&page, &HeaderMap::new());
+        let html = render_preview(&page, &HeaderMap::new(), None);
         assert!(html.contains("<video"));
         assert!(!html.contains("aria-label"));
         assert!(!html.contains("\"description\":"));
+    }
+
+    #[test]
+    fn audio_with_generated_video_uses_video_metadata() {
+        let page = PreviewPage {
+            kind: PreviewKind::Audio,
+            title: "Song.mp3 - Juicebox²".into(),
+            filename: "a.mp3".into(),
+            display_name: "Song.mp3".into(),
+            author: Some("artist".into()),
+            size_label: "4.0 MB".into(),
+            raw_url: "/f/a.mp3".into(),
+            download_url: "/d/a.mp3".into(),
+            page_url: "/v/a.mp3".into(),
+            file_id: "a".into(),
+            mime: "audio/mpeg".into(),
+            extension: "mp3".into(),
+            zip_html: None,
+            text_head: None,
+            uploading: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "f.juicey.dev".parse().expect("host"));
+        headers.insert("x-forwarded-proto", "https".parse().expect("proto"));
+        let embed = AudioEmbedInfo {
+            video_path: "/e/a.mp4".into(),
+            poster_path: "/e/a.jpg".into(),
+            width: 640,
+            height: 360,
+        };
+        let html = render_preview(&page, &headers, Some(&embed));
+        assert!(html.contains("og:video\" content=\"https://f.juicey.dev/e/a.mp4\""));
+        assert!(html.contains("og:video:type\" content=\"video/mp4\""));
+        assert!(html.contains("og:image\" content=\"https://f.juicey.dev/e/a.jpg\""));
+        assert!(html.contains("twitter:card\" content=\"player\""));
+        assert!(!html.contains("og:audio"));
+        assert!(html.contains("\"type\":12"));
+        assert!(html.contains("\"media\":{\"url\":\"https://f.juicey.dev/e/a.mp4\"}"));
+    }
+
+    #[test]
+    fn canonical_url_name_always_starts_with_id() {
+        assert_eq!(canonical_url_name("sd6Q83tz", "mp4"), "sd6Q83tz.mp4");
+        assert_eq!(canonical_url_name("abc123", ""), "abc123");
     }
 
     #[test]

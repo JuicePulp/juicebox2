@@ -9,8 +9,12 @@ import {
   TUNER_INTERVAL_MS,
   TUS_THRESHOLD,
   TUS_TARGET_CHUNK_SECS,
-  LAST_SPEED_KEY
+  LAST_SPEED_KEY,
+  DIRECT_STREAM_THRESHOLD,
+  DIRECT_PARALLEL_THRESHOLD,
+  readUploadMode
 } from "./upload-config.js";
+import { tweakEngineEnabled } from "./upload-tweaks.js";
 import { apiHealth } from "./api.js";
 const MB = 1024 * 1024;
 const fmtRate = (bps) => bps >= MB ? `${(bps / MB).toFixed(2)} MB/s` : `${(bps / 1024).toFixed(0)} KB/s`;
@@ -194,9 +198,11 @@ function settingLines() {
   const est = hint || TIER_DEFAULT_BPS[tier];
   return [
     `tier=${tier}${hint ? " (learned)" : ""} est=${fmtRate(est)}`,
+    `server mode: ${readUploadMode()} | stream>=${DIRECT_STREAM_THRESHOLD / MB}MB parallel>=${DIRECT_PARALLEL_THRESHOLD / MB}MB`,
     `streams: start ${streamsForRate(est)}, cap ${PARALLEL_STREAMS}, parts >=${TUS_MIN_PART / MB}MB up to ${TUS_MAX_PARTS}`,
     `chunk: start ${TIER_CHUNK[tier].start / MB}MB max ${TIER_CHUNK[tier].max / MB}MB target ${TUS_TARGET_CHUNK_SECS}s`,
-    `mode: tus> ${TUS_THRESHOLD / MB}MB | gzip: text-like ext/mime | tuner every ${TUNER_INTERVAL_MS / 1000}s`
+    `mode: tus> ${TUS_THRESHOLD / MB}MB | gzip: text-like ext/mime | tuner every ${TUNER_INTERVAL_MS / 1000}s`,
+    `tweak: ${tweakEngineEnabled() ? "adaptive" : `off (fixed ${PARALLEL_STREAMS} streams)`}`
   ];
 }
 function tunerLines() {
@@ -211,12 +217,12 @@ function tunerLines() {
   ];
 }
 function uploadLines() {
-  const it = liveItems.find((i) => i.o || i.m === "tus");
+  const it = liveItems.find((i) => i.o || i.m);
   if (!it)
     return ["no active upload"];
   const o = it.o;
   return [
-    `method=${it.m}${o ? ` mode=${o.mode} quick=${o.quick} ttl=${o.ttl}h` : ""}`,
+    `method=${it.m || "?"}${o ? ` mode=${o.mode} quick=${o.quick} ttl=${o.ttl}h` : ""}`,
     o ? `host=${o.host || "(default)"}` : ""
   ].filter(Boolean);
 }

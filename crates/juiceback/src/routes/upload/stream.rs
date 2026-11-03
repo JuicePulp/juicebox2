@@ -23,6 +23,7 @@ pub fn spawn_upload_push(
     host: Option<&str>,
     upload_mode: UploadMode,
     capability: &str,
+    live_total: Option<u64>,
 ) -> PushChannels {
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
@@ -45,6 +46,7 @@ pub fn spawn_upload_push(
             push_host,
             &push_mode,
             Some(&push_capability),
+            live_total,
         )
         .await
     });
@@ -62,6 +64,7 @@ pub async fn stream_upload_to_juicehost(
     upload_mode: UploadMode,
     max_size: i64,
     capability: &str,
+    live_total: Option<u64>,
 ) -> Result<(i64, u64, std::time::Duration, std::time::Duration), AppError> {
     let (tx, push_handle) = spawn_upload_push(
         state,
@@ -71,6 +74,7 @@ pub async fn stream_upload_to_juicehost(
         host,
         upload_mode,
         capability,
+        live_total,
     );
 
     let read_start = std::time::Instant::now();
@@ -262,6 +266,7 @@ pub async fn stream_gzip_upload_to_juicehost(
     max_size: i64,
     capability: &str,
     danger: crate::file_validation::ProtectionLevel,
+    live_total: Option<u64>,
 ) -> Result<(i64, std::time::Duration, std::time::Duration), AppError> {
     let (tx, push_handle) = spawn_upload_push(
         state,
@@ -271,6 +276,7 @@ pub async fn stream_gzip_upload_to_juicehost(
         host,
         upload_mode,
         capability,
+        live_total,
     );
 
     let read_start = std::time::Instant::now();

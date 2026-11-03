@@ -49,6 +49,16 @@ export const RECIPES = {
         ],
         vary: { pitch: 0.07, level: 0.2 },
     },
+    delete: {
+        masterGain: 0.36,
+        layers: [
+            { kind: "noise", filterType: "bandpass", filterFrequency: 2200, filterQ: 1.4, attack: 0.001, decay: 0.006, peak: 0.1 },
+            knock(260, 0.025, 0.05),
+            { kind: "tone", waveform: "sine", frequency: 392, glideTo: 196, glideTime: 0.035, attack: 0.001, decay: 0.05, peak: 0.022 },
+            { from: "strong", kind: "noise", filterType: "lowpass", filterFrequency: 240, filterQ: 0.8, attack: 0.001, decay: 0.03, peak: 0.12 },
+        ],
+        vary: { pitch: 0.05, level: 0.12 },
+    },
     select: {
         masterGain: 0.306,
         layers: [

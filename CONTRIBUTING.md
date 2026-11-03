@@ -11,6 +11,32 @@ then run the checks for whatever you touch:
   - `cargo clippy -p <crate> --all-targets`
   - `cargo test -p <crate>`
 
+## Faster local builds (optional: blaze)
+[blaze](https://github.com/indexable-inc/blaze) is a drop-in incremental
+replacement for `cargo` that keeps the workspace compiled in memory, so
+`blaze build` after an edit finishes in milliseconds instead of seconds. It
+takes the same subcommands and flags as cargo:
+
+```
+curl -fsSL https://ix.dev/blaze | sh
+blaze run -p juicefront
+blaze check -p juiceback
+blaze test -p juiceback
+```
+
+Two things to know before you use it. It brings its own Rust toolchain (an
+October 2026 nightly by default) instead of the `rust-version` pinned in
+`Cargo.toml`, so it can disagree with cargo about which features exist. And it
+trades a few GB of RAM for the speed, which is a lot next to the services on a
+small box.
+
+So treat it as a local loop accelerator only, not as a replacement for the
+checks above: `cargo fmt`, `cargo clippy`, `cargo test` and CI are still the
+final word before you push, and releases are still built with
+`cargo build --release`. If a crate builds under blaze but not under cargo (or
+the other way round), that is a blaze bug and not a juicebox bug, report it
+[upstream](https://github.com/indexable-inc/blaze/issues) and trust cargo.
+
 ## Frontend development (juicefront)
 The frontend is Rust (Axum + Askama templates + vanilla JS in
 `crates/juicefront/static/js/`). There is no Node/bundler step anymore. 

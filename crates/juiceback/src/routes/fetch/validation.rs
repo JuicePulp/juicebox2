@@ -63,6 +63,40 @@ pub(crate) fn require_cobalt_enabled(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
+fn host_matches(host: &str, candidate: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let candidate = candidate.trim_end_matches('.').to_ascii_lowercase();
+    !candidate.is_empty() && (host == candidate || host.ends_with(&format!(".{candidate}")))
+}
+
+/// Juicebox is the place files live, not a media source to feed back into the
+/// fetcher. Catch that mistake early with a friendlier (and funnier) message
+/// than whatever cobalt would return for our own links.
+#[must_use]
+pub(crate) fn juicebox_link_message(
+    raw: &str,
+    config: &crate::config::Config,
+) -> Option<&'static str> {
+    let parsed = url::Url::parse(raw.trim()).ok()?;
+    let host = parsed.host_str()?;
+    let mut candidates: Vec<&str> = vec![
+        &config.public_base_url,
+        &config.public_juicehost_url,
+        &config.juiceback_origin,
+        &config.juicehost_url,
+    ];
+    candidates.extend(config.region_public_juicehosts.values().map(String::as_str));
+
+    let is_juicebox = candidates.into_iter().any(|candidate| {
+        url::Url::parse(candidate)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .is_some_and(|candidate_host| host_matches(host, &candidate_host))
+    });
+
+    is_juicebox.then_some("That file already lives on Juicebox. Just open the url.")
+}
+
 #[must_use]
 pub(crate) fn service_domain(name: &str) -> String {
     match name {

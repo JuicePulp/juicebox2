@@ -194,6 +194,7 @@ struct ModalsTpl {
     max_bytes: u64,
     allowed_ttl: String,
     default_ttl: String,
+    asset_version: &'static str,
     public_base_url: String,
     share_url: String,
     encoded_url: String,
@@ -299,6 +300,7 @@ fn modals_html(
             .default_ttl_hours
             .unwrap_or(retention::DEFAULT_TTL_HOURS)
             .to_string(),
+        asset_version: env!("JUICEFRONT_ASSET_VERSION"),
         public_base_url: config.public_base_url.clone().unwrap_or_default(),
         share_url: url_href.to_owned(),
         encoded_url: i18n::pct_encode(url_href),
@@ -450,7 +452,7 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
         i18n_json: i18n::embedded_json(locale).replace("</", "<\\/"),
         icons_json: crate::icons::bundle_json(crate::icons::RUNTIME_ICONS).replace("</", "<\\/"),
         extra_scripts,
-        asset_version: env!("CARGO_PKG_VERSION"),
+        asset_version: env!("JUICEFRONT_ASSET_VERSION"),
     }
 }
 
@@ -518,7 +520,7 @@ fn head_ctx(
         current_path: absolute_url(headers, stripped_path),
         hreflang: hreflang_links_absolute(headers, stripped_path),
         live_reload,
-        asset_version: env!("CARGO_PKG_VERSION"),
+        asset_version: env!("JUICEFRONT_ASSET_VERSION"),
     }
 }
 

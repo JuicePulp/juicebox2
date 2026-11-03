@@ -455,7 +455,7 @@ async fn unavailable_without_session_config_fails_friendly() {
 }
 
 #[tokio::test]
-async fn non_youtube_unavailable_does_not_retry_session_instance() {
+async fn non_youtube_unavailable_uses_session_instance() {
     let primary = MockServer::start().await;
     let session = MockServer::start().await;
 
@@ -473,9 +473,24 @@ async fn non_youtube_unavailable_does_not_retry_session_instance() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "tunnel",
             "url": format!("{}/tunnel-s", session.uri()),
-            "filename": "should-not-happen.mp4",
+            "filename": "session.mp4",
         })))
         .mount(&session)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/tunnel-s"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("session-bytes"))
+        .mount(&session)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(
+            r"^/internal/file/stream/[A-Za-z0-9_-]+/session%2Emp4$",
+        ))
+        .and(header("x-mime-type", "video/mp4"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&primary)
         .await;
 
     let config = common::fetch_config_with_session(
@@ -492,7 +507,8 @@ async fn non_youtube_unavailable_does_not_retry_session_instance() {
     let cookie = cookie.unwrap();
 
     let result = wait_for_completion(&app, &job_id, &cookie).await;
-    assert_eq!(result["status"], "failed");
+    assert_eq!(result["status"], "done", "job failed: {result}");
+    assert_eq!(result["file"]["size_bytes"], 13);
 }
 
 #[tokio::test]
@@ -582,24 +598,25 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.stage, "");
     assert_eq!(job.bytes_received, 0);
 
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "cobalt", "processing", 0).unwrap();
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "cobalt", "processing", 0, 0).unwrap();
     let job = juiceback::db::get_fetch_job(&conn, "job1")
         .unwrap()
         .unwrap();
     assert_eq!(job.status, "processing");
     assert_eq!(job.stage, "cobalt");
 
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 512)
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 512, 8192)
         .unwrap();
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 4096)
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 4096, 8192)
         .unwrap();
     let job = juiceback::db::get_fetch_job(&conn, "job1")
         .unwrap()
         .unwrap();
     assert_eq!(job.status, "downloading");
     assert_eq!(job.bytes_received, 4096);
+    assert_eq!(job.total_bytes, 8192);
 
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 8192)
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "transfer", "downloading", 8192, 8192)
         .unwrap();
     let updated = juiceback::db::finish_fetch_job(&conn, "job1", "done", "", "file1").unwrap();
     assert!(updated);
@@ -609,7 +626,7 @@ async fn fetch_job_progress_lifecycle() {
     assert_eq!(job.status, "done");
     assert_eq!(job.file_id, "file1");
 
-    juiceback::db::update_fetch_job_progress(&conn, "job1", "late", "downloading", 1).unwrap();
+    juiceback::db::update_fetch_job_progress(&conn, "job1", "late", "downloading", 1, 0).unwrap();
     let job = juiceback::db::get_fetch_job(&conn, "job1")
         .unwrap()
         .unwrap();

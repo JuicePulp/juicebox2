@@ -12,7 +12,9 @@ use super::{
         FetchFileResponse, FetchServicesResponse, FetchStartRequest, FetchStartResponse,
         FetchStatusResponse, ServicesCache,
     },
-    validation::{require_cobalt_enabled, service_domain, validate_source_url},
+    validation::{
+        juicebox_link_message, require_cobalt_enabled, service_domain, validate_source_url,
+    },
 };
 use crate::{
     cobalt::FetchOptions,
@@ -44,6 +46,10 @@ pub async fn fetch_start_handler(
 ) -> Result<Json<FetchStartResponse>, AppError> {
     require_cobalt_enabled(&state)?;
 
+    if let Some(message) = juicebox_link_message(&body.url, &state.config) {
+        return Err(AppError::BadRequest(message.into()));
+    }
+
     let source_url = validate_source_url(&body.url, state.config.allow_private_fetch).await?;
     let opts = FetchOptions::sanitized(
         body.audio_only,
@@ -57,9 +63,6 @@ pub async fn fetch_start_handler(
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
 
-    
-    
-    
     if let Some(ref password) = body.password {
         if !password.is_empty() {
             state
@@ -207,6 +210,11 @@ pub async fn fetch_status_handler(
         },
         bytes_received: if job.bytes_received > 0 {
             Some(job.bytes_received as u64)
+        } else {
+            None
+        },
+        total_bytes: if job.total_bytes > 0 {
+            Some(job.total_bytes as u64)
         } else {
             None
         },

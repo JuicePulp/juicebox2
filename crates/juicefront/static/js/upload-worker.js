@@ -1,13 +1,14 @@
 import {
   startUpload
-} from "./upload-engine.js";
-import { UPLOAD_URL, TUS_THRESHOLD } from "./upload-config.js";
+} from "./upload-engine.js?v=2.1.32";
+import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.1.32";
 import { deleteTus } from "./tus.js";
 const ctx = self;
 const entries = new Map;
 const dismissed = new Set;
 const ports = new Set;
 const MAX_ITEMS = 100;
+const ACTIVE_STATES = new Set(["queued", "compressing", "uploading", "finalizing"]);
 function emit(message) {
   for (const port of ports) {
     try {
@@ -21,6 +22,8 @@ function entryItem(item) {
   emit({ type: "item", item });
 }
 function upsert(patch) {
+  if (dismissed.has(patch.id))
+    return;
   let entry = entries.get(patch.id);
   if (!entry) {
     entry = { item: {}, handle: null, tusIds: [] };
@@ -28,6 +31,13 @@ function upsert(patch) {
   }
   Object.assign(entry.item, patch);
   entryItem(entry.item);
+  if (!ACTIVE_STATES.has(entry.item.state)) {
+    // Release the file/transfer references. The item itself stays so late
+    // events and removals still merge into a complete row, but snapshots only
+    // send live work (see onconnect below).
+    entry.handle = null;
+    entry.tusIds = [];
+  }
   trim();
 }
 function trim() {
@@ -42,12 +52,19 @@ function trim() {
 function handleEnqueue(msg, _port) {
   if (entries.has(msg.id))
     return;
+  // This worker has no DOM: the page hands us the server-advertised upload
+  // mode with every enqueue. Without it readUploadMode() falls back to
+  // "standard" and every large upload silently takes the slow TUS path.
+  if (msg.clientMode)
+    setUploadModeHint(msg.clientMode);
   const item = {
     id: msg.id,
     filename: msg.filename,
     mimeType: msg.mimeType,
     size: msg.size,
-    method: msg.size > TUS_THRESHOLD ? "tus" : "direct",
+    lastModified: msg.lastModified,
+    clientMode: msg.clientMode || "",
+    method: "",
     state: "queued",
     progress: 0,
     ttlHours: msg.ttlHours,
@@ -83,6 +100,13 @@ function handleCancel(id) {
   }
 }
 function handleRemove(id) {
+  const entry = entries.get(id);
+  if (entry) {
+    entry.handle?.abort();
+    for (const tusId of entry.tusIds) {
+      deleteTus(UPLOAD_URL, tusId);
+    }
+  }
   dismissed.add(id);
   entries.delete(id);
   emit({ type: "removed", id });
@@ -100,12 +124,16 @@ ctx.onconnect = (event) => {
       handleRemove(msg.id);
     } else if (msg.type === "patch" && msg.id && msg.patch) {
       upsert({ id: msg.id, ...msg.patch });
+    } else if (msg.type === "ping") {
+      try { port.postMessage({ type: "pong" }); } catch {}
     }
   };
   port.start();
   port.postMessage({
     type: "snapshot",
-    items: [...entries.values()].filter((e) => !dismissed.has(e.item.id)).map((e) => e.item)
+    items: [...entries.values()]
+      .filter((e) => !dismissed.has(e.item.id) && ACTIVE_STATES.has(e.item.state))
+      .map((e) => e.item)
   });
   port.addEventListener("close", () => {
     ports.delete(port);

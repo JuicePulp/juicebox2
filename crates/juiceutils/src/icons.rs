@@ -7,6 +7,7 @@ pub const VIDEO: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-h
 pub const AUDIO: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3 7h2v5H3zm4 0h2v13H7zm4-3h2v16h-2zm4 0h2v13h-2zM5 5h2v2H5zm4 15h2v2H9zm4-18h2v2h-2zm4 15h2v2h-2zm2-5h2v5h-2zm2-2h2v2h-2zM1 12h2v2H1z\"/></svg>";
 pub const ARCHIVE: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3 2h18v2H3zm0 5h18v2H3zM1 4h2v3H1zm20 0h2v3h-2zm-2 5h2v11h-2zM3 9h2v11H3zm2 11h14v2H5zm4-9h6v2H9z\"/></svg>";
 pub const DOWNLOAD_ART: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><g><path d=\"M6 4H4v16h2zm10-2H6v2h10zm4 4h-2v14h2zm-2 14H6v2h12zM16 4h2v2h-2zm-4 0h2v6h-2z\"/><path d=\"M12 8h6v2h-6z\"/></g></svg>";
+pub const CHECK: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M21 5h2v10h-2v2h-2v2h-2v2H7v-2H5v-2H3v-2H1V9h2v4h2v2h2v2h8v-2h2v-2h2V5z\"/></svg>";
 
 pub fn file_icon(name: &str, is_dir: bool) -> &'static str {
     if is_dir {

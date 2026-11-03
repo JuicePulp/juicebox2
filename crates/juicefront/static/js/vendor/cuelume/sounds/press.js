@@ -1,4 +1,4 @@
-import { knock, LANDED } from "./recipes.js";
+import { knock, LANDED } from "./recipes.js?v=2.1.32";
 const A2 = 110;
 const C3 = 130.81, G3 = 196, A3 = 220;
 const C4 = 261.63, E4 = 329.63, G4 = 392, A4 = 440;
@@ -51,6 +51,15 @@ export const PRESS = {
             knock(C3, 0.03, 0.03, { from: "strong" }),
         ],
         vary: { pitch: 0.08, level: 0.15 },
+    },
+    delete: {
+        masterGain: 0.32,
+        layers: [
+            ...click(2400, 0.12),
+            knock(196, 0.03, 0.04),
+            thud(200, 0.04, 0.14, { from: "strong" }),
+        ],
+        vary: STEADY,
     },
     select: {
         masterGain: 0.499,

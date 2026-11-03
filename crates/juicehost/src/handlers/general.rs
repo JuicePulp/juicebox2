@@ -188,14 +188,21 @@ pub async fn ciphertext_file(
     serve_stored_bytes(&state, &headers, &id).await
 }
 
-#[tracing::instrument(skip_all)]
-pub async fn ciphertext_public(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(path): Path<String>,
+pub(crate) async fn serve_stored_bytes_inline(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    id: &str,
 ) -> Result<Response<Body>, JuicehostError> {
-    let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_stored_bytes(&state, &headers, &id).await
+    let mut response = serve_stored_bytes(state, headers, id).await?;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        header::HeaderValue::from_static("inline"),
+    );
+    Ok(response)
 }
 
 pub(crate) async fn serve_stored_bytes(

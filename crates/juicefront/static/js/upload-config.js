@@ -29,10 +29,38 @@ export function readDefaultTtlHours() {
   const n = val ? Number(val) : NaN;
   return Number.isFinite(n) && n > 0 ? n : 24;
 }
+let uploadModeHint = "";
+// Uploads run inside a SharedWorker, where `document` does not exist. The page
+// passes the server-advertised mode along with each enqueue so the worker can
+// make the same routing decision the page would.
+export function setUploadModeHint(mode) {
+  if (typeof mode === "string" && mode)
+    uploadModeHint = mode;
+}
 export function readUploadMode() {
+  if (uploadModeHint)
+    return uploadModeHint;
   if (typeof document === "undefined")
     return "standard";
   return document.getElementById("server-config")?.getAttribute("data-upload-mode") || "standard";
+}
+export function uploadMethodFor(mode, size, lastBps) {
+  if (mode === "direct-prefer") {
+    if (preferStream(mode, size, lastBps))
+      return "direct-stream";
+    if (size >= DIRECT_PARALLEL_THRESHOLD)
+      return "direct-parallel";
+    return "direct";
+  }
+  return size > TUS_THRESHOLD ? "tus" : "direct";
+}
+// A single resumed stream beats N parallel TUS parts on a slow uplink: no
+// concat step, no 409 storms, no per-part session setup. Keep the parallel
+// path for links fast enough to benefit from it.
+export function preferStream(mode, size, lastBps) {
+  if (mode !== "direct-prefer" || size < DIRECT_STREAM_THRESHOLD)
+    return false;
+  return !lastBps || lastBps < STREAM_PREFER_MAX_BPS;
 }
 export function readUploadPassword() {
   if (typeof document === "undefined")
@@ -53,15 +81,16 @@ export const LAST_SPEED_KEY = "juicebox_last_upload_bps";
 export const TUNER_INTERVAL_MS = 1200;
 export const INITIAL_WORKERS = 2;
 export const MAX_PART_RUNS = 2;
+export const DIRECT_COMPLETE_TIMEOUT_MS = 5 * 60 * 1000;
 export function streamsForRate(bytesPerSec) {
   const mbps = bytesPerSec * 8 / 1e6;
   if (mbps < 10)
-    return 8;
+    return 3;
   if (mbps < 40)
-    return 6;
+    return 5;
   if (mbps < 150)
-    return 4;
-  return 3;
+    return 7;
+  return PARALLEL_STREAMS;
 }
 export function detectNetTier() {
   try {
@@ -100,7 +129,17 @@ export const DIRECT_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/complete`;
 export const DIRECT_PARALLEL_RESERVE_URL = `${UPLOAD_URL}/upload/direct/parallel/reserve`;
 export const DIRECT_PARALLEL_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/parallel/complete`;
 export const DIRECT_PARALLEL_THRESHOLD = 16 * 1024 * 1024;
+export const DIRECT_STREAM_THRESHOLD = 64 * 1024 * 1024;
+// One PATCH per ~8s of data. Small enough that a collapsed uplink still
+// finishes a request well inside Cloudflare's 100s window, large enough that
+// per-request overhead stays negligible.
+export const STREAM_START_CHUNK = 4 * 1024 * 1024;
+export const STREAM_MIN_CHUNK = 1024 * 1024;
+export const STREAM_MAX_CHUNK = 16 * 1024 * 1024;
+export const STREAM_TARGET_SECS = 8;
+export const STREAM_PREFER_MAX_BPS = 25 * 1024 * 1024;
 export const DIRECT_PART_TARGET = 32 * 1024 * 1024;
+export const DIRECT_MAX_PART_BYTES = 96 * 1024 * 1024;
 export const DIRECT_MAX_PARTS = 32;
 export const TEXT_LIKE_RE = /\.(txt|json|csv|tsv|xml|html|css|js|ts|jsx|tsx|md|yaml|yml|toml|ini|conf|sh|bash|zsh|fish|py|rb|pl|php|java|c|h|cpp|hpp|rs|go|swift|kt|sql|log|diff|patch|srt|vtt|sub|cfg|env|gitignore|dockerignore|editorconfig|prettierrc|eslintrc|babelrc|Makefile|CMakeLists|Gemfile|Podfile|Dockerfile|svg|wasm|epub|tex|rst|graphql|proto)$/i;
 const TEXT_MIME_RE = /^text\/|application\/(json|xml|javascript|x-yaml|yaml|svg\+xml|wasm)/i;

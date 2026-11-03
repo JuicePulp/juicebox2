@@ -1,5 +1,41 @@
     .fsize{color:#a29188;font-size:.85rem;white-space:nowrap}
     .actions{display:flex;gap:.5rem;flex:none}
+    .topbar{position:relative}
+    .upload-badge{
+      color:#fdba74;
+      background:#3a2415;
+      border:1px solid #7c3f12;
+      border-radius:999px;
+      padding:.18rem .55rem;
+      font-size:.72rem;
+      font-weight:700;
+      letter-spacing:.02em;
+      white-space:nowrap;
+    }
+    .upload-badge[hidden]{display:none}
+    .upload-line{
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:-1px;
+      height:3px;
+      background:#2e2620;
+      overflow:hidden;
+    }
+    .upload-line[hidden]{display:none}
+    .upload-line i{
+      display:block;
+      height:100%;
+      background:linear-gradient(90deg,#f97316,#fb923c);
+      transition:width .4s ease;
+      min-width:2px;
+    }
+    .dl-upload-note{
+      color:#fdba74;
+      font-size:.82rem;
+      max-width:28rem;
+      line-height:1.4;
+    }
     .btn{
       display:inline-flex;
       align-items:center;

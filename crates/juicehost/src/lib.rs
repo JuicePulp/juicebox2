@@ -3,6 +3,7 @@ pub mod ban;
 pub mod config;
 pub mod error;
 pub mod handlers;
+pub mod live;
 pub mod server;
 pub mod state;
 pub mod storage;

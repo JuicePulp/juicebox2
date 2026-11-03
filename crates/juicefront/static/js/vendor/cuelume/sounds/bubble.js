@@ -1,4 +1,4 @@
-import { knock, LANDED } from "./recipes.js";
+import { knock, LANDED } from "./recipes.js?v=2.1.32";
 const slide = (from, to, time, decay, peak, more = {}) => ({
     kind: "tone", waveform: "sine", frequency: from, glideTo: to, glideTime: time, attack: 0.002, decay, peak, ...more,
 });
@@ -29,6 +29,15 @@ export const BUBBLE = {
             knock(208, 0.025, 0.05, { from: "strong" }),
         ],
         vary: { pitch: 0.1, level: 0.2 },
+    },
+    delete: {
+        masterGain: 0.31,
+        layers: [
+            pop(1800, 0.05),
+            slide(420, 210, 0.04, 0.06, 0.045),
+            knock(180, 0.03, 0.035, { from: "strong" }),
+        ],
+        vary: { pitch: 0.08, level: 0.15 },
     },
     select: {
         masterGain: 0.278,

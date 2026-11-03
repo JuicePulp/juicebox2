@@ -87,6 +87,9 @@ pub async fn create_upload_handler(
         .and_then(|v| v.parse::<f64>().ok())
         .unwrap_or(default_ttl);
     let ttl_hours = crate::constants::clamp_to_nearest(ttl_hours, &allowed_ttl);
+    let declared_file_size = find_meta(&metadata, "file_size")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
     let mut storage_host = match find_meta(&metadata, "host")
         .filter(|v| !v.is_empty())
         .map(ToString::to_string)
@@ -137,6 +140,7 @@ pub async fn create_upload_handler(
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
     let mut reservation_hash: Option<String> = None;
+    let mut reservation_size = declared_file_size;
     if let Some(ref reserve_id) = reserve_id {
         let token = reservation_token
             .as_deref()
@@ -151,6 +155,7 @@ pub async fn create_upload_handler(
         if reservation.status != "uploading" {
             return Err(AppError::BadRequest("reservation is not uploading".into()));
         }
+        reservation_size = reservation_size.max(reservation.size_bytes.max(0) as u64);
         if !crate::utils::constant_time_eq(&reservation.delete_token, token) {
             return Err(AppError::Forbidden(
                 "invalid reservation delete token".into(),
@@ -195,7 +200,8 @@ pub async fn create_upload_handler(
                     user_id: user_id.clone(),
                     upload_mode: storage_upload_mode,
                     declared_size: std::sync::atomic::AtomicU64::new(0),
-                    completed: std::sync::atomic::AtomicUsize::new(0),
+                    finalized_parts: dashmap::DashMap::new(),
+                    finalizing: std::sync::atomic::AtomicBool::new(false),
                     part_ids: dashmap::DashMap::new(),
                     part_lengths: dashmap::DashMap::new(),
                     completion_reserve_id: std::sync::Mutex::new(None),
@@ -216,10 +222,28 @@ pub async fn create_upload_handler(
         }
         file_capability = session.capability.clone();
         match session.part_ids.entry(pi) {
-            Entry::Occupied(_) => {
-                return Err(AppError::BadRequest(
-                    "parallel upload part index already exists".into(),
-                ));
+            Entry::Occupied(entry) => {
+                let existing_id = entry.get().clone();
+                let live = state
+                    .tus
+                    .get(&existing_id)
+                    .map(|upload| (upload.offset, upload.total_length));
+                let mut response = Response::builder()
+                    .status(StatusCode::CONFLICT)
+                    .header("Tus-Resumable", "1.0.0");
+                if let Some((offset, total_length)) = live
+                    && offset < total_length
+                {
+                    response = response
+                        .header("Location", format!("/api/tus/{existing_id}"))
+                        .header("Upload-Offset", offset.to_string())
+                        .header("Upload-Length", total_length.to_string());
+                } else {
+                    response = response.header("X-Juicebox-Part-Completing", "1");
+                }
+                return Ok(response
+                    .body(axum::body::Body::empty())
+                    .map_err(|_| AppError::Internal("response build failed".into()))?);
             }
             Entry::Vacant(entry) => {
                 entry.insert(id.clone());
@@ -275,6 +299,20 @@ pub async fn create_upload_handler(
         storage_upload_mode
     };
 
+    let live_target = reserve_id.clone();
+    let live_host = storage_host.clone();
+    let live_registration = match (&live_target, reservation_size) {
+        (Some(target), size) if size > 0 => {
+            let total = total_parts.unwrap_or(1).max(1) as u64;
+            let index = part_index.unwrap_or(0) as u64;
+            let step = size.div_ceil(total);
+            let offset = index.saturating_mul(step).min(size);
+            let length = total_length.min(size.saturating_sub(offset));
+            (length > 0).then(|| (target.clone(), vec![(id.clone(), offset, length)]))
+        }
+        _ => None,
+    };
+
     let upload = TusUpload {
         id: id.clone(),
         offset: 0,
@@ -283,6 +321,7 @@ pub async fn create_upload_handler(
         mime_type: mime_type.clone(),
         ttl_hours,
         created_at: chrono::Utc::now().timestamp(),
+        last_activity: chrono::Utc::now().timestamp(),
         delete_token: file_capability.clone(),
         hashed_ip,
         encrypted_ip,
@@ -312,6 +351,21 @@ pub async fn create_upload_handler(
 
     state.tus.insert(id.clone(), upload);
     state.tus_senders.insert(id.clone(), tx);
+
+    if let Some((target, parts)) = live_registration
+        && let Err(error) = crate::storage_client::register_live_upload(
+            &state,
+            &target,
+            &filename,
+            &mime_type,
+            reservation_size,
+            &parts,
+            live_host.as_deref(),
+        )
+        .await
+    {
+        tracing::warn!("tus live preview unavailable for {target}: {error}");
+    }
 
     let location = format!("/api/tus/{id}");
     Ok(Response::builder()

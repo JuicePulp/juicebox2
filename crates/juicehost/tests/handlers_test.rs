@@ -6,7 +6,7 @@ use axum::{
 };
 use bytes::Bytes;
 use juicehost::{
-    config::Config,
+    config::{AudioEmbedFile, AudioEmbedSettings, Config},
     server::build_router,
     state::AppState,
     storage::{LocalBackend, StorageBackend},
@@ -63,6 +63,8 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         ticket_jwt_secret: ticket_secret.into(),
         ip_pepper: String::new(),
         ban_list_file: None,
+        audio_embed: AudioEmbedSettings::load(&AudioEmbedFile::default())
+            .expect("default audio embed settings"),
         sentry: juiceutils::config::SentrySettings::default(),
     }
 }
@@ -1367,6 +1369,7 @@ async fn protected_file_serves_unlock_shell() {
         200,
         serde_json::json!({
             "protected": true,
+            "is_encrypted": true,
             "filename": "secret.txt",
             "key_version": 1,
             "gateway_origin": "https://box.example",
@@ -1390,7 +1393,8 @@ async fn protected_file_serves_unlock_shell() {
     );
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
-    assert!(page.contains("/c/abc12345"));
+    assert!(page.contains("/f/abc12345?inline=1"));
+    assert!(page.contains("href=\"/f/abc12345?inline=1\">show anyways</a>"));
     assert!(
         page.contains("https://box.example/api/gateway/unlock")
             || page.contains("https://box.example")
@@ -1398,21 +1402,36 @@ async fn protected_file_serves_unlock_shell() {
     assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
 
     
-    let (status, headers, body) = get_public(&app, "/c/abc12345", None).await;
+    let (status, headers, body) = get_public(&app, "/f/abc12345?inline=1", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"ciphertext-bytes");
     assert_eq!(
         headers.get("content-type").and_then(|v| v.to_str().ok()),
-        Some("application/octet-stream")
+        Some("text/plain; charset=utf-8")
+    );
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("inline")
     );
 
     
-    let (status, headers, body) = get_public(&app, "/c/abc12345", Some("bytes=0-9")).await;
+    let (status, headers, body) =
+        get_public(&app, "/f/abc12345?inline=1", Some("bytes=0-9")).await;
     assert_eq!(status, StatusCode::PARTIAL_CONTENT);
     assert_eq!(body, b"ciphertext");
     assert_eq!(
         headers.get("content-range").and_then(|v| v.to_str().ok()),
         Some("bytes 0-9/16")
+    );
+
+    let (status, headers, body) = get_bare(&app, "/f/abc12345", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"ciphertext-bytes");
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/octet-stream")
     );
 }
 
@@ -1565,6 +1584,59 @@ async fn download_forces_attachment_with_bytes() {
 }
 
 #[tokio::test]
+async fn download_uses_original_filename() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": false,
+            "filename": "My Report (final).pdf",
+            "tier": "standard",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_named(&app, "orig0001", "My Report (final).pdf", b"report").await;
+
+    let (status, headers, body) = get_public(&app, "/d/orig0001.pdf", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"report");
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"My Report (final).pdf\"")
+    );
+}
+
+#[tokio::test]
+async fn download_uses_rfc5987_for_unicode_filename() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_backend(
+        200,
+        serde_json::json!({
+            "protected": false,
+            "filename": "café menu.txt",
+            "tier": "standard",
+        }),
+    )
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+    store_named(&app, "orig0002", "café menu.txt", b"menu").await;
+
+    let (status, headers, _) = get_public(&app, "/d/orig0002.txt", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("attachment; filename=\"caf_ menu.txt\"; filename*=UTF-8''caf%C3%A9%20menu.txt")
+    );
+}
+
+#[tokio::test]
 async fn download_supports_ranges() {
     let dir = tempfile::tempdir().unwrap();
     let state = backend_state(dir.path(), None).await;
@@ -1589,6 +1661,7 @@ async fn download_serves_unlock_shell_for_protected() {
         200,
         serde_json::json!({
             "protected": true,
+            "is_encrypted": true,
             "filename": "abc12345.txt",
             "key_version": 1,
             "gateway_origin": "https://box.example",
@@ -1604,6 +1677,7 @@ async fn download_serves_unlock_shell_for_protected() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"download\""));
+    assert!(page.contains("href=\"/f/abc12345?inline=1\">show anyways</a>"));
 }
 
 async fn store_named(app: &axum::Router, id: &str, filename: &str, bytes: &[u8]) {
@@ -1698,6 +1772,46 @@ async fn preview_bots_redirect_to_raw() {
     );
     assert!(body.is_empty());
 
+    // ComputerCraft's http API sends a User-Agent but no Accept header. Its
+    // wget should follow this redirect to the raw file rather than download
+    // the HTML preview page.
+    let (status, headers, body) =
+        get_bare(&app, "/v/bot00001.txt", Some("computercraft/1.109.2")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/f/bot00001.txt")
+    );
+    assert!(body.is_empty());
+
+    // Any client that sends a UA but no Accept header is a non-browser, even
+    // if we have never seen its token before.
+    let (status, headers, body) =
+        get_bare(&app, "/v/bot00001.txt", Some("some-lua-client/1.0")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/f/bot00001.txt")
+    );
+    assert!(body.is_empty());
+
+    // ...but a browser UA without Accept still gets the preview page.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v/bot00001.txt")
+                .header(
+                    "user-agent",
+                    "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/130.0",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
     
     let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
     assert_eq!(status, StatusCode::OK);
@@ -1752,12 +1866,13 @@ async fn preview_bots_redirect_to_raw() {
 }
 
 #[tokio::test]
-async fn preview_protected_shell_ignores_bot_redirect() {
+async fn preview_protected_bot_redirects_to_raw() {
     let dir = tempfile::tempdir().unwrap();
     let backend = mock_backend(
         200,
         serde_json::json!({
             "protected": true,
+            "is_encrypted": true,
             "filename": "secret.txt",
             "key_version": 1,
             "gateway_origin": "https://box.example",
@@ -1769,16 +1884,12 @@ async fn preview_protected_shell_ignores_bot_redirect() {
     store_bytes(&app, "protbot01", b"ciphertext").await;
 
     
-    let (status, headers, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(String::from_utf8_lossy(&body).contains("password-protected"));
-    
-    let csp = headers
-        .get("content-security-policy")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    assert!(csp.contains("script-src 'unsafe-inline'"), "{csp}");
-    assert!(csp.contains("connect-src http"), "{csp}");
+    let (status, headers, _) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("/f/protbot01.txt")
+    );
 }
 
 #[tokio::test]
@@ -1805,6 +1916,7 @@ async fn preview_missing_and_protected() {
         200,
         serde_json::json!({
             "protected": true,
+            "is_encrypted": true,
             "filename": "secret.mp4",
             "key_version": 1,
             "gateway_origin": "https://box.example",
@@ -1820,6 +1932,7 @@ async fn preview_missing_and_protected() {
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"preview\""));
+    assert!(page.contains("href=\"/f/prot0001?inline=1\">show anyways</a>"));
     
     assert!(page.contains("id=\"topdl\""));
     assert!(page.contains("id=\"topraw\""));
@@ -1906,7 +2019,7 @@ async fn hot_protected_shell_uses_local_ciphertext() {
     let (status, _, body) = get_public(&app, "/f/sec00001.mp4", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
-    assert!(page.contains("/c/sec00001"));
+    assert!(page.contains("/f/sec00001?inline=1"));
     assert!(!page.contains("https://r.example/hot/"));
 }
 

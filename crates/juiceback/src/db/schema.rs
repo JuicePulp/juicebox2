@@ -45,6 +45,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("files.tier_pinned", m15_files_tier_pinned),
     ("promo_state.embed_attempt", m16_promo_state_embed_attempt),
     ("files.video_meta", m17_files_video_meta),
+    ("fetch_jobs.total_bytes", m18_fetch_jobs_total_bytes),
 ];
 
 fn m14_ip_geolocation(conn: &Connection) -> Result<()> {
@@ -168,6 +169,14 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE fetch_jobs ADD COLUMN bytes_received INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    Ok(())
+}
+
+fn m18_fetch_jobs_total_bytes(conn: &Connection) -> Result<()> {
+    let _ = conn.execute(
+        "ALTER TABLE fetch_jobs ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0",
         [],
     );
     Ok(())

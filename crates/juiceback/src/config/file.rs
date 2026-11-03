@@ -136,8 +136,16 @@ pub struct CobaltFile {
     pub enabled: bool,
     #[serde(default = "default_cobalt_api_url")]
     pub api_url: String,
+
+    /// Extra instances that share the primary cobalt API key.
+    #[serde(default)]
+    pub api_urls: Vec<String>,
     #[serde(default)]
     pub session_api_url: Option<String>,
+
+    /// Extra instances that share `COBALT_SESSION_API_KEY`.
+    #[serde(default)]
+    pub session_api_urls: Vec<String>,
     #[serde(default = "default_fetch_empty_retry_delay")]
     pub fetch_empty_retry_delay_secs: u64,
 }
@@ -203,6 +211,8 @@ pub struct R2File {
 pub struct PromoFile {
     #[serde(default = "default_promo_interval_secs")]
     pub interval_secs: u64,
+    #[serde(default = "default_promo_cool_after_secs")]
+    pub cool_after_secs: i64,
     #[serde(default = "default_promo_min_views")]
     pub min_views: u64,
     #[serde(default = "default_promo_min_views_per_min")]
@@ -337,6 +347,10 @@ const fn default_promo_interval_secs() -> u64 {
     300
 }
 
+const fn default_promo_cool_after_secs() -> i64 {
+    30 * 60
+}
+
 const fn default_promo_min_views() -> u64 {
     50
 }
@@ -423,7 +437,9 @@ impl Default for CobaltFile {
         Self {
             enabled: false,
             api_url: default_cobalt_api_url(),
+            api_urls: Vec::new(),
             session_api_url: None,
+            session_api_urls: Vec::new(),
             fetch_empty_retry_delay_secs: default_fetch_empty_retry_delay(),
         }
     }
@@ -481,6 +497,7 @@ impl Default for PromoFile {
     fn default() -> Self {
         Self {
             interval_secs: default_promo_interval_secs(),
+            cool_after_secs: default_promo_cool_after_secs(),
             min_views: default_promo_min_views(),
             min_views_per_min: default_promo_min_views_per_min(),
             min_ttl_remaining_secs: default_promo_min_ttl_remaining_secs(),

@@ -1030,6 +1030,50 @@ fn hot_tier_migration_and_promo_flow() {
 }
 
 #[test]
+fn cool_candidates_track_last_activity() {
+    let conn = setup_db();
+    let rec = FileRecord::new(
+        "cool1".into(),
+        "clip.mp4".into(),
+        "video/mp4".into(),
+        1024,
+        "tok-cool".into(),
+        1000,
+        9_999_999_999,
+        None,
+        Some("https://f.juicey.dev".into()),
+    );
+    insert_file(&conn, &rec).unwrap();
+    set_file_tier(&conn, "cool1", "hot", "hot/cool1.mp4").unwrap();
+
+    let candidates = list_cool_candidates(&conn, 1000, 10).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, "cool1");
+    assert_eq!(candidates[0].last_activity_at, 1000);
+
+    upsert_promo_state(&conn, &[("cool1".to_string(), 0, 0, 5000)]).unwrap();
+    assert!(list_cool_candidates(&conn, 2000, 10).unwrap().is_empty());
+    assert_eq!(
+        list_cool_candidates(&conn, 5000, 10).unwrap()[0].last_activity_at,
+        5000
+    );
+
+    record_file_hit(&conn, "cool1", "ip", HitKind::View, 6000).unwrap();
+    assert!(list_cool_candidates(&conn, 5000, 10).unwrap().is_empty());
+    assert_eq!(
+        list_cool_candidates(&conn, 6000, 10).unwrap()[0].last_activity_at,
+        6000
+    );
+
+    set_file_tier_manual(&conn, "cool1", "hot", "hot/cool1.mp4").unwrap();
+    assert!(
+        list_cool_candidates(&conn, i64::MAX, 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn manual_tier_pins_and_skips_auto_promo() {
     let conn = setup_db();
     let rec = FileRecord::new(
@@ -1068,12 +1112,16 @@ fn manual_tier_pins_and_skips_auto_promo() {
         .unwrap()
         .is_empty());
 
-    set_file_tier_manual(&conn, "pin1", "standard", "").unwrap();
+    set_file_tier(&conn, "pin1", "standard", "").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();
-    assert!(got.tier_pinned);
-    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
-        .unwrap()
-        .is_empty());
+    assert_eq!(got.tier, "standard");
+    assert!(!got.tier_pinned);
+    assert_eq!(
+        list_promo_candidates(&conn, 9_999_999_000, 500)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]

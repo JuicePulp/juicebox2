@@ -172,6 +172,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/internal/bans/snapshot", post(handlers::push_snapshot))
         .route("/internal/file/{id}/promote", post(handlers::promote_file))
         .route("/internal/file/{id}/demote", post(handlers::demote_file))
+        .route(
+            "/internal/live/{id}/register",
+            post(handlers::register_live_upload),
+        )
+        .route(
+            "/internal/live/{id}",
+            delete(handlers::remove_live_upload),
+        )
         .merge(concat)
         .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
         .layer(middleware::from_fn_with_state(
@@ -195,7 +203,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/f/{*path}", get(handlers::serve_file_wildcard))
         .route("/d/{*path}", get(handlers::serve_file_download))
         .route("/v/{*path}", get(handlers::preview_file_wildcard))
-        .route("/c/{*path}", get(handlers::ciphertext_public))
+        .route("/e/{*path}", get(handlers::audio_embed_media))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             handlers::viewer_ip_middleware,
@@ -211,6 +219,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/ip", get(handlers::ip_handler))
         .route("/api/storage", get(handlers::storage_handler))
         .route("/api/config", get(handlers::config_handler))
+        .route("/api/upload-progress/{id}", get(handlers::upload_progress))
         .route("/api/openapi.json", get(openapi_json_handler))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

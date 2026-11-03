@@ -47,7 +47,7 @@ pub(crate) async fn run_bun_tier(
     let _ = state
         .db_call("update_fetch_job_progress", {
             let job_id = job_id.to_string();
-            move |db| db::update_fetch_job_progress(db, &job_id, "bun-fetch", "processing", 0)
+            move |db| db::update_fetch_job_progress(db, &job_id, "bun-fetch", "processing", 0, 0)
         })
         .await;
 

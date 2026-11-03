@@ -1,5 +1,5 @@
-import { playInContext } from "../audio/engine.js";
-import { resolveSound } from "../sounds/recipes.js";
+import { playInContext } from "../audio/engine.js?v=2.1.32";
+import { resolveSound } from "../sounds/recipes.js?v=2.1.32";
 const HOVER_GAP_MS = 150;
 const TYPE_GAP_MS = 40;
 const IME_KEY_CODE = 229;
@@ -157,7 +157,8 @@ export function bind(root) {
         if (!isTypingKey(key, found[0]) || throttled("type", TYPE_GAP_MS))
             return null;
         const [element, attr, fallback] = found;
-        return [element, attr, fallback, { key: keyRole(key.key) }];
+        const role = keyRole(key.key);
+        return [element, attr, role === "delete" ? "delete" : fallback, { key: role }];
     });
     listen(scope, "pointerenter", (event) => {
         const found = match(scope, event, "data-cuelume-hover", "select");

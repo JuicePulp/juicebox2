@@ -366,10 +366,21 @@ body.rtt-scrolllock {
   overflow: hidden !important;
 }
 
+/* JS measures the scrollbar width before locking the page and sets this
+   variable, keeping the layout from widening (and centered content from
+   jumping right) once the scrollbar is gone. */
+html.rtt-scrollbar-compensate {
+  padding-right: var(--rtt-scrollbar-width, 0px);
+}
+
 /* Extra guard while dragging: no panning starting anywhere in the pill. */
 .rtt-options.rtt-dragging,
 .rtt-options.rtt-dragging * {
   touch-action: none !important;
+}
+
+html[data-motion-reduce] .rttvalue-container [data-exit-clone] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -386,5 +397,9 @@ body.rtt-scrolllock {
   .animate-up-exit,
   .animate-down-exit {
     animation: none;
+  }
+
+  .rttvalue-container [data-exit-clone] {
+    display: none;
   }
 }

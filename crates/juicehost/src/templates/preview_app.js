@@ -10,6 +10,10 @@
       var done = false;
       var retriedPlain = false;
       var truncated = false;
+      var uploading = textview.getAttribute("data-uploading") === "1";
+      function retryLater() {
+        if (uploading && !done) setTimeout(loadMore, 1200);
+      }
       var decoder = new TextDecoder();
       var sentinel = document.createElement("div");
       sentinel.setAttribute("aria-hidden", "true");
@@ -22,6 +26,11 @@
         }
       }
       function fail() {
+        if (uploading) {
+          if (loaded === 0) textview.textContent = "Waiting for the first bytes...";
+          retryLater();
+          return;
+        }
         if (loaded === 0) textview.textContent = "Could not load a text preview.";
         done = true;
       }
@@ -49,13 +58,19 @@
         loading = true;
         try {
           var res = await fetch(raw, { headers: { "Range": "bytes=" + loaded + "-" + (loaded + stride - 1) } });
-          if (res.status === 416) { done = true; return; }
+          if (res.status === 416) {
+            if (uploading) { retryLater(); return; }
+            done = true;
+            return;
+          }
           if (!res.ok && res.status !== 206) throw new Error("bad status");
           parseTotal(res);
           var buf = new Uint8Array(await res.arrayBuffer());
           if (buf.length === 0) {
             loading = false;
-            if (loaded === 0 && !retriedPlain) {
+            if (uploading) {
+              retryLater();
+            } else if (loaded === 0 && !retriedPlain) {
               retriedPlain = true;
               await loadPlain();
             } else {
@@ -74,9 +89,12 @@
             done = true;
           }
           if (last || (total !== null && loaded >= total)) done = true;
+          if (!done && uploading) retryLater();
         } catch (e) {
           loading = false;
-          if (loaded === 0 && !retriedPlain) {
+          if (uploading) {
+            fail();
+          } else if (loaded === 0 && !retriedPlain) {
             retriedPlain = true;
             await loadPlain();
           } else {
@@ -87,6 +105,9 @@
           loading = false;
         }
       }
+      window.addEventListener("juicebox-upload-progress", function () {
+        if (!done && !loading) loadMore();
+      });
       if ("IntersectionObserver" in window) {
         new IntersectionObserver(function (entries) {
           if (entries.some(function (en) { return en.isIntersecting; })) loadMore();

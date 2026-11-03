@@ -1,4 +1,4 @@
-pub const REPO_URL: &str = "https://github.com/create-juicey-app/juicebox2";
+pub const REPO_URL: &str = "https://github.com/JuicePulp/juicebox2";
 
 pub fn commit_ref() -> &'static str {
     option_env!("JUICEFRONT_COMMIT_REF").unwrap_or("unknown")

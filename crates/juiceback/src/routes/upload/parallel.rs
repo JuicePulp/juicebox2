@@ -13,7 +13,7 @@ use super::{
     common::UploadResponse,
     ticket::{
         check_mint_limit, clamp_ttl_seconds, encrypted_client_ip, insert_owned_pending,
-        mint_ticket, pinned_region_host, public_url_for, public_urls_for, reject_blocked_filename,
+        mint_ticket, pinned_region_host, public_urls_for, reject_blocked_filename,
         ticket_ttl_secs,
     },
 };
@@ -31,8 +31,14 @@ pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
         .collect()
 }
 
-pub(crate) const DIRECT_MAX_PART_BYTES: u64 = 128 * 1024 * 1024;
+pub(crate) const DIRECT_MAX_PART_BYTES: u64 = 96 * 1024 * 1024;
 pub(crate) const DIRECT_MAX_PARTS: usize = 64;
+
+/// Cloudflare sits in front of the public juicehost URL and refuses request
+/// bodies over 100 MB, so a part must stay comfortably below that or the edge
+/// rejects the POST and the browser ends the upload with a 413 that never
+/// reached us. `TUS_PATCH_MAX_BYTES` is sized against the same limit.
+const _: () = assert!(DIRECT_MAX_PART_BYTES < 100 * 1024 * 1024);
 
 #[derive(serde::Deserialize, ToSchema)]
 pub struct DirectParallelReserveRequest {
@@ -145,8 +151,12 @@ pub async fn direct_parallel_reserve_handler(
         .as_deref()
         .unwrap_or_else(|| public_juicehost_url.trim_end_matches('/'));
     let mut parts = Vec::with_capacity(num_parts);
+    let mut live_parts = Vec::with_capacity(num_parts);
+    let mut part_offset = 0u64;
     for (i, part_size) in part_sizes.iter().enumerate() {
         let part_id = nanoid::nanoid!(8);
+        live_parts.push((part_id.clone(), part_offset, *part_size));
+        part_offset = part_offset.saturating_add(*part_size);
         let ticket = mint_ticket(
             &state,
             "browser",
@@ -180,6 +190,20 @@ pub async fn direct_parallel_reserve_handler(
         now,
         ttl_secs,
     )?;
+
+    if let Err(error) = crate::storage_client::register_live_upload(
+        &state,
+        &file_id,
+        &body.filename,
+        &body.mime_type,
+        body.file_size,
+        &live_parts,
+        region_juicehost.as_deref(),
+    )
+    .await
+    {
+        tracing::warn!("direct parallel live preview unavailable for {file_id}: {error}");
+    }
 
     let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
     Ok(Json(DirectParallelReserveResponse {
@@ -295,36 +319,60 @@ pub async fn direct_parallel_complete_handler(
     if body.part_ids.iter().any(|id| !seen.insert(id)) {
         return Err(AppError::BadRequest("duplicate part id".into()));
     }
-    let expected = direct_part_sizes(file.size_bytes as u64, body.part_ids.len());
-    let mut checked: Vec<String> = Vec::with_capacity(body.part_ids.len());
-    for (part_id, want) in body.part_ids.iter().zip(expected.iter()) {
-        let stored = crate::storage_client::stat_file_on_juicehost(
-            &state,
-            part_id,
-            file.storage_host.as_deref(),
-            Some(&file.delete_token),
-        )
-        .await
-        .map_err(AppError::JuicehostUnreachable)?
-        .ok_or_else(|| AppError::Conflict(format!("part {part_id} has not been uploaded yet")))?;
-        if stored != *want {
-            return Err(AppError::Conflict(format!(
-                "part {part_id} size mismatch: expected {want} bytes, got {stored}"
-            )));
-        }
-        checked.push(part_id.clone());
-    }
 
-    crate::storage_client::concat_files(
-        &state,
-        &file_id,
-        &file.filename,
-        &checked,
-        file.storage_host.as_deref(),
-        Some(&file.delete_token),
-    )
-    .await
-    .map_err(|e| AppError::Internal(format!("concat failed: {e}")))?;
+    // A browser that gave up waiting for a long merge retries this handler,
+    // possibly while the first attempt is still copying. Never fail that
+    // retry on parts the first attempt already merged away: if the target
+    // already holds the full file, the only thing left is the bookkeeping.
+    let expected_size = file.size_bytes as u64;
+    let mut merged = stat_target_size(&state, &file).await? == Some(expected_size);
+
+    if !merged {
+        let expected = direct_part_sizes(expected_size, body.part_ids.len());
+        let mut checked: Vec<String> = Vec::with_capacity(body.part_ids.len());
+        for (part_id, want) in body.part_ids.iter().zip(expected.iter()) {
+            match crate::storage_client::stat_file_on_juicehost(
+                &state,
+                part_id,
+                file.storage_host.as_deref(),
+                Some(&file.delete_token),
+            )
+            .await
+            .map_err(AppError::JuicehostUnreachable)?
+            {
+                Some(stored) if stored == *want => checked.push(part_id.clone()),
+                Some(stored) => {
+                    return Err(AppError::Conflict(format!(
+                        "part {part_id} size mismatch: expected {want} bytes, got {stored}"
+                    )));
+                }
+                None => {
+                    // The merge can land between the check above and this
+                    // stat; treat that race as success, not as a lost part.
+                    if stat_target_size(&state, &file).await? == Some(expected_size) {
+                        merged = true;
+                        break;
+                    }
+                    return Err(AppError::Conflict(format!(
+                        "part {part_id} has not been uploaded yet"
+                    )));
+                }
+            }
+        }
+
+        if !merged {
+            crate::storage_client::concat_files(
+                &state,
+                &file_id,
+                &file.filename,
+                &checked,
+                file.storage_host.as_deref(),
+                Some(&file.delete_token),
+            )
+            .await
+            .map_err(|e| AppError::Internal(format!("concat failed: {e}")))?;
+        }
+    }
 
     let filename = file.filename.clone();
     let mime_type = file.mime_type.clone();
@@ -358,6 +406,18 @@ pub async fn direct_parallel_complete_handler(
     Ok(ready_response())
 }
 
+/// Size of the merged file on juicehost, or `None` when it does not exist yet.
+async fn stat_target_size(state: &Arc<AppState>, file: &FileRecord) -> Result<Option<u64>, AppError> {
+    crate::storage_client::stat_file_on_juicehost(
+        state,
+        &file.id,
+        file.storage_host.as_deref(),
+        Some(&file.delete_token),
+    )
+    .await
+    .map_err(AppError::JuicehostUnreachable)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +444,20 @@ mod tests {
     #[test]
     fn part_sizes_single_part() {
         assert_eq!(direct_part_sizes(7, 1), vec![7]);
+    }
+
+    #[test]
+    fn part_sizes_stay_under_edge_body_limit() {
+        // The largest file the host advertises (5 GiB) must still slice into
+        // parts the edge will accept, within the part-count ceiling.
+        let max = 5 * 1024 * 1024 * 1024_u64;
+        let parts = (max.div_ceil(DIRECT_MAX_PART_BYTES) as usize).max(2);
+        assert!(
+            parts <= DIRECT_MAX_PARTS,
+            "5 GiB needs {parts} parts, cap is {DIRECT_MAX_PARTS}"
+        );
+        for size in direct_part_sizes(max, parts) {
+            assert!(size <= DIRECT_MAX_PART_BYTES, "part of {size} bytes");
+        }
     }
 }

@@ -168,7 +168,7 @@ pub(crate) async fn run_ytdlp_tier(
     let _ = state
         .db_call("update_fetch_job_progress", {
             let job_id = job_id.to_string();
-            move |db| db::update_fetch_job_progress(db, &job_id, "yt-dlp", "processing", 0)
+            move |db| db::update_fetch_job_progress(db, &job_id, "yt-dlp", "processing", 0, 0)
         })
         .await;
 
@@ -199,7 +199,7 @@ pub(crate) async fn run_ytdlp_tier(
             .db_call("update_fetch_job_progress", {
                 let job_id = job_id.to_string();
                 let stage = stage_tag.to_string();
-                move |db| db::update_fetch_job_progress(db, &job_id, &stage, "processing", 0)
+                move |db| db::update_fetch_job_progress(db, &job_id, &stage, "processing", 0, 0)
             })
             .await;
 

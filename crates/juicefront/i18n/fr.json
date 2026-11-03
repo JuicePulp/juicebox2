@@ -52,15 +52,17 @@
   "upload.cobalt_placeholder": "Collez un lien YouTube, TikTok ou autre média ici...",
   "upload.cobalt_fetch": "Récupérer",
   "upload.cobalt_queued": "En file...",
+  "upload.cobalt_contacting": "Contact des serveurs de récupération...",
   "upload.cobalt_fetching": "Récupération du média...",
+  "upload.cobalt_downloading": "Téléchargement... {percent} %",
+  "upload.cobalt_converting": "Conversion de l’audio...",
   "upload.cobalt_relay": "Sauvetage via le serveur secondaire...",
   "upload.cobalt_retry": "YouTube verrouille cette vidéo, nouvel essai (passe {n})...",
   "upload.cobalt_gone": "Tâche expirée. Réessayez.",
   "upload.cobalt_audio_only": "Audio seul",
   "upload.cobalt_quality": "Qualité :",
   "upload.cobalt_format": "Format :",
-  "upload.cobalt_container": "Conteneur :",
-  "upload.cobalt_better_audio": "Qualité audio :",
+  "upload.cobalt_better_audio": "Qualité :",
   "upload.initializing": "Initialisation...",
   "upload.initializing_tus": "Initialisation TUS...",
   "upload.uploading": "Envoi... {percent} %",
@@ -347,6 +349,8 @@
   "upload.password_relay": "Protected uploads use the secure relay and are slower.",
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
-  "report.password_hint": "Optional: lets moderators review protected files."
+  "report.password_hint": "Optional: lets moderators review protected files.",
+  "upload.zipping": "Compression du dossier…",
+  "error.folder_empty": "Ce dossier est vide."
  }
 }

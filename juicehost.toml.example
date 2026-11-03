@@ -40,7 +40,7 @@ allow_http = false
 [r2]
 # Hot-tier overflow (e.g. Cloudflare R2) for popular files. Promoted copies
 # are written here by juiceback's velocity / embed promoters; hot bytes are
-# served from R2 under the existing /f/ + /d/ + /c/ URLs (no public /hot/
+# served from R2 under the existing /f/ + /d/ URLs (no public /hot/
 # endpoint — the bucket can stay private). All unset = hot-tier disabled.
 # bucket = "juicebox-hot"
 # endpoint = "https://<account-id>.r2.cloudflarestorage.com"
@@ -70,6 +70,23 @@ file_cache_enabled = false
 file_cache_max_age_secs = 86400
 default_ttl_hours = 24.0
 allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
+
+[audio_embed]
+# Discord cannot render audio attachments in link embeds. For audio files we
+# generate a static video card (H.264 plus the original audio stream) with a
+# thumbnail, tags, and a progress bar so Discord shows a playable video embed
+# on /v/ links. Generated files are cached under cache_dir and pruned by
+# age/size. max_seconds = 0 means full track.
+enabled = true
+max_seconds = 0
+max_source_mb = 256
+cache_dir = "./audio-embeds"
+cache_max_mb = 512
+width = 640
+height = 360
+max_concurrent = 2
+timeout_seconds = 120
+ffmpeg_bin = "ffmpeg"
 
 [ban]
 # Static ban list loaded once at startup. Runtime updates are pushed by juiceback.

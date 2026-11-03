@@ -186,7 +186,7 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
     let stale_ids: Vec<String> = state
         .tus
         .iter()
-        .filter(|e| now - e.created_at > crate::constants::STALE_UPLOAD_TIMEOUT_SECS)
+        .filter(|e| now - e.last_activity > crate::constants::STALE_UPLOAD_TIMEOUT_SECS)
         .map(|e| e.id.clone())
         .collect();
     for id in &stale_ids {
@@ -215,11 +215,21 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         state.part_sessions.remove(sid);
     }
 
+    // A reservation row is created when the upload starts, but the transfer
+    // itself can easily take longer than the stale timeout on a slow link.
+    // Keep rows that are still owned by a live TUS session; they are reaped
+    // on a later pass once the session is gone (idle timeout or restart).
+    let active_reserves: std::collections::HashSet<String> = state
+        .tus
+        .iter()
+        .filter_map(|entry| entry.value().reserve_id.clone())
+        .collect();
+
     let mut cursor = String::new();
     loop {
         let state4 = Arc::clone(state);
         let page_cursor = cursor.clone();
-        let abandoned =
+        let records =
             match tokio::task::spawn_blocking(move || -> Result<Vec<db::FileRecord>, AppError> {
                 let db = state4
                     .db
@@ -246,11 +256,21 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
                 }
             };
 
-        if abandoned.is_empty() {
+        if records.is_empty() {
             break;
         }
-        let full_page = abandoned.len() >= crate::constants::CLEANUP_BATCH_SIZE;
-        cursor = abandoned.last().map(|r| r.id.clone()).unwrap_or_default();
+        let full_page = records.len() >= crate::constants::CLEANUP_BATCH_SIZE;
+        cursor = records.last().map(|r| r.id.clone()).unwrap_or_default();
+        let abandoned: Vec<db::FileRecord> = records
+            .into_iter()
+            .filter(|record| !active_reserves.contains(&record.id))
+            .collect();
+        if abandoned.is_empty() {
+            if !full_page {
+                break;
+            }
+            continue;
+        }
         tracing::info!(
             "cleanup: purging batch of {} abandoned uploads (0B, never completed)",
             abandoned.len()

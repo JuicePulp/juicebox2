@@ -10,18 +10,23 @@ export function paintDitherOverlay(zone) {
   var rect = zone.getBoundingClientRect();
   var w = Math.max(1, Math.round(rect.width));
   var h = Math.max(1, Math.round(rect.height));
+  var extra = Math.max(1, Math.round(h * 0.16));
+  var canvasH = h + extra;
   var canvas = document.createElement("canvas");
   canvas.className = "dither-layer";
   canvas.width = w;
-  canvas.height = h;
+  canvas.height = canvasH;
+  canvas.style.height = canvasH + "px";
+  canvas.style.top = "0";
+  canvas.style.bottom = "auto";
   var ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  var img = ctx.createImageData(w, h);
+  var img = ctx.createImageData(w, canvasH);
   var data = img.data;
-  var top = Math.floor(h * 0.8);
-  for (var y = 0; y < h; y++) {
-    var t = y <= top ? 0 : (y - top) / Math.max(1, h - 1 - top);
-    var g = Math.min(1, t * 1.4);
+  var top = Math.floor(h * 0.55);
+  for (var y = 0; y < canvasH; y++) {
+    var t = y <= top ? 0 : (y - top) / Math.max(1, canvasH - 1 - top);
+    var g = Math.min(1, t * 1.15);
     for (var x = 0; x < w; x++) {
       var threshold = BAYER_4X4[y % 4][x % 4] / 16;
       var idx = (y * w + x) * 4;

@@ -14,6 +14,7 @@ fn row_to_fetch_job(row: &rusqlite::Row) -> rusqlite::Result<FetchJob> {
         updated_at: row.get(7)?,
         stage: row.get(8)?,
         bytes_received: row.get(9)?,
+        total_bytes: row.get(10)?,
     })
 }
 
@@ -32,7 +33,7 @@ pub fn insert_fetch_job(
 
 pub fn get_fetch_job(conn: &Connection, id: &str) -> Result<Option<FetchJob>> {
     let mut stmt = conn.prepare(
-        "SELECT id, user_id, source_url, status, error, file_id, created_at, updated_at, stage, bytes_received FROM fetch_jobs WHERE id = ?1",
+        "SELECT id, user_id, source_url, status, error, file_id, created_at, updated_at, stage, bytes_received, total_bytes FROM fetch_jobs WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
@@ -62,12 +63,13 @@ pub fn update_fetch_job_progress(
     stage: &str,
     status: &str,
     bytes_received: i64,
+    total_bytes: i64,
 ) -> Result<()> {
     conn.execute(
         "UPDATE fetch_jobs SET stage = ?2, status = ?3, bytes_received = ?4, \
-         updated_at = unixepoch() \
+         total_bytes = ?5, updated_at = unixepoch() \
          WHERE id = ?1 AND status IN ('pending', 'processing', 'downloading')",
-        params![id, stage, status, bytes_received],
+        params![id, stage, status, bytes_received, total_bytes],
     )?;
     Ok(())
 }

@@ -58,15 +58,17 @@
   "upload.cobalt_placeholder": "Add your video links from YouTube, TikTok, or other social platforms to upload them into Juicebox!",
   "upload.cobalt_fetch": "Fetch",
   "upload.cobalt_queued": "Queued...",
+  "upload.cobalt_contacting": "Contacting fetch servers...",
   "upload.cobalt_fetching": "Fetching media...",
+  "upload.cobalt_downloading": "Downloading... {percent}%",
+  "upload.cobalt_converting": "Converting audio...",
   "upload.cobalt_relay": "Rescuing via secondary server...",
   "upload.cobalt_retry": "YouTube is gating this video, retrying (pass {n})...",
   "upload.cobalt_gone": "Fetch job expired. Try again.",
   "upload.cobalt_audio_only": "Audio only",
   "upload.cobalt_quality": "Quality:",
   "upload.cobalt_format": "Format:",
-  "upload.cobalt_container": "Container:",
-  "upload.cobalt_better_audio": "Audio quality:",
+  "upload.cobalt_better_audio": "Quality:",
   "upload.initializing": "Initializing...",
   "upload.initializing_tus": "Initializing TUS...",
   "upload.uploading": "Uploading... {percent}%",
@@ -347,6 +349,8 @@
   "hostsel.applied": "Host applied",
   "hostsel.add_title": "Run a node?",
   "hostsel.add_desc": "Host your own JuiceHost node and get it listed here.",
-  "hostsel.add_btn": "Add your own"
+  "hostsel.add_btn": "Add your own",
+  "upload.zipping": "Zipping folder…",
+  "error.folder_empty": "That folder is empty."
  }
 }

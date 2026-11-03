@@ -112,6 +112,7 @@ impl ShellMode {
 
 pub(crate) enum GateDecision {
     Respond(Response<Body>),
+    Ciphertext,
     HotServe {
         key: String,
         meta: Option<BackendFileMeta>,
@@ -182,6 +183,7 @@ pub(crate) async fn gate_decision(
     id: &str,
     mode: ShellMode,
     page_url: Option<&str>,
+    raw_ciphertext: bool,
 ) -> GateDecision {
     if state.backend_url.is_none() {
         return GateDecision::ServeLocal { meta: None };
@@ -190,6 +192,16 @@ pub(crate) async fn gate_decision(
         BackendStatus::Known(body)
             if body.get("protected").and_then(|v| v.as_bool()) == Some(true) =>
         {
+            let encrypted = body
+                .get("is_encrypted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if raw_ciphertext
+                && encrypted
+                && matches!(mode, ShellMode::View | ShellMode::Download)
+            {
+                return GateDecision::Ciphertext;
+            }
             let filename = body
                 .get("filename")
                 .and_then(|v| v.as_str())
@@ -209,7 +221,7 @@ pub(crate) async fn gate_decision(
                 .and_then(|v| v.as_u64())
                 .map(super::preview::human_size)
                 .unwrap_or_default();
-            let ciphertext_url = format!("/c/{id}");
+            let ciphertext_url = format!("/f/{id}");
             GateDecision::Respond(render_shell(
                 &filename,
                 id,
@@ -219,6 +231,7 @@ pub(crate) async fn gate_decision(
                 &size_label,
                 mode,
                 page_url,
+                encrypted,
             ))
         }
         BackendStatus::Known(body) => {
@@ -246,8 +259,9 @@ pub(crate) async fn protected_shell_response(
     mode: ShellMode,
     page_url: Option<&str>,
 ) -> (Option<Response<Body>>, Option<BackendFileMeta>) {
-    match gate_decision(state, id, mode, page_url).await {
+    match gate_decision(state, id, mode, page_url, false).await {
         GateDecision::Respond(resp) => (Some(resp), None),
+        GateDecision::Ciphertext => (None, None),
         GateDecision::HotServe { meta, .. } | GateDecision::ServeLocal { meta } => (None, meta),
     }
 }
@@ -278,6 +292,7 @@ fn render_shell(
     size_label: &str,
     mode: ShellMode,
     page_url: Option<&str>,
+    show_anyways: bool,
 ) -> Response<Body> {
     
     
@@ -336,8 +351,13 @@ fn render_shell(
             "__BRAND__",
             &juiceutils::web::brand_html(LOGO_DATA_URI.trim()),
         )
-        .replace("__DL_ICON_SVG__", juiceutils::icons::DOWNLOAD_ART)
         .replace("__APP_JS__", SHELL_APP_JS.trim_end())
+        .replace("__DL_ICON_SVG__", juiceutils::icons::DOWNLOAD_ART)
+        .replace("__CHECK_ICON_SVG__", juiceutils::icons::CHECK)
+        .replace(
+            "__SHOW_ANYWAYS_HIDDEN__",
+            if show_anyways { "" } else { " hidden" },
+        )
         .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
         .replace("__FILE_ID__", &escape_html(id))
         .replace("__FILENAME__", &escape_html(filename))

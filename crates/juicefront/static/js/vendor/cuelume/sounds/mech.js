@@ -1,4 +1,4 @@
-import { BAR, contact, knock, struck } from "./recipes.js";
+import { BAR, contact, knock, struck } from "./recipes.js?v=2.1.32";
 export const MECH = {
     tap: {
         masterGain: 0.661,
@@ -19,6 +19,14 @@ export const MECH = {
             { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 330, filterQ: 2.5, attack: 0.001, decay: 0.02, peak: 0.3 },
         ],
         vary: { pitch: 0.05, level: 0.15 },
+    },
+    delete: {
+        masterGain: 0.5,
+        layers: [
+            { kind: "noise", filterType: "bandpass", filterFrequency: 1200, filterQ: 2, attack: 0.001, decay: 0.012, peak: 0.24 },
+            knock(220, 0.03, 0.04),
+            { from: "strong", kind: "noise", filterType: "bandpass", filterFrequency: 320, filterQ: 2.5, attack: 0.001, decay: 0.03, peak: 0.28 },
+        ],
     },
     select: {
         masterGain: 0.495,
