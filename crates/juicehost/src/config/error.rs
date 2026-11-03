@@ -6,6 +6,9 @@ pub enum ConfigError {
     #[error("TTL values must be finite, positive, and include DEFAULT_TTL_HOURS")]
     InvalidTtlConfiguration,
 
+    #[error("invalid audio embed configuration")]
+    InvalidAudioEmbedConfiguration,
+
     #[error("{0}")]
     InvalidTrustedProxyCidrs(String),
 

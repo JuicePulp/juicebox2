@@ -1,6 +1,6 @@
 import { formatMaxSize } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
-import { setSoundEnabled } from "./sounds.js";
+import { setSoundEnabled } from "./sounds.js?v=2.1.32";
 import { hapticsEnabled, setHapticsEnabled } from "./haptics.js";
 import { paintDitherOverlay, clearDitherOverlay, repaintDitherOverlay } from "./dither.js";
 

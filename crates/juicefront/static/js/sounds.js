@@ -1,4 +1,4 @@
-import { bind, play, setEnabled } from "./vendor/cuelume/index.js";
+import { bind, play, setEnabled } from "./vendor/cuelume/index.js?v=2.1.32";
 
 var STORE_KEY = "juicebox_sound";
 var lastBurst = Object.create(null);
@@ -60,7 +60,13 @@ try {
 } catch {}
 
 try {
-  bind();
+  // A page can end up with both the versioned entry module and an older
+  // unversioned copy from the module cache. Bind the document only once so
+  // key and pointer cues do not play twice.
+  if (typeof window !== "undefined" && !window.__juiceboxCuelumeBound) {
+    window.__juiceboxCuelumeBound = true;
+    bind();
+  }
 } catch {}
 applyEnabled(storedEnabled());
 

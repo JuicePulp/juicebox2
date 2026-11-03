@@ -1,6 +1,29 @@
 use super::{metadata::*, parallel::collect_ordered_parts};
 use crate::{error::AppError, upload_mode::UploadMode};
 
+fn part_session(total_parts: usize, declared_size: u64) -> crate::tus::PartSession {
+    crate::tus::PartSession {
+        session_id: "session".into(),
+        total_parts,
+        filename: "file.bin".into(),
+        mime_type: "application/octet-stream".into(),
+        hashed_ip: "hash".into(),
+        storage_host: None,
+        ttl_hours: 24.0,
+        reserve_id: None,
+        reservation_token: None,
+        capability: "capability".into(),
+        user_id: "user-1".into(),
+        upload_mode: UploadMode::Standard,
+        declared_size: std::sync::atomic::AtomicU64::new(declared_size),
+        finalized_parts: dashmap::DashMap::new(),
+        finalizing: std::sync::atomic::AtomicBool::new(false),
+        part_ids: dashmap::DashMap::new(),
+        part_lengths: dashmap::DashMap::new(),
+        completion_reserve_id: std::sync::Mutex::new(None),
+    }
+}
+
 #[test]
 fn parse_tus_metadata_empty() {
     let result = parse_tus_metadata(None);
@@ -78,25 +101,7 @@ fn parallel_metadata_requires_complete_bounded_tuple() {
 
 #[test]
 fn ordered_parts_use_actual_declared_lengths() {
-    let session = crate::tus::PartSession {
-        session_id: "session".into(),
-        total_parts: 3,
-        filename: "file.bin".into(),
-        mime_type: "application/octet-stream".into(),
-        hashed_ip: "hash".into(),
-        storage_host: None,
-        ttl_hours: 24.0,
-        reserve_id: None,
-        reservation_token: None,
-        capability: "capability".into(),
-        user_id: "user-1".into(),
-        upload_mode: UploadMode::Standard,
-        declared_size: std::sync::atomic::AtomicU64::new(17),
-        completed: std::sync::atomic::AtomicUsize::new(3),
-        part_ids: dashmap::DashMap::new(),
-        part_lengths: dashmap::DashMap::new(),
-        completion_reserve_id: std::sync::Mutex::new(None),
-    };
+    let session = part_session(3, 17);
     session.part_ids.insert(2, "part-c".into());
     session.part_ids.insert(0, "part-a".into());
     session.part_ids.insert(1, "part-b".into());
@@ -107,6 +112,33 @@ fn ordered_parts_use_actual_declared_lengths() {
     let (ids, size) = collect_ordered_parts(&session, 3).unwrap();
     assert_eq!(ids, vec!["part-a", "part-b", "part-c"]);
     assert_eq!(size, 17);
+}
+
+#[test]
+fn duplicate_part_completion_does_not_finalize_early() {
+    use super::parallel::note_part_finalized;
+
+    let session = part_session(3, 30);
+    // Part 0 retried twice, part 1 once: three *events* but only two distinct
+    // parts. The old counter treated this as a complete session and merged
+    // while part 2 was still missing.
+    assert!(!note_part_finalized(&session, 0, 3));
+    assert!(!note_part_finalized(&session, 0, 3));
+    assert!(!note_part_finalized(&session, 1, 3));
+    assert!(note_part_finalized(&session, 2, 3));
+}
+
+#[test]
+fn every_distinct_part_finalizes_once() {
+    use super::parallel::note_part_finalized;
+
+    let session = part_session(3, 30);
+    assert!(!note_part_finalized(&session, 0, 3));
+    assert!(!note_part_finalized(&session, 1, 3));
+    assert!(note_part_finalized(&session, 2, 3));
+    // A retried final PATCH still reports "all finalized", never more than.
+    assert!(note_part_finalized(&session, 2, 3));
+    assert!(!note_part_finalized(&session, 9, 3));
 }
 
 #[test]

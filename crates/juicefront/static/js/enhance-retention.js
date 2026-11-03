@@ -1,8 +1,8 @@
-import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js";
+import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.1.32";
 import { ttlLabel } from "./i18n.js";
-import { playSound } from "./sounds.js";
-import { soundEnabled } from "./sounds.js";
-import { play } from "./vendor/cuelume/index.js";
+import { playSound } from "./sounds.js?v=2.1.32";
+import { soundEnabled } from "./sounds.js?v=2.1.32";
+import { play } from "./vendor/cuelume/index.js?v=2.1.32";
 import { haptic } from "./haptics.js";
 
 function scrubTick(direction) {
@@ -26,15 +26,27 @@ function retentionTick() {
 
 function lockPageScroll() {
   try {
+    const root = document.documentElement;
+    // Hiding the page scrollbar widens the viewport by its width, which makes
+    // centered content jump to the right. Reserve that width on <html> for as
+    // long as the lock is active so the layout stays put.
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+    if (scrollbarWidth > 0) {
+      root.style.setProperty("--rtt-scrollbar-width", `${scrollbarWidth}px`);
+      root.classList.add("rtt-scrollbar-compensate");
+    }
     document.body.classList.add("rtt-scrolllock");
-    document.documentElement.classList.add("rtt-scrolllock");
+    root.classList.add("rtt-scrolllock");
   } catch {}
 }
 
 function unlockPageScroll() {
   try {
     document.body.classList.remove("rtt-scrolllock");
-    document.documentElement.classList.remove("rtt-scrolllock");
+    const root = document.documentElement;
+    root.classList.remove("rtt-scrolllock");
+    root.classList.remove("rtt-scrollbar-compensate");
+    root.style.removeProperty("--rtt-scrollbar-width");
   } catch {}
 }
 
@@ -173,6 +185,17 @@ function splitRetentionLabel(label) {
   };
 }
 
+function prefersReducedMotion() {
+  try {
+    if (document.documentElement.hasAttribute("data-motion-reduce")) return true;
+  } catch {}
+  try {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch {
+    return false;
+  }
+}
+
 function ensureValueWrap(labelGroup) {
   let wrap = labelGroup.querySelector(".rttvalue-container");
   if (!wrap) {
@@ -231,10 +254,39 @@ export function enhanceRetention(card, locale = "en") {
     const enterClass = isUp ? "animate-up-enter" : "animate-down-enter";
     const old = splitRetentionLabel(labels[lastIndex] || "");
 
+    // Drop any exit clones still animating before querying the live nodes.
+    // Otherwise a stale suffix clone can be picked instead of the live one,
+    // leaving two suffixes behind ("7 dayss") when scrubbing faster than the
+    // 200ms exit animation.
+    clearTimeout(cleanupTimer);
+    wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
+
     const numberEl = wrapper.querySelector(".rttnumber");
     const baseEl = wrapper.querySelector(".rttunit-base");
     let suffixEl = wrapper.querySelector(".rttunit-s");
     const baseChanged = old.base !== nw.base;
+    const suffixChanges = old.hasS !== nw.hasS || old.base !== nw.base;
+
+    if (prefersReducedMotion()) {
+      numberEl.textContent = nw.number;
+      numberEl.className = "rttnumber";
+      baseEl.textContent = nw.base;
+      baseEl.className = "rttunit-base";
+      if (suffixChanges) {
+        if (suffixEl) {
+          suffixEl.remove();
+          suffixEl = null;
+        }
+        if (nw.hasS) {
+          const s = document.createElement("span");
+          s.className = "rttunit-s";
+          s.textContent = "s";
+          wrapper.appendChild(s);
+        }
+      }
+      lastIndex = i;
+      return;
+    }
 
     const wr = wrapper.getBoundingClientRect();
     const toRemove = [];
@@ -253,13 +305,10 @@ export function enhanceRetention(card, locale = "en") {
       wrapper.appendChild(exit);
       toRemove.push(exit);
     };
-    clearTimeout(cleanupTimer);
-    wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
 
     cloneExit(numberEl, "rttnumber " + exitClass);
     if (baseChanged) cloneExit(baseEl, "rttunit-base " + exitClass);
 
-    const suffixChanges = old.hasS !== nw.hasS || old.base !== nw.base;
     if (suffixChanges && suffixEl) {
       cloneExit(suffixEl, "rttunit-s " + exitClass);
       suffixEl.remove();
@@ -319,7 +368,7 @@ export function enhanceRetention(card, locale = "en") {
     numberEl.textContent = prevNumber;
     baseEl.textContent = prevBase;
     const current = splitRetentionLabel(labels[lastIndex] || "");
-    if (current.hasS && !wrapper.querySelector(".rttunit-s")) {
+    if (current.hasS && !wrapper.querySelector(".rttunit-s:not([data-exit-clone])")) {
       const s = document.createElement("span");
       s.className = "rttunit-s";
       s.textContent = "s";

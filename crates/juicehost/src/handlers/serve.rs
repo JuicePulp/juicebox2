@@ -1,17 +1,18 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::{Duration, Instant}};
 
 use axum::{
     body::Body,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use bytes::Bytes;
 use futures::StreamExt;
 
 use super::{
     common::backend_request,
     preview::is_bot,
-    shell::{GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
+    shell::{BackendFileMeta, GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
     stats::{ViewerIp, report_file_hit},
 };
 use crate::{
@@ -22,6 +23,89 @@ use crate::{
 };
 
 const FILE_CACHE_CONTROL: &str = "no-store";
+
+fn download_filename(
+    id: &str,
+    extension: &str,
+    backend_meta: Option<&BackendFileMeta>,
+) -> String {
+    if let Some(name) = backend_meta
+        .and_then(|meta| meta.filename.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        let name = name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(name)
+            .chars()
+            .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
+            .take(255)
+            .collect::<String>();
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    if extension.is_empty() {
+        id.to_string()
+    } else {
+        format!("{id}.{extension}")
+    }
+}
+
+fn encode_rfc5987(value: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'!'
+            | b'#'
+            | b'$'
+            | b'&'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~' => out.push(char::from(byte)),
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+    }
+    out
+}
+
+fn content_disposition_value(disposition: &str, name: &str) -> String {
+    if name.is_ascii() {
+        return format!("{disposition}; filename=\"{name}\"");
+    }
+    let fallback = name
+        .chars()
+        .map(|c| if c.is_ascii() { c } else { '_' })
+        .collect::<String>();
+    format!(
+        "{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{}",
+        encode_rfc5987(name)
+    )
+}
+
+/// Raw (`/f/`) responses keep the original filename without forcing a
+/// download, so `curl -OJ` and browsers save the file with its real name and
+/// extension instead of the bare file ID.
+fn disposition_for(force_download: bool) -> &'static str {
+    if force_download {
+        "attachment"
+    } else {
+        "inline"
+    }
+}
 
 #[must_use]
 pub(crate) fn file_cache_control_value(
@@ -52,6 +136,323 @@ fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
     response
 }
 
+struct LiveReadState {
+    offset: u64,
+    end: u64,
+    idle: Instant,
+    wait: bool,
+    permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+async fn read_live_at(
+    state: &AppState,
+    id: &str,
+    offset: u64,
+    max_len: u64,
+) -> Result<Option<Bytes>, String> {
+    if max_len == 0 {
+        return Ok(None);
+    }
+
+    // Once the real object exists, it is always the best source. This also
+    // handles the short transition between "last part uploaded" and "concat
+    // finished" without exposing deleted part files.
+    if let Ok(meta) = state.storage.stat(id).await
+        && offset < meta.size
+    {
+        let end = offset.saturating_add(max_len - 1).min(meta.size - 1);
+        let mut stream = state
+            .storage
+            .get_range_stream(id, offset, end)
+            .await
+            .map_err(|e| e.to_string())?;
+        return match stream.next().await {
+            Some(Ok(bytes)) => Ok(Some(bytes)),
+            Some(Err(e)) => Err(e.to_string()),
+            None => Ok(None),
+        };
+    }
+
+    let Some(source) = state.live_uploads.source_at(id, offset) else {
+        return Ok(None);
+    };
+    let available = source.end.saturating_sub(offset);
+    let len = available.min(max_len);
+    if len == 0 {
+        return Ok(None);
+    }
+
+    if source.ready {
+        let local_start = offset.saturating_sub(source.base_offset);
+        let local_end = local_start.saturating_add(len - 1);
+        let Ok(mut stream) = state
+            .storage
+            .get_range_stream(&source.upload_id, local_start, local_end)
+            .await
+        else {
+            return Ok(None);
+        };
+        return match stream.next().await {
+            Some(Ok(bytes)) => Ok(Some(bytes)),
+            Some(Err(e)) => Err(e.to_string()),
+            None => Ok(None),
+        };
+    }
+
+    let Some(path) = state.storage.live_path(&source.upload_id) else {
+        return Ok(None);
+    };
+    let Ok(mut file) = tokio::fs::File::open(&path).await else {
+        return Ok(None);
+    };
+    let Ok(meta) = file.metadata().await else {
+        return Ok(None);
+    };
+    let local_start = offset.saturating_sub(source.base_offset);
+    if local_start >= meta.len() {
+        return Ok(None);
+    }
+    let read_len = len.min(meta.len() - local_start);
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    file.seek(std::io::SeekFrom::Start(local_start))
+        .await
+        .map_err(|e| format!("live seek failed: {e}"))?;
+    let mut buf = vec![0u8; read_len as usize];
+    let n = file
+        .read(&mut buf)
+        .await
+        .map_err(|e| format!("live read failed: {e}"))?;
+    if n == 0 {
+        return Ok(None);
+    }
+    buf.truncate(n);
+    Ok(Some(Bytes::from(buf)))
+}
+
+fn live_body_stream(
+    state: Arc<AppState>,
+    id: String,
+    start: u64,
+    end: u64,
+    wait: bool,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Body {
+    let stream = futures::stream::unfold(
+        LiveReadState {
+            offset: start,
+            end,
+            idle: Instant::now(),
+            wait,
+            permit,
+        },
+        move |mut read| {
+            let state = Arc::clone(&state);
+            let id = id.clone();
+            async move {
+                if read.offset > read.end {
+                    return None;
+                }
+                loop {
+                    let remaining = read.end.saturating_sub(read.offset).saturating_add(1);
+                    match read_live_at(&state, &id, read.offset, remaining.min(256 * 1024)).await {
+                        Ok(Some(bytes)) if !bytes.is_empty() => {
+                            read.offset = read.offset.saturating_add(bytes.len() as u64);
+                            read.idle = Instant::now();
+                            return Some((Ok(bytes), read));
+                        }
+                        Ok(_) => {
+                            let progress = state.live_uploads.progress(&id);
+                            if progress.as_ref().is_some_and(|p| p.complete)
+                                && progress
+                                    .as_ref()
+                                    .is_some_and(|p| p.available <= read.offset)
+                            {
+                                return None;
+                            }
+                            if !read.wait {
+                                return None;
+                            }
+                            if read.idle.elapsed() > Duration::from_secs(120) {
+                                return Some((
+                                    Err(std::io::Error::new(
+                                        std::io::ErrorKind::TimedOut,
+                                        "upload stalled",
+                                    )),
+                                    read,
+                                ));
+                            }
+                            state
+                                .live_uploads
+                                .wait_for_change(&id, Duration::from_millis(250))
+                                .await;
+                        }
+                        Err(error) => {
+                            return Some((Err(std::io::Error::other(error)), read));
+                        }
+                    }
+                }
+            }
+        },
+    );
+    Body::from_stream(stream)
+}
+
+async fn serve_live_upload(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    method: &Method,
+    id: &str,
+    force_download: bool,
+    viewer_ip: &Option<String>,
+) -> Result<Option<Response<Body>>, JuicehostError> {
+    let Some(snapshot) = state.live_uploads.snapshot(id) else {
+        return Ok(None);
+    };
+    if snapshot.total_size == 0 {
+        return Ok(None);
+    }
+
+    let extension = storage::extract_extension(&snapshot.filename).to_ascii_lowercase();
+    let mime = if snapshot.mime.trim().is_empty() {
+        storage::guess_mime(&extension)
+    } else {
+        snapshot.mime.clone()
+    };
+    let backend_meta = BackendFileMeta {
+        filename: Some(snapshot.filename.clone()),
+        title: None,
+        author: None,
+    };
+    let download_name = download_filename(id, &extension, Some(&backend_meta));
+    let with_headers = |mut builder: axum::http::response::Builder| {
+        builder = builder.header(header::CACHE_CONTROL, FILE_CACHE_CONTROL);
+        builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+        builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
+        builder = builder.header("x-juicebox-uploading", "1");
+        builder = builder.header("x-juicebox-uploaded", snapshot.uploaded.to_string());
+        builder = builder.header("x-juicebox-total", snapshot.total_size.to_string());
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            content_disposition_value(disposition_for(force_download), &download_name),
+        );
+        builder
+    };
+
+    let is_head = *method == Method::HEAD;
+    let count_hit = |viewer_ip: &Option<String>| {
+        if *method != Method::GET || is_bot(headers) {
+            return;
+        }
+        if let Some(ip) = viewer_ip.as_deref() {
+            let surface = if force_download { "download" } else { "view" };
+            report_file_hit(state, id, surface, ip, surface);
+        }
+    };
+
+    if let Some(range_header) = headers.get(header::RANGE)
+        && let Ok(range_val) = range_header.to_str()
+    {
+        let available = snapshot.available.max(1);
+        match parse_range(range_val, available, state.max_range_response_bytes) {
+            RangeResult::Satisfiable(start, end) => {
+                let end = end.min(snapshot.available.saturating_sub(1));
+                if snapshot.available == 0 || end < start {
+                    return Ok(Some(with_headers(
+                        Response::builder()
+                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!("bytes */{}", snapshot.total_size),
+                            )
+                            .header(header::ACCEPT_RANGES, "bytes"),
+                    )
+                    .body(Body::empty())
+                    .map_err(|_| JuicehostError::Internal)?));
+                }
+                let content_len = end - start + 1;
+                let body = if is_head {
+                    Body::empty()
+                } else {
+                    let permit = Arc::clone(&state.download_semaphore)
+                        .try_acquire_owned()
+                        .map_err(|_| JuicehostError::ServiceUnavailable)?;
+                    live_body_stream(
+                        Arc::clone(state),
+                        id.to_string(),
+                        start,
+                        end,
+                        false,
+                        permit,
+                    )
+                };
+                count_hit(viewer_ip);
+                return Ok(Some(
+                    with_headers(
+                        Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_TYPE, &mime)
+                            .header(header::CONTENT_LENGTH, content_len)
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!(
+                                    "bytes {start}-{end}/{}",
+                                    snapshot.total_size
+                                ),
+                            )
+                            .header(header::ACCEPT_RANGES, "bytes"),
+                    )
+                    .body(body)
+                    .map_err(|_| JuicehostError::Internal)?,
+                ));
+            }
+            RangeResult::Unsatisfiable => {
+                return Ok(Some(
+                    with_headers(
+                        Response::builder()
+                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!("bytes */{}", snapshot.total_size),
+                            )
+                            .header(header::ACCEPT_RANGES, "bytes"),
+                    )
+                    .body(Body::empty())
+                    .map_err(|_| JuicehostError::Internal)?,
+                ));
+            }
+            RangeResult::Ignore => {}
+        }
+    }
+
+    let body = if is_head {
+        Body::empty()
+    } else {
+        let permit = Arc::clone(&state.download_semaphore)
+            .try_acquire_owned()
+            .map_err(|_| JuicehostError::ServiceUnavailable)?;
+        live_body_stream(
+            Arc::clone(state),
+            id.to_string(),
+            0,
+            snapshot.total_size.saturating_sub(1),
+            true,
+            permit,
+        )
+    };
+    count_hit(viewer_ip);
+    Ok(Some(
+        with_headers(
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, &mime)
+                .header(header::CONTENT_LENGTH, snapshot.total_size)
+                .header(header::ACCEPT_RANGES, "bytes"),
+        )
+        .body(body)
+        .map_err(|_| JuicehostError::Internal)?,
+    ))
+}
+
 #[expect(clippy::too_many_arguments)]
 async fn serve_r2_response(
     state: &AppState,
@@ -60,6 +461,7 @@ async fn serve_r2_response(
     id: &str,
     key: &str,
     file_meta: &storage::FileMetadata,
+    backend_meta: Option<&BackendFileMeta>,
     force_download: bool,
     viewer_ip: Option<String>,
 ) -> Option<Response<Body>> {
@@ -67,7 +469,7 @@ async fn serve_r2_response(
     let etag = file_meta.etag.clone();
     let total_size = file_meta.size;
     let mime_str = storage::guess_mime(&file_meta.extension);
-    let download_name = format!("{}.{}", id, file_meta.extension);
+    let download_name = download_filename(id, &file_meta.extension, backend_meta);
 
     let ttl_remaining = remaining_ttl_secs(state, id).await;
     let cache_control = file_cache_control_value(state, ttl_remaining);
@@ -86,12 +488,10 @@ async fn serve_r2_response(
         builder
     };
     let with_disposition = |mut builder: axum::http::response::Builder| {
-        if force_download {
-            builder = builder.header(
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{download_name}\""),
-            );
-        }
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            content_disposition_value(disposition_for(force_download), &download_name),
+        );
         builder
     };
     let count_hit = |viewer_ip: &Option<String>| {
@@ -195,8 +595,12 @@ pub async fn serve_file_wildcard(
     method: Method,
     headers: HeaderMap,
     Path(path): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
+    if params.get("inline").is_some_and(|value| value == "1") {
+        return super::serve_stored_bytes_inline(&state, &headers, &id).await;
+    }
     serve_file_inner(state, headers, method, id, false, viewer.0).await
 }
 
@@ -212,7 +616,7 @@ pub async fn serve_file_download(
     serve_file_inner(state, headers, method, id, true, viewer.0).await
 }
 
-async fn serve_file_inner(
+pub(crate) async fn serve_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
     method: Method,
@@ -230,6 +634,19 @@ async fn serve_file_inner(
             return Ok(prevent_file_caching(frozen_html().into_response()));
         }
         Err(StorageError::NotFound) => {
+            if let Some(response) = serve_live_upload(
+                &state,
+                &headers,
+                &method,
+                &id,
+                force_download,
+                &viewer_ip,
+            )
+            .await?
+            {
+                return Ok(response);
+            }
+
             if let Some(ref backend_url) = state.backend_url {
                 let status_url = format!("{backend_url}/internal/file/{id}/status");
                 match backend_request(&state, status_url).send().await {
@@ -285,9 +702,12 @@ async fn serve_file_inner(
     } else {
         ShellMode::View
     };
-    match gate_decision(&state, &id, mode, None).await {
+    let backend_meta = match gate_decision(&state, &id, mode, None, is_bot(&headers)).await {
         GateDecision::Respond(resp) => return Ok(resp),
-        GateDecision::HotServe { key, .. } => {
+        GateDecision::Ciphertext => {
+            return super::general::serve_stored_bytes(&state, &headers, &id).await;
+        }
+        GateDecision::HotServe { key, meta } => {
             if let Some(resp) = serve_r2_response(
                 &state,
                 &headers,
@@ -295,6 +715,7 @@ async fn serve_file_inner(
                 &id,
                 &key,
                 &file_meta,
+                meta.as_ref(),
                 force_download,
                 viewer_ip.clone(),
             )
@@ -302,9 +723,10 @@ async fn serve_file_inner(
             {
                 return Ok(resp);
             }
+            meta
         }
-        GateDecision::ServeLocal { .. } => {}
-    }
+        GateDecision::ServeLocal { meta } => meta,
+    };
 
     let etag = &file_meta.etag;
 
@@ -365,14 +787,12 @@ async fn serve_file_inner(
 
     let mime_str = storage::guess_mime(&file_meta.extension);
     let total_size = file_meta.size;
-    let download_name = format!("{}.{}", id, file_meta.extension);
+    let download_name = download_filename(&id, &file_meta.extension, backend_meta.as_ref());
     let with_disposition = |mut builder: axum::http::response::Builder| {
-        if force_download {
-            builder = builder.header(
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{download_name}\""),
-            );
-        }
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            content_disposition_value(disposition_for(force_download), &download_name),
+        );
         builder
     };
 

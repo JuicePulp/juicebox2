@@ -79,12 +79,23 @@ pub async fn push_file_streaming(
     host: Option<String>,
     mode: &UploadMode,
     capability: Option<&str>,
+    live_total: Option<u64>,
 ) -> Result<(), String> {
     let custom_host = host.as_deref().map(str::trim).filter(|h| !h.is_empty());
     let client = super::client::StorageClient::resolve(state, custom_host).await?;
     let target_base = client.base_url().to_string();
 
-    if *mode == UploadMode::Quic
+    // The QUIC push path is disabled. juicehost's HTTP/3 request-body idle
+    // timeout aborts a push when the client pauses between chunks, and the
+    // HTTP fallback only replays chunks that arrive *after* the failure: the
+    // bytes already consumed by the QUIC attempt are lost, so a truncated
+    // file could be published under the final ID (and the retried store then
+    // fails with 409 "Target file already exists"). juiceback and juicehost
+    // share a host, so the loopback HTTP stream is just as fast and is
+    // resumable. Keep the code below for reference, but never select it.
+    const ENABLE_QUIC_PUSH: bool = false;
+    if ENABLE_QUIC_PUSH
+        && *mode == UploadMode::Quic
         && custom_host.is_none()
         && !state.config.juicehost_api_key.is_empty()
     {
@@ -152,6 +163,9 @@ pub async fn push_file_streaming(
         .headers(client.headers_with(None)?);
     if let Some(capability) = capability {
         request = request.header("x-juicehost-file-capability", capability);
+    }
+    if let Some(total) = live_total {
+        request = request.header("x-juicebox-live-total", total.to_string());
     }
     let resp = request
         .body(body)

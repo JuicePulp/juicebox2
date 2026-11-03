@@ -1,5 +1,7 @@
-import { initPairModal } from "./pair.js";
-import { playSound } from "./sounds.js";
+import { initPairModal } from "./pair.js?v=2.1.32";
+import { playSound } from "./sounds.js?v=2.1.32";
+import { setTweakEngineEnabled, tweakEngineEnabled } from "./upload-tweaks.js";
+import { announce } from "./util.js";
 
 (function () {
   var cfg = document.querySelector("[data-i18n-config]");
@@ -55,8 +57,23 @@ import { playSound } from "./sounds.js";
     try { localStorage.setItem("ADTESTING", next); } catch (e) {}
   }
 
+  function toggleTweakEngine() {
+    var enabled = !tweakEngineEnabled();
+    setTweakEngineEnabled(enabled);
+    document.documentElement.toggleAttribute("data-tweak-engine-off", !enabled);
+    announce(enabled ? "Adaptive upload mode" : "Default upload mode");
+    playSound("toggle");
+    showChordIndicator([enabled ? "ADAPTIVE" : "DEFAULT"]);
+    chordTimer = setTimeout(clearChord, 1600);
+  }
+
   var CHORDS = {
     "g": {
+      "g": {
+        "g": {
+          "g": function () { toggleTweakEngine(); }
+        }
+      },
       "h": function () { navigateTo("/"); },
       "f": function () { navigateTo("/files"); },
       "r": function () { navigateTo("/report"); },
@@ -237,9 +254,13 @@ import { playSound } from "./sounds.js";
             dropzone.classList.remove("drop-zone--shake");
             void dropzone.offsetWidth;
             dropzone.classList.add("drop-zone--shake");
-            dropzone.addEventListener("animationend", function () {
+            var clearShake = function () {
               dropzone.classList.remove("drop-zone--shake");
-            }, { once: true });
+            };
+            dropzone.addEventListener("animationend", clearShake, { once: true });
+            // Reduced motion turns the animation off, so animationend never
+            // fires. Keep the error state from sticking around forever.
+            setTimeout(clearShake, 600);
           }
           return;
         }
@@ -332,6 +353,7 @@ import { playSound } from "./sounds.js";
   function init() {
     chordEl = document.getElementById("chord-indicator");
     chordKeysEl = chordEl ? chordEl.querySelector(".chord-indicator__keys") : null;
+    document.documentElement.toggleAttribute("data-tweak-engine-off", !tweakEngineEnabled());
     retargetLegacySettingsHash();
     redirectToSavedLocale();
     saveLanguageOnNav();

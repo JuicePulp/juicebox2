@@ -1,6 +1,6 @@
 import { t } from "./i18n.js";
 import { announce, formatSize } from "./util.js";
-import { playSound } from "./sounds.js";
+import { playSound } from "./sounds.js?v=2.1.32";
 import {
   iconHTML,
   iconForMime,
@@ -11,16 +11,16 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js";
+} from "./copy.js?v=2.1.32";
 import {
   UPLOAD_URL,
   readMaxFileSize,
   readUploadPassword,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
-} from "./upload-config.js";
+} from "./upload-config.js?v=2.1.32";
 import { apiFetch, apiFetchJob, publicFileInfo } from "./api.js";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.1.32";
 import {
   enhanceHostSelector,
   readSelectedHost,
@@ -30,9 +30,10 @@ import {
   readUltraFastEnabled,
   readUltraFastSupported,
   initHostGlow,
-} from "./enhance-host.js";
+} from "./enhance-host.js?v=2.1.32";
 import { connectPresence, isAppMode } from "./presence.js";
 import { validateFileClient } from "./file-validation.js";
+import { upsertLocalFile } from "./upload-storage.js";
 import {
   enqueueUpload,
   cancelUpload,
@@ -40,9 +41,23 @@ import {
   subscribe,
   getUploads,
   wasRemoved,
-} from "./upload-client.js";
-import { extractServerId } from "./upload-engine.js";
+  connectUploads,
+} from "./upload-client-loader.js";
+import { extractServerId } from "./upload-engine.js?v=2.1.32";
 import { initHostSelector } from "./host-selector.js";
+
+var assetVersion = (() => {
+  try {
+    return document.getElementById("server-config")?.getAttribute("data-version") || "";
+  } catch {
+    return "";
+  }
+})();
+var folderZip = await import(
+  assetVersion
+    ? `./folder-zip.js?v=${encodeURIComponent(assetVersion)}`
+    : "./folder-zip.js"
+);
 
 var LOCALE = (document.documentElement && document.documentElement.lang) || "en";
 var rowIds = new Map();
@@ -214,6 +229,7 @@ function failItem(item, pill, fill, status, errorCode, rawMessage) {
   pill.classList.add("error");
   fill.classList.add("error");
   fill.classList.remove("finalizing");
+  fill.classList.remove("indeterminate");
   var spinner = item.querySelector(".spinner");
   if (spinner) spinner.remove();
   var msg = vanityMsg(LOCALE, errorCode, rawMessage);
@@ -430,22 +446,18 @@ async function ultrafastReserve(file, item, fill, status, pill) {
     var reserveDownloadUrl = reserve.download_url || "";
     if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
     if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
-    try {
-      var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-      stored.push({
-        id: reserve.file_id || "",
-        filename: file.name,
-        mime_type: file.type || "application/octet-stream",
-        size_bytes: file.size,
-        uploaded_at: Math.floor(Date.now() / 1000),
-        url: reserveUrl,
-        raw_url: reserveRawUrl,
-        download_url: reserveDownloadUrl,
-        expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
-        delete_token: reserve.delete_token || "",
-      });
-      localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
-    } catch {}
+    upsertLocalFile({
+      id: reserve.file_id || "",
+      filename: file.name,
+      mime_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+      uploaded_at: Math.floor(Date.now() / 1000),
+      url: reserveUrl,
+      raw_url: reserveRawUrl,
+      download_url: reserveDownloadUrl,
+      expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
+      delete_token: reserve.delete_token || "",
+    });
     if (reserveUrl) {
       item.setAttribute("data-quick-link", "");
       var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
@@ -528,22 +540,18 @@ async function ultrafastReservePlaceholder(item, fill, status, pill) {
     var reserveDownloadUrl = reserve.download_url || "";
     if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
     if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
-    try {
-      var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-      stored.push({
-        id: reserve.file_id || "",
-        filename: "upload",
-        mime_type: "application/octet-stream",
-        size_bytes: 0,
-        uploaded_at: Math.floor(Date.now() / 1000),
-        url: reserveUrl,
-        raw_url: reserveRawUrl,
-        download_url: reserveDownloadUrl,
-        expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
-        delete_token: reserve.delete_token || "",
-      });
-      localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
-    } catch {}
+    upsertLocalFile({
+      id: reserve.file_id || "",
+      filename: "upload",
+      mime_type: "application/octet-stream",
+      size_bytes: 0,
+      uploaded_at: Math.floor(Date.now() / 1000),
+      url: reserveUrl,
+      raw_url: reserveRawUrl,
+      download_url: reserveDownloadUrl,
+      expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
+      delete_token: reserve.delete_token || "",
+    });
     if (reserveUrl) {
       item.setAttribute("data-quick-link", "");
       var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
@@ -638,34 +646,18 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
               }),
             );
           }
-          try {
-            var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-            var idx = stored.findIndex(function (e) {
-              return e.id === fileId;
-            });
-            if (idx >= 0) {
-              stored[idx].filename = realName;
-              stored[idx].mime_type = realMime;
-              stored[idx].size_bytes = realSize;
-              stored[idx].url = realUrl;
-              stored[idx].raw_url = realRawUrl;
-              stored[idx].download_url = realDownloadUrl;
-            } else {
-              stored.push({
-                id: fileId,
-                filename: realName,
-                mime_type: realMime,
-                size_bytes: realSize,
-                uploaded_at: Math.floor(Date.now() / 1000),
-                url: realUrl,
-                raw_url: realRawUrl,
-                download_url: realDownloadUrl,
-                expires_at: data.expires_at || Math.floor(Date.now() / 1000) + ttlHours() * 3600,
-                delete_token: deleteToken,
-              });
-            }
-            localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
-          } catch {}
+          upsertLocalFile({
+            id: fileId,
+            filename: realName,
+            mime_type: realMime,
+            size_bytes: realSize,
+            uploaded_at: Math.floor(Date.now() / 1000),
+            url: realUrl,
+            raw_url: realRawUrl,
+            download_url: realDownloadUrl,
+            expires_at: data.expires_at || Math.floor(Date.now() / 1000) + ttlHours() * 3600,
+            delete_token: deleteToken,
+          });
           announce(t(LOCALE, "upload.announce_complete", { filename: realName }));
           playSound("success");
           autoCopyUrl(realUrl, copyBar);
@@ -678,6 +670,20 @@ function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
       });
   }
   setTimeout(poll, nextDelay());
+}
+
+function setCobaltBarProgress(fill, percent) {
+  fill.classList.remove("indeterminate");
+  fill.style.setProperty("--progress", percent + "%");
+  var progressDivider = fill.closest('[role="progressbar"]');
+  if (progressDivider) progressDivider.setAttribute("aria-valuenow", String(percent));
+}
+
+function setCobaltBarIndeterminate(fill) {
+  fill.classList.add("indeterminate");
+  fill.style.removeProperty("--progress");
+  var progressDivider = fill.closest('[role="progressbar"]');
+  if (progressDivider) progressDivider.removeAttribute("aria-valuenow");
 }
 
 function startCobaltFetch(url) {
@@ -755,8 +761,8 @@ function startCobaltFetch(url) {
           failItem(item, pill, fill, status, "BAD_RESPONSE");
           return;
         }
-        fill.classList.add("finalizing");
-        status.textContent = t(LOCALE, "upload.cobalt_fetching");
+        setCobaltBarIndeterminate(fill);
+        status.textContent = t(LOCALE, "upload.cobalt_contacting");
         pollCobaltJob(start.job_id, item, fill, status, pill);
       });
     })
@@ -799,12 +805,33 @@ function pollCobaltJob(jobId, item, fill, status, pill) {
         }
         if ((data.stage || "").startsWith("retry-")) {
           var n = data.stage.split("-")[1];
+          setCobaltBarIndeterminate(fill);
           status.textContent = t(LOCALE, "upload.cobalt_retry", { n: n });
-        } else if (typeof data.bytes_received === "number" && data.bytes_received > 0) {
-          status.textContent = t(LOCALE, "upload.cobalt_fetching") + " " + formatSize(data.bytes_received);
+        } else if (data.stage === "converting") {
+          setCobaltBarIndeterminate(fill);
+          status.textContent = t(LOCALE, "upload.cobalt_converting");
+        } else if (
+          typeof data.total_bytes === "number" &&
+          data.total_bytes > 0
+        ) {
+          var received =
+            typeof data.bytes_received === "number" ? data.bytes_received : 0;
+          var percent = Math.max(
+            0,
+            Math.min(99, Math.floor((received / data.total_bytes) * 100)),
+          );
+          setCobaltBarProgress(fill, percent);
+          status.textContent = t(LOCALE, "upload.cobalt_downloading", {
+            percent: percent,
+          });
+        } else if (data.stage === "transfer" || data.stage === "transcode") {
+          setCobaltBarIndeterminate(fill);
+          status.textContent = t(LOCALE, "upload.cobalt_fetching");
         } else if (data.stage === "session-fallback") {
+          setCobaltBarIndeterminate(fill);
           status.textContent = t(LOCALE, "upload.cobalt_relay");
         } else if (data.status !== "pending") {
+          setCobaltBarIndeterminate(fill);
           status.textContent = t(LOCALE, "upload.cobalt_fetching");
         }
         setTimeout(poll, nextDelay());
@@ -826,6 +853,7 @@ function completeCobaltRow(file, item, fill, status, pill) {
     iconContainer.innerHTML = iconHTML(iconForMime(file.mime_type), 24);
   }
   fill.classList.remove("finalizing");
+  fill.classList.remove("indeterminate");
   fill.style.setProperty("--progress", "100%");
   var progressDivider = fill.closest('[role="progressbar"]');
   if (progressDivider) progressDivider.setAttribute("aria-valuenow", "100");
@@ -861,20 +889,18 @@ function completeCobaltRow(file, item, fill, status, pill) {
       }),
     );
   }
-  try {
-    var stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-    stored.push({
-      id: file.id,
-      filename: file.filename,
-      mime_type: file.mime_type,
-      size_bytes: file.size_bytes,
-      uploaded_at: Math.floor(Date.now() / 1000),
-      url: file.url,
-      expires_at: file.expires_at,
-      delete_token: file.delete_token,
-    });
-    localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
-  } catch {}
+  upsertLocalFile({
+    id: file.id,
+    filename: file.filename,
+    mime_type: file.mime_type,
+    size_bytes: file.size_bytes,
+    uploaded_at: Math.floor(Date.now() / 1000),
+    url: file.url,
+    raw_url: file.raw_url,
+    download_url: file.download_url,
+    expires_at: file.expires_at,
+    delete_token: file.delete_token,
+  });
   announce(t(LOCALE, "upload.announce_complete", { filename: file.filename }));
   playSound("success");
   autoCopyUrl(file.url, copyBar);
@@ -920,13 +946,25 @@ function adoptItem(data) {
   syncRow(data);
 }
 
+function setRowDeleteHandler(item, handler) {
+  var button = item.querySelector(".delete-btn");
+  if (!button) return;
+  var replacement = button.cloneNode(true);
+  button.replaceWith(replacement);
+  replacement.addEventListener("click", handler);
+}
+
 function startItem(file) {
   setEmpty(false);
   var item = buildRow(file.name, formatSize(file.size), extIcon(file.name));
-  item.querySelector(".delete-btn").addEventListener("click", function () {
+  setRowDeleteHandler(item, function () {
     dismissRow(item);
   });
   listContentRef.prepend(item);
+  uploadItem(file, item);
+}
+
+function uploadItem(file, item) {
   var fill = item.querySelector(".progress-fill");
   var status = item.querySelector(".status-text");
   var pill = item.querySelector(".status-pill");
@@ -974,6 +1012,90 @@ function startItem(file) {
     file.size > TUS_THRESHOLD
       ? t(LOCALE, "upload.initializing_tus")
       : t(LOCALE, "upload.initializing");
+}
+
+function startFolderZip(dirs, looseEntries) {
+  var name = dirs.length === 1 ? folderZip.zipName(dirs[0].name) : "folders.zip";
+  setEmpty(false);
+  var placeholder = buildRow(name, "", extIcon(name));
+  placeholder.querySelector(".file-size").textContent = "";
+  placeholder.querySelector(".status-text").textContent = t(LOCALE, "upload.zipping");
+  listContentRef.prepend(placeholder);
+  announce(t(LOCALE, "upload.zipping"));
+
+  var cancelled = false;
+  setRowDeleteHandler(placeholder, function () {
+    cancelled = true;
+    removeItem(placeholder);
+  });
+
+  Promise.all(
+    (looseEntries || []).map(function (entry) {
+      return folderZip.resolveDroppedFile(entry).catch(function () {
+        return null;
+      });
+    }),
+  ).then(function (loose) {
+    loose
+      .filter(function (file) {
+        return file && file.size > 0;
+      })
+      .forEach(startItem);
+  });
+
+  folderZip
+    .buildFolderZip(dirs)
+    .then(function (zip) {
+      if (cancelled) return;
+      if (!zip) {
+        showFolderZipError(placeholder, name, t(LOCALE, "error.folder_empty"));
+        return;
+      }
+      uploadFolderZip(placeholder, zip);
+    })
+    .catch(function (err) {
+      if (cancelled) return;
+      if (window.DEBUG_LOGS) console.error("[folder-zip]", err);
+      showFolderZipError(
+        placeholder,
+        name,
+        err && err.code === "ZIP_TOO_LARGE"
+          ? t(LOCALE, "error.file_too_large")
+          : t(LOCALE, "error.upload_failed"),
+      );
+    });
+
+  // Keep the row that was shown while zipping and turn it into the upload row.
+  // Rebuilding it would replay the entry animation and make the upload look
+  // like it restarted.
+  function uploadFolderZip(item, zip) {
+    item.querySelector(".file-name").textContent = zip.name;
+    item.querySelector(".file-size").textContent = formatSize(zip.size);
+    var iconContainer = item.querySelector(".file-card-icon");
+    if (iconContainer) {
+      iconContainer.innerHTML = iconHTML(extIcon(zip.name), 24);
+    }
+    setRowDeleteHandler(item, function () {
+      dismissRow(item);
+    });
+    uploadItem(zip, item);
+  }
+
+  function showFolderZipError(item, zipFileName, message) {
+    item.querySelector(".file-name").textContent = zipFileName;
+    item.querySelector(".file-size").textContent = "";
+    setRowDeleteHandler(item, function () {
+      dismissRow(item);
+    });
+    failItem(
+      item,
+      item.querySelector(".status-pill"),
+      item.querySelector(".progress-fill"),
+      item.querySelector(".status-text"),
+      "FOLDER_ZIP",
+      message,
+    );
+  }
 }
 
 function sanitizeUploaded(raw) {
@@ -1294,7 +1416,15 @@ export function initUploadCard() {
       });
     });
     dropZone.addEventListener("drop", function (e) {
-      if (!e.dataTransfer || !e.dataTransfer.files) return;
+      if (!e.dataTransfer) return;
+      var entries = folderZip.collectDropEntries(e.dataTransfer);
+      if (entries.dirs.length) {
+        e.preventDefault();
+        e.stopPropagation();
+        startFolderZip(entries.dirs, entries.files);
+        return;
+      }
+      if (!e.dataTransfer.files) return;
       Array.from(e.dataTransfer.files).forEach(startItem);
     });
   }
@@ -1314,7 +1444,7 @@ export function initUploadCard() {
 
   var audioToggle = document.querySelector("[data-cobalt-audio-only]");
   var videoRows = [document.querySelector("[data-cobalt-quality-row]"), document.querySelector("[data-cobalt-container-row]")];
-  var audioRows = [document.querySelector("[data-cobalt-format-row]"), document.querySelector("[data-cobalt-better-audio-row]")];
+  var audioRows = [document.querySelector("[data-cobalt-better-audio-row]"), document.querySelector("[data-cobalt-format-row]")];
   if (audioToggle) {
     audioToggle.addEventListener("change", function () {
       for (var i = 0; i < videoRows.length; i++) {

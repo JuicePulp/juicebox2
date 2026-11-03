@@ -56,8 +56,13 @@ enabled = false
 api_url = "http://localhost:7272"
 fetch_empty_retry_delay_secs = 10
 
-# Session API URL (check env for api)
-# session_api_url = "http://localhost:7272"
+# Extra instances using COBALT_API_KEY. All instances are raced in parallel and
+# the first usable response wins; the rest are cancelled.
+# api_urls = ["http://localhost:7274"]
+
+# Instances using COBALT_SESSION_API_KEY (they are raced alongside the primary).
+# session_api_url = "http://localhost:7273"
+# session_api_urls = ["http://localhost:7275"]
 
 [dte]
 enabled = false
@@ -98,6 +103,10 @@ max_promote_bytes = 268435456
 # Velocity promoter. Only runs when [r2].enabled. dry_run = true only logs
 # candidates so thresholds can be tuned before spending anything.
 interval_secs = 300
+# Cool a hot file back to standard storage after this many seconds without
+# activity (views/downloads, or time since upload/promotion for never-viewed
+# files). Set to a larger value to keep files hot longer.
+cool_after_secs = 1800
 min_views = 50
 min_views_per_min = 10.0
 min_ttl_remaining_secs = 3600

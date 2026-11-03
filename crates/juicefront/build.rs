@@ -24,6 +24,47 @@ fn git_head_path() -> Option<PathBuf> {
     fallback.is_file().then_some(fallback)
 }
 
+fn hash_static_tree(dir: &Path) -> u64 {
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.filter_map(std::result::Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect(&path, out);
+                } else if path.is_file() {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    collect(dir, &mut files);
+    files.sort();
+
+    // FNV-1a over sorted relative paths and contents. This only needs to
+    // change whenever the served assets change, not to be cryptographic.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for path in files {
+        let rel = path
+            .strip_prefix(dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        for byte in rel.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        if let Ok(data) = fs::read(&path) {
+            for byte in data {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+        }
+    }
+    hash
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=icons/");
     if let Some(head) = git_head_path() {
@@ -79,5 +120,15 @@ fn main() {
     println!(
         "cargo:rustc-env=JUICEFRONT_COMMIT_HASH={}",
         git(&["rev-parse", "HEAD"])
+    );
+
+    // Asset URLs use `?v=<version>`, so any static change must produce a new
+    // version or browsers (and Cloudflare) keep the old immutable copy.
+    let static_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
+    println!("cargo:rerun-if-changed={}", static_dir.display());
+    let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned());
+    println!(
+        "cargo:rustc-env=JUICEFRONT_ASSET_VERSION={package_version}-{:016x}",
+        hash_static_tree(&static_dir)
     );
 }

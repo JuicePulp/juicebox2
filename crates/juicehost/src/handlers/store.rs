@@ -233,6 +233,33 @@ pub async fn store_file_streaming(
     let max_size = state.max_file_size_bytes;
     let stream = sized_stream(body, max_size, None);
     let storage_filename = content_filename(&filename, detected.as_ref());
+    let mime = headers
+        .get("x-mime-type")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| storage::guess_mime(storage::extract_extension(&storage_filename)));
+    let live_total = headers
+        .get("x-juicebox-live-total")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let is_part = state.live_uploads.is_part(&id);
+    let should_track = is_part || live_total > 0;
+    if should_track && !is_part {
+        state
+            .live_uploads
+            .ensure_single(&id, &storage_filename, &mime, live_total);
+    }
+    let live_writer = should_track.then(|| state.live_uploads.track(&id)).flatten();
+    let stream = stream.map(move |item| {
+        if let Ok(ref bytes) = item
+            && let Some(ref writer) = live_writer
+        {
+            writer.add(bytes.len());
+        }
+        item
+    });
 
     let total = state
         .storage
@@ -244,6 +271,7 @@ pub async fn store_file_streaming(
         )
         .await
         .map_err(JuicehostError::from)?;
+    state.live_uploads.mark_ready(&id);
 
     let total_time = handler_start.elapsed();
     let bytes_per_sec = if total_time.as_secs_f64() > 0.0 {
@@ -347,6 +375,24 @@ pub async fn store_file_ticket(
     let (body, detected) = sniff_and_validate(body, &real_filename, state.danger_level).await?;
     let stream = sized_stream(body, ticket.claims.file_size, Some(ticket.claims.file_size));
     let storage_filename = content_filename(&real_filename, detected.as_ref());
+    let mime = storage::guess_mime(storage::extract_extension(&storage_filename));
+    if !state.live_uploads.is_part(&id) {
+        state.live_uploads.ensure_single(
+            &id,
+            &storage_filename,
+            &mime,
+            ticket.claims.file_size,
+        );
+    }
+    let live_writer = state.live_uploads.track(&id);
+    let stream = stream.map(move |item| {
+        if let Ok(ref bytes) = item
+            && let Some(ref writer) = live_writer
+        {
+            writer.add(bytes.len());
+        }
+        item
+    });
 
     let total = state
         .storage
@@ -358,6 +404,7 @@ pub async fn store_file_ticket(
         )
         .await
         .map_err(JuicehostError::from)?;
+    state.live_uploads.mark_ready(&id);
 
     let total_time = handler_start.elapsed();
     let bytes_per_sec = if total_time.as_secs_f64() > 0.0 {

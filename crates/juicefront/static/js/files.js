@@ -1,7 +1,7 @@
 import { announce, esc, formatSize } from "./util.js";
-import { playSound } from "./sounds.js";
-import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js";
-import { openQrModal } from "./qr.js";
+import { playSound } from "./sounds.js?v=2.1.32";
+import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.1.32";
+import { openQrModal } from "./qr.js?v=2.1.32";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
 
@@ -101,9 +101,30 @@ function normalizeFile(f) {
     uploaded_at,
     expires_at,
     url: f.url ?? "",
+    raw_url: f.raw_url ?? "",
+    download_url: f.download_url ?? "",
     delete_token: f.delete_token ?? "",
     storage_host: f.storage_host ?? "",
   };
+}
+
+function updateLocalFile(oldId, file) {
+  try {
+    const raw = localStorage.getItem("juicebox_uploads");
+    if (!raw) return;
+    const stored = JSON.parse(raw);
+    if (!Array.isArray(stored)) return;
+    let changed = false;
+    for (const entry of stored) {
+      if (!entry || entry.id !== oldId) continue;
+      entry.id = file.id;
+      entry.url = file.url;
+      entry.raw_url = file.raw_url;
+      entry.download_url = file.download_url;
+      changed = true;
+    }
+    if (changed) localStorage.setItem("juicebox_uploads", JSON.stringify(stored));
+  } catch {}
 }
 
 function getLocalFiles() {
@@ -111,7 +132,31 @@ function getLocalFiles() {
     const raw = localStorage.getItem("juicebox_uploads");
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(normalizeFile);
+      if (Array.isArray(parsed)) {
+        const files = parsed.map(normalizeFile);
+        const seen = new Set();
+        const seenTokens = new Set();
+        const deduped = [];
+        for (let i = files.length - 1; i >= 0; i--) {
+          const f = files[i];
+          if (f.id) {
+            if (seen.has(f.id)) continue;
+            seen.add(f.id);
+          }
+          if (f.delete_token) {
+            if (seenTokens.has(f.delete_token)) continue;
+            seenTokens.add(f.delete_token);
+          }
+          deduped.push(f);
+        }
+        deduped.reverse();
+        if (deduped.length !== parsed.length) {
+          try {
+            localStorage.setItem("juicebox_uploads", JSON.stringify(deduped));
+          } catch {}
+        }
+        return deduped;
+      }
     }
   } catch {}
   return [];
@@ -139,6 +184,23 @@ function extractIdFromUrl(url, fallbackId) {
     const segment = url.split("/").pop() || "";
     const dot = segment.lastIndexOf(".");
     return (dot > 0 ? segment.slice(0, dot) : segment) || fallbackId || "";
+  }
+}
+
+function swapUrlId(url, oldId, newId) {
+  if (!url || !oldId || !newId || oldId === newId) return url || "";
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/");
+    const last = parts[parts.length - 1] || "";
+    const dot = last.lastIndexOf(".");
+    const stem = dot > 0 ? last.slice(0, dot) : last;
+    if (stem !== oldId) return url;
+    parts[parts.length - 1] = newId + (dot > 0 ? last.slice(dot) : "");
+    parsed.pathname = parts.join("/");
+    return parsed.toString();
+  } catch {
+    return url;
   }
 }
 
@@ -325,10 +387,14 @@ function wireRenameModal(card, modal, f, locale) {
       }
       const data = await res.json();
       const host = card.querySelector('[data-file-id="' + CSS.escape(f.id) + '"]');
+      const oldId = f.id;
+      const oldRawUrl = f.raw_url || host?.getAttribute("data-raw-url") || "";
+      const oldDownloadUrl = f.download_url || host?.getAttribute("data-download-url") || "";
       f.id = data.id;
       f.url = data.url;
-      f.raw_url = data.raw_url || "";
-      f.download_url = data.download_url || "";
+      f.raw_url = data.raw_url || swapUrlId(oldRawUrl, oldId, data.id);
+      f.download_url = data.download_url || swapUrlId(oldDownloadUrl, oldId, data.id);
+      updateLocalFile(oldId, f);
       if (host) {
         host.setAttribute("data-file-id", data.id);
         host.setAttribute("data-url", data.url);
@@ -350,6 +416,14 @@ function wireRenameModal(card, modal, f, locale) {
           if (urlEl) urlEl.textContent = data.url;
           const qrBtn = host.querySelector(".copy-bar-qr");
           if (qrBtn) qrBtn.setAttribute("data-qr-url", data.url);
+          const wrapper = host.querySelector(".copy-bar-wrapper");
+          if (wrapper && f.raw_url) {
+            const toggle = makeUrlVariantToggle(
+              { preview: data.url, raw: f.raw_url, download: f.download_url },
+              urlVariantLabels(locale),
+            );
+            if (toggle) wrapper.after(toggle);
+          }
         }
         const link = host.querySelector(".copy-bar__text-wrapper")?.closest(".copy-bar");
         if (link) link.setAttribute("aria-label", t(locale, "upload.copy_bar_aria"));

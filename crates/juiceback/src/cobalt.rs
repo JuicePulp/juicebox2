@@ -65,7 +65,9 @@ impl FetchOptions {
             _ => "auto".to_string(),
         };
         let audio_format = match audio_format {
-            Some(f) if matches!(f, "best" | "mp3" | "ogg" | "wav" | "opus") => f.to_string(),
+            Some(f) if matches!(f, "best" | "mp3" | "ogg" | "wav" | "opus" | "flac") => {
+                f.to_string()
+            }
             _ => "mp3".to_string(),
         };
         let youtube_video_codec = match youtube_video_codec {
@@ -85,11 +87,17 @@ impl FetchOptions {
 
 #[must_use]
 pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
+    // Cobalt has no FLAC output; use lossless WAV and transcode after download.
+    let audio_format = if opts.audio_format == "flac" {
+        "wav"
+    } else {
+        opts.audio_format.as_str()
+    };
     serde_json::json!({
         "url": url,
         "downloadMode": if opts.audio_only { "audio" } else { "auto" },
         "videoQuality": opts.video_quality,
-        "audioFormat": opts.audio_format,
+        "audioFormat": audio_format,
         "youtubeVideoCodec": opts.youtube_video_codec,
         "youtubeVideoContainer": opts.youtube_video_container,
         "youtubeBetterAudio": opts.youtube_better_audio,
@@ -105,6 +113,25 @@ pub struct CobaltPickerItem {
     pub url: String,
     #[serde(default)]
     pub thumb: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CobaltEndpoint {
+    pub url: String,
+    pub api_key: String,
+
+    pub session: bool,
+}
+
+impl CobaltEndpoint {
+    #[must_use]
+    pub fn new(url: impl Into<String>, api_key: impl Into<String>, session: bool) -> Self {
+        Self {
+            url: url.into().trim().trim_end_matches('/').to_string(),
+            api_key: api_key.into(),
+            session,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,12 +161,22 @@ pub enum CobaltResponse {
 
 impl CobaltResponse {
     #[must_use]
+    pub fn is_downloadable(&self) -> bool {
+        matches!(self, Self::Tunnel { .. } | Self::Redirect { .. })
+    }
+
+    #[must_use]
     pub fn is_client_refused(&self) -> bool {
         matches!(
             self,
             Self::Error { code }
                 if code == "error.api.content.video.unavailable"
         )
+    }
+
+    #[must_use]
+    pub fn is_instance_failure(&self) -> bool {
+        matches!(self, Self::Error { code } if is_instance_error_code(code))
     }
 
     #[must_use]
@@ -224,6 +261,46 @@ impl CobaltResponse {
     }
 }
 
+/// Errors that describe one cobalt instance rather than the requested media.
+/// Another instance, or another fetch tier, may still be able to serve the
+/// same link, so these must not end the whole fetch.
+#[must_use]
+pub fn is_instance_error_code(code: &str) -> bool {
+    matches!(
+        code,
+        "error.api.youtube.login"
+            | "error.api.youtube.token_expired"
+            | "error.api.youtube.token_mismatch"
+            | "error.api.auth.jwt.missing"
+            | "error.api.auth.jwt.invalid"
+            | "error.api.auth.key.missing"
+            | "error.api.auth.key.invalid"
+            | "error.api.auth.turnstile.missing"
+            | "error.api.auth.turnstile.invalid"
+            | "error.api.rate_limit"
+            | "error.api.service.disabled"
+            | "error.api.malformed_response"
+            | "error.api.empty_response"
+    ) || code.starts_with("error.api.unknown_status:")
+}
+
+const INSTANCE_FAILURE_PREFIX: &str = "fetch service instance failed: ";
+
+#[must_use]
+pub fn instance_failure_message(code: &str) -> String {
+    format!("{INSTANCE_FAILURE_PREFIX}{}", friendly_error(code))
+}
+
+#[must_use]
+pub fn instance_failure_from_error(err: &str) -> String {
+    format!("{INSTANCE_FAILURE_PREFIX}{err}")
+}
+
+#[must_use]
+pub fn is_instance_failure_error(err: &str) -> bool {
+    err.starts_with(INSTANCE_FAILURE_PREFIX)
+}
+
 pub async fn process(
     client: &reqwest::Client,
     api_url: &str,
@@ -261,6 +338,119 @@ pub async fn process(
         .await
         .map_err(|e| format!("fetch service returned invalid json: {e}"))?;
     Ok(CobaltResponse::from_json(value))
+}
+
+/// Ask every configured cobalt instance at once and return the first usable
+/// response. Instances that return an error (or a non-media response) are
+/// ignored until all of them have answered, so a slow instance can never
+/// delay a healthy one.
+pub async fn process_race(
+    client: &reqwest::Client,
+    endpoints: &[CobaltEndpoint],
+    source_url: &str,
+    opts: &FetchOptions,
+    excluded: &[usize],
+) -> Result<(CobaltResponse, usize), String> {
+    let available: Vec<(usize, &CobaltEndpoint)> = endpoints
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !excluded.contains(idx))
+        .collect();
+    if available.is_empty() {
+        return Err("no fetch service instances remain".into());
+    }
+    if available.len() == 1 {
+        let (idx, endpoint) = available[0];
+        let response = process(client, &endpoint.url, &endpoint.api_key, source_url, opts).await?;
+        return Ok((response, idx));
+    }
+
+    type RaceFuture = std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = (usize, Result<CobaltResponse, String>)>
+                + Send
+                + 'static,
+        >,
+    >;
+
+    let instance_count = available.len();
+    let mut pending: Vec<RaceFuture> = available
+        .into_iter()
+        .map(|(idx, endpoint)| {
+            let client = client.clone();
+            let url = endpoint.url.clone();
+            let api_key = endpoint.api_key.clone();
+            let source_url = source_url.to_string();
+            let opts = opts.clone();
+            Box::pin(async move {
+                (
+                    idx,
+                    process(&client, &url, &api_key, &source_url, &opts).await,
+                )
+            }) as RaceFuture
+        })
+        .collect();
+
+    let mut first_non_media = None;
+    let mut first_instance_failure = None;
+    let mut first_error = None;
+
+    while !pending.is_empty() {
+        let ((idx, result), _remaining, rest) = futures::future::select_all(pending).await;
+        pending = rest;
+
+        match result {
+            Ok(response) if response.is_downloadable() => {
+                tracing::info!(
+                    "cobalt race: instance {}/{} ({}) answered first",
+                    idx + 1,
+                    instance_count,
+                    endpoints[idx].url
+                );
+                return Ok((response, idx));
+            }
+            Ok(response) if response.is_instance_failure() => {
+                tracing::warn!(
+                    "cobalt race: instance {}/{} ({}) failed for this fetch ({response:?})",
+                    idx + 1,
+                    instance_count,
+                    endpoints[idx].url
+                );
+                if first_instance_failure.is_none() {
+                    first_instance_failure = Some((idx, response));
+                }
+            }
+            Ok(response) => {
+                tracing::debug!(
+                    "cobalt race: instance {} returned no media ({response:?})",
+                    endpoints[idx].url
+                );
+                if first_non_media.is_none() {
+                    first_non_media = Some((idx, response));
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    "cobalt race: instance {} failed ({err})",
+                    endpoints[idx].url
+                );
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
+
+    // Prefer a response about the media itself over one that only describes a
+    // broken instance. If every instance failed, keep a login/token error so
+    // the caller can move on to the next fetch tier.
+    if let Some((idx, response)) = first_non_media {
+        return Ok((response, idx));
+    }
+    if let Some((idx, response)) = first_instance_failure {
+        return Ok((response, idx));
+    }
+    Err(first_error.unwrap_or_else(|| "no fetch service instances responded".into()))
 }
 
 #[must_use]
@@ -395,7 +585,7 @@ mod tests {
             false,
             Some("<script>"),
             Some("avi"),
-            Some("flac"),
+            Some("aac"),
             true,
             Some("mpeg2"),
         );
@@ -404,6 +594,16 @@ mod tests {
         assert_eq!(o.audio_format, "mp3");
         assert_eq!(o.youtube_video_codec, "h264");
         assert!(o.youtube_better_audio);
+    }
+
+    #[test]
+    fn flac_is_requested_as_wav_from_cobalt() {
+        let opts = FetchOptions::sanitized(true, None, None, Some("flac"), true, None);
+        assert_eq!(opts.audio_format, "flac");
+        let body = build_request_body("https://youtu.be/x", &opts);
+        assert_eq!(body["downloadMode"], "audio");
+        assert_eq!(body["audioFormat"], "wav");
+        assert_eq!(body["youtubeBetterAudio"], true);
     }
 
     #[test]

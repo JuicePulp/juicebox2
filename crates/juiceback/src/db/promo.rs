@@ -10,6 +10,12 @@ pub struct PromoCandidate {
     pub filename: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CoolCandidate {
+    pub id: String,
+    pub last_activity_at: i64,
+}
+
 pub fn list_promo_candidates(
     conn: &Connection,
     min_expires_at: i64,
@@ -27,6 +33,41 @@ pub fn list_promo_candidates(
             storage_host: row.get(1)?,
             size_bytes: row.get(2)?,
             filename: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn list_cool_candidates(
+    conn: &Connection,
+    inactive_before: i64,
+    limit: i64,
+) -> Result<Vec<CoolCandidate>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, last_activity_at FROM (
+            SELECT f.id AS id,
+                   MAX(
+                       COALESCE(f.uploaded_at, 0),
+                       COALESCE(p.checked_at, 0),
+                       COALESCE(s.last_seen_at, 0)
+                   ) AS last_activity_at
+            FROM files f
+            LEFT JOIN promo_state p ON p.file_id = f.id
+            LEFT JOIN (
+                SELECT file_id, MAX(last_seen_at) AS last_seen_at
+                FROM file_stats GROUP BY file_id
+            ) s ON s.file_id = f.id
+            WHERE f.status = 'ready'
+              AND f.tier = 'hot'
+              AND COALESCE(f.tier_pinned, 0) = 0
+        ) WHERE last_activity_at <= ?1
+        ORDER BY last_activity_at ASC
+        LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![inactive_before, limit], |row| {
+        Ok(CoolCandidate {
+            id: row.get(0)?,
+            last_activity_at: row.get(1)?,
         })
     })?;
     rows.collect()
@@ -117,9 +158,11 @@ pub fn record_embed_attempt(conn: &Connection, file_id: &str, now: i64) -> Resul
     Ok(())
 }
 
+/// Apply an automatic tier change. A manual pin is cleared so a cooled file
+/// returns to the auto-promoter instead of staying pinned to standard.
 pub fn set_file_tier(conn: &Connection, id: &str, tier: &str, r2_key: &str) -> Result<usize> {
     Ok(conn.execute(
-        "UPDATE files SET tier = ?1, r2_key = ?2 WHERE id = ?3",
+        "UPDATE files SET tier = ?1, r2_key = ?2, tier_pinned = 0 WHERE id = ?3",
         params![tier, r2_key, id],
     )? as usize)
 }

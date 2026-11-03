@@ -1,6 +1,12 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use futures::{StreamExt, stream::FuturesUnordered};
+use tokio::sync::Semaphore;
+
 use crate::{db, state::AppState};
+
+const COOL_SWEEP_LIMIT: i64 = 100;
+const COOL_CONCURRENCY: usize = 4;
 
 #[must_use]
 pub fn embed_mime_eligible(mime: &str) -> bool {
@@ -109,10 +115,21 @@ pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
 
 pub async fn run_promo_loop(state: Arc<AppState>) {
     let interval = Duration::from_secs(state.config.promo_interval_secs.max(60));
+    tracing::info!(
+        "promo: cooling hot files after {}s of inactivity",
+        state.config.promo_cool_after_secs
+    );
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
+
+        let cool = Arc::clone(&state);
+        let result = tokio::spawn(async move { cool_sweep_once(&cool).await }).await;
+        if let Err(e) = result {
+            tracing::error!("promo: cool sweep task failed: {e}");
+        }
+
         let sweep = Arc::clone(&state);
         let result = tokio::spawn(async move { promo_sweep_once(&sweep).await }).await;
         if let Err(e) = result {
@@ -139,6 +156,81 @@ pub(crate) fn official_hosts(state: &AppState) -> HashSet<String> {
         push(url);
     }
     hosts
+}
+
+async fn cool_sweep_once(state: &Arc<AppState>) {
+    if !state.config.r2_enabled {
+        return;
+    }
+    let now = chrono::Utc::now().timestamp();
+    let inactive_before = now.saturating_sub(state.config.promo_cool_after_secs);
+    let candidates = match state
+        .db_call("cool_candidates", move |db| {
+            db::list_cool_candidates(db, inactive_before, COOL_SWEEP_LIMIT)
+        })
+        .await
+    {
+        Ok(candidates) => candidates,
+        Err(e) => {
+            tracing::error!("promo: cool candidate query failed: {:?}", e);
+            return;
+        }
+    };
+    if candidates.is_empty() {
+        return;
+    }
+    if state.config.promo_dry_run {
+        for candidate in &candidates {
+            let idle = now.saturating_sub(candidate.last_activity_at);
+            tracing::info!(
+                "promo: [dry-run] would cool id={} idle={}s",
+                candidate.id,
+                idle
+            );
+        }
+        return;
+    }
+
+    let permits = Arc::new(Semaphore::new(COOL_CONCURRENCY));
+    let mut pending = FuturesUnordered::new();
+    for candidate in candidates {
+        let permit = match permits.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => break,
+        };
+        let state = Arc::clone(state);
+        pending.push(tokio::spawn(async move {
+            let _permit = permit;
+            let id = candidate.id;
+            let idle = now.saturating_sub(candidate.last_activity_at);
+            let lookup = id.clone();
+            let record = match state
+                .db_call("get_file_for_cool", move |db| db::get_file(db, &lookup))
+                .await
+            {
+                Ok(Some(record)) => record,
+                Ok(None) => return,
+                Err(e) => {
+                    tracing::warn!("promo: cool lookup failed id={id}: {:?}", e);
+                    return;
+                }
+            };
+            // The sweep result can be stale. Do not pull a file back after an
+            // admin pinned it or after it left the hot tier.
+            if record.status != "ready" || record.tier != "hot" || record.tier_pinned {
+                return;
+            }
+            match force_cool(&state, &id).await {
+                Ok(()) => tracing::info!("promo: id={id} cooled after {idle}s idle"),
+                Err(e) => tracing::warn!("promo: id={id} cool failed: {e}"),
+            }
+        }));
+    }
+    while let Some(result) = pending.next().await {
+        if let Err(e) = result {
+            tracing::warn!("promo: cool task failed: {e}");
+        }
+    }
 }
 
 async fn promo_sweep_once(state: &Arc<AppState>) {
@@ -362,8 +454,8 @@ pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), St
     crate::storage_client::demote_file_on_juicehost(state, id, host).await?;
     let id_owned = id.to_string();
     state
-        .db_call("demote_mark_standard_pinned", move |db| {
-            db::set_file_tier_manual(db, &id_owned, "standard", "")
+        .db_call("demote_mark_standard_unpinned", move |db| {
+            db::set_file_tier(db, &id_owned, "standard", "")
         })
         .await
         .map_err(|e| format!("tier update failed: {e:?}"))?;

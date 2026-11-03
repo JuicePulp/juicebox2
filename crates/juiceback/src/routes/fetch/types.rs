@@ -80,6 +80,9 @@ pub struct FetchStatusResponse {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_received: Option<u64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
 }
 
 pub(crate) type ServicesCache = tokio::sync::Mutex<Option<(std::time::Instant, Arc<Vec<String>>)>>;

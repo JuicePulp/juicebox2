@@ -89,15 +89,13 @@ pub(crate) async fn run_fetch_job_inner(
     let _ = state
         .db_call("update_fetch_job_progress", {
             let job_id = job_id.to_string();
-            move |db| db::update_fetch_job_progress(db, &job_id, "cobalt", "processing", 0)
+            move |db| db::update_fetch_job_progress(db, &job_id, "cobalt", "processing", 0, 0)
         })
         .await;
 
-    let mut primary_result = fetch_via(
+    let mut last = fetch_via(
         state,
         job_id,
-        &state.config.cobalt_api_url,
-        &state.config.cobalt_api_key,
         user_id,
         source_url,
         opts,
@@ -108,56 +106,8 @@ pub(crate) async fn run_fetch_job_inner(
     )
     .await;
 
-    let is_rescue = |r: &FetchResult| {
-        matches!(r, Err(e) if youtube_needs_rescue(e)) && cobalt::is_youtube_link(source_url)
-    };
-
-    if is_rescue(&primary_result) {
-        if let (Some(su0), Some(sk0)) = (
-            &state.config.cobalt_session_api_url,
-            &state.config.cobalt_session_api_key,
-        ) {
-            let _ = state
-                .db_call("update_fetch_job_progress", {
-                    let job_id = job_id.to_string();
-                    move |db| {
-                        db::update_fetch_job_progress(
-                            db,
-                            &job_id,
-                            "session-fallback",
-                            "processing",
-                            0,
-                        )
-                    }
-                })
-                .await;
-            let r = fetch_via(
-                state,
-                job_id,
-                su0,
-                sk0,
-                user_id,
-                source_url,
-                opts,
-                max_size,
-                default_ttl_hours,
-                encrypted_ip.clone(),
-                password.clone(),
-            )
-            .await;
-            if !matches!(&r, Err(e) if youtube_needs_rescue(e)) {
-                return r;
-            }
-            primary_result = r;
-        }
-    }
-
     let mut pass: u32 = 1;
-    let mut last = primary_result;
-    loop {
-        if !matches!(last, Err(ref e) if is_rescue_err(e)) {
-            return last;
-        }
+    while matches!(&last, Err(e) if is_empty_stream_error(e)) {
         pass += 1;
         let budget_left = budget.saturating_sub(started.elapsed());
 
@@ -166,7 +116,7 @@ pub(crate) async fn run_fetch_job_inner(
             || budget_left
                 < std::time::Duration::from_secs(state.config.fetch_empty_retry_delay_secs)
         {
-            return last;
+            break;
         }
         let retry_delay = state.config.fetch_empty_retry_delay_secs;
         tracing::info!("youtube rescue pass {pass} failed; retrying in {retry_delay}s");
@@ -174,7 +124,7 @@ pub(crate) async fn run_fetch_job_inner(
             .db_call("update_fetch_job_progress", {
                 let job_id = job_id.to_string();
                 let stage = format!("retry-{pass}");
-                move |db| db::update_fetch_job_progress(db, &job_id, &stage, "processing", 0)
+                move |db| db::update_fetch_job_progress(db, &job_id, &stage, "processing", 0, 0)
             })
             .await;
         tokio::time::sleep(std::time::Duration::from_secs(
@@ -182,43 +132,9 @@ pub(crate) async fn run_fetch_job_inner(
         ))
         .await;
 
-        let (Some(session_url), Some(session_key)) = (
-            &state.config.cobalt_session_api_url,
-            &state.config.cobalt_session_api_key,
-        ) else {
-            let retry = fetch_via(
-                state,
-                job_id,
-                &state.config.cobalt_api_url,
-                &state.config.cobalt_api_key,
-                user_id,
-                source_url,
-                opts,
-                max_size,
-                default_ttl_hours,
-                encrypted_ip.clone(),
-                password.clone(),
-            )
-            .await;
-            let empty_retry = matches!(&retry, Err(e) if is_empty_stream_error(e));
-            if !empty_retry || !cobalt::is_youtube_link(source_url) {
-                return retry;
-            }
-            continue;
-        };
-        let _ = state
-            .db_call("update_fetch_job_progress", {
-                let job_id = job_id.to_string();
-                move |db| {
-                    db::update_fetch_job_progress(db, &job_id, "session-fallback", "processing", 0)
-                }
-            })
-            .await;
-        let session_result = fetch_via(
+        last = fetch_via(
             state,
             job_id,
-            session_url,
-            session_key,
             user_id,
             source_url,
             opts,
@@ -228,66 +144,60 @@ pub(crate) async fn run_fetch_job_inner(
             password.clone(),
         )
         .await;
+    }
 
-        if matches!(&session_result, Err(e) if is_rescue_err(e)) {
-            if bun_fetch_configured(state) {
-                tracing::info!("cobalt tiers exhausted; falling back to bun-fetch");
-                match run_bun_tier(
-                    state,
-                    job_id,
-                    user_id,
-                    source_url,
-                    opts,
-                    max_size,
-                    default_ttl_hours,
-                    encrypted_ip.clone(),
-                    password.clone(),
-                )
-                .await
-                {
-                    Ok(r) => return Ok(r),
-                    Err(e3) => {
-                        tracing::warn!("bun-fetch tier failed, trying local yt-dlp: {e3}");
-                        last = Err(e3);
-                    }
-                }
-            } else {
-                last = session_result;
-            }
-            if ytdlp_enabled() {
-                tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
-                match run_ytdlp_tier(
-                    state,
-                    job_id,
-                    user_id,
-                    source_url,
-                    opts,
-                    max_size,
-                    default_ttl_hours,
-                    encrypted_ip.clone(),
-                    password.clone(),
-                )
-                .await
-                {
-                    Ok(r) => return Ok(r),
-                    Err(e3) => last = Err(e3),
-                }
-            }
-        } else {
-            last = session_result;
-        }
+    if !matches!(&last, Err(e) if is_rescue_err(e)) {
+        return last;
+    }
 
-        if !cobalt::is_youtube_link(source_url) {
-            return last;
+    if bun_fetch_configured(state) {
+        tracing::info!("cobalt tiers exhausted; falling back to bun-fetch");
+        match run_bun_tier(
+            state,
+            job_id,
+            user_id,
+            source_url,
+            opts,
+            max_size,
+            default_ttl_hours,
+            encrypted_ip.clone(),
+            password.clone(),
+        )
+        .await
+        {
+            Ok(r) => return Ok(r),
+            Err(e3) => {
+                tracing::warn!("bun-fetch tier failed, trying local yt-dlp: {e3}");
+                last = Err(e3);
+            }
         }
     }
+    if ytdlp_enabled() {
+        tracing::info!("cobalt tiers exhausted; falling back to yt-dlp");
+        match run_ytdlp_tier(
+            state,
+            job_id,
+            user_id,
+            source_url,
+            opts,
+            max_size,
+            default_ttl_hours,
+            encrypted_ip.clone(),
+            password.clone(),
+        )
+        .await
+        {
+            Ok(r) => return Ok(r),
+            Err(e3) => last = Err(e3),
+        }
+    }
+
+    last
 }
 
 pub(crate) async fn fetch_via(
     state: &Arc<AppState>,
     job_id: &str,
-    api_url: &str,
-    api_key: &str,
     user_id: &str,
     source_url: &str,
     opts: &FetchOptions,
@@ -296,66 +206,111 @@ pub(crate) async fn fetch_via(
     encrypted_ip: Option<String>,
     password: Option<String>,
 ) -> FetchResult {
-    let response = cobalt::process(&state.http, api_url, api_key, source_url, opts).await?;
+    let endpoints = &state.config.cobalt_endpoints;
+    let mut excluded: Vec<usize> = Vec::new();
+    loop {
+        let (response, winner) =
+            cobalt::process_race(&state.http, endpoints, source_url, opts, &excluded)
+                .await
+                .map_err(|err| cobalt::instance_failure_from_error(&err))?;
+        tracing::debug!(
+            "fetch job {job_id}: cobalt instance {} answered first",
+            endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+        );
 
-    if response.is_client_refused() {
-        return Err(cobalt::friendly_error(
-            "error.api.content.video.unavailable",
-        ));
-    }
-
-    match response {
-        CobaltResponse::Error { code } => Err(cobalt::friendly_error(&code)),
-        CobaltResponse::Picker { items } => Err(format!(
-            "found {} media items at that link; pickers aren't supported yet",
-            items.len()
-        )),
-        CobaltResponse::LocalProcessing { service } => Err(format!(
-            "{service} requires merging separate streams; try a different container or codec setting"
-        )),
-        CobaltResponse::Tunnel {
-            tunnel_url,
-            filename,
+        if response.is_client_refused() {
+            return Err(cobalt::friendly_error(
+                "error.api.content.video.unavailable",
+            ));
         }
-        | CobaltResponse::Redirect {
-            url: tunnel_url,
-            filename,
-        } => {
-            let meta = FetchMeta {
-                title: None,
-                author: filename
-                    .as_deref()
-                    .and_then(meta::author_from_cobalt_filename),
-            };
-            download_and_store(
-                state,
-                user_id,
-                job_id,
-                source_url,
-                ByteSource::Tunnel(tunnel_url),
-                filename.as_deref(),
-                meta,
-                opts,
-                max_size,
-                default_ttl_hours,
-                encrypted_ip,
-                password.clone(),
-            )
-            .await
+
+        let result = match response {
+            CobaltResponse::Error { code } => {
+                if cobalt::is_instance_error_code(&code) {
+                    tracing::warn!(
+                        "fetch job {job_id}: cobalt instance {} failed for this fetch; trying another tier",
+                        endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+                    );
+                    return Err(cobalt::instance_failure_message(&code));
+                }
+                return Err(cobalt::friendly_error(&code));
+            }
+            CobaltResponse::Picker { items } => {
+                return Err(format!(
+                    "found {} media items at that link; pickers aren't supported yet",
+                    items.len()
+                ));
+            }
+            CobaltResponse::LocalProcessing { service } => {
+                return Err(format!(
+                    "{service} requires merging separate streams; try a different container or codec setting"
+                ));
+            }
+            CobaltResponse::Tunnel {
+                tunnel_url,
+                filename,
+            }
+            | CobaltResponse::Redirect {
+                url: tunnel_url,
+                filename,
+            } => {
+                let meta = FetchMeta {
+                    title: None,
+                    author: filename
+                        .as_deref()
+                        .and_then(meta::author_from_cobalt_filename),
+                };
+                download_and_store(
+                    state,
+                    user_id,
+                    job_id,
+                    source_url,
+                    ByteSource::Tunnel(tunnel_url),
+                    filename.as_deref(),
+                    meta,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
+            }
+        };
+
+        match result {
+            Err(err) if is_empty_stream_error(&err) && excluded.len() + 1 < endpoints.len() => {
+                tracing::info!(
+                    "fetch job {job_id}: cobalt instance {} returned an empty stream; trying another instance",
+                    endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+                );
+                excluded.push(winner);
+                let _ = state
+                    .db_call("update_fetch_job_progress", {
+                        let job_id = job_id.to_string();
+                        move |db| {
+                            db::update_fetch_job_progress(
+                                db,
+                                &job_id,
+                                "session-fallback",
+                                "processing",
+                                0,
+                                0,
+                            )
+                        }
+                    })
+                    .await;
+            }
+            other => return other,
         }
     }
 }
 
 fn is_rescue_err(err: &str) -> bool {
-    youtube_needs_rescue(err)
+    is_empty_stream_error(err) || cobalt::is_instance_failure_error(err)
 }
 
 #[must_use]
 pub(crate) fn is_empty_stream_error(err: &str) -> bool {
     err.contains("returned no data") || err.contains("blocked extraction")
-}
-
-#[must_use]
-pub(crate) fn youtube_needs_rescue(err: &str) -> bool {
-    err.contains("unavailable") || err.contains("login") || is_empty_stream_error(err)
 }

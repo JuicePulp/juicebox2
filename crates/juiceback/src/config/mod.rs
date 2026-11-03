@@ -4,6 +4,8 @@ pub mod file;
 pub use file::FileConfig;
 use file::load_file_config;
 
+use crate::cobalt::CobaltEndpoint;
+
 #[derive(Clone)]
 pub struct Config {
     pub host: String,
@@ -73,6 +75,8 @@ pub struct Config {
 
     pub cobalt_api_key: String,
 
+    pub cobalt_endpoints: Vec<CobaltEndpoint>,
+
     pub cobalt_session_api_url: Option<String>,
 
     pub cobalt_session_api_key: Option<String>,
@@ -106,6 +110,7 @@ pub struct Config {
     pub r2_max_promote_bytes: u64,
 
     pub promo_interval_secs: u64,
+    pub promo_cool_after_secs: i64,
     pub promo_min_views: u64,
     pub promo_min_views_per_min: f64,
     pub promo_min_ttl_remaining_secs: i64,
@@ -173,6 +178,14 @@ impl std::fmt::Debug for Config {
             .field("cobalt_enabled", &self.cobalt_enabled)
             .field("cobalt_api_url", &self.cobalt_api_url)
             .field("cobalt_api_key", &"[REDACTED]")
+            .field(
+                "cobalt_endpoints",
+                &self
+                    .cobalt_endpoints
+                    .iter()
+                    .map(|e| (&e.url, e.session))
+                    .collect::<Vec<_>>(),
+            )
             .field("cobalt_session_api_url", &self.cobalt_session_api_url)
             .field(
                 "cobalt_session_api_key",
@@ -329,6 +342,35 @@ impl Config {
             .clone()
             .map(clean_url)
             .filter(|v| !v.is_empty());
+
+        let mut cobalt_endpoints = Vec::new();
+        push_cobalt_endpoint(
+            &mut cobalt_endpoints,
+            cobalt_api_url.clone(),
+            &cobalt_api_key,
+            false,
+        );
+        for url in &file.cobalt.api_urls {
+            push_cobalt_endpoint(&mut cobalt_endpoints, url.clone(), &cobalt_api_key, false);
+        }
+        if let (Some(url), Some(key)) = (&cobalt_session_api_url, &cobalt_session_api_key) {
+            push_cobalt_endpoint(&mut cobalt_endpoints, url.clone(), key, true);
+        }
+        if cobalt_session_api_key.is_some() {
+            for url in &file.cobalt.session_api_urls {
+                push_cobalt_endpoint(
+                    &mut cobalt_endpoints,
+                    url.clone(),
+                    cobalt_session_api_key.as_deref().unwrap_or_default(),
+                    true,
+                );
+            }
+        }
+        if !file.cobalt.session_api_urls.is_empty() && cobalt_session_api_key.is_none() {
+            return Err(
+                "cobalt session_api_urls requires COBALT_SESSION_API_KEY to be set".to_string(),
+            );
+        }
         let fetch_empty_retry_delay_secs = file.cobalt.fetch_empty_retry_delay_secs;
 
         let dte_enabled = file.dte.enabled;
@@ -369,6 +411,7 @@ impl Config {
             parse_env_u64("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
 
         let promo_interval_secs = file.promo.interval_secs.max(60);
+        let promo_cool_after_secs = file.promo.cool_after_secs.max(60);
         let promo_min_views = file.promo.min_views;
         let promo_min_views_per_min = file.promo.min_views_per_min;
         let promo_min_ttl_remaining_secs = file.promo.min_ttl_remaining_secs.max(0);
@@ -379,10 +422,11 @@ impl Config {
         let embed_promote_enabled = file.promo.embed_enabled;
         let embed_promote_max_bytes = file.promo.embed_max_bytes;
         let embed_promote_cooldown_secs = file.promo.embed_cooldown_secs.max(60);
-        let embed_promote_min_ttl_remaining_secs =
-            file.promo.embed_min_ttl_remaining_secs.max(0);
+        let embed_promote_min_ttl_remaining_secs = file.promo.embed_min_ttl_remaining_secs.max(0);
 
-        if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some() {
+        if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some()
+            && file.cobalt.session_api_urls.is_empty()
+        {
             return Err(
                 "cobalt session_api_url and COBALT_SESSION_API_KEY must be set together \
                  (or both left unset)."
@@ -391,11 +435,9 @@ impl Config {
         }
 
         if bun_fetch_url.is_some() != bun_fetch_key.is_some() {
-            return Err(
-                "BUN_FETCH_URL and BUN_FETCH_KEY must be set together \
+            return Err("BUN_FETCH_URL and BUN_FETCH_KEY must be set together \
                  (or both left unset)."
-                    .to_string(),
-            );
+                .to_string());
         }
 
         if juiceutils::config::is_placeholder_secret(&jwt_secret) {
@@ -458,6 +500,7 @@ impl Config {
             cobalt_enabled,
             cobalt_api_url,
             cobalt_api_key,
+            cobalt_endpoints,
             cobalt_session_api_url,
             cobalt_session_api_key,
             bun_fetch_url,
@@ -484,6 +527,7 @@ impl Config {
             r2_max_hot_files,
             r2_max_promote_bytes,
             promo_interval_secs,
+            promo_cool_after_secs,
             promo_min_views,
             promo_min_views_per_min,
             promo_min_ttl_remaining_secs,
@@ -498,6 +542,19 @@ impl Config {
 
 fn clean_url(s: String) -> String {
     s.trim_end_matches('/').to_string()
+}
+
+fn push_cobalt_endpoint(
+    endpoints: &mut Vec<CobaltEndpoint>,
+    url: impl Into<String>,
+    api_key: &str,
+    session: bool,
+) {
+    let url = url.into().trim().trim_end_matches('/').to_string();
+    if url.is_empty() || endpoints.iter().any(|existing| existing.url == url) {
+        return;
+    }
+    endpoints.push(CobaltEndpoint::new(url, api_key, session));
 }
 
 pub const DEFAULT_PASSWORD_MIN_LEN: usize = 8;

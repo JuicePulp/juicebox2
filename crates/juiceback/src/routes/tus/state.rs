@@ -10,7 +10,17 @@ pub(crate) async fn await_storage_push(
     upload_id: &str,
 ) -> Result<(), AppError> {
     let Some((_, handle)) = state.push_handles.remove(upload_id) else {
-        return Err(AppError::TusSessionNotFound);
+        // A retried finalize arrives after the push was already awaited. If
+        // every byte has been accepted there is nothing left to flush.
+        let already_complete = state
+            .tus
+            .get(upload_id)
+            .is_some_and(|upload| upload.offset >= upload.total_length);
+        return if already_complete {
+            Ok(())
+        } else {
+            Err(AppError::TusSessionNotFound)
+        };
     };
     handle
         .await
@@ -49,6 +59,7 @@ pub(crate) fn spawn_push_task(
             push_host,
             &push_mode,
             Some(&push_capability),
+            None,
         )
         .await;
         if let Err(ref e) = result {
@@ -68,21 +79,18 @@ pub(crate) fn release_parallel_slot(
     part_index: Option<usize>,
     total_length: u64,
 ) {
+    use std::sync::atomic::Ordering;
+
     state.tus.remove(id);
     state.tus_senders.remove(id);
     state.push_handles.remove(id);
     let (Some(sid), Some(pi)) = (session_id, part_index) else {
         return;
     };
-    use std::sync::atomic::Ordering;
     let Some(session) = state.part_sessions.get(sid) else {
         return;
     };
-    let ours = session
-        .part_ids
-        .get(&pi)
-        .map(|v| v.value() == id)
-        .unwrap_or(false);
+    let ours = session.part_ids.get(&pi).is_some_and(|v| v.value() == id);
     if ours && session.part_ids.remove(&pi).is_some() {
         let _ = session
             .declared_size

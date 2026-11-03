@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::atomic::Ordering,
-};
+use std::path::{Path, PathBuf};
 
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -9,7 +6,7 @@ use futures::StreamExt;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use super::{
-    ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics, TEMP_COUNTER,
+    ByteStream, FileData, FileMetadata, StorageBackend, StorageMetrics,
     capability::{self, CapStore},
     common::{safe_extension, valid_component},
     freeze::ensure_not_frozen,
@@ -337,12 +334,22 @@ impl LocalBackend {
             // disk writes. 512 KiB per active upload is cheap at 16 uploads.
             let mut file = BufWriter::with_capacity(512 * 1024, file);
             let mut total = 0u64;
+            let mut visible = 0u64;
             while let Some(chunk) = data.next().await {
                 let chunk = chunk?;
                 total = total.saturating_add(chunk.len() as u64);
                 file.write_all(&chunk)
                     .await
                     .map_err(|e| StorageError::Io(format!("write failed: {e}")))?;
+                // Make the bytes visible to the progressive-download path
+                // while the upload is still running. Without this, BufWriter
+                // could hide the whole beginning of a stalled upload.
+                if total.saturating_sub(visible) >= 256 * 1024 {
+                    file.flush()
+                        .await
+                        .map_err(|e| StorageError::Io(format!("flush failed: {e}")))?;
+                    visible = total;
+                }
             }
             file.flush()
                 .await
@@ -379,6 +386,7 @@ impl LocalBackend {
         }
 
         let temp_path = self.temp_path(target_id);
+        let started = std::time::Instant::now();
         let result = async {
             let mut target_file = tokio::fs::OpenOptions::new()
                 .write(true)
@@ -419,6 +427,12 @@ impl LocalBackend {
             return Err(e);
         }
         self.extensions.insert(target_id.to_string(), ext);
+
+        tracing::debug!(
+            "concat: {} parts -> {target_id} in {:?}",
+            part_ids.len(),
+            started.elapsed()
+        );
 
         for part_id in part_ids {
             if let Err(e) = self.delete(part_id, None).await {
@@ -485,91 +499,188 @@ impl LocalBackend {
     }
 }
 
+#[cfg(target_os = "linux")]
+const FICLONERANGE: libc::c_ulong = 0x4020_940d;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct FileCloneRange {
+    src_fd: i64,
+    src_offset: u64,
+    src_length: u64,
+    dest_offset: u64,
+}
+
+/// Reflink `part` into `target_file` at `dst_off`.
+///
+/// Returns `Ok(true)` when the whole part was cloned, `Ok(false)` when the
+/// kernel or filesystem refuses to clone (tmpfs, overlayfs, cross-device) and
+/// the caller must copy instead. A clone is metadata-only, so merging a 1 GiB
+/// upload costs microseconds instead of ~26 s at disk speed, and the parts and
+/// the merged file share blocks until one of them is unlinked.
+#[cfg(target_os = "linux")]
+fn try_reflink_range(
+    part: &tokio::fs::File,
+    target_file: &tokio::fs::File,
+    part_len: u64,
+    dst_off: u64,
+) -> Result<bool, StorageError> {
+    use std::os::fd::AsRawFd;
+    let range = FileCloneRange {
+        src_fd: i64::from(part.as_raw_fd()),
+        src_offset: 0,
+        src_length: part_len,
+        dest_offset: dst_off,
+    };
+    // SAFETY: both descriptors stay open for the duration of the call and
+    // `range` matches the layout the kernel expects for FICLONERANGE.
+    let rc = unsafe {
+        libc::ioctl(
+            target_file.as_raw_fd(),
+            FICLONERANGE,
+            &raw const range,
+        )
+    };
+    if rc == 0 {
+        return Ok(true);
+    }
+    // A reflink the filesystem declines must never fail the merge: the caller
+    // falls back to a real copy, which surfaces genuine I/O errors.
+    tracing::debug!("reflink declined, copying: {}", std::io::Error::last_os_error());
+    Ok(false)
+}
+
 async fn copy_part_fast(
     part: &mut tokio::fs::File,
     target_file: &mut tokio::fs::File,
     part_len: u64,
+    dst_off: u64,
+    part_id: &str,
+) -> Result<u64, StorageError> {
+    // Reflink first. This is the difference between a 20 s and a 0 ms merge
+    // for a 1 GiB upload, and it is the only path that does not double the
+    // file's disk footprint while parts and target coexist.
+    #[cfg(target_os = "linux")]
+    {
+        if try_reflink_range(part, target_file, part_len, dst_off)? {
+            return Ok(dst_off + part_len);
+        }
+    }
+    // Everything past this point moves bytes: at disk speed a part is seconds
+    // of syscalls, so it must not run on a reactor thread. Hand duplicated
+    // handles to the blocking pool; the originals stay open for the caller.
+    let part_std = part
+        .try_clone()
+        .await
+        .map_err(|e| StorageError::Io(format!("clone part {part_id} handle: {e}")))?
+        .into_std()
+        .await;
+    let target_std = target_file
+        .try_clone()
+        .await
+        .map_err(|e| StorageError::Io(format!("clone target handle: {e}")))?
+        .into_std()
+        .await;
+    let id = part_id.to_owned();
+    tokio::task::spawn_blocking(move || {
+        copy_part_blocking(&part_std, &target_std, part_len, dst_off, &id)
+    })
+    .await
+    .map_err(|e| StorageError::Io(format!("copy part {part_id} task failed: {e}")))?
+}
+
+/// Blocking half of [`copy_part_fast`], run on the blocking pool.
+///
+/// `copy_file_range` keeps the bytes in the kernel; when the filesystem does not
+/// support it the loop falls back to positional reads and writes, which must not
+/// disturb the shared file offsets of the handles it was given.
+fn copy_part_blocking(
+    part: &std::fs::File,
+    target: &std::fs::File,
+    part_len: u64,
     mut dst_off: u64,
     part_id: &str,
 ) -> Result<u64, StorageError> {
-    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
     const CHUNK: u64 = 32 * 1024 * 1024;
-    let mut src_off: libc::off_t = 0;
+
+    let mut src_off = 0u64;
     let mut remaining = part_len;
-    let mut out_off: libc::off_t = dst_off as libc::off_t;
-    let mut kernel_done = true;
-    while remaining > 0 {
-        let want = remaining.min(CHUNK) as libc::size_t;
-        let mut in_off = src_off;
-        let rc = unsafe {
-            libc::copy_file_range(
-                part.as_raw_fd(),
-                &mut in_off,
-                target_file.as_raw_fd(),
-                &mut out_off,
-                want,
-                0,
-            )
-        };
-        if rc < 0 {
-            let err = std::io::Error::last_os_error();
-            match err.raw_os_error() {
-                Some(code)
-                    if code == libc::ENOSYS
-                        || code == libc::EXDEV
-                        || code == libc::EINVAL
-                        || code == libc::EPERM
-                        || code == libc::EOPNOTSUPP =>
-                {
-                    kernel_done = false;
-                    break;
-                }
-                Some(code) if code == libc::EINTR => continue,
-                _ => {
-                    return Err(StorageError::Io(format!(
-                        "copy part {part_id} failed: {err}"
-                    )));
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        while remaining > 0 {
+            let want = remaining.min(CHUNK) as libc::size_t;
+            let mut in_off = src_off as libc::off_t;
+            let mut out_off = dst_off as libc::off_t;
+            let rc = unsafe {
+                libc::copy_file_range(
+                    part.as_raw_fd(),
+                    &mut in_off,
+                    target.as_raw_fd(),
+                    &mut out_off,
+                    want,
+                    0,
+                )
+            };
+            if rc < 0 {
+                let err = std::io::Error::last_os_error();
+                match err.raw_os_error() {
+                    Some(code)
+                        if code == libc::ENOSYS
+                            || code == libc::EXDEV
+                            || code == libc::EINVAL
+                            || code == libc::EPERM
+                            || code == libc::EOPNOTSUPP =>
+                    {
+                        break;
+                    }
+                    Some(code) if code == libc::EINTR => continue,
+                    _ => {
+                        return Err(StorageError::Io(format!(
+                            "copy part {part_id} failed: {err}"
+                        )));
+                    }
                 }
             }
-        }
-        if rc == 0 {
-            return Err(StorageError::Io(format!(
-                "copy part {part_id} hit unexpected EOF"
-            )));
-        }
-        let n = rc as u64;
-        src_off = in_off;
-        dst_off = out_off as u64;
-        remaining -= n;
-    }
-    if !kernel_done {
-        use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-        part.seek(std::io::SeekFrom::Start(src_off as u64))
-            .await
-            .map_err(|e| StorageError::Io(format!("seek part {part_id} failed: {e}")))?;
-        target_file
-            .seek(std::io::SeekFrom::Start(dst_off))
-            .await
-            .map_err(|e| StorageError::Io(format!("seek target failed: {e}")))?;
-        let mut buf = vec![0u8; 1 << 20];
-        while remaining > 0 {
-            let want = remaining.min(buf.len() as u64) as usize;
-            let n = part
-                .read(&mut buf[..want])
-                .await
-                .map_err(|e| StorageError::Io(format!("read part {part_id} failed: {e}")))?;
-            if n == 0 {
+            if rc == 0 {
                 return Err(StorageError::Io(format!(
                     "copy part {part_id} hit unexpected EOF"
                 )));
             }
-            target_file
-                .write_all(&buf[..n])
-                .await
-                .map_err(|e| StorageError::Io(format!("write target failed: {e}")))?;
-            remaining -= n as u64;
-            dst_off += n as u64;
+            let n = rc as u64;
+            src_off = in_off as u64;
+            dst_off = out_off as u64;
+            remaining -= n;
         }
+    }
+    // Whatever copy_file_range did not take (or that it could not start) is
+    // moved in userspace, from where the kernel loop stopped.
+    let mut buf = vec![0u8; 1 << 20];
+    while remaining > 0 {
+        let want = remaining.min(buf.len() as u64) as usize;
+        let n = part
+            .read_at(&mut buf[..want], src_off)
+            .map_err(|e| StorageError::Io(format!("read part {part_id} failed: {e}")))?;
+        if n == 0 {
+            return Err(StorageError::Io(format!(
+                "copy part {part_id} hit unexpected EOF"
+            )));
+        }
+        let mut written = 0;
+        while written < n {
+            let w = target
+                .write_at(&buf[written..n], dst_off + written as u64)
+                .map_err(|e| StorageError::Io(format!("write target failed: {e}")))?;
+            if w == 0 {
+                return Err(StorageError::Io("write target made no progress".into()));
+            }
+            written += w;
+        }
+        src_off += n as u64;
+        dst_off += n as u64;
+        remaining -= n as u64;
     }
     Ok(dst_off)
 }
@@ -639,6 +750,14 @@ impl StorageBackend for LocalBackend {
 
     async fn stat(&self, id: &str) -> Result<FileMetadata, StorageError> {
         self.stat_cached(id).await
+    }
+
+    fn local_path(&self, id: &str) -> Option<PathBuf> {
+        self.resolve_path(id)
+    }
+
+    fn live_path(&self, id: &str) -> Option<PathBuf> {
+        valid_component(id).then(|| self.files_dir.join(format!(".live.{id}.tmp")))
     }
 
     async fn get_range_stream(
@@ -809,12 +928,10 @@ impl StorageBackend for LocalBackend {
 
 impl LocalBackend {
     fn temp_path(&self, id: &str) -> PathBuf {
-        self.files_dir.join(format!(
-            ".{}.{}.{}.tmp",
-            id,
-            std::process::id(),
-            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ))
+        // A deterministic temp name lets the public host stream bytes while
+        // they are still being written. The per-ID reservation file makes
+        // concurrent writers for the same logical ID impossible.
+        self.files_dir.join(format!(".live.{id}.tmp"))
     }
 
     async fn write_local(

@@ -165,6 +165,11 @@ pub async fn parse_multipart(
                 selected_upload_mode
             };
 
+            let live_total = reservation
+                .as_ref()
+                .map(|r| r.size_bytes.max(0) as u64)
+                .filter(|size| *size > 0);
+
             if protected {
                 let upload_protection = super::protected::resolve_multipart_protection(
                     state,
@@ -219,6 +224,7 @@ pub async fn parse_multipart(
                     max_size as i64,
                     &file_capability,
                     danger,
+                    live_total,
                 )
                 .await?;
                 total_bytes = bytes;
@@ -245,6 +251,7 @@ pub async fn parse_multipart(
                     selected_upload_mode,
                     max_size as i64,
                     &file_capability,
+                    live_total,
                 )
                 .await?;
                 total_bytes = bytes;

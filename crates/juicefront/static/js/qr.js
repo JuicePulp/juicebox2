@@ -1,4 +1,4 @@
-import { iconHTML } from "./copy.js";
+import { iconHTML } from "./copy.js?v=2.1.32";
 import { announce } from "./util.js";
 
 async function qrFactory() {

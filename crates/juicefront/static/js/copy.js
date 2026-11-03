@@ -1,6 +1,6 @@
 import { announce } from "./util.js";
 import { t } from "./i18n.js";
-import { playSound } from "./sounds.js";
+import { playSound } from "./sounds.js?v=2.1.32";
 
 var iconCache = null;
 var iconCounter = 0;
@@ -104,7 +104,7 @@ export function applyUrlVariantsVisibility() {
 }
 
 export function makeUrlVariantToggle(variants, labels) {
-  if (!variants || !variants.raw || !urlVariantsEnabled()) return null;
+  if (!variants || !variants.raw) return null;
   labels = labels || {};
   var group = document.createElement("div");
   group.className = "url-variants";
@@ -134,9 +134,20 @@ function switchUrlVariant(btn) {
   var group = btn.closest("[data-url-variants]");
   if (!group) return;
   var buttons = group.querySelectorAll(".url-variant");
+  var previousIndex = -1;
+  var nextIndex = -1;
   for (var i = 0; i < buttons.length; i++) {
+    if (buttons[i].classList.contains("is-active")) previousIndex = i;
+    if (buttons[i] === btn) nextIndex = i;
     buttons[i].classList.toggle("is-active", buttons[i] === btn);
   }
+  var direction =
+    previousIndex >= 0 && nextIndex >= 0 && previousIndex !== nextIndex
+      ? nextIndex > previousIndex
+        ? "forward"
+        : "back"
+      : undefined;
+  playSound("select", { emphasis: "subtle", direction: direction });
   var url = btn.getAttribute("data-url") || "";
   if (!url) return;
   var scope = btn.closest(".copy-bar-wrapper") || group.parentElement;
@@ -157,9 +168,25 @@ export function applyVariantUrl(scope, url) {
   for (var m = 0; m < qrs.length; m++) qrs[m].setAttribute("data-qr-url", url);
 }
 
+export function updateUrlVariants(group, variants) {
+  if (!group || !variants) return group;
+  var buttons = group.querySelectorAll(".url-variant[data-variant]");
+  for (var i = 0; i < buttons.length; i++) {
+    var key = buttons[i].getAttribute("data-variant");
+    var url = variants[key];
+    if (url) buttons[i].setAttribute("data-url", url);
+  }
+  var active = group.querySelector(".url-variant.is-active");
+  var url = (active && active.getAttribute("data-url")) || variants.preview || "";
+  if (url) applyVariantUrl(group.parentElement, url);
+  return group;
+}
+
 export function attachUrlVariantsAfter(anchor, variants, labels) {
-  if (!anchor || !anchor.parentElement || !variants || !variants.raw) return null;
-  if (anchor.parentElement.querySelector(":scope > [data-url-variants]")) return null;
+  if (!anchor || !anchor.parentElement || !variants) return null;
+  var existing = anchor.parentElement.querySelector(":scope > [data-url-variants]");
+  if (existing) return updateUrlVariants(existing, variants);
+  if (!variants.raw) return null;
   var toggle = makeUrlVariantToggle(variants, labels || {});
   if (!toggle) return null;
   anchor.after(toggle);

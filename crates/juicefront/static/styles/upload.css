@@ -175,7 +175,10 @@ body {
   border-radius: 0.5rem;
   padding: 3rem 2rem;
   margin-bottom: 0.75rem;
-  transition: all 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -200,6 +203,8 @@ body {
   border-color: var(--orange-400);
   border-style: solid;
   background-color: var(--orange-500-20);
+  outline: 2px solid var(--orange-400);
+  outline-offset: 3px;
   box-shadow:
     0 0 0 3px var(--orange-500-20),
     0 0 20px rgba(249, 115, 22, 0.15);
@@ -377,6 +382,10 @@ html[data-banned] .upload-tabs {
 }
 
 .drop-lock[hidden] {
+  display: none;
+}
+
+.drop-zone.is-encrypted .drop-icon {
   display: none;
 }
 
@@ -578,6 +587,14 @@ html[data-banned] .upload-tabs {
   color: var(--juice-200);
 }
 
+.upload-tab:focus-visible,
+.url-variant:focus-visible {
+  outline: 2px solid var(--orange-400);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 2;
+}
+
 .upload-tab {
   padding: 0.6rem 0.6rem;
   font-size: 0.85rem;
@@ -621,6 +638,15 @@ html[data-banned] .upload-tabs {
   z-index: 1;
 }
 
+#mode-file:focus-visible ~ .upload-tabs label[for="mode-file"],
+#mode-text:focus-visible ~ .upload-tabs label[for="mode-text"],
+#mode-cobalt:focus-visible ~ .upload-tabs label[for="mode-cobalt"] {
+  outline: 2px solid var(--orange-400);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 2;
+}
+
 .text-editor {
   border: 2px dashed var(--orange-600);
   background-color: var(--orange-500-10);
@@ -657,7 +683,7 @@ html[data-banned] .upload-tabs {
   font-family: "General", "Unifont", monospace;
   font-size: 0.85rem;
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
   box-sizing: border-box;
 }
 
@@ -1281,6 +1307,20 @@ html[data-banned] .upload-tabs {
   animation: shimmer 2s ease-in-out infinite;
 }
 
+.progress-fill.indeterminate {
+  width: 35% !important;
+  animation: cobalt-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes cobalt-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @keyframes shimmer {
   0% {
     background-position: 0% 0;
@@ -1393,12 +1433,30 @@ html[data-banned] .upload-tabs {
   margin-top: 0 !important;
 }
 
+.file-item .copy-bar {
+  animation: copy-bar-appear 0.25s ease-out;
+}
+
+@keyframes copy-bar-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .status-pill.sliding {
   transform: translateY(calc(100% + 1px));
   opacity: 0;
   height: 0;
   margin-top: 0;
+  padding: 0;
+  border-width: 0;
   overflow: hidden;
+  pointer-events: none;
 }
 
 .copy-bar:has(+ .delete-btn) {
@@ -1546,6 +1604,10 @@ html[data-banned] .upload-tabs {
     animation: none;
   }
 
+  .file-item .copy-bar {
+    animation: none;
+  }
+
   .file-item.exiting {
     animation: none;
     opacity: 0;
@@ -1558,6 +1620,12 @@ html[data-banned] .upload-tabs {
 
   .progress-fill.finalizing {
     animation: none;
+  }
+
+  .progress-fill.indeterminate {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.45;
   }
 
   .status-pill {
@@ -1971,4 +2039,50 @@ html[data-banned] .upload-tabs {
 @keyframes host-glow-pulse {
   0%, 100% { opacity: 0; transform: scale(1); }
   50% { opacity: 0.3; transform: scale(1.1); }
+}
+
+/* Reduced motion: both the in-app preference and the OS setting should
+   present changes immediately, without fades, slides, or a page crossfade. */
+html[data-motion-reduce] *,
+html[data-motion-reduce] *::before,
+html[data-motion-reduce] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-motion-reduce]::view-transition-group(*),
+html[data-motion-reduce]::view-transition-old(*),
+html[data-motion-reduce]::view-transition-new(*) {
+  animation: none !important;
+}
+
+html[data-motion-reduce] .ripple-wave,
+html[data-motion-reduce] .ripple-wave--hold,
+html[data-motion-reduce] .ripple-wave--release,
+html[data-motion-reduce] .ripple-noise {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .ripple-wave,
+  .ripple-wave--hold,
+  .ripple-wave--release,
+  .ripple-noise {
+    display: none !important;
+  }
 }

@@ -223,6 +223,7 @@ pub async fn push_encrypted_file(
         host,
         upload_mode,
         capability,
+        None,
     );
     tx.send(Ok(Bytes::copy_from_slice(&header)))
         .await

@@ -100,7 +100,7 @@ impl Default for QuicServerLimits {
             max_connections: 256,
             max_requests: 256,
             handshake_timeout: Duration::from_secs(10),
-            idle_timeout: Duration::from_secs(30),
+            idle_timeout: Duration::from_secs(120),
             request_timeout: Duration::from_secs(600),
         }
     }
@@ -275,6 +275,7 @@ async fn handle_h3_conn(
             continue;
         };
         let request_timeout = limits.request_timeout;
+        let body_read_timeout = limits.idle_timeout;
         tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + request_timeout;
             let (req, stream) =
@@ -293,7 +294,14 @@ async fn handle_h3_conn(
             }
             match tokio::time::timeout_at(
                 deadline,
-                proxy_axum(&mut router, req, stream, remote_addr, request_timeout),
+                proxy_axum(
+                    &mut router,
+                    req,
+                    stream,
+                    remote_addr,
+                    request_timeout,
+                    body_read_timeout,
+                ),
             )
             .await
             {
@@ -314,6 +322,7 @@ async fn proxy_axum(
     stream: h3::server::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
     remote_addr: std::net::SocketAddr,
     request_timeout: Duration,
+    body_read_timeout: Duration,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let uri = req.uri().clone();
     let method = req.method().clone();
@@ -323,15 +332,21 @@ async fn proxy_axum(
 
     let (mut send_stream, mut recv_stream) = stream.split();
     let (mut body_tx, body) = Channel::<Bytes, std::io::Error>::new(4);
+    let body_method = method_str.clone();
+    let body_uri = uri_str.clone();
     let request_body_task = tokio::spawn(async move {
         loop {
             let chunk = match tokio::time::timeout(
-                request_timeout.min(Duration::from_secs(30)),
+                request_timeout.min(body_read_timeout),
                 recv_stream.recv_data(),
             )
             .await
             {
                 Err(_) => {
+                    tracing::warn!(
+                        "H3 request body idle timeout after {:?}: {body_method} {body_uri}",
+                        body_read_timeout
+                    );
                     body_tx.abort(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
                         "timeout reading H3 request body",
@@ -408,6 +423,11 @@ fn header_bytes(req: &Request<()>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_idle_timeout_supports_slow_upload_chunks() {
+        assert!(QuicServerLimits::default().idle_timeout >= Duration::from_secs(120));
+    }
 
     #[test]
     fn generated_cert_has_non_empty_der() {

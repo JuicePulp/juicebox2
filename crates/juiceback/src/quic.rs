@@ -132,6 +132,12 @@ fn create_quic_endpoint(
     transport.stream_receive_window(VarInt::from_u32(16 * 1024 * 1024));
     transport.receive_window(VarInt::from_u32(64 * 1024 * 1024));
     transport.send_window(64 * 1024 * 1024);
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(120)
+            .try_into()
+            .expect("bounded QUIC idle timeout"),
+    ));
+    transport.keep_alive_interval(Some(Duration::from_secs(15)));
 
     let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
     client_config.transport_config(Arc::new(transport));
@@ -250,7 +256,7 @@ fn quic_stream_request(
 async fn quic_recv_response(
     stream: &mut h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
 ) -> Result<(u16, Vec<u8>), String> {
-    let (status, body_bytes) = tokio::time::timeout(Duration::from_secs(60), async {
+    let (status, body_bytes) = tokio::time::timeout(Duration::from_secs(120), async {
         stream
             .finish()
             .await

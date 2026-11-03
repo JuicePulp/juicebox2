@@ -1,5 +1,5 @@
 import { UPLOAD_URL } from "./upload-config.js";
-import { playSound } from "./sounds.js";
+import { playSound } from "./sounds.js?v=2.1.32";
 import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api.js";
 let countdownInterval = null;
 let pollInterval = null;

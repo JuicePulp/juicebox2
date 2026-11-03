@@ -76,6 +76,11 @@ pub fn test_config() -> Config {
         cobalt_enabled: false,
         cobalt_api_url: "http://localhost:7272".into(),
         cobalt_api_key: "cobalt_key".into(),
+        cobalt_endpoints: vec![juiceback::cobalt::CobaltEndpoint::new(
+            "http://localhost:7272",
+            "cobalt_key",
+            false,
+        )],
         cobalt_session_api_url: None,
         cobalt_session_api_key: None,
         bun_fetch_url: None,
@@ -102,6 +107,7 @@ pub fn test_config() -> Config {
         r2_max_hot_files: 500,
         r2_max_promote_bytes: 256 * 1024 * 1024,
         promo_interval_secs: 300,
+        promo_cool_after_secs: 1800,
         promo_min_views: 50,
         promo_min_views_per_min: 10.0,
         promo_min_ttl_remaining_secs: 3600,
@@ -137,6 +143,18 @@ pub fn fetch_config_with_delay(
     session_api_key: Option<String>,
     delay: u64,
 ) -> Config {
+    let mut cobalt_endpoints = vec![juiceback::cobalt::CobaltEndpoint::new(
+        cobalt_api_url.clone(),
+        "cobalt_key",
+        false,
+    )];
+    if let (Some(url), Some(key)) = (&session_api_url, &session_api_key) {
+        cobalt_endpoints.push(juiceback::cobalt::CobaltEndpoint::new(
+            url.clone(),
+            key.clone(),
+            true,
+        ));
+    }
     Config {
         host: "127.0.0.1".into(),
         port: 6401,
@@ -185,6 +203,7 @@ pub fn fetch_config_with_delay(
         cobalt_enabled: true,
         cobalt_api_url,
         cobalt_api_key: "cobalt_key".into(),
+        cobalt_endpoints,
         cobalt_session_api_url: session_api_url,
         cobalt_session_api_key: session_api_key,
         bun_fetch_url: None,
@@ -211,6 +230,7 @@ pub fn fetch_config_with_delay(
         r2_max_hot_files: 500,
         r2_max_promote_bytes: 256 * 1024 * 1024,
         promo_interval_secs: 300,
+        promo_cool_after_secs: 1800,
         promo_min_views: 50,
         promo_min_views_per_min: 10.0,
         promo_min_ttl_remaining_secs: 3600,

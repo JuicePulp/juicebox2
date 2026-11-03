@@ -57,8 +57,11 @@
         var html = "";
         for (var i = 0; i < files.length; i++) {
             var f = files[i];
-            var tierState = f.tier_state || (f.hot ? "hot" : "standard");
-            var tierAction = (tierState === "hot" || tierState === "warming") ? "cool" : "warm";
+            // "cooling"/"warming" are display states, not storage tiers.
+            // The action must follow where the file actually lives, otherwise
+            // a cooling (still hot) file only offers "Warm" and stays on R2.
+            var isHot = f.tier === "hot" || (!f.tier && f.hot);
+            var tierAction = isHot ? "cool" : "warm";
             var tierLabel = tierAction === "cool" ? "Cool" : "Warm";
             var expired = f.expires_at * 1000 <= Date.now();
             var rowClass = expired ? ' class="expired"' : '';

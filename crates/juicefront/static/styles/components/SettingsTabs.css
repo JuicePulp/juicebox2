@@ -15,6 +15,15 @@
   z-index: 1;
 }
 
+#settings-tab-connection:focus-visible ~ .full-tab label[for="settings-tab-connection"],
+#settings-tab-upload:focus-visible ~ .full-tab label[for="settings-tab-upload"],
+#settings-tab-preferences:focus-visible ~ .full-tab label[for="settings-tab-preferences"] {
+  outline: 2px solid var(--orange-400);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 2;
+}
+
 .settings-panels [data-settings-panel] {
   display: none;
 }

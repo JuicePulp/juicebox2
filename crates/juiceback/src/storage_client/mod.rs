@@ -3,6 +3,7 @@ pub mod config;
 pub mod download;
 pub mod errors;
 pub mod files;
+pub mod live;
 pub mod probe;
 pub mod push;
 pub mod target;
@@ -17,6 +18,7 @@ pub use files::{
     concat_files, delete_file_on_juicehost, demote_file_on_juicehost, freeze_file_on_juicehost,
     promote_file_on_juicehost, rename_file_on_juicehost, unfreeze_file_on_juicehost,
 };
+pub use live::register_live_upload;
 pub use probe::stat_file_on_juicehost;
 pub use push::{push_file_streaming, push_file_to_juicehost};
 pub(crate) use target::{

@@ -272,6 +272,9 @@ pub struct FetchJob {
 
     #[serde(default)]
     pub bytes_received: i64,
+
+    #[serde(default)]
+    pub total_bytes: i64,
 }
 
 #[derive(Debug, Clone)]

@@ -96,8 +96,24 @@ fn main() {
             Arc::new(backend)
         };
 
+        if config.audio_embed.enabled() {
+            match std::fs::create_dir_all(config.audio_embed.cache_dir()) {
+                Ok(()) => tracing::info!(
+                    "audio embeds: cache={:?}, cap={} MB, clip={}s",
+                    config.audio_embed.cache_dir(),
+                    config.audio_embed.cache_max_bytes() / (1024 * 1024),
+                    config.audio_embed.max_seconds()
+                ),
+                Err(e) => tracing::warn!(
+                    "audio embeds: could not create cache dir {:?}: {e}",
+                    config.audio_embed.cache_dir()
+                ),
+            }
+        }
+
         let state = Arc::new(AppState::new(&config, storage));
         juicehost::handlers::stats::start_flusher(Arc::clone(&state));
+        juicehost::handlers::audio_embed::spawn_pruner(Arc::clone(&state));
 
         if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {
             let ban_state = Arc::clone(&state);

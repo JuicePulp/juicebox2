@@ -7,6 +7,7 @@
   __OG_TAGS__
   __DISCORD_EMBED__
   <title>Unlock __FILENAME__ - Juicebox²</title>
+  <noscript><meta http-equiv="refresh" content="0;url=__CIPHERTEXT_URL__?inline=1"></noscript>
   <link rel="icon" type="image/png" href="/favicon.ico">
   <style>
     __FONT_FACE__
@@ -48,10 +49,20 @@
     .card button:hover{background:#fb923c}
     .card button:disabled{opacity:.5;cursor:wait}
     .card[hidden]{display:none}
-    .status{font-size:.85rem;color:#a29188;min-height:1.2em}
+    .card form{display:flex;flex-direction:column;gap:.9rem}
+    .status{font-size:.85rem;color:#a29188;min-height:2.4em;line-height:1.2}
     .status.err{color:#f87171}
+    .status a{color:#f97316}
     .progress{height:.4rem;background:#100d0a;border-radius:.2rem;overflow:hidden}
     .progress > div{height:100%;width:0;background:#f97316;transition:width .15s}
+    .show-anyways{font-size:.8rem;color:#a29188;text-decoration:underline;align-self:center}
+    .show-anyways:hover{color:#f97316}
+    .show-anyways[hidden]{display:none}
+    .card.is-downloading{align-items:center;justify-content:center;min-height:12rem}
+    .card.is-downloading > :not(.progress):not(.status){display:none}
+    .card.done{align-items:center;justify-content:center;min-height:14rem}
+    .done-check{display:flex;align-items:center;justify-content:center;color:#f97316}
+    .done-check svg{display:block;width:5rem;height:5rem}
     .btn[disabled]{opacity:.5;cursor:not-allowed}
     .view-full .topbar{display:none}
     .view-full .stage{padding:0}
@@ -86,12 +97,16 @@
     <div class="card" id="unlockcard">
       <h1>This file is password-protected</h1>
       <p>Enter the password for <strong>__FILENAME__</strong>. The decryption happens within your browser, so you MUST require javascript to see this file</p>
-      <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password">
-      <button id="unlockbtn" type="button">Unlock</button>
+      <form id="unlockform">
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <button id="unlockbtn" type="submit">Unlock</button>
+      </form>
       <div class="progress" id="progress" hidden><div id="bar"></div></div>
       <p class="status" id="status" aria-live="polite"></p>
+      <a class="show-anyways" id="showraw" href="__CIPHERTEXT_URL__?inline=1"__SHOW_ANYWAYS_HIDDEN__>show anyways</a>
     </div>
+    <noscript><p class="status">JavaScript is disabled. <a href="__CIPHERTEXT_URL__?inline=1">Open the encrypted content</a>.</p></noscript>
   </main>
   <script>
 __APP_JS__

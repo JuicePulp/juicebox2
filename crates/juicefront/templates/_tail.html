@@ -1,4 +1,12 @@
 </div>
+<div id="jb-net-debug" hidden aria-hidden="true">
+  <canvas id="jb-net-canvas" width="440" height="88"></canvas>
+  <div id="jb-net-text"></div>
+  <div id="jb-net-actions">
+    <button id="jb-net-export-json" type="button">export json</button>
+    <button id="jb-net-export-csv" type="button">export csv</button>
+  </div>
+</div>
 {{ shell.modals_html|safe }}
 {{ shell.ads_html|safe }}
 <script id="jb-i18n" type="application/json">{{ shell.i18n_json|safe }}</script>

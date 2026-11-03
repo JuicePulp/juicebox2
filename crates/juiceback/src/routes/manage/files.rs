@@ -79,6 +79,8 @@ impl FileInfoResponse {
 pub struct RenewResponse {
     pub id: String,
     pub url: String,
+    pub raw_url: String,
+    pub download_url: String,
     pub filename: String,
     pub expires_at: i64,
     pub custom: bool,
@@ -328,7 +330,7 @@ pub async fn renew_file_id_handler(
     )
     .await?;
 
-    let url = crate::utils::share_link(
+    let (url, raw_url, download_url) = crate::utils::share_links(
         &state.config,
         record.storage_host.as_deref(),
         &new_id,
@@ -357,6 +359,8 @@ pub async fn renew_file_id_handler(
         Json(RenewResponse {
             id: new_id,
             url,
+            raw_url,
+            download_url,
             filename: record.filename,
             expires_at: record.expires_at,
             custom: is_custom,

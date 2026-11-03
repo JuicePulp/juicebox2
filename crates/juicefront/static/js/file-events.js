@@ -1,4 +1,8 @@
+import { readStoredFiles } from "./upload-storage.js";
+export { upsertLocalFile } from "./upload-storage.js";
+const STORAGE_KEY = "juicebox_uploads";
 const listeners = new Set;
+
 export function onFileDeleted(listener) {
   listeners.add(listener);
   return () => {
@@ -16,15 +20,10 @@ export function removeLocalFile(fileId) {
   if (typeof localStorage === "undefined")
     return;
   try {
-    const raw = localStorage.getItem("juicebox_uploads");
-    if (!raw)
-      return;
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr))
-      return;
+    const arr = readStoredFiles();
     const next = arr.filter((f) => f && f.id !== fileId);
     if (next.length !== arr.length) {
-      localStorage.setItem("juicebox_uploads", JSON.stringify(next));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     }
   } catch {}
 }

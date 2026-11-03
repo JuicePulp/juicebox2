@@ -2,9 +2,16 @@ import {
   startUpload,
   generateId,
   extractServerId
-} from "./upload-engine.js";
-import { UPLOAD_URL, TUS_THRESHOLD } from "./upload-config.js";
+} from "./upload-engine.js?v=2.1.32";
+import {
+  UPLOAD_URL,
+  readUploadMode,
+  uploadMethodFor,
+  LAST_SPEED_KEY
+} from "./upload-config.js?v=2.1.32";
 import { deleteTus } from "./tus.js";
+import { upsertLocalFile } from "./upload-storage.js";
+import { announce } from "./util.js";
 const listeners = new Set;
 let items = [];
 const persistedIds = new Set;
@@ -41,26 +48,168 @@ export function wasRemoved(id) {
   return removedIds.has(id);
 }
 function reset(snapshot) {
-  items = snapshot;
+  const merged = new Map(items.map((it) => [it.id, it]));
   for (const it of snapshot)
-    maybePersist(it);
+    merged.set(it.id, it);
+  items = [...merged.values()];
   publish();
 }
 let port = null;
 let workerDead = false;
 let workerHeard = false;
 let workerValidating = false;
+const workerInputs = new Map;
+const workerAckTimers = new Map;
+const workerAcked = new Set;
+const WORKER_ACK_TIMEOUT_MS = 8000;
+const HEARTBEAT_INTERVAL_MS = 8000;
+const PONG_TIMEOUT_MS = 6000;
+const WORKER_INSTANCE_NAME = (() => {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+      return "juicebox-uploads-" + crypto.randomUUID();
+  } catch {}
+  return "juicebox-uploads-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+})();
+let heartbeatTimer = null;
+let pingStartedAt = 0;
+
+function isTerminal(state) {
+  return state === "done" || state === "error" || state === "cancelled";
+}
+function clearWorkerTimer(id) {
+  const timer = workerAckTimers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    workerAckTimers.delete(id);
+  }
+}
+function noteWorkerAlive(id) {
+  workerHeard = true;
+  workerValidating = false;
+  if (!id)
+    return;
+  clearWorkerTimer(id);
+  workerAcked.add(id);
+}
+function forgetWorkerItem(id) {
+  clearWorkerTimer(id);
+  workerInputs.delete(id);
+  workerAcked.delete(id);
+}
+function startHeartbeat() {
+  if (heartbeatTimer)
+    return;
+  heartbeatTimer = setInterval(() => {
+    if (!port || workerDead) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+      return;
+    }
+    if (typeof document !== "undefined" && document.hidden) {
+      pingStartedAt = 0;
+      return;
+    }
+    if (workerInputs.size === 0 && workerAcked.size === 0)
+      return;
+    if (pingStartedAt) {
+      if (Date.now() - pingStartedAt >= PONG_TIMEOUT_MS)
+        restartWithoutWorker();
+      return;
+    }
+    pingStartedAt = Date.now();
+    try {
+      port.postMessage({ type: "ping" });
+    } catch {
+      restartWithoutWorker();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+function restartWithoutWorker() {
+  pingStartedAt = 0;
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  const pending = [];
+  for (const [id, input] of workerInputs) {
+    if (!workerAcked.has(id))
+      pending.push([id, input]);
+  }
+  const acked = [...workerAcked];
+  if (port) {
+    for (const [id] of pending) {
+      try { port.postMessage({ type: "cancel", id }); } catch {}
+    }
+    try { port.close(); } catch {}
+  }
+  port = null;
+  workerDead = true;
+  workerValidating = false;
+  for (const id of workerInputs.keys())
+    clearWorkerTimer(id);
+  workerInputs.clear();
+  workerAcked.clear();
+
+  // Uploads the worker never acknowledged can safely be run here.
+  for (const [id, input] of pending) {
+    const item = items.find((i) => i.id === id);
+    if (!item || isTerminal(item.state))
+      continue;
+    startLocal({ ...item, state: "queued", progress: 0 }, input);
+  }
+  // Already-acknowledged uploads may be mid-flight; don't duplicate them.
+  for (const id of acked) {
+    const item = items.find((i) => i.id === id);
+    if (item && !isTerminal(item.state)) {
+      localUpsert({
+        ...item,
+        state: "error",
+        errorCode: "WORKER_LOST",
+        errorMessage: "",
+      });
+    }
+  }
+}
 function onWorkerMessage(e) {
   workerHeard = true;
   workerValidating = false;
+  pingStartedAt = 0;
   const msg = e.data || {};
   if (msg.type === "snapshot" && Array.isArray(msg.items)) {
-    reset(msg.items);
+    const active = [];
+    for (const it of msg.items) {
+      if (!it || !it.id)
+        continue;
+      noteWorkerAlive(it.id);
+      if (isTerminal(it.state)) {
+        // Completed entries belong to the files history, not the upload queue.
+        // Replaying them here would duplicate rows, re-copy URLs over the
+        // clipboard, and resurrect files the user already deleted.
+        forgetWorkerItem(it.id);
+      } else {
+        active.push(it);
+      }
+    }
+    reset(active);
   } else if (msg.type === "item" && msg.item) {
+    noteWorkerAlive(msg.item.id);
+    if (isTerminal(msg.item.state))
+      forgetWorkerItem(msg.item.id);
     upsertItem(msg.item);
   } else if (msg.type === "removed" && msg.id) {
+    forgetWorkerItem(msg.id);
     removeItem(msg.id);
   }
+}
+function workerScriptUrl() {
+  const url = new URL("./upload-worker.js", import.meta.url);
+  try {
+    const version = document.getElementById("server-config")?.getAttribute("data-version") || "";
+    if (version)
+      url.searchParams.set("v", version);
+  } catch {}
+  return url;
 }
 function ensurePort() {
   if (typeof window === "undefined") return null;
@@ -68,30 +217,27 @@ function ensurePort() {
   if (port) return port;
   try {
     if (typeof SharedWorker === "undefined") return null;
-    var sw = new SharedWorker(new URL("./upload-worker.js", import.meta.url), {
-      name: "juicebox-uploads",
+    // A unique name per document load guarantees a fresh worker. A reload
+    // must never reconnect to a worker that was already wedged or abandoned.
+    var sw = new SharedWorker(workerScriptUrl(), {
+      name: WORKER_INSTANCE_NAME,
       type: "module",
     });
     sw.port.onmessage = onWorkerMessage;
     sw.onerror = () => {
-      port = null;
-      workerDead = true;
-      workerValidating = false;
+      restartWithoutWorker();
     };
     sw.port.start();
     port = sw.port;
+    startHeartbeat();
     workerValidating = true;
     workerHeard = false;
     setTimeout(() => {
-      if (!workerHeard) {
-        if (port) {
-          try { port.close(); } catch {}
-        }
-        port = null;
-        workerDead = true;
-      }
-      workerValidating = false;
-    }, 2000);
+      if (!workerHeard)
+        restartWithoutWorker();
+      else
+        workerValidating = false;
+    }, 4000);
   } catch {
     port = null;
   }
@@ -119,14 +265,37 @@ function startLocal(item, input) {
   });
   localHandles.set(item.id, handle);
 }
+function findActiveDuplicate(file) {
+  if (!file)
+    return null;
+  return items.find((i) => i.filename === file.name && i.size === file.size && i.lastModified === file.lastModified && !isTerminal(i.state)) || null;
+}
+function lastUploadBps() {
+  try {
+    const stored = Number(localStorage.getItem(LAST_SPEED_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : 0;
+  } catch {
+    return 0;
+  }
+}
 export function enqueueUpload(input) {
+  const duplicate = findActiveDuplicate(input.file);
+  if (duplicate) {
+    try {
+      announce(`${input.file.name} is already uploading`);
+    } catch {}
+    return duplicate.id;
+  }
   const id = generateId();
+  const clientMode = readUploadMode();
   const item = {
     id,
     filename: input.file.name,
     mimeType: input.file.type || "application/octet-stream",
     size: input.file.size,
-    method: input.file.size > TUS_THRESHOLD ? "tus" : "direct",
+    lastModified: input.file.lastModified,
+    clientMode,
+    method: uploadMethodFor(clientMode, input.file.size, lastUploadBps()),
     state: "queued",
     progress: 0,
     ttlHours: input.ttlHours,
@@ -153,11 +322,22 @@ export function enqueueUpload(input) {
         filename: item.filename,
         mimeType: item.mimeType,
         size: item.size,
+        lastModified: item.lastModified,
+        clientMode,
         ttlHours: input.ttlHours,
         options,
         file: input.file
       });
+      workerInputs.set(id, input);
+      workerAcked.delete(id);
+      clearWorkerTimer(id);
+      workerAckTimers.set(id, setTimeout(() => {
+        workerAckTimers.delete(id);
+        if (!workerAcked.has(id))
+          restartWithoutWorker();
+      }, WORKER_ACK_TIMEOUT_MS));
     } catch {
+      forgetWorkerItem(id);
       startLocal(item, input);
     }
   } else {
@@ -174,9 +354,11 @@ export function cancelUpload(id) {
     try {
       p.postMessage({ type: "cancel", id });
     } catch {}
+    forgetWorkerItem(id);
     return;
   }
   localHandles.get(id)?.abort();
+  forgetWorkerItem(id);
 }
 export function removeUpload(id) {
   const p = ensurePort();
@@ -185,6 +367,8 @@ export function removeUpload(id) {
       p.postMessage({ type: "remove", id });
     } catch {}
   }
+  localHandles.get(id)?.abort();
+  forgetWorkerItem(id);
   removeItem(id);
 }
 export function updateUpload(id, patch) {
@@ -204,24 +388,20 @@ function maybePersist(item) {
     return;
   persistedIds.add(item.id);
   const write = () => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("juicebox_uploads") || "[]");
-      const arr = Array.isArray(stored) ? stored : [];
-      const id = item.serverId || extractServerId(item.url ?? "") || item.id || Math.random().toString(36).slice(2);
-      const entry = {
-        id,
-        filename: item.filename,
-        mime_type: item.mimeType,
-        size_bytes: item.size,
-        uploaded_at: Math.floor(Date.now() / 1000),
-        url: item.url,
-        expires_at: Math.floor(Date.now() / 1000) + item.ttlHours * 3600,
-        delete_token: item.deleteToken || ""
-      };
-      const deduped = arr.filter((e) => !(e && (e.id === id || e.id === "" && e.filename === item.filename && e.size_bytes === item.size)));
-      deduped.push(entry);
-      localStorage.setItem("juicebox_uploads", JSON.stringify(deduped));
-    } catch {}
+    const id = item.serverId || extractServerId(item.url ?? "") || item.id || Math.random().toString(36).slice(2);
+    const uploadedAt = Math.floor((item.createdAt || Date.now()) / 1000);
+    upsertLocalFile({
+      id,
+      filename: item.filename,
+      mime_type: item.mimeType,
+      size_bytes: item.size,
+      uploaded_at: uploadedAt,
+      url: item.url,
+      raw_url: item.rawUrl || "",
+      download_url: item.downloadUrl || "",
+      expires_at: uploadedAt + item.ttlHours * 3600,
+      delete_token: item.deleteToken || ""
+    });
   };
   if (typeof navigator !== "undefined" && navigator.locks?.request) {
     navigator.locks.request("juicebox-uploads", () => {

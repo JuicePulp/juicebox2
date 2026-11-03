@@ -29,12 +29,16 @@ pub async fn get_upload_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let upload = state.tus.get(&id).ok_or(AppError::TusSessionNotFound)?;
+    let (offset, total_length) = {
+        let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
+        upload.last_activity = chrono::Utc::now().timestamp();
+        (upload.offset, upload.total_length)
+    };
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header("Upload-Offset", upload.offset.to_string())
-        .header("Upload-Length", upload.total_length.to_string())
+        .header("Upload-Offset", offset.to_string())
+        .header("Upload-Length", total_length.to_string())
         .header("Tus-Resumable", "1.0.0")
         .body(axum::body::Body::empty())
         .map_err(|_| AppError::Internal("response build failed".into()))?)

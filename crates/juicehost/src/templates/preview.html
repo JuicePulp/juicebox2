@@ -17,18 +17,24 @@ __DISCORD_EMBED__
   </style>
 </head>
 <body>
+  <div hidden class="curl-notice">__CURL_NOTICE__</div>
   <header class="topbar" id="topbar">
     __BRAND__
     <span class="fname" title="__FILENAME__">__FILENAME__</span>
     <span class="fsize">__SIZE__</span>
+    <span class="upload-badge" id="uploadBadge" __UPLOAD_HIDDEN__>__UPLOAD_LABEL__</span>
     <nav class="actions">
       <a class="btn btn--primary" href="__DOWNLOAD_URL__" download>Download</a>
       <a class="btn" href="__RAW_URL__">Raw</a>
     </nav>
+    <div class="upload-line" id="uploadLine" __UPLOAD_HIDDEN__><i id="uploadFill" style="width:__UPLOAD_WIDTH__%"></i></div>
   </header>
-  <main class="stage" id="stage">__STAGE__</main>
+  <main class="stage" id="stage" data-file-id="__FILE_ID__">__STAGE__</main>
   <script>
 __APP_JS__
+  </script>
+  <script>
+__LIVE_JS__
   </script>
 </body>
 </html>

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use juiceutils::file_validation::ProtectionLevel;
 use serde::{Deserialize, Serialize};
 
+mod audio_embed;
 mod ban;
 mod directory;
 mod error;
@@ -16,6 +17,7 @@ mod secret;
 mod security;
 mod thread;
 
+pub use audio_embed::{AudioEmbedFile, AudioEmbedSettings};
 use ban::BanSettings;
 use directory::DirectorySettings;
 pub use error::ConfigError;
@@ -127,6 +129,8 @@ pub struct Config {
 
     pub ban_list_file: Option<PathBuf>,
 
+    pub audio_embed: AudioEmbedSettings,
+
     pub sentry: juiceutils::config::SentrySettings,
 }
 
@@ -161,6 +165,9 @@ pub struct FileConfig {
 
     #[serde(default)]
     pub ban: BanFile,
+
+    #[serde(default)]
+    pub audio_embed: AudioEmbedFile,
 
     #[serde(default)]
     pub sentry: juiceutils::config::SentrySettings,
@@ -575,6 +582,7 @@ impl Config {
         let features = FeatureSettings::load(&file.features)?;
         let secrets = SecretSettings::load(&security)?;
         let ban = BanSettings::load(&file.ban);
+        let audio_embed = AudioEmbedSettings::load(&file.audio_embed)?;
         let sentry = juiceutils::config::SentrySettings::from_env_or(&file.sentry);
 
         Ok(Self {
@@ -626,6 +634,7 @@ impl Config {
             ticket_jwt_secret: secrets.ticket_jwt_secret().to_owned(),
             ip_pepper: secrets.ip_pepper().to_owned(),
             ban_list_file: ban.list_file().cloned(),
+            audio_embed,
             sentry,
         })
     }

@@ -6,8 +6,9 @@ use std::{
 use dashmap::DashMap;
 
 use crate::{
-    config::Config,
+    config::{AudioEmbedSettings, Config},
     handlers::stats::HitKey,
+    live::LiveUploads,
     storage::{R2Store, StorageBackend},
 };
 
@@ -62,6 +63,14 @@ pub struct AppState {
     pub file_status_cache: Arc<DashMap<String, (Instant, serde_json::Value)>>,
 
     pub hit_buffer: Arc<DashMap<HitKey, u64>>,
+
+    pub audio_embed: AudioEmbedSettings,
+
+    pub audio_embed_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+
+    pub audio_embed_semaphore: Arc<tokio::sync::Semaphore>,
+
+    pub live_uploads: LiveUploads,
 }
 
 impl AppState {
@@ -123,6 +132,12 @@ impl AppState {
                 .expect("fixed backend HTTP client configuration must be valid"),
             file_status_cache: Arc::new(DashMap::new()),
             hit_buffer: Arc::new(DashMap::new()),
+            audio_embed_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                config.audio_embed.max_concurrent(),
+            )),
+            audio_embed: config.audio_embed.clone(),
+            audio_embed_locks: Arc::new(DashMap::new()),
+            live_uploads: LiveUploads::new(),
         }
     }
 }

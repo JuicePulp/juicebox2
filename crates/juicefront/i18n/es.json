@@ -52,15 +52,17 @@
   "upload.cobalt_placeholder": "Pega un enlace de YouTube, TikTok u otro medio aquí...",
   "upload.cobalt_fetch": "Obtener",
   "upload.cobalt_queued": "En cola...",
+  "upload.cobalt_contacting": "Contactando servidores de descarga...",
   "upload.cobalt_fetching": "Obteniendo medio...",
+  "upload.cobalt_downloading": "Descargando... {percent}%",
+  "upload.cobalt_converting": "Convirtiendo audio...",
   "upload.cobalt_relay": "Rescatando por el servidor secundario...",
   "upload.cobalt_retry": "YouTube está bloqueando este video, reintentando (pasada {n})...",
   "upload.cobalt_gone": "La tarea expiró. Inténtalo de nuevo.",
   "upload.cobalt_audio_only": "Solo audio",
   "upload.cobalt_quality": "Calidad:",
   "upload.cobalt_format": "Formato:",
-  "upload.cobalt_container": "Contenedor:",
-  "upload.cobalt_better_audio": "Calidad de audio:",
+  "upload.cobalt_better_audio": "Calidad:",
   "upload.initializing": "Inicializando...",
   "upload.initializing_tus": "Inicializando TUS...",
   "upload.uploading": "Subiendo... {percent}%",
@@ -347,6 +349,8 @@
   "upload.password_relay": "Protected uploads use the secure relay and are slower.",
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
-  "report.password_hint": "Optional: lets moderators review protected files."
+  "report.password_hint": "Optional: lets moderators review protected files.",
+  "upload.zipping": "Comprimiendo carpeta…",
+  "error.folder_empty": "Esa carpeta está vacía."
  }
 }

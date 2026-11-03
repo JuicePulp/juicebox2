@@ -48,15 +48,17 @@
   "upload.cobalt_placeholder": "Вставь ссылку на YouTube, TikTok или другой медиа-сайт...",
   "upload.cobalt_fetch": "Скачать",
   "upload.cobalt_queued": "В очереди...",
+  "upload.cobalt_contacting": "Связываемся с серверами загрузки...",
   "upload.cobalt_fetching": "Скачиваем медиа...",
+  "upload.cobalt_downloading": "Скачиваем... {percent}%",
+  "upload.cobalt_converting": "Конвертируем аудио...",
   "upload.cobalt_relay": "Спасаем через резервный сервер...",
   "upload.cobalt_retry": "YouTube ограничивает видео, повторяем (проход {n})...",
   "upload.cobalt_gone": "Задача истекла. Попробуй снова.",
   "upload.cobalt_audio_only": "Только аудио",
   "upload.cobalt_quality": "Качество:",
   "upload.cobalt_format": "Формат:",
-  "upload.cobalt_container": "Контейнер:",
-  "upload.cobalt_better_audio": "Качество аудио:",
+  "upload.cobalt_better_audio": "Качество:",
   "upload.initializing": "Инициализация...",
   "upload.initializing_tus": "Инициализация TUS...",
   "upload.uploading": "Загрузка... {percent}%",
@@ -347,6 +349,8 @@
   "upload.password_relay": "Protected uploads use the secure relay and are slower.",
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
-  "report.password_hint": "Optional: lets moderators review protected files."
+  "report.password_hint": "Optional: lets moderators review protected files.",
+  "upload.zipping": "Сжатие папки…",
+  "error.folder_empty": "Эта папка пуста."
  }
 }
