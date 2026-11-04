@@ -350,7 +350,7 @@
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
   "report.password_hint": "Optional: lets moderators review protected files.",
-  "upload.zipping": "Сжатие папки…",
+  "upload.zipping": "Сжатие папки...",
   "error.folder_empty": "Эта папка пуста."
  }
 }

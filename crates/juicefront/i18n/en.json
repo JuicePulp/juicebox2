@@ -350,7 +350,7 @@
   "hostsel.add_title": "Run a node?",
   "hostsel.add_desc": "Host your own JuiceHost node and get it listed here.",
   "hostsel.add_btn": "Add your own",
-  "upload.zipping": "Zipping folder…",
+  "upload.zipping": "Zipping folder...",
   "error.folder_empty": "That folder is empty."
  }
 }
