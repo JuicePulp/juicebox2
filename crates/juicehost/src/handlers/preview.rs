@@ -460,6 +460,20 @@ fn component_embed_payload(
     })
 }
 
+/// Serialize a value for an inline `<script type="application/json">` block.
+///
+/// Script content is raw text to the HTML parser, so a file whose previewed
+/// contents include `</script>` would close the element early and dump the
+/// rest of the JSON onto the page. Unicode escapes keep the JSON valid while
+/// making the payload inert for the parser.
+fn json_script_payload(value: &serde_json::Value) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_default()
+        .replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+}
+
 fn component_embed_script(
     page: &PreviewPage,
     abs_raw: &str,
@@ -469,7 +483,7 @@ fn component_embed_script(
 ) -> String {
     let mut payload =
         component_embed_payload(page, abs_raw, abs_page, abs_download, audio_video_url);
-    let mut serialized = serde_json::to_string(&payload).unwrap_or_default();
+    let mut serialized = json_script_payload(&payload);
     if serialized.len() > 3000 {
         let name = truncate_chars(&page.display_name, 40);
         let meta = truncate_chars(&format!("{} - {}", page.mime, page.size_label), 80);
@@ -479,7 +493,7 @@ fn component_embed_script(
                 "components": [{ "type": 10, "content": format!("## [{name}]({abs_page})\n{meta}") }],
             }
         });
-        serialized = serde_json::to_string(&payload).unwrap_or_default();
+        serialized = json_script_payload(&payload);
     }
     if serialized.is_empty() {
         return String::new();
@@ -556,6 +570,22 @@ fn og_tags(
     tags
 }
 
+fn text_head_from_bytes(bytes: &[u8]) -> Option<(String, u64, String)> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let valid = match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    if valid == 0 {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&bytes[..valid]);
+    let snippet: String = raw.chars().take(800).collect();
+    Some((escape_html(&raw), valid as u64, snippet.replace("```", "'''")))
+}
+
 async fn load_text_head(
     storage: &Arc<dyn storage::StorageBackend>,
     id: &str,
@@ -567,18 +597,50 @@ async fn load_text_head(
     }
     let bytes =
         super::zip_list::read_range_capped(storage, id, 0, end - 1, TEXT_PREVIEW_MAX_BYTES).await?;
-    
-    
-    let valid = match std::str::from_utf8(&bytes) {
-        Ok(_) => bytes.len(),
-        Err(e) => e.valid_up_to(),
+    text_head_from_bytes(&bytes)
+}
+
+/// Read the start of a text file that lives on another storage node. The
+/// canonical host renders these previews itself so HTML uploads keep working
+/// even when a node runs an older viewer.
+async fn load_remote_text_head(
+    state: &AppState,
+    location: &super::route::RemoteLocation,
+    id: &str,
+    size: u64,
+) -> Option<(String, u64, String)> {
+    let end = if size == 0 {
+        TEXT_PREVIEW_MAX_BYTES
+    } else {
+        size.min(TEXT_PREVIEW_MAX_BYTES)
     };
-    if valid == 0 {
+    let url = if let Some(r2_url) = location.r2_url.as_deref() {
+        if !super::route::is_http_url(r2_url) {
+            return None;
+        }
+        r2_url.to_owned()
+    } else {
+        let storage_host = location.storage_host.as_deref()?;
+        if !super::route::is_http_url(storage_host) {
+            return None;
+        }
+        format!("{}/f/{}", storage_host.trim_end_matches('/'), id)
+    };
+    let response = state
+        .backend_client
+        .get(url)
+        .header(header::RANGE, format!("bytes=0-{}", end.saturating_sub(1)))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success()
+        && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+    {
         return None;
     }
-    let raw = String::from_utf8_lossy(&bytes[..valid]);
-    let snippet: String = raw.chars().take(800).collect();
-    Some((escape_html(&raw), valid as u64, snippet.replace("```", "'''")))
+    let bytes = response.bytes().await.ok()?;
+    let capped = &bytes[..bytes.len().min(end as usize)];
+    text_head_from_bytes(capped)
 }
 
 async fn backend_uploading_meta(state: &AppState, id: &str) -> Option<(String, u64)> {
@@ -855,6 +917,95 @@ pub async fn preview_file_wildcard(
     preview_file_inner(state, headers, method, &id, &ext, &path, viewer.0).await
 }
 
+/// Render a text/HTML preview for a file that lives on another node.
+///
+/// Returns `None` when the file is not ready, is not text, or when the caller
+/// should keep the existing redirect (non-Discord bots).
+async fn remote_text_preview(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    method: &Method,
+    id: &str,
+    ext: &str,
+    page_path: &str,
+    viewer_ip: Option<&str>,
+    location: &super::route::RemoteLocation,
+) -> Result<Option<Response<Body>>, crate::error::JuicehostError> {
+    use crate::error::JuicehostError;
+
+    if location.status != "ready" {
+        return Ok(None);
+    }
+    if is_bot(headers) && !is_discordbot(headers) {
+        return Ok(None);
+    }
+
+    let extension = location
+        .filename
+        .as_deref()
+        .map(storage::extract_extension)
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| ext.to_ascii_lowercase());
+    let mime = location
+        .mime_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| storage::guess_mime(&extension));
+    if preview_kind(&mime) != PreviewKind::Text {
+        return Ok(None);
+    }
+
+    let size = location.size_bytes.unwrap_or(0);
+    let filename = canonical_url_name(id, &extension);
+    let raw_url = format!("/f/{filename}");
+    let download_url = format!("/d/{filename}");
+    let page_url = format!("/v/{filename}");
+
+    let abs_self = request_base_url(headers)
+        .map(|base| absolute_for(Some(base.as_str()), &format!("/v/{page_path}")));
+    let (shelled, backend_meta) =
+        protected_shell_response(state, id, ShellMode::Preview, abs_self.as_deref()).await;
+    if let Some(shelled) = shelled {
+        return Ok(Some(shelled));
+    }
+
+    let display_name = resolved_display_name(backend_meta.as_ref(), &filename);
+    let author = backend_meta.as_ref().and_then(|meta| meta.author.clone());
+    let text_head = load_remote_text_head(state, location, id, size).await;
+    let page = PreviewPage {
+        kind: PreviewKind::Text,
+        title: format!("{display_name} - Juicebox²"),
+        filename,
+        display_name,
+        author,
+        size_label: human_size(size),
+        raw_url,
+        download_url,
+        page_url,
+        file_id: id.to_string(),
+        mime,
+        extension,
+        zip_html: None,
+        text_head,
+        uploading: None,
+    };
+    let response = Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, NO_STORE)
+        .body(Body::from(render_preview(&page, headers, None)))
+        .map_err(|_| JuicehostError::Internal)?;
+    if *method == Method::GET
+        && let Some(ip) = viewer_ip
+    {
+        report_file_hit(state, id, "view", ip, "preview");
+    }
+    Ok(Some(response))
+}
+
 async fn preview_file_inner(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -880,10 +1031,28 @@ async fn preview_file_inner(
         }
         Err(crate::error::StorageError::NotFound) => {
             // Another storage node may hold the bytes (or R2 for hot files).
-            if let Some(response) =
-                super::route::remote_redirect(&state, &headers, id, "v", page_path).await
-            {
-                return Ok(response);
+            // Text previews are rendered here so the canonical host controls
+            // the viewer, even when the node runs an older juicehost.
+            if let Some(location) = super::route::backend_location(&state, id).await {
+                if let Some(response) = remote_text_preview(
+                    &state,
+                    &headers,
+                    &method,
+                    id,
+                    ext,
+                    page_path,
+                    viewer_ip.as_deref(),
+                    &location,
+                )
+                .await?
+                {
+                    return Ok(response);
+                }
+                if let Some(response) =
+                    super::route::remote_redirect_with(&headers, "v", page_path, &location)
+                {
+                    return Ok(response);
+                }
             }
             let live = state.live_uploads.progress(id);
             let backend = if live.is_none() {
@@ -1336,6 +1505,47 @@ mod tests {
         assert!(!html.contains("og:audio"));
         assert!(html.contains("\"type\":12"));
         assert!(html.contains("\"media\":{\"url\":\"https://f.juicey.dev/e/a.mp4\"}"));
+    }
+
+    #[test]
+    fn text_preview_cannot_break_out_of_component_script() {
+        let page = PreviewPage {
+            kind: PreviewKind::Text,
+            title: "page.html - Juicebox²".into(),
+            filename: "a.html".into(),
+            display_name: "page.html".into(),
+            author: None,
+            size_label: "42 B".into(),
+            raw_url: "/f/a.html".into(),
+            download_url: "/d/a.html".into(),
+            page_url: "/v/a.html".into(),
+            file_id: "a".into(),
+            mime: "text/html".into(),
+            extension: "html".into(),
+            zip_html: None,
+            text_head: Some((
+                "&lt;script&gt;alert(1)&lt;/script&gt;".into(),
+                42,
+                "</script><script>alert(1)</script>".into(),
+            )),
+            uploading: None,
+        };
+        let html = render_preview(&page, &HeaderMap::new(), None);
+
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+
+        let marker = "discord:component-embed";
+        let marker_at = html.find(marker).expect("component payload");
+        let body_start = html[marker_at..].find('>').expect("script open tag") + marker_at + 1;
+        let body_end = html[body_start..]
+            .find("</script>")
+            .expect("script close tag")
+            + body_start;
+        let body = html[body_start..body_end].trim();
+        let parsed: serde_json::Value =
+            serde_json::from_str(body).expect("component payload stays valid JSON");
+        assert!(parsed.to_string().contains("</script>"));
     }
 
     #[test]

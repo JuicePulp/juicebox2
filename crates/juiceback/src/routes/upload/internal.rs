@@ -131,6 +131,8 @@ pub async fn resolve_file_handler(
             "r2_url": r2_url_for(&state.config, &record),
             "r2_key": record.r2_key,
             "filename": record.filename,
+            "mime_type": record.mime_type,
+            "size_bytes": record.size_bytes,
         }))),
         Ok(None) => Err(AppError::NotFound),
         Err(e) => Err(e),
