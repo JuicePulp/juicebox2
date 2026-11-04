@@ -52,8 +52,7 @@ fn host_only(value: &str) -> Option<String> {
 }
 
 fn is_http_url(value: &str) -> bool {
-    url::Url::parse(value)
-        .is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
+    url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
 }
 
 /// Redirect a request for a file this node does not have to the node that

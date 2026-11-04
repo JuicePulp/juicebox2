@@ -81,11 +81,11 @@ impl Node {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        health.checked_secs_ago =
-            self.checked_at
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .map(|at| at.elapsed().as_secs());
+        health.checked_secs_ago = self
+            .checked_at
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .map(|at| at.elapsed().as_secs());
         health
     }
 
@@ -376,13 +376,10 @@ impl AppState {
             tracing::warn!("resolve {id}: status {}", response.status());
             return Err(ResolveError::Unavailable);
         }
-        let record = response
-            .json::<ResolveRecord>()
-            .await
-            .map_err(|error| {
-                tracing::warn!("resolve {id}: bad body: {error}");
-                ResolveError::Unavailable
-            })?;
+        let record = response.json::<ResolveRecord>().await.map_err(|error| {
+            tracing::warn!("resolve {id}: bad body: {error}");
+            ResolveError::Unavailable
+        })?;
         if self.cache.len() > 20_000 {
             self.cache.retain(|_, entry| {
                 entry.0.elapsed() < Duration::from_secs(self.config.router.resolve_cache_secs)
@@ -431,9 +428,9 @@ impl AppState {
         let target = match kind {
             RouteKind::Uploading => None,
             RouteKind::R2 => r2_url.map(ToOwned::to_owned),
-            RouteKind::Remote => storage_host.map(|host| {
-                format!("{}/{relative}", host.trim_end_matches('/'))
-            }),
+            RouteKind::Remote => {
+                storage_host.map(|host| format!("{}/{relative}", host.trim_end_matches('/')))
+            }
             RouteKind::Local => Some(format!(
                 "{}/{relative}",
                 self.config.router.home_url.trim_end_matches('/')
@@ -458,8 +455,7 @@ pub enum ResolveError {
 }
 
 fn is_http_url(value: &str) -> bool {
-    url::Url::parse(value)
-        .is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
+    url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
 }
 
 #[cfg(test)]
@@ -469,14 +465,14 @@ mod tests {
     fn config() -> Config {
         let mut config = Config::default();
         config.router.home_url = "https://f.example".to_string();
-        config.regions.public_juicehosts.insert(
-            "eu1".to_string(),
-            "https://f-eu1.example".to_string(),
-        );
-        config.regions.public_juicehosts.insert(
-            "us1".to_string(),
-            "https://f-us1.example".to_string(),
-        );
+        config
+            .regions
+            .public_juicehosts
+            .insert("eu1".to_string(), "https://f-eu1.example".to_string());
+        config
+            .regions
+            .public_juicehosts
+            .insert("us1".to_string(), "https://f-us1.example".to_string());
         config
     }
 
@@ -553,7 +549,10 @@ mod tests {
         };
         let decision = state.decision("abc12345", &record, "f", "abc12345.mp4");
         assert_eq!(decision.kind, RouteKind::Local);
-        assert_eq!(decision.target.as_deref(), Some("https://f.example/f/abc12345.mp4"));
+        assert_eq!(
+            decision.target.as_deref(),
+            Some("https://f.example/f/abc12345.mp4")
+        );
     }
 
     #[test]

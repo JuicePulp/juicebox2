@@ -233,11 +233,18 @@ US = "us1"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(
-            config.regions.public_juicehosts.get("us1").map(String::as_str),
+            config
+                .regions
+                .public_juicehosts
+                .get("us1")
+                .map(String::as_str),
             Some("https://f-us1.example")
         );
         assert_eq!(config.geo.default_region.as_deref(), Some("eu1"));
-        assert_eq!(config.geo.countries.get("US").map(String::as_str), Some("us1"));
+        assert_eq!(
+            config.geo.countries.get("US").map(String::as_str),
+            Some("us1")
+        );
         assert_eq!(config.server.port, 6404);
     }
 }

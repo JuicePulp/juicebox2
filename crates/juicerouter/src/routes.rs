@@ -127,12 +127,7 @@ async fn upload_target(
         .and_then(|value| value.split('-').nth(1));
     let selection = state
         .registry
-        .select(
-            &state.config.geo,
-            query.region.as_deref(),
-            country,
-            colo,
-        )
+        .select(&state.config.geo, query.region.as_deref(), country, colo)
         .ok_or(ApiError::Unavailable)?;
     tracing::info!(
         "upload-target region={} reason={} country={:?} colo={:?}",

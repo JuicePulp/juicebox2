@@ -12,8 +12,7 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -32,7 +31,10 @@ async fn main() {
         .map(|node| node.region.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    tracing::info!("juicerouter: {} node(s): {regions}", state.registry.nodes.len());
+    tracing::info!(
+        "juicerouter: {} node(s): {regions}",
+        state.registry.nodes.len()
+    );
 
     let health_state = Arc::clone(&state);
     tokio::spawn(async move { health_loop(health_state).await });
