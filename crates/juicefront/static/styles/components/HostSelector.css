@@ -184,10 +184,10 @@
     color: var(--juice-200);
     white-space: nowrap;
   }
-  .hostsel-badge--legacy {
+  .hostsel-badge--unknown {
     background-color: transparent;
-    border: 1px dashed var(--orange-400);
-    color: var(--orange-400);
+    border: 1px dashed var(--juice-600);
+    color: var(--juice-300);
   }
   .hostsel-cell--latency {
     width: 4.5rem;

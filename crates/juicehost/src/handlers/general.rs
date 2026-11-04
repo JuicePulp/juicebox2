@@ -120,6 +120,9 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
         "frontend_url": state.frontend_url,
         "password_links": true,
         "at_rest_via_juiceback": true,
+        // Storage nodes hold ciphertext; the central juiceback owns the key,
+        // so every node can take part in encrypted uploads.
+        "encrypted": true,
     }))
 }
 

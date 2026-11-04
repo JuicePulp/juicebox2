@@ -45,7 +45,7 @@ import {
   connectUploads,
 } from "./upload-client-loader.js";
 import { extractServerId } from "./upload-engine.js?v=2.1.32";
-import { initHostSelector } from "./host-selector.js";
+import { initHostSelector } from "./host-selector.js?v=2.1.32";
 
 var assetVersion = (() => {
   try {
