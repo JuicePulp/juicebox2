@@ -9,7 +9,7 @@ port = 6404
 # Central juiceback used for /internal/resolve/{id}.
 juiceback_url = "http://127.0.0.1:6401"
 # This router's public hostname (used for display and future share links).
-public_base_url = "https://router.juicey.dev"
+public_base_url = "https://f-r.juicey.dev"
 # Where files with no storage_host live (the local juicehost).
 home_url = "https://f.juicey.dev"
 # Storage nodes reject /internal calls without this header when they set
