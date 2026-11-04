@@ -746,7 +746,6 @@ struct HostselTpl {
     cx: Cx,
     official: Vec<HostRow>,
     unofficial: Vec<HostRow>,
-    version: &'static str,
 }
 
 struct HostRow {
@@ -1041,7 +1040,6 @@ pub async fn index(
         cx: cx.clone(),
         official,
         unofficial,
-        version: env!("CARGO_PKG_VERSION"),
     }
     .render()
     .unwrap_or_default();

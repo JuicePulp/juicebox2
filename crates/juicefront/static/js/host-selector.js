@@ -55,40 +55,8 @@ function syncConfigBits(cfg) {
     } catch {}
   }
 }
-function capsOf(cfg) {
-  const caps = [];
-  if (cfg.router === true)
-    caps.unshift("Router");
-  if (cfg.quic === true)
-    caps.push("QUIC");
-  if (cfg.cobalt === true)
-    caps.push("Cobalt");
-  if (cfg.quick_link === true)
-    caps.push("Quick link");
-  if (cfg.ultrafast === true)
-    caps.push("Plus");
-  if (cfg.encrypted === true)
-    caps.push("Encrypted");
-  return caps;
-}
-function versionParts(v) {
-  return String(v || "").split(".").map((p) => parseInt(p, 10));
-}
-function isLegacyVersion(cfg, current) {
-  if (!current)
-    return false;
-  const theirs = typeof cfg.version === "string" ? cfg.version : "";
-  if (!theirs)
-    return true;
-  const a = versionParts(theirs);
-  const b = versionParts(current);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = Number.isFinite(a[i]) ? a[i] : 0;
-    const y = Number.isFinite(b[i]) ? b[i] : 0;
-    if (x !== y)
-      return x < y;
-  }
-  return false;
+function versionOf(cfg) {
+  return typeof cfg.version === "string" ? cfg.version.trim().replace(/^v/i, "") : "";
 }
 function addChip(parent, text, cls) {
   const b = document.createElement("span");
@@ -170,10 +138,11 @@ export function initHostSelector() {
       badges.appendChild(chips);
       badges.appendChild(more);
       if (s.state === "online" && s.cfg) {
-        for (const cap of capsOf(s.cfg))
-          addChip(chips, cap, "hostsel-badge");
-        if (isLegacyVersion(s.cfg, root.getAttribute("data-current-version") || ""))
-          addChip(chips, "Legacy", "hostsel-badge hostsel-badge--legacy");
+        const version = versionOf(s.cfg);
+        if (version)
+          addChip(chips, `v${version}`, "hostsel-badge");
+        else
+          addChip(chips, str(root, "version-unknown", "version unknown"), "hostsel-badge hostsel-badge--unknown");
       }
       layoutBadges(badges);
     }
