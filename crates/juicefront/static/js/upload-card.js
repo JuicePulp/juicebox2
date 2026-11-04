@@ -32,6 +32,7 @@ import {
   initHostGlow,
 } from "./enhance-host.js?v=2.1.32";
 import { connectPresence, isAppMode } from "./presence.js";
+import { resolveUploadHost } from "./upload-router.js?v=2.1.32";
 import { validateFileClient } from "./file-validation.js";
 import { upsertLocalFile } from "./upload-storage.js";
 import {
@@ -964,7 +965,7 @@ function startItem(file) {
   uploadItem(file, item);
 }
 
-function uploadItem(file, item) {
+async function uploadItem(file, item) {
   var fill = item.querySelector(".progress-fill");
   var status = item.querySelector(".status-text");
   var pill = item.querySelector(".status-pill");
@@ -997,7 +998,7 @@ function uploadItem(file, item) {
     id = enqueueUpload({
       file: file,
       ttlHours: ttlHours(),
-      customHost: readSelectedHost(),
+      customHost: readSelectedHost() || await resolveUploadHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
       password: readUploadPassword(),

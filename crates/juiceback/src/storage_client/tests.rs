@@ -48,6 +48,7 @@ fn test_state() -> Arc<AppState> {
         juicehost_api_key: "my_api_key".into(),
         juicehost_url: "http://127.0.0.1:6402".into(),
         public_juicehost_url: "http://localhost:6402".into(),
+        default_storage_host: None,
         juiceback_origin: "http://127.0.0.1:6401".into(),
         router_base_url: None,
         jwt_secret: "secret".into(),

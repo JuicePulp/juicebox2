@@ -77,7 +77,14 @@ pub async fn direct_upload_reserve_handler(
     headers: HeaderMap,
     Json(body): Json<DirectUploadReserveRequest>,
 ) -> Result<Json<DirectUploadReserveResponse>, AppError> {
-    let (default_ttl, allowed_ttl, danger, max_file_size, public_juicehost_url) = {
+    let (
+        default_ttl,
+        allowed_ttl,
+        danger,
+        max_file_size,
+        public_juicehost_url,
+        default_storage_host,
+    ) = {
         let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
@@ -85,6 +92,7 @@ pub async fn direct_upload_reserve_handler(
             jh.danger_level,
             jh.max_file_size_bytes,
             state.config.public_juicehost_url.clone(),
+            state.config.default_storage_host.clone(),
         )
     };
 
@@ -111,28 +119,18 @@ pub async fn direct_upload_reserve_handler(
         }
     }
 
-    let selected_host = body
+    let selected_host = match body
         .host
         .as_deref()
         .map(str::trim)
-        .filter(|host| !host.is_empty());
-    if selected_host.is_some() && requested_device_id.is_none() {
-        return Err(AppError::BadRequest(
-            "direct browser upload does not support custom hosts yet".into(),
-        ));
-    }
-
-    let selected_host = if requested_device_id.is_some() {
-        match selected_host {
-            Some(h) => Some(
-                crate::storage_client::check_storage_host(h, state.config.allow_private_fetch)
-                    .await
-                    .map_err(|e| AppError::BadRequest(e.to_string()))?,
-            ),
-            None => None,
-        }
-    } else {
-        None
+        .filter(|host| !host.is_empty())
+    {
+        Some(host) => Some(
+            crate::storage_client::check_storage_host(host, state.config.allow_private_fetch)
+                .await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?,
+        ),
+        None => None,
     };
 
     check_mint_limit(&state, &headers, addr)?;
@@ -145,7 +143,10 @@ pub async fn direct_upload_reserve_handler(
     let encrypted_ip = encrypted_client_ip(&state, &headers, addr);
 
     let region_juicehost = pinned_region_host(&state, &headers, addr);
-    let storage_host = selected_host.clone().or(region_juicehost.clone());
+    let storage_host = selected_host
+        .clone()
+        .or(region_juicehost.clone())
+        .or(default_storage_host);
     let record = FileRecord::new(
         file_id.clone(),
         body.filename.clone(),
@@ -155,7 +156,7 @@ pub async fn direct_upload_reserve_handler(
         now,
         now + ttl_seconds,
         encrypted_ip,
-        storage_host,
+        storage_host.clone(),
     );
     let record = insert_owned_pending(&state, &user_id, record, "own_direct_upload").await?;
 
@@ -192,13 +193,10 @@ pub async fn direct_upload_reserve_handler(
     }
 
     let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
-    let upload_url = format!(
-        "{}/internal/file/upload/{}",
-        region_juicehost
-            .as_deref()
-            .unwrap_or_else(|| public_juicehost_url.trim_end_matches('/')),
-        file_id
-    );
+    let upload_base = storage_host
+        .as_deref()
+        .unwrap_or_else(|| public_juicehost_url.trim_end_matches('/'));
+    let upload_url = format!("{upload_base}/internal/file/upload/{file_id}");
 
     Ok(Json(DirectUploadReserveResponse {
         ticket,

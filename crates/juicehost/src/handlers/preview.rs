@@ -1009,10 +1009,13 @@ async fn preview_file_inner(
         Err(_) => return Err(JuicehostError::Internal),
     };
 
-    let extension = if ext.is_empty() {
-        meta.extension.clone()
-    } else {
+    // Trust what was actually stored over the extension in the requested
+    // URL. Old share links can still say `.mp4` for an audio upload, and
+    // building a video preview around MP3 bytes breaks embeds.
+    let extension = if meta.extension.is_empty() {
         ext.to_ascii_lowercase()
+    } else {
+        meta.extension.to_ascii_lowercase()
     };
     let filename = canonical_url_name(id, &extension);
     let raw_url = format!("/f/{filename}");

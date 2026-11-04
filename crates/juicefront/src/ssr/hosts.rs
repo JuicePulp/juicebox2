@@ -15,8 +15,6 @@ fn default_host_kind() -> String {
 }
 
 const OFFICIAL_DEFAULTS: &[(&str, &str, &str, &str)] = &[
-    ("Default", "", "", "storage"),
-    ("Router", "https://f.juicey.dev", "", "router"),
     ("Europe-1", "https://f-eu1.juicey.dev", "Europe", "storage"),
     ("Europe-2", "https://f-eu2.juicey.dev", "Europe", "storage"),
     ("US-1", "https://f-us1.juicey.dev", "United States", "storage"),

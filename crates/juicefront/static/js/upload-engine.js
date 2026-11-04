@@ -526,7 +526,8 @@ function startDirectTicketUpload(item, file, controls) {
           filename: item.filename,
           mime_type: item.mimeType || "application/octet-stream",
           file_size: file.size,
-          ttl_hours: Number(item.ttlHours)
+          ttl_hours: Number(item.ttlHours),
+          host: item.customHost || undefined
         })
       });
       if (runState.cancelled)
@@ -663,7 +664,8 @@ function startDirectParallelUpload(item, file, controls) {
         mime_type: item.mimeType || "application/octet-stream",
         file_size: file.size,
         ttl_hours: Number(item.ttlHours),
-        num_parts: numParts
+        num_parts: numParts,
+        host: item.customHost || undefined
       })
     });
     if (runState.cancelled)

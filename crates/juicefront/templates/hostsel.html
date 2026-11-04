@@ -15,6 +15,15 @@
 <section aria-labelledby="hostsel-official-title" data-hostsel-section="">
 <h3 id="hostsel-official-title" class="hostsel__group-title">{{ cx.t("hostsel.official") }}</h3>
 <table class="hostsel-table"><tbody data-hostsel-list="">
+<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="" data-name="{{ cx.t("hostsel.auto") }}" data-region="auto" data-kind="auto" data-official="true" data-auto="true">
+<td class="hostsel-cell hostsel-cell--dot"><span class="hostsel-dot" data-hostsel-dot="" data-state="online" aria-hidden="true"></span></td>
+<td class="hostsel-cell hostsel-cell--meta">
+<span class="hostsel-name">{{ cx.t("hostsel.auto") }}</span>
+<span class="hostsel-url">{{ cx.t("hostsel.auto_desc") }}</span>
+</td>
+<td class="hostsel-cell hostsel-cell--caps"><span class="hostsel-badges" data-hostsel-badges=""></span></td>
+<td class="hostsel-cell hostsel-cell--latency" data-hostsel-latency=""></td>
+</tr>
 {% for n in official %}<tr class="hostsel-row" tabindex="0" data-hostsel-row="" data-url="{{ n.url }}" data-name="{{ n.name }}" data-region="{{ n.region }}" data-kind="{{ n.kind }}" data-official="true"{% if n.selected %} data-selected=""{% endif %}>
 <td class="hostsel-cell hostsel-cell--dot"><span class="hostsel-dot" data-hostsel-dot="" data-state="unknown" aria-hidden="true"></span></td>
 <td class="hostsel-cell hostsel-cell--meta">

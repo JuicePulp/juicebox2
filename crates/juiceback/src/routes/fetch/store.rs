@@ -68,7 +68,7 @@ pub(crate) async fn download_and_store(
         now,
         expires_at,
         encrypted_ip,
-        None,
+        state.config.default_storage_host.clone(),
     );
     record.title = meta.title.as_deref().and_then(clean_meta_value).unwrap_or_default();
     record.author = meta
@@ -104,6 +104,7 @@ pub(crate) async fn download_and_store(
         state: Arc::clone(state),
         file_id: file_id.clone(),
         delete_token: delete_token.clone(),
+        host: state.config.default_storage_host.clone(),
         active: true,
     };
 
@@ -147,8 +148,9 @@ pub(crate) async fn download_and_store(
     )
     .await;
 
-    let (size_bytes, enc_header) = result?;
+    let (size_bytes, enc_header, detected) = result?;
     cleanup.active = false;
+    let (filename, mime_type) = reconcile_media(filename, mime_type, detected);
     finalize_stored_file(
         state,
         user_id,
@@ -174,6 +176,7 @@ struct CleanupOnDrop {
     state: Arc<AppState>,
     file_id: String,
     delete_token: String,
+    host: Option<String>,
     active: bool,
 }
 
@@ -183,12 +186,13 @@ impl Drop for CleanupOnDrop {
             let state = Arc::clone(&self.state);
             let file_id = self.file_id.clone();
             let token = self.delete_token.clone();
+            let host = self.host.clone();
             tokio::spawn(async move {
                 let _ = db::delete_pending_file(&state, file_id.clone()).await;
                 let _ = crate::storage_client::delete_file_on_juicehost(
                     &state,
                     &file_id,
-                    None,
+                    host.as_deref(),
                     Some(&token),
                 )
                 .await;
@@ -292,6 +296,52 @@ fn with_extension(filename: String, extension: &str) -> String {
     let mut path = std::path::PathBuf::from(filename);
     path.set_extension(extension);
     path.to_string_lossy().into_owned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetectedMedia {
+    extension: String,
+    mime_type: String,
+}
+
+const SNIFF_PREFIX_BYTES: usize = 512;
+
+fn sniff_media(prefix: &[u8]) -> Option<DetectedMedia> {
+    if prefix.is_empty() {
+        return None;
+    }
+    let kind = infer::get(prefix)?;
+    let mime_type = kind.mime_type();
+    if !mime_type.starts_with("audio/") && !mime_type.starts_with("video/") {
+        return None;
+    }
+    Some(DetectedMedia {
+        extension: kind.extension().to_string(),
+        mime_type: mime_type.to_string(),
+    })
+}
+
+/// The requested `audio_only` flag is only a hint: cobalt can answer a video
+/// request with an audio-only stream (and vice versa). When the bytes say the
+/// media is audio or video, the stored metadata must follow the bytes,
+/// otherwise the preview advertises a video player for an MP3 and embeds break.
+fn reconcile_media(
+    filename: String,
+    mime_type: String,
+    detected: Option<DetectedMedia>,
+) -> (String, String) {
+    let Some(detected) = detected else {
+        return (filename, mime_type);
+    };
+    let old_kind = mime_type.split('/').next().unwrap_or("").trim();
+    let new_kind = detected.mime_type.split('/').next().unwrap_or("").trim();
+    if old_kind == new_kind {
+        return (filename, mime_type);
+    }
+    (
+        with_extension(filename, &detected.extension),
+        detected.mime_type,
+    )
 }
 
 async fn spool_for_transcode(
@@ -460,7 +510,7 @@ async fn transfer_to_juicehost(
     byte_source: ByteSource,
     max_size: u64,
     dek: Option<crate::crypto_file::FileKey>,
-) -> Result<(u64, Option<String>), String> {
+) -> Result<(u64, Option<String>, Option<DetectedMedia>), String> {
     use tokio::io::AsyncReadExt as _;
     let (mut stream, total_hint): (
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>>,
@@ -569,6 +619,7 @@ async fn transfer_to_juicehost(
     let push_filename = filename.to_string();
     let push_mime = mime_type.to_string();
     let push_capability = capability.to_string();
+    let push_host = state.config.default_storage_host.clone();
     let push_task = tokio::spawn(async move {
         crate::storage_client::push_file_streaming(
             &push_state,
@@ -576,7 +627,7 @@ async fn transfer_to_juicehost(
             &push_filename,
             &push_mime,
             rx,
-            None,
+            push_host,
             &UploadMode::Standard,
             Some(&push_capability),
             None,
@@ -585,9 +636,14 @@ async fn transfer_to_juicehost(
     });
 
     let mut total: u64 = 0;
+    let mut prefix: Vec<u8> = Vec::with_capacity(SNIFF_PREFIX_BYTES);
     let mut last_progress = std::time::Instant::now() - std::time::Duration::from_secs(1);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("media download failed mid-stream: {e}"))?;
+        if prefix.len() < SNIFF_PREFIX_BYTES {
+            let take = (SNIFF_PREFIX_BYTES - prefix.len()).min(chunk.len());
+            prefix.extend_from_slice(&chunk[..take]);
+        }
         total += chunk.len() as u64;
         if total > max_size {
             return Err("file exceeds this server's maximum file size".into());
@@ -642,7 +698,7 @@ async fn transfer_to_juicehost(
         .await
         .map_err(|_| "storage task panicked".to_string())??;
 
-    Ok((total, None))
+    Ok((total, None, sniff_media(&prefix)))
 }
 
 #[expect(
@@ -663,7 +719,7 @@ async fn transfer_protected_to_juicehost(
     source_url: &str,
     total_hint: Option<u64>,
     dek: &crate::crypto_file::FileKey,
-) -> Result<(u64, Option<String>), String> {
+) -> Result<(u64, Option<String>, Option<DetectedMedia>), String> {
     let _ = state
         .db_call("update_fetch_job_progress", {
             let job_id = job_id.to_string();
@@ -676,9 +732,14 @@ async fn transfer_protected_to_juicehost(
     let (spool_tx, spool_handle) =
         crate::routes::upload::protected::spawn_spool_task(max_size as i64);
     let mut received: u64 = 0;
+    let mut prefix: Vec<u8> = Vec::with_capacity(SNIFF_PREFIX_BYTES);
     let mut last_progress = std::time::Instant::now() - std::time::Duration::from_secs(1);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("media download failed mid-stream: {e}"))?;
+        if prefix.len() < SNIFF_PREFIX_BYTES {
+            let take = (SNIFF_PREFIX_BYTES - prefix.len()).min(chunk.len());
+            prefix.extend_from_slice(&chunk[..take]);
+        }
         received += chunk.len() as u64;
         if received > max_size {
             return Err("file exceeds this server's maximum file size".into());
@@ -733,7 +794,7 @@ async fn transfer_protected_to_juicehost(
         file_id,
         filename,
         mime_type,
-        None,
+        state.config.default_storage_host.as_deref(),
         capability,
         spool_file.path(),
         total,
@@ -742,7 +803,11 @@ async fn transfer_protected_to_juicehost(
     )
     .await
     .map_err(|e| format!("encrypted push failed: {e:?}"))?;
-    Ok((total, Some(hex::encode(header))))
+    Ok((
+        total,
+        Some(hex::encode(header)),
+        sniff_media(&prefix),
+    ))
 }
 
 async fn finalize_stored_file(
@@ -811,7 +876,45 @@ async fn finalize_stored_file(
 
 #[cfg(test)]
 mod tunnel_host_tests {
-    use super::{tunnel_url_host_port, with_extension};
+    use super::{reconcile_media, sniff_media, tunnel_url_host_port, with_extension};
+
+    #[test]
+    fn audio_bytes_override_a_video_fetch_label() {
+        // ID3v2 header: cobalt answered a video request with an MP3 stream.
+        let detected = sniff_media(b"ID3\x03\x00\x00\x00\x00\x00\x00").expect("mp3");
+        assert_eq!(detected.mime_type, "audio/mpeg");
+        let (filename, mime) = reconcile_media(
+            "Song.mp4".to_string(),
+            "video/mp4".to_string(),
+            Some(detected),
+        );
+        assert_eq!(filename, "Song.mp3");
+        assert_eq!(mime, "audio/mpeg");
+    }
+
+    #[test]
+    fn matching_media_is_left_alone() {
+        let detected = sniff_media(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00").expect("mp4");
+        assert_eq!(detected.mime_type, "video/mp4");
+        let (filename, mime) = reconcile_media(
+            "Movie.mp4".to_string(),
+            "video/mp4".to_string(),
+            Some(detected),
+        );
+        assert_eq!(filename, "Movie.mp4");
+        assert_eq!(mime, "video/mp4");
+    }
+
+    #[test]
+    fn unknown_bytes_do_not_change_metadata() {
+        let (filename, mime) = reconcile_media(
+            "notes.txt".to_string(),
+            "text/plain".to_string(),
+            None,
+        );
+        assert_eq!(filename, "notes.txt");
+        assert_eq!(mime, "text/plain");
+    }
 
     #[test]
     fn flac_extension_replaces_container_extension() {

@@ -23,6 +23,7 @@ pub struct Config {
     pub juicehost_url: String,
 
     pub public_juicehost_url: String,
+    pub default_storage_host: Option<String>,
     pub juiceback_origin: String,
     pub router_base_url: Option<String>,
     pub jwt_secret: String,
@@ -288,6 +289,17 @@ impl Config {
             .unwrap_or_else(|| public_base_url.clone())
             .trim_end_matches('/')
             .to_string();
+        let default_storage_host = std::env::var("DEFAULT_STORAGE_HOST")
+            .ok()
+            .map(|value| value.trim().trim_end_matches('/').to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                file.urls
+                    .default_storage_host
+                    .clone()
+                    .map(|value| value.trim().trim_end_matches('/').to_string())
+                    .filter(|value| !value.is_empty())
+            });
         let juiceback_origin = file
             .urls
             .juiceback_origin
@@ -469,6 +481,7 @@ impl Config {
             juicehost_api_key,
             juicehost_url,
             public_juicehost_url,
+            default_storage_host,
             juiceback_origin,
             router_base_url,
             jwt_secret,

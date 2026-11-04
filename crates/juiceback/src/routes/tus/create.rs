@@ -173,7 +173,8 @@ pub async fn create_upload_handler(
     }
 
     if storage_host.is_none() {
-        storage_host = crate::routes::upload::region_host(&state, &headers, addr);
+        storage_host = crate::routes::upload::region_host(&state, &headers, addr)
+            .or_else(|| state.config.default_storage_host.clone());
     }
 
     let id = nanoid::nanoid!(8);

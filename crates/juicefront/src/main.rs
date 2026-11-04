@@ -183,6 +183,7 @@ fn main() {
             .route("/{locale}/", any(handlers::index))
             .route("/index.html", any(handlers::index))
             .route("/{locale}/index.html", any(handlers::index))
+            .route("/router/upload-target", get(handlers::upload_target_proxy))
             .route("/files", get(handlers::files_page))
             .route("/files/", get(handlers::files_page))
             .route("/{locale}/files", get(handlers::files_page))

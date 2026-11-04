@@ -35,6 +35,7 @@ futures.workspace = true
 h3 = { workspace = true, optional = true }
 h3-quinn = { workspace = true, optional = true }
 hex.workspace = true
+infer.workspace = true
 jsonwebtoken.workspace = true
 juiceutils = { path = "../juiceutils" }
 lettre.workspace = true

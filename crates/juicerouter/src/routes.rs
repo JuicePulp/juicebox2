@@ -9,7 +9,10 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    set_header::SetResponseHeaderLayer,
+};
 
 use crate::{
     config::LocalMode,
@@ -32,6 +35,10 @@ pub fn build(state: Arc<AppState>) -> Router {
                 .allow_methods([axum::http::Method::GET])
                 .allow_headers(Any),
         )
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        ))
         .with_state(state)
 }
 

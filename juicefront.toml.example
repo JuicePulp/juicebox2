@@ -8,6 +8,9 @@ juiceback_url = "http://127.0.0.1:6401"
 juicehost_url = "http://127.0.0.1:6402"
 # Internal base for the /admin/* session check. Env: API_INTERNAL_URL.
 api_internal_url = "http://127.0.0.1:6401"
+# Optional juicerouter base for automatic upload node selection.
+# Leave empty to always upload to the default node. Env: JUICEROUTER_URL.
+router_url = ""
 # Proxies whose X-Forwarded-For we believe (comma-separated IPs/CIDRs).
 # Same format as the backends' TRUSTED_PROXY_CIDRS. Empty = ignore
 # forwarding headers. Env: TRUSTED_PROXY_CIDRS.
