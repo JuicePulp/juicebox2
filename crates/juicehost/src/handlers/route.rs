@@ -12,6 +12,7 @@ struct RemoteLocation {
     status: String,
     storage_host: Option<String>,
     r2_url: Option<String>,
+    filename: Option<String>,
 }
 
 async fn backend_location(state: &AppState, id: &str) -> Option<RemoteLocation> {
@@ -34,7 +35,39 @@ async fn backend_location(state: &AppState, id: &str) -> Option<RemoteLocation> 
         status,
         storage_host: string_field("storage_host"),
         r2_url: string_field("r2_url"),
+        filename: string_field("filename"),
     })
+}
+
+/// Use the extension juicebox recorded for the file, not the extension in the
+/// shared URL. A link copied before an audio file was correctly re-labelled
+/// can say `.mp4`; forwarding that extension would make the storage node
+/// render a video preview around MP3 bytes. The `/e/` route is generated
+/// media (`.mp4` visualiser, `.jpg` poster), so it keeps its own extension.
+fn canonical_route_path(route: &str, path: &str, filename: Option<&str>) -> String {
+    if route == "e" {
+        return path.to_string();
+    }
+    let Some(filename) = filename else {
+        return path.to_string();
+    };
+    let Some(extension) = std::path::Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return path.to_string();
+    };
+    let id = path
+        .trim_start_matches('/')
+        .split(['.', '/'])
+        .next()
+        .unwrap_or(path);
+    if id.is_empty() {
+        return path.to_string();
+    }
+    format!("{id}.{extension}")
 }
 
 fn host_only(value: &str) -> Option<String> {
@@ -58,9 +91,9 @@ fn is_http_url(value: &str) -> bool {
 /// Redirect a request for a file this node does not have to the node that
 /// does (or to R2 when it has been promoted).
 ///
-/// `route` is `f`, `d`, or `v`; `path` is the part after the route (usually
-/// `<id>` or `<id>.<ext>`) and is preserved so the target node keeps the
-/// original extension and filename behavior.
+/// `route` is `f`, `d`, `v`, or `e`; `path` is the part after the route
+/// (usually `<id>` or `<id>.<ext>`). For raw/preview routes the extension is
+/// replaced with the one juicebox recorded, so stale links keep working.
 ///
 /// Returns `None` when the file is still uploading here, when the backend has
 /// no record, when the storage host is this same node (no redirect loop), or
@@ -79,6 +112,7 @@ pub(crate) async fn remote_redirect(
         return None;
     }
 
+    let target_path = canonical_route_path(route, path, location.filename.as_deref());
     let target = if let Some(r2_url) = location.r2_url {
         if !is_http_url(&r2_url) {
             return None;
@@ -103,7 +137,7 @@ pub(crate) async fn remote_redirect(
             "{}/{}/{}",
             storage_host.trim_end_matches('/'),
             route,
-            path.trim_start_matches('/')
+            target_path.trim_start_matches('/')
         )
     };
 
@@ -130,6 +164,30 @@ mod tests {
             Some("f-eu2.juicey.dev".to_string())
         );
         assert_eq!(host_only(""), None);
+    }
+
+    #[test]
+    fn remote_paths_follow_the_recorded_extension() {
+        assert_eq!(
+            canonical_route_path("v", "abc12345.mp4", Some("Song.mp3")),
+            "abc12345.mp3"
+        );
+        assert_eq!(
+            canonical_route_path("f", "abc12345", Some("Song.mp3")),
+            "abc12345.mp3"
+        );
+        assert_eq!(
+            canonical_route_path("d", "abc12345.mp4", Some("movie.mp4")),
+            "abc12345.mp4"
+        );
+        assert_eq!(
+            canonical_route_path("e", "abc12345.mp4", Some("Song.mp3")),
+            "abc12345.mp4"
+        );
+        assert_eq!(
+            canonical_route_path("v", "abc12345.mp4", Some("no-extension")),
+            "abc12345.mp4"
+        );
     }
 
     #[test]

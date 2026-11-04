@@ -15,6 +15,11 @@ cleanup_interval_minutes = 30
 public_base_url = "http://localhost:6402"
 juicehost_url = "http://127.0.0.1:6402"
 
+# Storage node used when a client does not pick one. Set this in a
+# control-plane deployment so new uploads never land on the canonical host.
+# Env override: DEFAULT_STORAGE_HOST
+# default_storage_host = "https://f-us1.juicey.dev"
+
 # Single link domain (Cloudflare Worker router). When set, share links for
 # official regional hosts are minted under this host instead of the region,
 # e.g. https://f.juicey.dev/v/abc123.gif. Custom third-party hosts keep theirs.

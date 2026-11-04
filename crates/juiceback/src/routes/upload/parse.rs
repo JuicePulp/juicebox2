@@ -55,7 +55,7 @@ pub async fn parse_multipart(
     let mut sanitized_filename = String::new();
     let mut mime_type = String::new();
     let mut total_bytes: i64 = 0;
-    let mut selected_host: Option<String> = None;
+    let mut selected_host: Option<String> = state.config.default_storage_host.clone();
     let mut selected_upload_mode = UploadMode::Standard;
     let mut reservation = None;
     let mut file_capability = default_capability;

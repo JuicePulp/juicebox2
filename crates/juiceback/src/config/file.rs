@@ -69,6 +69,10 @@ pub struct UrlsFile {
     pub juicehost_url: String,
     #[serde(default)]
     pub public_juicehost_url: Option<String>,
+    /// Storage node used when a client does not pick a host. When set, uploads
+    /// are pushed to this node instead of being stored on this server.
+    #[serde(default)]
+    pub default_storage_host: Option<String>,
     #[serde(default)]
     pub juiceback_origin: Option<String>,
     #[serde(default)]
@@ -426,6 +430,7 @@ impl Default for UrlsFile {
             public_base_url: default_public_base_url(),
             juicehost_url: default_juicehost_url(),
             public_juicehost_url: None,
+            default_storage_host: None,
             juiceback_origin: None,
             router_base_url: None,
         }

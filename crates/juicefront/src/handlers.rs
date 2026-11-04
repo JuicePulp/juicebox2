@@ -9,8 +9,8 @@ use askama::Template;
 use axum::{
     body::Body,
     extract::{ConnectInfo, Json, Path, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::Response,
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -841,6 +841,53 @@ struct IndexTpl {
     banner_html: String,
     upload_html: String,
     hostsel_html: String,
+}
+
+/// Proxy `/router/upload-target` to juicerouter so the browser can ask for a
+/// storage node without a cross-origin call or a hardcoded router hostname.
+pub async fn upload_target_proxy(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let Some(router_url) = state
+        .config
+        .router_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "router not configured").into_response();
+    };
+    let url = format!("{}/upload-target", router_url.trim_end_matches('/'));
+    let mut request = state
+        .http
+        .get(url)
+        .timeout(Duration::from_millis(1_500));
+    for name in ["cf-ipcountry", "cf-ray", "cf-connecting-ip"] {
+        if let Some(value) = headers.get(name) {
+            request = request.header(name, value);
+        }
+    }
+    let response = match request.send().await {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            tracing::warn!("router upload-target returned {}", response.status());
+            return (StatusCode::SERVICE_UNAVAILABLE, "router unavailable").into_response();
+        }
+        Err(error) => {
+            tracing::warn!("router upload-target failed: {error}");
+            return (StatusCode::SERVICE_UNAVAILABLE, "router unavailable").into_response();
+        }
+    };
+    let Ok(body) = response.bytes().await else {
+        return (StatusCode::BAD_GATEWAY, "router response error").into_response();
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 pub async fn index(

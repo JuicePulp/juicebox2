@@ -85,7 +85,8 @@ pub async fn reserve_upload_handler(
     let selected_host = body
         .host
         .map(|h| h.trim().trim_end_matches('/').to_string())
-        .filter(|h| !h.is_empty());
+        .filter(|h| !h.is_empty())
+        .or_else(|| state.config.default_storage_host.clone());
 
     let file_id = nanoid::nanoid!(8);
     let declared_size = body.file_size.unwrap_or(0);

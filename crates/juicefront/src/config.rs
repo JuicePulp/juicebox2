@@ -51,6 +51,9 @@ pub struct ProxyFile {
     pub api_internal_url: String,
     #[serde(default)]
     pub trusted_proxy_cidrs: String,
+    /// Optional juicerouter base URL for upload target selection.
+    #[serde(default)]
+    pub router_url: String,
 }
 
 impl Default for ProxyFile {
@@ -60,6 +63,7 @@ impl Default for ProxyFile {
             juicehost_url: default_juicehost_url(),
             api_internal_url: default_api_internal_url(),
             trusted_proxy_cidrs: String::new(),
+            router_url: String::new(),
         }
     }
 }
@@ -83,6 +87,7 @@ pub struct Config {
     pub juiceback_url: String,
     pub juicehost_url: String,
     pub api_internal_url: String,
+    pub router_url: Option<String>,
     pub trusted_proxies: Vec<IpCidr>,
     pub sentry_environment: String,
 }
@@ -101,6 +106,9 @@ impl Config {
         let api_internal_url = optional_secret("API_INTERNAL_URL")
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| proxy.api_internal_url.clone());
+        let router_url = optional_secret("JUICEROUTER_URL")
+            .filter(|v| !v.is_empty())
+            .or_else(|| (!proxy.router_url.is_empty()).then(|| proxy.router_url.clone()));
         let cidrs = optional_secret("TRUSTED_PROXY_CIDRS")
             .unwrap_or_else(|| proxy.trusted_proxy_cidrs.clone());
         let trusted_proxies = match parse_trusted_proxy_cidrs(&cidrs) {
@@ -117,6 +125,7 @@ impl Config {
             juiceback_url,
             juicehost_url,
             api_internal_url,
+            router_url,
             trusted_proxies,
             sentry_environment: file.sentry.environment,
         }

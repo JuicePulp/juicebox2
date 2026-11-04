@@ -1589,7 +1589,14 @@ pub async fn audio_embed_media(
     };
     let meta = match state.storage.stat(&id).await {
         Ok(meta) => meta,
-        Err(StorageError::NotFound | StorageError::Frozen) => return Ok(media_not_found()),
+        Err(StorageError::NotFound | StorageError::Frozen) => {
+            if let Some(response) =
+                super::route::remote_redirect(&state, &headers, &id, "e", &path).await
+            {
+                return Ok(response);
+            }
+            return Ok(media_not_found());
+        }
         Err(_) => return Err(JuicehostError::Internal),
     };
     if !storage::guess_mime(&meta.extension).starts_with("audio/") {

@@ -5,8 +5,10 @@ Node registry, health probes and routing policy for Juicebox.
 `juicerouter` answers two questions:
 
 1. **Where does this upload go?** — `GET /upload-target` returns the best
-   writable node for the caller (Cloudflare country → region, then colo,
-   then default, then any healthy node).
+   writable storage node for the caller (Cloudflare country → region, then
+   colo, then default, then any healthy storage node). The canonical
+   `home_url` is never returned: it serves previews and downloads, but new
+   files always land on a storage node.
 2. **Where does this file live?** — `GET /v|f|d|e/{path}` resolves the ID
    through juiceback and returns a `302` to the node that stores it (or to
    the R2 URL for hot-tier files), `404` when the file does not exist, and
@@ -48,8 +50,9 @@ share the key.
 | `404` | `route_missing` (`/internal` not exposed) | no |
 | other / timeout | `unreachable` | no |
 
-`unknown` nodes stay candidates until the first probe finishes, so the
-router can start before juiceback/nodes are ready.
+`unknown` nodes are not upload candidates until the first probe succeeds.
+Until then `/upload-target` returns `503`, and clients omit `host` so
+juiceback uses its configured default storage node.
 
 ## Configuration
 

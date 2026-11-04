@@ -125,7 +125,8 @@ export function initHostSelector() {
     row,
     url: row.getAttribute("data-url") || "",
     name: row.getAttribute("data-name") || "",
-    state: "unknown",
+    auto: row.hasAttribute("data-auto"),
+    state: row.hasAttribute("data-auto") ? "online" : "unknown",
     latencyMs: null,
     cfg: null
   }));
@@ -147,7 +148,7 @@ export function initHostSelector() {
     if (dot)
       dot.setAttribute("data-state", s.state);
     if (latency)
-      latency.textContent = s.latencyMs === null ? "-" : `${Math.round(s.latencyMs)} ms`;
+      latency.textContent = s.auto ? "" : s.latencyMs === null ? "-" : `${Math.round(s.latencyMs)} ms`;
     if (status)
       status.textContent = s.state === "online" ? str(root, "online", "Online") : s.state === "offline" ? str(root, "offline", "Offline") : s.state === "checking" ? str(root, "checking", "Pinging...") : "";
     if (badges) {
@@ -225,6 +226,11 @@ async function pingOnce(s) {
   }
 }
   async function pingRow(s) {
+    if (s.auto) {
+      s.state = "online";
+      renderRow(s);
+      return;
+    }
     if (s.state === "checking")
       return;
     if (s.url.startsWith("http://") && window.location.protocol === "https:") {
@@ -273,9 +279,10 @@ async function pingOnce(s) {
     if (typeof document !== "undefined" && document.hidden)
       return;
     setStatusLine(str(root, "checking", "Pinging..."));
-    Promise.allSettled(rows.map((s) => pingRow(s))).then(() => {
-      const online = rows.filter((s) => s.state === "online").length;
-      setStatusLine(`${online}/${rows.length} ${str(root, "online", "Online").toLowerCase()}`);
+    const manual = rows.filter((s) => !s.auto);
+    Promise.allSettled(manual.map((s) => pingRow(s))).then(() => {
+      const online = manual.filter((s) => s.state === "online").length;
+      setStatusLine(`${online}/${manual.length} ${str(root, "online", "Online").toLowerCase()}`);
     });
   }
   function applyFilters() {
@@ -298,6 +305,8 @@ async function pingOnce(s) {
         empty.hidden = visible > 0;
       if (list) {
         const ordered = sectionRows.filter((s) => !s.row.hidden).sort((a, b) => {
+          if (a.auto !== b.auto)
+            return a.auto ? -1 : 1;
           if (mode === "name")
             return a.name.localeCompare(b.name);
           const al = a.latencyMs ?? Number.POSITIVE_INFINITY;
@@ -310,6 +319,13 @@ async function pingOnce(s) {
     }
   }
   function selectRow(s) {
+    if (s.auto) {
+      saveHost("");
+      markSelected("");
+      setStatusLine(str(root, "applied", "Host applied"));
+      location.hash = "#settings-modal";
+      return;
+    }
     if (s.state !== "online" || !s.cfg)
       return;
     saveHost(s.url);

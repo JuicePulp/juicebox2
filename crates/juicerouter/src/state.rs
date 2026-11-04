@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, GeoSettings};
 
+/// The canonical public host. It serves downloads and previews, but never
+/// receives new uploads.
+const HOME_REGION: &str = "home";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthState {
@@ -31,10 +35,7 @@ impl HealthState {
         }
     }
 
-    #[must_use]
-    pub fn usable(self) -> bool {
-        matches!(self, Self::Healthy | Self::Unknown)
-    }
+
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,7 +120,7 @@ impl Registry {
 
         let home = config.router.home_url.trim_end_matches('/');
         if !home.is_empty() && !nodes.iter().any(|node| node.url == home) {
-            nodes.push(Node::new("home".to_string(), home.to_string()));
+            nodes.push(Node::new(HOME_REGION.to_string(), home.to_string()));
         }
         Self { nodes }
     }
@@ -131,6 +132,9 @@ impl Registry {
     }
 
     fn best_in<'a>(&'a self, region: &str) -> Option<&'a Node> {
+        if region == HOME_REGION {
+            return None;
+        }
         self.nodes
             .iter()
             .filter(|node| node.region == region)
@@ -143,7 +147,9 @@ impl Registry {
     fn best_overall(&self) -> Option<&Node> {
         self.nodes
             .iter()
-            .filter(|node| node.health().state.usable())
+            .filter(|node| {
+                node.region != HOME_REGION && node.health().state == HealthState::Healthy
+            })
             .min_by_key(|node| {
                 let health = node.health();
                 (health.state.rank(), health.latency_ms.unwrap_or(u64::MAX))
@@ -154,7 +160,8 @@ impl Registry {
     ///
     /// Preference order: an explicitly requested region, then the country
     /// map, then the Cloudflare colo map, then the configured default. If the
-    /// preferred region has no usable node, fall back to any usable node.
+    /// preferred region has no usable node, fall back to any usable storage
+    /// node. The canonical home host is never returned for uploads.
     #[must_use]
     pub fn select(
         &self,
@@ -186,7 +193,7 @@ impl Registry {
         for (region, reason) in candidates {
             if let Some(node) = self.best_in(region) {
                 let health = node.health();
-                if health.state.usable() {
+                if health.state == HealthState::Healthy {
                     return Some(Selection {
                         region: node.region.clone(),
                         url: node.url.clone(),
@@ -476,6 +483,19 @@ mod tests {
         config
     }
 
+    fn mark_storage_nodes_healthy(registry: &Registry) {
+        for node in &registry.nodes {
+            if node.region != HOME_REGION {
+                node.set_health(NodeHealth {
+                    state: HealthState::Healthy,
+                    latency_ms: Some(10),
+                    checked_secs_ago: Some(0),
+                    error: None,
+                });
+            }
+        }
+    }
+
     #[test]
     fn registry_includes_home_node_once() {
         let registry = Registry::new(&config());
@@ -487,6 +507,7 @@ mod tests {
     fn country_prefers_its_region() {
         let config = config();
         let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
         let mut geo = GeoSettings::default();
         geo.countries.insert("US".to_string(), "us1".to_string());
         let selection = registry
@@ -500,6 +521,7 @@ mod tests {
     fn explicit_region_wins_over_country() {
         let config = config();
         let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
         let mut geo = GeoSettings::default();
         geo.countries.insert("US".to_string(), "us1".to_string());
         let selection = registry
@@ -510,14 +532,28 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_home_when_no_region_matches() {
+    fn falls_back_to_a_storage_node_not_home() {
         let config = config();
         let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
         let geo = GeoSettings::default();
         let selection = registry
             .select(&geo, None, Some("ZZ"), None)
             .expect("selection");
         assert_eq!(selection.reason, "fallback");
+        assert_ne!(selection.region, "home");
+    }
+
+    #[test]
+    fn explicit_home_is_never_an_upload_target() {
+        let config = config();
+        let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
+        let geo = GeoSettings::default();
+        let selection = registry
+            .select(&geo, Some("home"), None, None)
+            .expect("selection");
+        assert_ne!(selection.region, "home");
     }
 
     #[test]

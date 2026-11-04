@@ -47,6 +47,7 @@ pub struct DirectParallelReserveRequest {
     pub file_size: u64,
     pub ttl_hours: Option<f64>,
     pub num_parts: Option<usize>,
+    pub host: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -95,7 +96,14 @@ pub async fn direct_parallel_reserve_handler(
     headers: HeaderMap,
     Json(body): Json<DirectParallelReserveRequest>,
 ) -> Result<Json<DirectParallelReserveResponse>, AppError> {
-    let (default_ttl, allowed_ttl, danger, max_file_size, public_juicehost_url) = {
+    let (
+        default_ttl,
+        allowed_ttl,
+        danger,
+        max_file_size,
+        public_juicehost_url,
+        default_storage_host,
+    ) = {
         let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
@@ -103,6 +111,7 @@ pub async fn direct_parallel_reserve_handler(
             jh.danger_level,
             jh.max_file_size_bytes,
             state.config.public_juicehost_url.clone(),
+            state.config.default_storage_host.clone(),
         )
     };
 
@@ -133,7 +142,23 @@ pub async fn direct_parallel_reserve_handler(
     let delete_token = uuid::Uuid::new_v4().to_string();
     let encrypted_ip = encrypted_client_ip(&state, &headers, addr);
 
+    let selected_host = match body
+        .host
+        .as_deref()
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+    {
+        Some(host) => Some(
+            crate::storage_client::check_storage_host(host, state.config.allow_private_fetch)
+                .await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?,
+        ),
+        None => None,
+    };
     let region_juicehost = pinned_region_host(&state, &headers, addr);
+    let storage_host = selected_host
+        .or(region_juicehost.clone())
+        .or(default_storage_host);
     let record = FileRecord::new(
         file_id.clone(),
         body.filename.clone(),
@@ -143,11 +168,11 @@ pub async fn direct_parallel_reserve_handler(
         now,
         now + ttl_seconds,
         encrypted_ip,
-        region_juicehost.clone(),
+        storage_host.clone(),
     );
     let record = insert_owned_pending(&state, &user_id, record, "own_direct_parallel_upload").await?;
 
-    let upload_base = region_juicehost
+    let upload_base = storage_host
         .as_deref()
         .unwrap_or_else(|| public_juicehost_url.trim_end_matches('/'));
     let mut parts = Vec::with_capacity(num_parts);
@@ -198,7 +223,7 @@ pub async fn direct_parallel_reserve_handler(
         &body.mime_type,
         body.file_size,
         &live_parts,
-        region_juicehost.as_deref(),
+        storage_host.as_deref(),
     )
     .await
     {
