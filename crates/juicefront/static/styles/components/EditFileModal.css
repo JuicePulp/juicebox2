@@ -21,10 +21,14 @@
   font-display: swap;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) {
   .mdloverlay {
     padding: 0;
     align-items: stretch;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
   }
 }
 
@@ -63,11 +67,14 @@
   animation: mdlslide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@media (max-width: 768px) {
-  .mdlcontent {
-    max-width: 100%;
-    max-height: 100%;
-    height: 100%;
+@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) {
+  .mdlcontent,
+  .mdlcontent.mdlcontent--wide {
+    max-width: none;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
     border-radius: 0;
     border: none;
   }
@@ -468,7 +475,7 @@
   gap: 0.5rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) {
   .mdlheader {
     padding: 1rem;
   }
@@ -479,6 +486,8 @@
 
   .mdlbody {
     padding: 1rem;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .mdlfooter {
