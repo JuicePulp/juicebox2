@@ -8,14 +8,16 @@ use super::common::backend_request;
 use crate::state::AppState;
 
 /// What the backend knows about a file that is not stored on this node.
-struct RemoteLocation {
-    status: String,
-    storage_host: Option<String>,
-    r2_url: Option<String>,
-    filename: Option<String>,
+pub(crate) struct RemoteLocation {
+    pub(crate) status: String,
+    pub(crate) storage_host: Option<String>,
+    pub(crate) r2_url: Option<String>,
+    pub(crate) filename: Option<String>,
+    pub(crate) mime_type: Option<String>,
+    pub(crate) size_bytes: Option<u64>,
 }
 
-async fn backend_location(state: &AppState, id: &str) -> Option<RemoteLocation> {
+pub(crate) async fn backend_location(state: &AppState, id: &str) -> Option<RemoteLocation> {
     let backend_url = state.backend_url.as_ref()?;
     let url = format!("{backend_url}/internal/resolve/{id}");
     let response = backend_request(state, url).send().await.ok()?;
@@ -36,6 +38,12 @@ async fn backend_location(state: &AppState, id: &str) -> Option<RemoteLocation> 
         storage_host: string_field("storage_host"),
         r2_url: string_field("r2_url"),
         filename: string_field("filename"),
+        mime_type: string_field("mime_type"),
+        size_bytes: body.get("size_bytes").and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_i64().and_then(|n| u64::try_from(n).ok()))
+        }),
     })
 }
 
@@ -84,7 +92,7 @@ fn host_only(value: &str) -> Option<String> {
     Some(parsed.host_str()?.to_ascii_lowercase())
 }
 
-fn is_http_url(value: &str) -> bool {
+pub(crate) fn is_http_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
 }
 
@@ -106,6 +114,18 @@ pub(crate) async fn remote_redirect(
     path: &str,
 ) -> Option<Response<Body>> {
     let location = backend_location(state, id).await?;
+    remote_redirect_with(headers, route, path, &location)
+}
+
+/// Build the redirect for an already-fetched backend location. Callers that
+/// need to inspect the location (for example to render a preview locally)
+/// use this so the backend is only queried once.
+pub(crate) fn remote_redirect_with(
+    headers: &HeaderMap,
+    route: &str,
+    path: &str,
+    location: &RemoteLocation,
+) -> Option<Response<Body>> {
     // The upload is still in flight on this node; the caller should render
     // the live progress page instead of bouncing the viewer.
     if location.status == "uploading" {
@@ -113,14 +133,14 @@ pub(crate) async fn remote_redirect(
     }
 
     let target_path = canonical_route_path(route, path, location.filename.as_deref());
-    let target = if let Some(r2_url) = location.r2_url {
-        if !is_http_url(&r2_url) {
+    let target = if let Some(r2_url) = location.r2_url.as_deref() {
+        if !is_http_url(r2_url) {
             return None;
         }
-        r2_url
+        r2_url.to_owned()
     } else {
-        let storage_host = location.storage_host?;
-        if !is_http_url(&storage_host) {
+        let storage_host = location.storage_host.as_deref()?;
+        if !is_http_url(storage_host) {
             return None;
         }
         let request_host = headers
@@ -128,7 +148,7 @@ pub(crate) async fn remote_redirect(
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
         if !request_host.is_empty() {
-            match (host_only(&storage_host), host_only(request_host)) {
+            match (host_only(storage_host), host_only(request_host)) {
                 (Some(storage), Some(current)) if storage == current => return None,
                 _ => {}
             }
