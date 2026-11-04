@@ -1,0 +1,69 @@
+# juicerouter — node registry, health and routing policy.
+# Secrets stay in env: JUICEROUTER_API_KEY (falls back to JUICEHOST_API_KEY).
+
+[server]
+host = "127.0.0.1"
+port = 6404
+
+[router]
+# Central juiceback used for /internal/resolve/{id}.
+juiceback_url = "http://127.0.0.1:6401"
+# This router's public hostname (used for display and future share links).
+public_base_url = "https://r.juicey.dev"
+# Where files with no storage_host live (the local juicehost).
+home_url = "https://f.juicey.dev"
+# Storage nodes reject /internal calls without this header when they set
+# [security] allowed_origins.
+juiceback_origin = "https://box.juicey.dev"
+# api_key = "..."   # prefer JUICEROUTER_API_KEY / JUICEHOST_API_KEY
+backend_timeout_ms = 2000
+resolve_cache_secs = 30
+probe_interval_secs = 30
+probe_timeout_ms = 5000
+# redirect: 302 local files to home_url (router has its own hostname).
+# proxy: stream local files to local_upstream (router fronts home_url).
+local_mode = "redirect"
+local_upstream = "http://127.0.0.1:6402"
+
+[regions.public_juicehosts]
+eu1 = "https://f-eu1.juicey.dev"
+eu2 = "https://f-eu2.juicey.dev"
+us1 = "https://f-us1.juicey.dev"
+
+[geo]
+default_region = "eu1"
+
+# Cloudflare CF-IPCountry (ISO-3166 alpha-2) -> region key.
+[geo.countries]
+US = "us1"
+CA = "us1"
+MX = "us1"
+GB = "eu1"
+IE = "eu1"
+DE = "eu1"
+FR = "eu1"
+NL = "eu1"
+BE = "eu1"
+ES = "eu1"
+PT = "eu1"
+IT = "eu1"
+AT = "eu1"
+CH = "eu1"
+SE = "eu1"
+NO = "eu1"
+DK = "eu1"
+FI = "eu1"
+PL = "eu1"
+CZ = "eu1"
+
+# Cloudflare CF-Ray colo -> region key (fallback when country is missing).
+[geo.colos]
+IAD = "us1"
+ORD = "us1"
+SFO = "us1"
+LAX = "us1"
+SEA = "us1"
+AMS = "eu1"
+FRA = "eu1"
+LHR = "eu1"
+CDG = "eu1"
