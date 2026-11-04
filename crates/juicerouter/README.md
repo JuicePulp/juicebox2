@@ -64,7 +64,7 @@ JUICEROUTER_API_KEY=...   # or JUICEHOST_API_KEY
 `local_mode`:
 
 - `redirect` (default) — the router has its own hostname (e.g.
-  `r.juicey.dev`) and 302s home-node files to `home_url`.
+  `router.juicey.dev`) and 302s home-node files to `home_url`.
 - `proxy` — the router sits in front of `home_url`; home-node files are
   streamed from `local_upstream` instead of redirected (avoids loops).
 
@@ -90,7 +90,7 @@ default. If it is fronted by Cloudflare, keep `CF-IPCountry` in the
 request (it is, unless a `header_up -CF-IPCountry` rule strips it).
 
 ```caddy
-r.juicey.dev {
+router.juicey.dev {
     reverse_proxy 127.0.0.1:6404
 }
 ```
