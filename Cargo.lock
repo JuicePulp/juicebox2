@@ -2203,6 +2203,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "juicerouter"
+version = "2.1.32"
+dependencies = [
+ "axum",
+ "dashmap",
+ "juiceutils",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tower",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "juiceutils"
 version = "2.1.32"
 dependencies = [
