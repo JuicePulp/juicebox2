@@ -350,7 +350,7 @@
   "hostsel.add_title": "ノードを運営する?",
   "hostsel.add_desc": "自分でJuiceHostノードを運営してここに載せよう。",
   "hostsel.add_btn": "自分で追加",
-  "upload.zipping": "フォルダを圧縮中…",
+  "upload.zipping": "フォルダを圧縮中...",
   "error.folder_empty": "そのフォルダにはファイルがありません。"
  }
 }

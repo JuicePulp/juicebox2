@@ -350,7 +350,7 @@
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
   "report.password_hint": "Optional: lets moderators review protected files.",
-  "upload.zipping": "Compression du dossier…",
+  "upload.zipping": "Compression du dossier...",
   "error.folder_empty": "Ce dossier est vide."
  }
 }

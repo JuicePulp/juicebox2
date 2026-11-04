@@ -158,7 +158,7 @@ fn title_for_video(raw: &str, extension: &str) -> String {
             .collect::<String>()
             .trim_end()
             .to_string();
-        title.push('…');
+        title.push_str("...");
     }
     title
 }
@@ -197,7 +197,7 @@ fn truncate_units(value: &str, max_units: usize) -> String {
     if text_units(value) <= max_units {
         return value.to_string();
     }
-    let budget = max_units.saturating_sub(1);
+    let budget = max_units.saturating_sub(3);
     let mut out = String::new();
     let mut used = 0;
     for ch in value.chars() {
@@ -209,7 +209,7 @@ fn truncate_units(value: &str, max_units: usize) -> String {
         used += units;
     }
     out = out.trim_end().to_string();
-    out.push('\u{2026}');
+    out.push_str("...");
     out
 }
 
@@ -275,11 +275,11 @@ fn wrap_text(value: &str, max_units: usize, max_lines: usize) -> Vec<String> {
         truncated = true;
     }
     if truncated && let Some(last) = lines.last_mut() {
-        while text_units(last) + 1 > max_units {
+        while text_units(last) + 3 > max_units {
             last.pop();
         }
         *last = last.trim_end().to_string();
-        last.push('\u{2026}');
+        last.push_str("...");
     }
     lines
 }
@@ -1895,8 +1895,8 @@ mod tests {
     fn video_title_truncates_to_char_limit() {
         let raw = "a".repeat(TITLE_MAX_CHARS + 12);
         let title = title_for_video(&raw, "flac");
-        assert_eq!(title.chars().count(), TITLE_MAX_CHARS + 1);
-        assert!(title.ends_with('…'));
+        assert_eq!(title.chars().count(), TITLE_MAX_CHARS + 3);
+        assert!(title.ends_with("..."));
     }
 
     #[test]
@@ -1909,11 +1909,11 @@ mod tests {
     fn wide_title_uses_tighter_limit() {
         let raw = "な".repeat(TITLE_MAX_CHARS + 8);
         let title = title_for_video(&raw, "mp3");
-        assert_eq!(title.chars().count(), TITLE_MAX_CHARS_WIDE + 1);
-        assert!(title.ends_with('…'));
+        assert_eq!(title.chars().count(), TITLE_MAX_CHARS_WIDE + 3);
+        assert!(title.ends_with("..."));
         assert!(title_needs_wide_font(&title));
         assert!(!title_needs_wide_font("Midnight Drive"));
-        assert!(!title_needs_wide_font("A very long ascii title…"));
+        assert!(!title_needs_wide_font("A very long ascii title..."));
     }
 
     #[test]
@@ -1933,7 +1933,7 @@ mod tests {
         assert_eq!(truncate_units("Short title", 40), "Short title");
         let cut = truncate_units("A much longer title than the limit", 12);
         assert!(text_units(&cut) <= 12);
-        assert!(cut.ends_with('…'));
+        assert!(cut.ends_with("..."));
     }
 
     #[test]
@@ -1941,7 +1941,7 @@ mod tests {
         let lines = wrap_text("alpha beta gamma delta", 10, 2);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], "alpha beta");
-        assert!(lines[1].ends_with('…'));
+        assert!(lines[1].ends_with("..."));
         assert!(lines.iter().all(|line| text_units(line) <= 10));
     }
 

@@ -350,7 +350,7 @@
   "files.protected": "Password-protected",
   "report.password_label": "File password (if the file is protected)",
   "report.password_hint": "Optional: lets moderators review protected files.",
-  "upload.zipping": "Comprimiendo carpeta…",
+  "upload.zipping": "Comprimiendo carpeta...",
   "error.folder_empty": "Esa carpeta está vacía."
  }
 }
