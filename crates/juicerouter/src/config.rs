@@ -121,7 +121,7 @@ fn default_juiceback_url() -> String {
 }
 
 fn default_public_base_url() -> String {
-    "https://r.juicey.dev".to_string()
+    "https://router.juicey.dev".to_string()
 }
 
 fn default_home_url() -> String {
