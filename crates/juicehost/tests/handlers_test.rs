@@ -1266,6 +1266,22 @@ async fn mock_backend(status_code: u16, body: serde_json::Value) -> String {
     format!("http://{addr}")
 }
 
+async fn mock_resolve_backend(resolve: serde_json::Value) -> String {
+    let app = axum::Router::new().route(
+        "/internal/resolve/{id}",
+        axum::routing::get(move || {
+            let body = resolve.clone();
+            async move { (StatusCode::OK, axum::Json(body)) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
 async fn backend_state(dir: &std::path::Path, backend_url: Option<String>) -> Arc<AppState> {
     let backend = Arc::new(LocalBackend::new(dir.to_path_buf(), 0).unwrap());
     backend.init_cache().await.unwrap();
@@ -1273,6 +1289,103 @@ async fn backend_state(dir: &std::path::Path, backend_url: Option<String>) -> Ar
     cfg.allow_no_auth = true;
     cfg.backend_url = backend_url;
     Arc::new(AppState::new(&cfg, backend))
+}
+
+#[tokio::test]
+async fn missing_file_redirects_to_remote_storage_host_for_preview() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_resolve_backend(serde_json::json!({
+        "id": "rem00001",
+        "status": "ready",
+        "storage_host": "https://f-eu2.example",
+        "tier": "cold",
+        "r2_url": null,
+        "r2_key": "",
+        "filename": "clip.mp4",
+    }))
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+
+    let (status, headers, _) = get_public(&app, "/v/rem00001.mp4", None).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("https://f-eu2.example/v/rem00001.mp4")
+    );
+    assert_eq!(
+        headers.get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+}
+
+#[tokio::test]
+async fn missing_file_redirects_to_remote_storage_host_for_raw() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_resolve_backend(serde_json::json!({
+        "id": "rem00002",
+        "status": "ready",
+        "storage_host": "https://f-us1.example/",
+        "tier": "cold",
+        "r2_url": null,
+        "r2_key": "",
+        "filename": "clip.mp4",
+    }))
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+
+    let (status, headers, _) = get_public(&app, "/f/rem00002.mp4", None).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("https://f-us1.example/f/rem00002.mp4")
+    );
+}
+
+#[tokio::test]
+async fn hot_file_redirects_to_r2_instead_of_storage_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_resolve_backend(serde_json::json!({
+        "id": "hot00001",
+        "status": "ready",
+        "storage_host": "https://f-eu2.example",
+        "tier": "hot",
+        "r2_url": "https://r.example/hot/hot00001.mp4",
+        "r2_key": "hot/hot00001.mp4",
+        "filename": "clip.mp4",
+    }))
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+
+    let (status, headers, _) = get_public(&app, "/f/hot00001.mp4", None).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(
+        headers.get("location").and_then(|v| v.to_str().ok()),
+        Some("https://r.example/hot/hot00001.mp4")
+    );
+}
+
+#[tokio::test]
+async fn uploading_file_is_not_redirected() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = mock_resolve_backend(serde_json::json!({
+        "id": "upl00001",
+        "status": "uploading",
+        "storage_host": null,
+        "tier": "cold",
+        "r2_url": null,
+        "r2_key": "",
+        "filename": "clip.mp4",
+    }))
+    .await;
+    let state = backend_state(dir.path(), Some(backend)).await;
+    let app = build_router(state);
+
+    let (status, headers, _) = get_public(&app, "/v/upl00001.mp4", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(headers.get("location").is_none());
 }
 
 async fn store_bytes(app: &axum::Router, id: &str, bytes: &[u8]) {
@@ -1580,7 +1693,12 @@ async fn download_forces_attachment_with_bytes() {
     
     let (status, headers, _) = get_public(&app, "/f/dlfile01.txt", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(headers.get("content-disposition").is_none());
+    assert_eq!(
+        headers
+            .get("content-disposition")
+            .and_then(|v| v.to_str().ok()),
+        Some("inline; filename=\"dlfile01.txt\"")
+    );
 }
 
 #[tokio::test]
@@ -1757,43 +1875,34 @@ async fn preview_renders_by_media_kind() {
 }
 
 #[tokio::test]
-async fn preview_bots_redirect_to_raw() {
+async fn preview_bots_get_raw_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let state = backend_state(dir.path(), None).await;
     let app = build_router(state);
     store_named(&app, "bot00001", "notes.txt", b"hello bots").await;
 
-    
+    // Non-browser clients get the bytes directly, so `curl -O /v/<id>` works
+    // without following a redirect.
     let (status, headers, body) = get_bare(&app, "/v/bot00001.txt", Some("curl/8.5.0")).await;
-    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_slice(), b"hello bots");
     assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some("/f/bot00001.txt")
+        headers.get("cache-control").and_then(|v| v.to_str().ok()),
+        Some("no-store")
     );
-    assert!(body.is_empty());
 
-    // ComputerCraft's http API sends a User-Agent but no Accept header. Its
-    // wget should follow this redirect to the raw file rather than download
-    // the HTML preview page.
-    let (status, headers, body) =
+    // ComputerCraft's http API sends a User-Agent but no Accept header.
+    let (status, _, body) =
         get_bare(&app, "/v/bot00001.txt", Some("computercraft/1.109.2")).await;
-    assert_eq!(status, StatusCode::FOUND);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some("/f/bot00001.txt")
-    );
-    assert!(body.is_empty());
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_slice(), b"hello bots");
 
     // Any client that sends a UA but no Accept header is a non-browser, even
     // if we have never seen its token before.
-    let (status, headers, body) =
+    let (status, _, body) =
         get_bare(&app, "/v/bot00001.txt", Some("some-lua-client/1.0")).await;
-    assert_eq!(status, StatusCode::FOUND);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some("/f/bot00001.txt")
-    );
-    assert!(body.is_empty());
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_slice(), b"hello bots");
 
     // ...but a browser UA without Accept still gets the preview page.
     let resp = app
@@ -1836,7 +1945,7 @@ async fn preview_bots_redirect_to_raw() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FOUND);
+    assert_eq!(resp.status(), StatusCode::OK);
 
     
     let resp = app
@@ -1866,7 +1975,7 @@ async fn preview_bots_redirect_to_raw() {
 }
 
 #[tokio::test]
-async fn preview_protected_bot_redirects_to_raw() {
+async fn preview_protected_bot_gets_raw_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let backend = mock_backend(
         200,
@@ -1883,13 +1992,9 @@ async fn preview_protected_bot_redirects_to_raw() {
     let app = build_router(state);
     store_bytes(&app, "protbot01", b"ciphertext").await;
 
-    
-    let (status, headers, _) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
-    assert_eq!(status, StatusCode::FOUND);
-    assert_eq!(
-        headers.get("location").and_then(|v| v.to_str().ok()),
-        Some("/f/protbot01.txt")
-    );
+    let (status, _, body) = get_bare(&app, "/v/protbot01.txt", Some("curl/8.5.0")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_slice(), b"ciphertext");
 }
 
 #[tokio::test]

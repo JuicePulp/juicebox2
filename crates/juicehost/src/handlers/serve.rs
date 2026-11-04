@@ -601,7 +601,7 @@ pub async fn serve_file_wildcard(
     if params.get("inline").is_some_and(|value| value == "1") {
         return super::serve_stored_bytes_inline(&state, &headers, &id).await;
     }
-    serve_file_inner(state, headers, method, id, false, viewer.0).await
+    serve_file_inner(state, headers, method, id, false, viewer.0, &path).await
 }
 
 #[tracing::instrument(skip_all)]
@@ -613,7 +613,7 @@ pub async fn serve_file_download(
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
     let id = path.split('.').next().unwrap_or(&path).to_string();
-    serve_file_inner(state, headers, method, id, true, viewer.0).await
+    serve_file_inner(state, headers, method, id, true, viewer.0, &path).await
 }
 
 pub(crate) async fn serve_file_inner(
@@ -623,6 +623,7 @@ pub(crate) async fn serve_file_inner(
     id: String,
     force_download: bool,
     viewer_ip: Option<String>,
+    request_path: &str,
 ) -> Result<Response<Body>, JuicehostError> {
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -643,6 +644,20 @@ pub(crate) async fn serve_file_inner(
                 &viewer_ip,
             )
             .await?
+            {
+                return Ok(response);
+            }
+
+            // The file may live on another storage node (or R2). Redirect to
+            // the node that actually has the bytes instead of 404ing here.
+            if let Some(response) = super::route::remote_redirect(
+                &state,
+                &headers,
+                &id,
+                if force_download { "d" } else { "f" },
+                request_path,
+            )
+            .await
             {
                 return Ok(response);
             }

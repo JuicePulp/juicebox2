@@ -879,6 +879,12 @@ async fn preview_file_inner(
                 .map_err(|_| JuicehostError::Internal);
         }
         Err(crate::error::StorageError::NotFound) => {
+            // Another storage node may hold the bytes (or R2 for hot files).
+            if let Some(response) =
+                super::route::remote_redirect(&state, &headers, id, "v", page_path).await
+            {
+                return Ok(response);
+            }
             let live = state.live_uploads.progress(id);
             let backend = if live.is_none() {
                 backend_uploading_meta(&state, id).await
@@ -935,6 +941,7 @@ async fn preview_file_inner(
                     id.to_string(),
                     false,
                     viewer_ip.clone(),
+                    &canonical,
                 )
                 .await?;
                 // The same preview URL serves an HTML page to browsers and
@@ -1020,6 +1027,7 @@ async fn preview_file_inner(
             id.to_string(),
             false,
             viewer_ip.clone(),
+            &filename,
         )
         .await?;
         // See the live-upload branch above: the preview URL is shared by

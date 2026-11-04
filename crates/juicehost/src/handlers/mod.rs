@@ -11,6 +11,7 @@ pub mod zip_entry;
 pub mod zip_list;
 pub mod r2;
 pub mod rename;
+pub mod route;
 pub mod serve;
 pub mod shell;
 pub mod stats;
