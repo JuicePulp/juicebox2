@@ -39,10 +39,8 @@
   }
   .hostsel__group-title {
     margin: 0.5rem 0 0.15rem;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--juice-400);
   }
   .hostsel-table {
@@ -105,7 +103,9 @@
   }
   .hostsel-url {
     display: block;
+    margin-top: 0.2rem;
     font-size: 0.75rem;
+    line-height: 1.3;
     color: var(--juice-400);
     white-space: nowrap;
     overflow: hidden;
@@ -223,4 +223,14 @@
   }
   .hostsel-add__text strong {
     color: var(--juice-100);
+  }
+
+  @media (max-width: 600px) {
+    .hostsel-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .hostsel-refresh {
+      width: 100%;
+    }
   }
