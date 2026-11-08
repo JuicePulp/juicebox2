@@ -1,8 +1,8 @@
-import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.1.32";
+import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.2.0";
 import { ttlLabel } from "./i18n.js";
-import { playSound } from "./sounds.js?v=2.1.32";
-import { soundEnabled } from "./sounds.js?v=2.1.32";
-import { play } from "./vendor/cuelume/index.js?v=2.1.32";
+import { playSound } from "./sounds.js?v=2.2.0";
+import { soundEnabled } from "./sounds.js?v=2.2.0";
+import { play } from "./vendor/cuelume/index.js?v=2.2.0";
 import { haptic } from "./haptics.js";
 
 function scrubTick(direction) {

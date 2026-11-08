@@ -23,3 +23,5 @@ export const connectUploads = client.connectUploads;
 export const cancelUpload = client.cancelUpload;
 export const removeUpload = client.removeUpload;
 export const updateUpload = client.updateUpload;
+export const findPausedUpload = client.findPausedUpload;
+export const resumeUpload = client.resumeUpload;

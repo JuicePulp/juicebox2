@@ -1,6 +1,6 @@
 import { formatMaxSize } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
-import { setSoundEnabled } from "./sounds.js?v=2.1.32";
+import { setSoundEnabled } from "./sounds.js?v=2.2.0";
 import { hapticsEnabled, setHapticsEnabled } from "./haptics.js";
 import { paintDitherOverlay, clearDitherOverlay, repaintDitherOverlay } from "./dither.js";
 
@@ -242,6 +242,17 @@ export function enhanceHostSelector(locale) {
     quickLinkToggle.checked = readQuickLinkEnabled();
     quickLinkToggle.addEventListener("change", () => {
       localStorage.setItem("juicebox_quick_link", quickLinkToggle.checked ? "true" : "false");
+    });
+  }
+  const safeUploadToggle = document.querySelector("[data-safe-upload-toggle]");
+  if (safeUploadToggle) {
+    try {
+      safeUploadToggle.checked = localStorage.getItem("juicebox_safe_upload") === "true";
+    } catch {}
+    safeUploadToggle.addEventListener("change", () => {
+      try {
+        localStorage.setItem("juicebox_safe_upload", safeUploadToggle.checked ? "true" : "false");
+      } catch {}
     });
   }
   

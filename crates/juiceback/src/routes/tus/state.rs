@@ -59,7 +59,7 @@ pub(crate) fn spawn_push_task(
             push_host,
             &push_mode,
             Some(&push_capability),
-            None,
+            Some(total_len),
         )
         .await;
         if let Err(ref e) = result {

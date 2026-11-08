@@ -1,7 +1,7 @@
-import { BUBBLE } from "./bubble.js?v=2.1.32";
-import { MECH } from "./mech.js?v=2.1.32";
-import { PRESS } from "./press.js?v=2.1.32";
-import { RECIPES } from "./recipes.js?v=2.1.32";
+import { BUBBLE } from "./bubble.js?v=2.2.0";
+import { MECH } from "./mech.js?v=2.2.0";
+import { PRESS } from "./press.js?v=2.2.0";
+import { RECIPES } from "./recipes.js?v=2.2.0";
 export const THEMES = {
     default: RECIPES,
     mech: MECH,

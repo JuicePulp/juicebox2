@@ -1348,6 +1348,66 @@ html[data-banned] .upload-tabs {
   display: none;
 }
 
+.file-item.paused {
+  border-color: var(--orange-500);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.22);
+}
+
+/* Restored paused rows already existed before this page load. Keep their
+   exit animation available when the row is removed. */
+.file-item.paused:not(.exiting) {
+  animation: none;
+}
+
+.progress-fill.paused {
+  background-color: var(--orange-500) !important;
+  animation: none;
+}
+
+.status-pill.paused {
+  border-color: var(--orange-500) !important;
+  color: #fdba74 !important;
+  background-color: rgba(249, 115, 22, 0.1);
+}
+
+.status-pill.paused .spinner {
+  display: none;
+}
+
+.resume-upload-btn {
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+  margin: 0.5rem 0 0;
+  border: 1px solid var(--orange-500);
+  border-radius: 2rem;
+  background: var(--orange-500);
+  color: var(--juice-950);
+  padding: 0.55rem 0.85rem;
+  font-family: "General", "Unifont", monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    transform 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.resume-upload-btn:hover {
+  background: #fb923c;
+  border-color: #fb923c;
+}
+
+.resume-upload-btn:active {
+  transform: scale(0.97);
+}
+
+.resume-upload-btn:focus-visible {
+  outline: 2px solid var(--orange-400);
+  outline-offset: 2px;
+}
+
 [data-quick-link] .status-pill.error + .copy-bar {
   border-color: #ef4444 !important;
   border-top-color: var(--juice-700) !important;
@@ -1629,6 +1689,10 @@ html[data-banned] .upload-tabs {
   }
 
   .status-pill {
+    transition: none;
+  }
+
+  .resume-upload-btn {
     transition: none;
   }
 

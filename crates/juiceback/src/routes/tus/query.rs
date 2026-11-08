@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -42,6 +43,61 @@ pub async fn get_upload_handler(
         .header("Tus-Resumable", "1.0.0")
         .body(axum::body::Body::empty())
         .map_err(|_| AppError::Internal("response build failed".into()))?)
+}
+
+/// Safe upload health probe. It combines the backend offset with the bytes the
+/// storage host reports for the exact TUS resource, so the browser can tell
+/// whether a retry should resume from the server offset or start that part
+/// again.
+#[utoipa::path(
+    get,
+    path = "/api/tus/{id}/health",
+    params(
+        ("id" = String, Path, description = "The TUS upload session ID"),
+    ),
+    responses(
+        (status = 200, description = "Backend and storage progress"),
+        (status = 404, description = "TUS session not found"),
+    ),
+    tag = "Uploads",
+)]
+pub async fn health_upload_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let (offset, total_length, storage_host, capability) = {
+        let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
+        upload.last_activity = chrono::Utc::now().timestamp();
+        (
+            upload.offset,
+            upload.total_length,
+            upload.storage_host.clone(),
+            upload.capability.clone(),
+        )
+    };
+
+    let storage = match crate::storage_client::live_part_status(
+        &state,
+        &id,
+        storage_host.as_deref(),
+        Some(capability.as_str()),
+    )
+    .await
+    {
+        Ok(status) => status,
+        Err(error) => serde_json::json!({
+            "found": false,
+            "error": error,
+        }),
+    };
+
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "offset": offset,
+        "length": total_length,
+        "complete": offset >= total_length,
+        "storage": storage,
+    })))
 }
 
 #[utoipa::path(

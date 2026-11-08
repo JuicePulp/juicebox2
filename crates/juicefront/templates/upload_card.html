@@ -139,9 +139,7 @@
 <div class="file-list-content" role="group" aria-label="{{ cx.t("upload.queued_aria") }}" data-component="upload-card">
 <div class="empty-text visible">{{ cx.t("upload.empty") }}</div>
 </div>
-{% if let Some(f) = uploaded %}<noscript>
-<style>[data-component="upload-card"] { display: none !important; }</style>
-<div class="file-item complete" role="listitem" data-file-id="{{ f.id }}" data-delete-token="{{ f.delete_token }}" data-url="{{ f.url }}" data-raw-url="{{ f.raw_url }}" data-download-url="{{ f.download_url }}" data-server-rendered="">
+{% if let Some(f) = uploaded %}<div class="file-item complete upload-result-fallback" role="listitem" data-file-id="{{ f.id }}" data-delete-token="{{ f.delete_token }}" data-url="{{ f.url }}" data-raw-url="{{ f.raw_url }}" data-download-url="{{ f.download_url }}" data-server-rendered="">
 <div class="file-item-header">
 <div class="file-card-icon">{{ cx.icon(f.icon.as_str(), 24)|safe }}</div>
 <div class="file-info-left"><span class="file-name">{{ f.filename }}</span><span class="file-size">{{ f.size_str }}</span></div>
@@ -154,8 +152,7 @@
 <button type="submit" data-cuelume-close data-cuelume-emphasis="strong" class="delete-btn" aria-label="{{ cx.t("upload.delete_file_aria") }}"><span class="file-card-icon">{{ cx.icon("trash", 24)|safe }}</span></button>
 </form>
 </div>
-</div>
-</noscript>{% endif %}
+</div>{% endif %}
 <div class="scroll-element sticky-shadow-bottom" aria-hidden="true"></div>
 <div class="scroll-element scroll-cover-bottom" aria-hidden="true"></div>
 </section>

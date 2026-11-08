@@ -15,6 +15,7 @@ pub async fn register_live_upload(
     total_size: u64,
     parts: &[(String, u64, u64)],
     host: Option<&str>,
+    capability: Option<&str>,
 ) -> Result<(), String> {
     if total_size == 0 || parts.is_empty() {
         return Ok(());
@@ -46,7 +47,7 @@ pub async fn register_live_upload(
     let resp = client
         .http()
         .post(&url)
-        .headers(client.headers_with(None)?)
+        .headers(client.headers_with(capability)?)
         .json(&body)
         .send()
         .await
@@ -60,4 +61,38 @@ pub async fn register_live_upload(
         ));
     }
     Ok(())
+}
+
+/// Ask juicehost how many bytes it has accepted for one TUS resource. This is
+/// intentionally best-effort: a missing live record does not mean the upload
+/// is broken, so callers can keep transferring while they wait for a result.
+pub async fn live_part_status(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+    capability: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let client = StorageClient::resolve(state, host).await?;
+    let url = format!(
+        "{}/internal/live/part/{}",
+        client.base_url().trim_end_matches('/'),
+        id
+    );
+    let resp = client
+        .http()
+        .get(&url)
+        .headers(client.headers_with(capability)?)
+        .send()
+        .await
+        .map_err(|e| format!("juicehost live status request error: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "juicehost live status failed: status={status} body={body}"
+        ));
+    }
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("juicehost live status parse error: {e}"))
 }

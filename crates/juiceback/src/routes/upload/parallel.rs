@@ -224,6 +224,7 @@ pub async fn direct_parallel_reserve_handler(
         body.file_size,
         &live_parts,
         storage_host.as_deref(),
+        None,
     )
     .await
     {

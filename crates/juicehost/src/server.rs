@@ -177,6 +177,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(handlers::register_live_upload),
         )
         .route(
+            "/internal/live/part/{id}",
+            get(handlers::live_part_status),
+        )
+        .route(
             "/internal/live/{id}",
             delete(handlers::remove_live_upload),
         )

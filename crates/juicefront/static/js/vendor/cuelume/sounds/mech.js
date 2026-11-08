@@ -1,4 +1,4 @@
-import { BAR, contact, knock, struck } from "./recipes.js?v=2.1.32";
+import { BAR, contact, knock, struck } from "./recipes.js?v=2.2.0";
 export const MECH = {
     tap: {
         masterGain: 0.661,

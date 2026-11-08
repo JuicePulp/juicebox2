@@ -370,6 +370,20 @@ html:not(.js) .upload-submit {
 html.js .upload-submit {
   display: none !important;
 }
+html.js[data-upload-fallback] .upload-submit {
+  display: inline-flex !important;
+}
+.upload-result-fallback {
+  display: none;
+}
+html.no-js .upload-result-fallback,
+html[data-upload-fallback] .upload-result-fallback {
+  display: block;
+}
+html.no-js [data-component="upload-card"],
+html[data-upload-fallback] [data-component="upload-card"] {
+  display: none !important;
+}
 
 .select-backdrop {
   display: none;

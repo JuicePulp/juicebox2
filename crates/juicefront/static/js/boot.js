@@ -1,6 +1,32 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
+// Older browsers (for example the PS Vita browser) ignore type="module"
+// scripts entirely. Keep the plain multipart upload form usable when the
+// upload module never initializes, and as a safety net when it fails to parse.
+(function () {
+  function armUploadFallback() {
+    if (!document.getElementById("upload-card")) return;
+    var root = document.documentElement;
+    function showFallback() {
+      if (!root.hasAttribute("data-upload-ready"))
+        root.setAttribute("data-upload-fallback", "");
+    }
+    var supportsModules = false;
+    try {
+      supportsModules = "noModule" in HTMLScriptElement.prototype;
+    } catch {}
+    if (!supportsModules)
+      showFallback();
+    else
+      setTimeout(showFallback, 2000);
+  }
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", armUploadFallback);
+  else
+    armUploadFallback();
+})();
+
 try {
   if (localStorage.getItem("juicebox_reduce_motion") === "1") {
     document.documentElement.setAttribute("data-motion-reduce", "");

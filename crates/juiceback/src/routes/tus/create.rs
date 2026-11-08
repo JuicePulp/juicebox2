@@ -222,6 +222,36 @@ pub async fn create_upload_handler(
             ));
         }
         file_capability = session.capability.clone();
+        // A part can outlive its TUS resource after a backend restart. Treating
+        // that stale id as complete would silently drop the part, so clear it
+        // and let this request create a replacement that starts from zero.
+        let stale_part = session
+            .part_ids
+            .get(&pi)
+            .is_some_and(|existing_id| {
+                !state.tus.contains_key(existing_id.value())
+                    && !session.finalized_parts.contains_key(&pi)
+            });
+        if stale_part {
+            let old_length = session.part_ids.remove(&pi).and_then(|(_, old_id)| {
+                tracing::warn!(
+                    "parallel part {}/{} lost its TUS resource {old_id}; restarting the part",
+                    pi + 1,
+                    tp
+                );
+                session
+                    .part_lengths
+                    .remove(&pi)
+                    .map(|(_, length)| length)
+            });
+            if let Some(old_length) = old_length {
+                let _ = session.declared_size.fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |size| Some(size.saturating_sub(old_length)),
+                );
+            }
+        }
         match session.part_ids.entry(pi) {
             Entry::Occupied(entry) => {
                 let existing_id = entry.get().clone();
@@ -362,6 +392,7 @@ pub async fn create_upload_handler(
             reservation_size,
             &parts,
             live_host.as_deref(),
+            Some(file_capability.as_str()),
         )
         .await
     {

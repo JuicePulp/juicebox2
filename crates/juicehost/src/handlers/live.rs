@@ -78,6 +78,69 @@ pub async fn remove_live_upload(
     StatusCode::NO_CONTENT
 }
 
+/// Internal health probe for one upload resource. It reports the part when the
+/// resource is registered as part of a parallel upload, the single stream when
+/// it stands alone, and the final stored file once it is published.
+pub async fn live_part_status(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, JuicehostError> {
+    if !valid_component(&id) {
+        return Err(JuicehostError::BadRequest);
+    }
+
+    if let Some(part) = state.live_uploads.part_snapshot(&id) {
+        return Ok(Json(serde_json::json!({
+            "found": true,
+            "part": true,
+            "ready": part.ready,
+            "complete": part.complete,
+            "id": part.part_id,
+            "target_id": part.target_id,
+            "offset": part.offset,
+            "length": part.length,
+            "written": part.written,
+            "total_size": part.total_size,
+        })));
+    }
+
+    if let Some(progress) = state.live_uploads.progress(&id) {
+        return Ok(Json(serde_json::json!({
+            "found": true,
+            "part": false,
+            "ready": progress.complete,
+            "complete": progress.complete,
+            "id": id,
+            "offset": 0,
+            "length": progress.total_size,
+            "written": progress.uploaded,
+            "total_size": progress.total_size,
+            "available": progress.available,
+        })));
+    }
+
+    if let Ok(meta) = state.storage.stat(&id).await {
+        return Ok(Json(serde_json::json!({
+            "found": true,
+            "part": false,
+            "ready": true,
+            "complete": true,
+            "id": id,
+            "offset": 0,
+            "length": meta.size,
+            "written": meta.size,
+            "total_size": meta.size,
+            "available": meta.size,
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "found": false,
+        "ready": false,
+        "id": id,
+    })))
+}
+
 pub async fn upload_progress(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

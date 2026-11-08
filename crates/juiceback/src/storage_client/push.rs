@@ -3,6 +3,36 @@ use std::sync::Arc;
 use super::{errors::format_error_response, target::require_juicehost_url};
 use crate::{state::AppState, upload_mode::UploadMode};
 
+fn normalized_origin(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    url::Url::parse(&with_scheme)
+        .ok()
+        .map(|url| url.origin().ascii_serialization())
+}
+
+/// The default storage host is this node's public Cloudflare hostname. Pushing
+/// a whole TUS stream to it goes back through Cloudflare, whose request body
+/// cap is 100 MB. Use the loopback juicehost URL for that node instead, while
+/// keeping the public origin in the file record and share links.
+fn local_push_host<'a>(state: &Arc<AppState>, host: Option<&'a str>) -> Option<&'a str> {
+    let host = host.map(str::trim).filter(|host| !host.is_empty())?;
+    let Some(default_host) = state.config.default_storage_host.as_deref() else {
+        return Some(host);
+    };
+    match (normalized_origin(default_host), normalized_origin(host)) {
+        (Some(default_origin), Some(host_origin)) if default_origin == host_origin => None,
+        _ => Some(host),
+    }
+}
+
 pub struct QuicFallbackBuffer {
     ram: Vec<bytes::Bytes>,
     ram_bytes: usize,
@@ -82,7 +112,8 @@ pub async fn push_file_streaming(
     live_total: Option<u64>,
 ) -> Result<(), String> {
     let custom_host = host.as_deref().map(str::trim).filter(|h| !h.is_empty());
-    let client = super::client::StorageClient::resolve(state, custom_host).await?;
+    let client =
+        super::client::StorageClient::resolve(state, local_push_host(state, custom_host)).await?;
     let target_base = client.base_url().to_string();
 
     // The QUIC push path is disabled. juicehost's HTTP/3 request-body idle
@@ -231,7 +262,7 @@ pub async fn push_file_to_juicehost(
     host: Option<&str>,
     capability: Option<&str>,
 ) -> Result<(), String> {
-    let client = super::client::StorageClient::resolve(state, host).await?;
+    let client = super::client::StorageClient::resolve(state, local_push_host(state, host)).await?;
 
     let build_start = std::time::Instant::now();
     let file_part = reqwest::multipart::Part::bytes(data)

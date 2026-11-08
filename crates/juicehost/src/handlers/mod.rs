@@ -31,7 +31,9 @@ pub use general::{
     storage_handler,
 };
 pub(crate) use general::serve_stored_bytes_inline;
-pub use live::{register_live_upload, remove_live_upload, upload_progress};
+pub use live::{
+    live_part_status, register_live_upload, remove_live_upload, upload_progress,
+};
 pub use preview::preview_file_wildcard;
 pub use r2::{demote_file, promote_file};
 pub use rename::{RenameRequest, rename_file};

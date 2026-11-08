@@ -1,7 +1,7 @@
 import { announce, esc, formatSize } from "./util.js";
-import { playSound } from "./sounds.js?v=2.1.32";
-import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.1.32";
-import { openQrModal } from "./qr.js?v=2.1.32";
+import { playSound } from "./sounds.js?v=2.2.0";
+import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.2.0";
+import { openQrModal } from "./qr.js?v=2.2.0";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
 

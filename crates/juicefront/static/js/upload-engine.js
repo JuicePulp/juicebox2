@@ -34,7 +34,7 @@ import {
   readUploadMode,
   uploadMethodFor,
   preferStream
-} from "./upload-config.js?v=2.1.32";
+} from "./upload-config.js?v=2.2.0";
 import { tryAcquireStream, releaseStream } from "./stream-limiter.js";
 import { tweakEngineEnabled } from "./upload-tweaks.js";
 import { announce } from "./util.js";
@@ -119,6 +119,61 @@ function fetchWithTimeout(input, init, ms) {
       userSignal.removeEventListener("abort", onAbort);
   });
 }
+const SAFE_HEALTH_MS = 15000;
+async function tusHealth(tusId, signal) {
+  if (!tusId)
+    return null;
+  try {
+    const res = await fetchWithTimeout(
+      `${UPLOAD_URL}/api/tus/${encodeURIComponent(tusId)}/health`,
+      {
+        method: "GET",
+        headers: { "Tus-Resumable": "1.0.0" },
+        signal
+      },
+      12000
+    );
+    if (res.status === 404)
+      return { lost: true };
+    if (!res.ok)
+      return null;
+    const data = await res.json();
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
+}
+function healthOffset(health) {
+  const value = Number(health?.offset);
+  return Number.isFinite(value) ? Math.max(0, value) : null;
+}
+function healthStorageReady(health) {
+  const storage = health?.storage;
+  return !!storage && storage.found !== false && storage.ready === true;
+}
+async function directPartHealth(uploadUrl, id, expectedSize) {
+  if (!uploadUrl || !id)
+    return null;
+  try {
+    const base = new URL(uploadUrl, typeof location !== "undefined" ? location.href : "http://localhost");
+    const res = await fetchWithTimeout(
+      `${base.origin}/api/upload-progress/${encodeURIComponent(id)}`,
+      {},
+      10000
+    );
+    if (!res.ok)
+      return null;
+    const data = await res.json();
+    if (!data || data.ready !== true)
+      return null;
+    if (Number.isFinite(expectedSize) && Number(data.total) !== expectedSize)
+      return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 async function createTusSession(input, init) {
   const readText = async (r) => r.text().catch(() => "");
   const echo = (r, text) => new Response(text, { status: r.status, headers: r.headers });
@@ -187,6 +242,13 @@ async function waitForReservedFile(id, signal, timeoutMs = 60000) {
 }
 
 export function startUpload(item, file, controls) {
+  // Resume must keep the transport that created the server session. Protected
+  // uploads normally take the direct relay, but an interrupted protected TUS
+  // session is already encrypted and has a server offset to continue from.
+  if (item.method === "direct-stream" && item.tusId)
+    return startTusStreamUpload(item, file, controls);
+  if (item.method === "tus" && item.tusSessionId)
+    return startTusUpload(item, file, controls);
   if (item.password) {
     try {
       announce("Protected upload: using secure relay");
@@ -330,14 +392,15 @@ async function reserveQuickLink(item, signal) {
 function startDirectUpload(item, file, controls) {
   const { update } = controls;
   const runState = { cancelled: false };
+  const waitCtrl = new AbortController;
   let xhr = null;
   const run = (async () => {
-    let reserveId = "";
-    let reserveUrl = "";
-    let reserveRawUrl = "";
-    let reserveDownloadUrl = "";
-    let reserveDeleteToken = "";
-    if (item.quickLink) {
+    let reserveId = item.reserveId || "";
+    let reserveUrl = item.reserveUrl || "";
+    let reserveRawUrl = item.reserveRawUrl || "";
+    let reserveDownloadUrl = item.reserveDownloadUrl || "";
+    let reserveDeleteToken = item.reserveDeleteToken || "";
+    if (item.quickLink && !reserveId) {
       try {
         const reserve = await reserveQuickLink(item);
         if (reserve) {
@@ -347,7 +410,15 @@ function startDirectUpload(item, file, controls) {
           reserveDownloadUrl = reserve.downloadUrl;
           reserveDeleteToken = reserve.deleteToken;
           if (reserveUrl)
-            update({ id: item.id, reserveUrl, reserveRawUrl, reserveDownloadUrl, serverId: reserveId });
+            update({
+              id: item.id,
+              reserveId,
+              reserveUrl,
+              reserveRawUrl,
+              reserveDownloadUrl,
+              reserveDeleteToken,
+              serverId: reserveId
+            });
         }
       } catch {}
       if (runState.cancelled)
@@ -368,15 +439,12 @@ function startDirectUpload(item, file, controls) {
     if (item.password)
       fd.append("password", item.password);
     fd.append("file", uploadFile);
+    const safe = !!item.safeUpload;
     const progress = new LiveProgress((pct) => {
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     });
     progress.begin(uploadFile.size);
-    await new Promise((resolve) => {
-      const finish = () => {
-        progress.destroy();
-        resolve();
-      };
+    const sendOnce = () => new Promise((resolve) => {
       xhr = new XMLHttpRequest;
       xhr.open("POST", `${UPLOAD_URL}/upload`, true);
       if (isGzip)
@@ -391,63 +459,105 @@ function startDirectUpload(item, file, controls) {
         progress.set(ev.loaded);
       };
       xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          let res = {};
-          try {
-            res = JSON.parse(xhr.responseText);
-          } catch {}
-          if (reserveUrl && !res.url)
-            res.url = reserveUrl;
-          if (reserveRawUrl && !res.raw_url)
-            res.raw_url = reserveRawUrl;
-          if (reserveDownloadUrl && !res.download_url)
-            res.download_url = reserveDownloadUrl;
-          if (reserveDeleteToken && !res.delete_token)
-            res.delete_token = reserveDeleteToken;
-          update({
-            id: item.id,
-            serverId: res.id || reserveId || "",
-            url: res.url || "",
-            rawUrl: res.raw_url || "",
-            downloadUrl: res.download_url || "",
-            deleteToken: res.delete_token || "",
-            expiresAt: res.expires_at ? Number(res.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
-            protected: !!res.protected,
-            state: "done",
-            progress: 100
-          });
-        } else {
-          let code;
-          let msg;
-          try {
-            const err = JSON.parse(xhr.responseText);
-            if (err.error)
-              code = err.error;
-            if (err.message)
-              msg = err.message;
-          } catch {}
-          if (xhr.status >= 520 && xhr.status <= 524) {
-            code = code || "UPLOAD_TIMEOUT";
-            msg = msg || "Connection timed out (Cloudflare). Try a smaller file or try again later.";
-          }
-          update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
-        }
-        finish();
+        resolve({ status: xhr.status, body: xhr.responseText || "" });
       };
       xhr.onerror = () => {
-        update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
-        finish();
+        resolve({ status: 0, network: true });
       };
       xhr.ontimeout = () => {
-        update({ id: item.id, errorCode: "UPLOAD_TIMEOUT", errorMessage: "Upload timed out. Try a smaller file.", state: "error" });
-        finish();
+        resolve({ status: 0, timeout: true });
       };
       xhr.onabort = () => {
-        update({ id: item.id, state: "cancelled" });
-        finish();
+        resolve({ status: 0, aborted: true });
       };
       xhr.send(fd);
     });
+    const maxAttempts = safe ? 3 : 1;
+    let result = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (runState.cancelled)
+        break;
+      if (attempt > 0) {
+        update({ id: item.id, state: "uploading", progress: 0 });
+        progress.begin(uploadFile.size);
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+        if (runState.cancelled)
+          break;
+        // A lost response can hide a completed upload. If the reserved file
+        // is already live, finish without sending the bytes again.
+        if (reserveId) {
+          const info = await waitForReservedFile(reserveId, waitCtrl.signal, 12000);
+          if (info) {
+            result = { status: 200, body: JSON.stringify(info) };
+            break;
+          }
+        }
+      }
+      result = await sendOnce();
+      if (result.aborted || runState.cancelled)
+        break;
+      if (result.status >= 200 && result.status < 300)
+        break;
+      const retryable = result.status === 0 || result.status === 408 || result.status >= 500;
+      if (!safe || !retryable || attempt === maxAttempts - 1)
+        break;
+    }
+    progress.destroy();
+    if (runState.cancelled || result?.aborted) {
+      update({ id: item.id, state: "cancelled" });
+      return;
+    }
+    if (safe && result?.status === 409 && reserveId) {
+      const info = await waitForReservedFile(reserveId, waitCtrl.signal, 12000);
+      if (info)
+        result = { status: 200, body: JSON.stringify(info) };
+    }
+    if (result && result.status >= 200 && result.status < 300) {
+      let res = {};
+      try {
+        res = JSON.parse(result.body);
+      } catch {}
+      if (reserveUrl && !res.url)
+        res.url = reserveUrl;
+      if (reserveRawUrl && !res.raw_url)
+        res.raw_url = reserveRawUrl;
+      if (reserveDownloadUrl && !res.download_url)
+        res.download_url = reserveDownloadUrl;
+      if (reserveDeleteToken && !res.delete_token)
+        res.delete_token = reserveDeleteToken;
+      update({
+        id: item.id,
+        serverId: res.id || reserveId || "",
+        url: res.url || "",
+        rawUrl: res.raw_url || "",
+        downloadUrl: res.download_url || "",
+        deleteToken: res.delete_token || "",
+        expiresAt: res.expires_at ? Number(res.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+        protected: !!res.protected,
+        state: "done",
+        progress: 100
+      });
+      return;
+    }
+    let code;
+    let msg;
+    try {
+      const err = JSON.parse(result?.body || "");
+      if (err.error)
+        code = err.error;
+      if (err.message)
+        msg = err.message;
+    } catch {}
+    if (result?.timeout) {
+      code = code || "UPLOAD_TIMEOUT";
+      msg = msg || "Upload timed out. Try a smaller file.";
+    } else if (!result || result.status === 0) {
+      code = code || "NETWORK_ERROR";
+    } else if (result.status >= 520 && result.status <= 524) {
+      code = code || "UPLOAD_TIMEOUT";
+      msg = msg || "Connection timed out (Cloudflare). Try a smaller file or try again later.";
+    }
+    update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
   })().catch((err) => {
     update({
       id: item.id,
@@ -459,6 +569,7 @@ function startDirectUpload(item, file, controls) {
   return {
     abort: () => {
       runState.cancelled = true;
+      waitCtrl.abort();
       xhr?.abort();
     }
   };
@@ -516,6 +627,7 @@ function xhrSendBytes(uploadUrl, blob, ticket, onBytes, runState, xhrRef) {
 function startDirectTicketUpload(item, file, controls) {
   const { update } = controls;
   const runState = { cancelled: false };
+  const safe = !!item.safeUpload;
   const xhrRef = { current: null };
   const run = (async () => {
     const attempt = async (isRetry) => {
@@ -563,19 +675,47 @@ function startDirectTicketUpload(item, file, controls) {
         update({ id: item.id, progress: Math.min(pct, 99.4) });
       });
       progress.begin(file.size);
-      let uploadStatus;
-      try {
-        uploadStatus = await xhrSendBytes(uploadUrl, file, ticket, (loaded) => progress.set(loaded), runState, xhrRef);
-      } catch (err) {
-        progress.destroy();
-        if (runState.cancelled)
-          throw err;
-        update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
-        return;
+      let uploadStatus = null;
+      const maxUploadTries = safe ? 3 : 1;
+      for (let uploadTry = 0; uploadTry < maxUploadTries; uploadTry++) {
+        try {
+          uploadStatus = await xhrSendBytes(uploadUrl, file, ticket, (loaded) => progress.set(loaded), runState, xhrRef);
+          if (!safe || uploadStatus.ok)
+            break;
+          const retryableStatus = uploadStatus.status === 408 || uploadStatus.status >= 500;
+          if (!retryableStatus || uploadTry === maxUploadTries - 1)
+            break;
+          // The request may have landed even though the response was lost.
+          const health = await directPartHealth(uploadUrl, fileId, file.size);
+          if (health) {
+            uploadStatus = { status: 200, ok: true, body: JSON.stringify(health) };
+            break;
+          }
+          progress.begin(file.size);
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** uploadTry));
+        } catch (err) {
+          if (runState.cancelled)
+            throw err;
+          if (uploadTry === maxUploadTries - 1) {
+            progress.destroy();
+            update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
+            return;
+          }
+          // The request may have landed even though the response was lost.
+          const health = await directPartHealth(uploadUrl, fileId, file.size);
+          if (health) {
+            uploadStatus = { status: 200, ok: true, body: JSON.stringify(health) };
+            break;
+          }
+          progress.begin(file.size);
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** uploadTry));
+        }
       }
       progress.destroy();
       if (runState.cancelled)
         throw new Error("Upload cancelled");
+      if (safe && uploadStatus?.status === 409)
+        uploadStatus = { ...uploadStatus, ok: true };
       if ((uploadStatus.status === 401 || uploadStatus.status === 403) && !isRetry) {
         attempt(true);
         return;
@@ -604,6 +744,25 @@ function startDirectTicketUpload(item, file, controls) {
       if ((completeRes.status === 401 || completeRes.status === 403) && !isRetry) {
         attempt(true);
         return;
+      }
+      if (safe && completeRes.status === 409) {
+        const info = await publicFileInfo(fileId);
+        if (info.ok) {
+          const data = await info.json();
+          update({
+            id: item.id,
+            serverId: data.id || fileId,
+            url: data.url || shareUrl,
+            rawUrl: data.raw_url || shareRawUrl,
+            downloadUrl: data.download_url || shareDownloadUrl,
+            deleteToken: data.delete_token || "",
+            expiresAt: data.expires_at ? Number(data.expires_at) : Math.round(Date.now() / 1000) + item.ttlHours * 3600,
+            protected: !!data.protected,
+            state: "done",
+            progress: 100
+          });
+          return;
+        }
       }
       if (!completeRes.ok) {
         let code;
@@ -651,6 +810,7 @@ function startDirectTicketUpload(item, file, controls) {
 function startDirectParallelUpload(item, file, controls) {
   const { update } = controls;
   const runState = { cancelled: false };
+  const safe = !!item.safeUpload;
   const liveXhrs = new Set;
   let fallback = null;
   const run = (async () => {
@@ -733,7 +893,8 @@ function startDirectParallelUpload(item, file, controls) {
     const putPart = async (index) => {
       const p = parts[index];
       const blob = file.slice(index * step, Math.min((index + 1) * step, file.size));
-      for (let attemptNum = 0; attemptNum < 3; attemptNum++) {
+      const maxTries = safe ? 5 : 3;
+      for (let attemptNum = 0; attemptNum < maxTries; attemptNum++) {
         if (runState.cancelled)
           throw new Error("Upload cancelled");
         const xhrRef = {};
@@ -743,7 +904,7 @@ function startDirectParallelUpload(item, file, controls) {
             loaded[index] = n;
             report();
           }, runState, xhrRef);
-          if (st.ok || st.status === 409) {
+          if (st.ok || (safe && st.status === 409)) {
             loaded[index] = p.part_size;
             report();
             return;
@@ -752,9 +913,15 @@ function startDirectParallelUpload(item, file, controls) {
         } catch (err) {
           if (runState.cancelled)
             throw err;
-          if (attemptNum === 2)
+          const health = safe ? await directPartHealth(p.upload_url, p.part_id, p.part_size) : null;
+          if (health) {
+            loaded[index] = p.part_size;
+            report();
+            return;
+          }
+          if (attemptNum === maxTries - 1)
             throw err;
-          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attemptNum)));
+          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, Math.min(attemptNum, 3))));
         } finally {
           liveXhrs.delete(xhrRef);
         }
@@ -860,6 +1027,13 @@ function startDirectParallelUpload(item, file, controls) {
           data = await completeRes.json();
           break;
         }
+        if (safe && completeRes.status === 409) {
+          const info = await publicFileInfo(fileId);
+          if (info.ok) {
+            data = await info.json();
+            break;
+          }
+        }
         let code;
         let msg;
         try {
@@ -915,7 +1089,7 @@ function startDirectParallelUpload(item, file, controls) {
     }
   };
 }
-async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signal, hooks, reserveReady, getReserveId, getReserveToken, controls, netTier, probeShared) {
+async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signal, hooks, reserveReady, getReserveId, getReserveToken, clearReserve, controls, netTier, probeShared, safe) {
   const partSize = Math.ceil(file.size / totalParts);
   const start = partIndex * partSize;
   const end = Math.min(start + partSize, file.size);
@@ -930,6 +1104,9 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
     const relayCancel = () => partCtrl.abort();
     signal.addEventListener("abort", relayCancel);
     let inflight = new Map;
+    let partTusId = "";
+    let healthTimer = null;
+    let healthLost = false;
     try {
       await reserveReady;
       const liveReserveId = getReserveId();
@@ -961,8 +1138,14 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
         },
         signal
       });
-      if (created.completing)
+      if (created.res && created.res.status === 400 && liveReserveId) {
+        await clearReserve?.();
+        throw new Error("Upload reservation expired");
+      }
+      if (created.completing) {
+        hooks.onPartState?.({ offset: partFile.size, length: partFile.size, done: true });
         return { status: 202 };
+      }
       if (created.alreadyExists)
         throw new Error("TUS part already exists without a resume location");
       let uploadUrl;
@@ -971,8 +1154,10 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
         uploadUrl = `${UPLOAD_URL}${created.existing.location}`;
         resumeOffset = Math.min(partFile.size, created.existing.offset);
         const tusIdMatch = created.existing.location.match(/\/api\/tus\/(.+)$/);
-        if (tusIdMatch)
-          controls.onTusCreate(tusIdMatch[1]);
+        if (tusIdMatch) {
+          partTusId = tusIdMatch[1];
+          controls.onTusCreate(partTusId, { kind: "part", partIndex });
+        }
       } else {
         if (!created.res.ok)
           throw new Error(`TUS create failed: ${created.res.status}`);
@@ -981,12 +1166,42 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
           throw new Error("No TUS location");
         uploadUrl = `${UPLOAD_URL}${location}`;
         const tusIdMatch = location.match(/\/api\/tus\/(.+)$/);
-        if (tusIdMatch)
-          controls.onTusCreate(tusIdMatch[1]);
+        if (tusIdMatch) {
+          partTusId = tusIdMatch[1];
+          controls.onTusCreate(partTusId, { kind: "part", partIndex });
+        }
       }
       if (resumeOffset > 0) {
         hooks.onWire?.(resumeOffset);
         hooks.onAcked?.(resumeOffset);
+      }
+      if (safe && partTusId) {
+        hooks.onPartState?.({
+          id: partTusId,
+          offset: resumeOffset,
+          length: partFile.size,
+          done: false
+        });
+        healthTimer = setInterval(async () => {
+          const health = await tusHealth(partTusId, partSignal);
+          if (!health)
+            return;
+          if (health.lost) {
+            healthLost = true;
+            return;
+          }
+          if (healthStorageReady(health) && Number(health.length) >= partFile.size) {
+            // The bytes are on storage, but the TUS resource still has to be
+            // finalized. Persist the offset only; a health snapshot must not
+            // let a reload skip a part that was never finalized.
+            hooks.onPartState?.({
+              id: partTusId,
+              offset: partFile.size,
+              length: partFile.size,
+              done: false
+            });
+          }
+        }, SAFE_HEALTH_MS);
       }
       const patchChunk = (body, chunkOffset, rawSize) => new Promise((resolve, reject) => {
         let last = 0;
@@ -1018,6 +1233,14 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
             partSignal.removeEventListener("abort", onAbort);
           };
           const discoverOffset = async () => {
+            if (safe && partTusId) {
+              const health = await tusHealth(partTusId, partSignal);
+              if (health?.lost)
+                return null;
+              const fromHealth = healthOffset(health);
+              if (fromHealth !== null)
+                return fromHealth;
+            }
             try {
               const res = await fetchWithTimeout(uploadUrl, {
                 method: "GET",
@@ -1123,8 +1346,11 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
       hooks.onChunk?.(chunkSize);
       let adaptBytes = 0;
       let adaptSince = performance.now();
+      let ackedOffset = resumeOffset;
       const noteAcked = (bytes) => {
         hooks.onAcked(bytes);
+        ackedOffset += bytes;
+        hooks.onPartOffset?.(ackedOffset);
         adaptBytes += bytes;
         const dt = (performance.now() - adaptSince) / 1000;
         if (dt >= 1 && adaptBytes > 0) {
@@ -1139,6 +1365,8 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
       while (offset < partFile.size || inflight.size > 0) {
         if (signal.aborted)
           throw new Error("Upload cancelled");
+        if (healthLost)
+          throw new Error("TUS part session lost");
         const windowSize = probeDone && (hooks.rateHint?.() ?? 0) > 4 * 1024 * 1024 ? PIPELINE_WINDOW : 1;
         while (inflight.size < windowSize && offset < partFile.size) {
           await hooks.beforeChunk?.();
@@ -1187,11 +1415,19 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
           try {
             data = JSON.parse(r.text);
           } catch {}
+          hooks.onPartState?.({
+            id: partTusId,
+            offset: partFile.size,
+            length: partFile.size,
+            done: true
+          });
           return { status: 200, data };
         } else {
           throw new Error(`TUS patch failed: ${r.status}`);
         }
       }
+      if (healthLost)
+        throw new Error("TUS part session lost");
       await reserveReady;
       const finalReserveId = getReserveId();
       const finalRes = await fetchWithRetry(uploadUrl, {
@@ -1207,10 +1443,20 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
       }, 3, 1000, DIRECT_COMPLETE_TIMEOUT_MS);
       if (finalRes.ok) {
         const data = await finalRes.json();
+        hooks.onPartState?.({
+          id: partTusId,
+          offset: partFile.size,
+          length: partFile.size,
+          done: true
+        });
         return { status: 200, data };
       }
+      if (finalRes.status === 404 && safe)
+        throw new Error("TUS part session lost during finalize");
       return { status: finalRes.status };
     } finally {
+      if (healthTimer)
+        clearInterval(healthTimer);
       signal.removeEventListener("abort", relayCancel);
       partCtrl.abort();
       for (const s of inflight.values())
@@ -1218,7 +1464,8 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
     }
   };
   let lastError;
-  for (let attemptNo = 0;attemptNo < 3; attemptNo++) {
+  const maxSessionTries = safe ? 5 : 3;
+  for (let attemptNo = 0;attemptNo < maxSessionTries; attemptNo++) {
     try {
       return await runSession();
     } catch (err) {
@@ -1244,17 +1491,36 @@ function startTusStreamUpload(item, file, controls) {
   const { update } = controls;
   const controller = new AbortController;
   const signal = controller.signal;
-  let tusId = "";
+  const safe = !!item.safeUpload;
+  let tusId = item.tusId || "";
+  let healthTimer = null;
 
   (async () => {
-    update({ id: item.id, state: "uploading", progress: 0 });
+    const resumeProgress = Math.max(0, Math.min(99.4, Number(item.progress) || 0));
+    update({ id: item.id, state: "uploading", progress: resumeProgress });
 
-    let reserveId = "";
-    let reserveUrl = "";
-    let reserveRawUrl = "";
-    let reserveDownloadUrl = "";
-    let reserveDeleteToken = "";
-    if (item.quickLink) {
+    const probeOffset = async (url) => {
+      try {
+        const res = await fetchWithTimeout(url, {
+          method: "GET",
+          headers: { "Tus-Resumable": "1.0.0" },
+          signal
+        });
+        if (!res.ok)
+          return null;
+        const off = Number(res.headers.get("Upload-Offset"));
+        return Number.isFinite(off) ? Math.max(0, off) : null;
+      } catch {
+        return null;
+      }
+    };
+
+    let reserveId = item.reserveId || "";
+    let reserveUrl = item.reserveUrl || "";
+    let reserveRawUrl = item.reserveRawUrl || "";
+    let reserveDownloadUrl = item.reserveDownloadUrl || "";
+    let reserveDeleteToken = item.reserveDeleteToken || "";
+    if (item.quickLink && !reserveId) {
       try {
         const reserve = await reserveQuickLink(item, signal);
         if (reserve) {
@@ -1264,7 +1530,15 @@ function startTusStreamUpload(item, file, controls) {
           reserveDownloadUrl = reserve.downloadUrl;
           reserveDeleteToken = reserve.deleteToken;
           if (reserveUrl)
-            update({ id: item.id, reserveUrl, reserveRawUrl, reserveDownloadUrl, serverId: reserveId });
+            update({
+              id: item.id,
+              reserveId,
+              reserveUrl,
+              reserveRawUrl,
+              reserveDownloadUrl,
+              reserveDeleteToken,
+              serverId: reserveId
+            });
         }
       } catch {}
     }
@@ -1277,41 +1551,99 @@ function startTusStreamUpload(item, file, controls) {
     };
     if (item.customHost)
       meta.host = item.customHost;
-    if (reserveId) {
-      meta.reserve_id = reserveId;
-      if (reserveDeleteToken)
-        meta.delete_token = reserveDeleteToken;
-    }
     if (item.uploadMode)
       meta.upload_mode = item.uploadMode;
 
-    const created = await createTusSession(`${UPLOAD_URL}/api/tus`, {
-      method: "POST",
-      headers: {
-        "Upload-Length": String(file.size),
-        "Upload-Metadata": encodeTusMeta(meta),
-        "Tus-Resumable": "1.0.0"
-      },
-      signal
-    });
-    if (created.completing || created.alreadyExists)
-      throw new Error("Upload session was rejected; please retry");
-    if (!created.res?.ok)
-      throw new Error(`TUS create failed: ${created.res?.status ?? "network"}`);
-    const location = created.res.headers.get("Location");
-    if (!location)
-      throw new Error("No TUS location");
-    const uploadUrl = `${UPLOAD_URL}${location}`;
-    const idMatch = location.match(/\/api\/tus\/(.+)$/);
-    if (idMatch) {
-      tusId = idMatch[1];
-      controls.onTusCreate?.(tusId);
+    let uploadUrl = "";
+    let offset = 0;
+    let serverLost = false;
+    const createStreamSession = async (withReserve) => {
+      const createMeta = { ...meta };
+      if (withReserve && reserveId) {
+        createMeta.reserve_id = reserveId;
+        if (reserveDeleteToken)
+          createMeta.delete_token = reserveDeleteToken;
+      }
+      return createTusSession(`${UPLOAD_URL}/api/tus`, {
+        method: "POST",
+        headers: {
+          "Upload-Length": String(file.size),
+          "Upload-Metadata": encodeTusMeta(createMeta),
+          "Tus-Resumable": "1.0.0"
+        },
+        signal
+      });
+    };
+    const adoptSession = async (withReserve) => {
+      let created = await createStreamSession(withReserve);
+      if (!created.res?.ok && created.res?.status === 400 && reserveId) {
+        // The old quick-link reservation expired while the page was closed.
+        // Drop it and continue as an ordinary upload rather than failing.
+        reserveId = "";
+        reserveUrl = "";
+        reserveRawUrl = "";
+        reserveDownloadUrl = "";
+        reserveDeleteToken = "";
+        update({
+          id: item.id,
+          reserveId: "",
+          reserveUrl: "",
+          reserveRawUrl: "",
+          reserveDownloadUrl: "",
+          reserveDeleteToken: "",
+          serverId: ""
+        });
+        created = await createStreamSession(false);
+      }
+      if (created.completing || created.alreadyExists)
+        throw new Error("Upload session was rejected; please retry");
+      if (!created.res?.ok)
+        throw new Error(`TUS create failed: ${created.res?.status ?? "network"}`);
+      const location = created.res.headers.get("Location");
+      if (!location)
+        throw new Error("No TUS location");
+      uploadUrl = `${UPLOAD_URL}${location}`;
+      const idMatch = location.match(/\/api\/tus\/(.+)$/);
+      if (idMatch) {
+        tusId = idMatch[1];
+        controls.onTusCreate?.(tusId, { kind: "stream" });
+      }
+    };
+    if (item.tusId) {
+      const candidate = `${UPLOAD_URL}/api/tus/${encodeURIComponent(item.tusId)}`;
+      const existingOffset = await probeOffset(candidate);
+      if (existingOffset !== null) {
+        uploadUrl = candidate;
+        tusId = item.tusId;
+        offset = Math.min(existingOffset, file.size);
+        controls.onTusCreate?.(tusId, { kind: "stream" });
+      }
     }
+
+    if (!uploadUrl)
+      await adoptSession(!!reserveId);
 
     const progress = new LiveProgress((pct) => {
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     });
     progress.begin(file.size);
+    if (offset > 0)
+      progress.set(offset);
+    update({ id: item.id, tusOffset: offset });
+    if (safe) {
+      healthTimer = setInterval(async () => {
+        const health = await tusHealth(tusId, signal);
+        if (!health)
+          return;
+        if (health.lost) {
+          serverLost = true;
+          return;
+        }
+        const hOff = healthOffset(health);
+        if (hOff !== null)
+          update({ id: item.id, tusOffset: hOff });
+      }, SAFE_HEALTH_MS);
+    }
 
     const headersFor = (offset) => ({
       "Content-Type": "application/offset+octet-stream",
@@ -1322,19 +1654,15 @@ function startTusStreamUpload(item, file, controls) {
     });
 
     const discoverOffset = async () => {
-      try {
-        const res = await fetchWithTimeout(uploadUrl, {
-          method: "GET",
-          headers: { "Tus-Resumable": "1.0.0" },
-          signal
-        });
-        if (!res.ok)
+      if (safe && tusId) {
+        const health = await tusHealth(tusId, signal);
+        if (health?.lost)
           return null;
-        const off = Number(res.headers.get("Upload-Offset"));
-        return Number.isFinite(off) ? Math.max(0, off) : null;
-      } catch {
-        return null;
+        const fromHealth = healthOffset(health);
+        if (fromHealth !== null)
+          return fromHealth;
       }
+      return probeOffset(uploadUrl);
     };
 
     const patch = (start, end, timeoutMs) => new Promise((resolve, reject) => {
@@ -1381,11 +1709,13 @@ function startTusStreamUpload(item, file, controls) {
       x.send(file.slice(start, end));
     });
 
-    let offset = 0;
     let failures = 0;
     let chunkSize = STREAM_START_CHUNK;
-
+    let finished = false;
+    const maxStreamFailures = safe ? STREAM_MAX_FAILURES * 2 : STREAM_MAX_FAILURES;
     const complete = (data) => {
+      if (healthTimer)
+        clearInterval(healthTimer);
       progress.destroy();
       const merged = { ...data };
       if (reserveUrl && !merged.url)
@@ -1410,10 +1740,53 @@ function startTusStreamUpload(item, file, controls) {
         progress: 100
       });
     };
+    const readyFile = async () => {
+      for (const id of [reserveId, tusId]) {
+        if (!id)
+          continue;
+        try {
+          const res = await fetchWithTimeout(publicFileInfo(id), { signal });
+          if (!res.ok)
+            continue;
+          const info = await res.json();
+          if (info?.status === "ready" && info.url)
+            return info;
+        } catch {}
+      }
+      return null;
+    };
+    const restartSession = async () => {
+      // The final bytes may have landed even though the session disappeared
+      // before the client saw the completion response.
+      const info = await readyFile();
+      if (info) {
+        complete({
+          ...info,
+          delete_token: reserveDeleteToken || info.delete_token || ""
+        });
+        finished = true;
+        serverLost = false;
+        offset = file.size;
+        return;
+      }
+      uploadUrl = "";
+      offset = 0;
+      serverLost = false;
+      failures = 0;
+      progress.set(0);
+      update({ id: item.id, progress: 0, tusOffset: 0, state: "uploading" });
+      await adoptSession(!!reserveId);
+    };
 
-    while (offset < file.size) {
+    while (offset < file.size || serverLost) {
+      if (finished)
+        break;
       if (signal.aborted)
         throw new Error("Upload cancelled");
+      if (safe && serverLost) {
+        await restartSession();
+        continue;
+      }
       const end = Math.min(offset + chunkSize, file.size);
       const chunkStarted = performance.now();
       let r;
@@ -1423,11 +1796,16 @@ function startTusStreamUpload(item, file, controls) {
         if (signal.aborted)
           throw new Error("Upload cancelled");
         failures++;
-        if (failures > STREAM_MAX_FAILURES)
+        if (failures > maxStreamFailures)
           throw err;
         const next = await discoverOffset();
-        if (next === null)
+        if (next === null) {
+          if (safe) {
+            serverLost = true;
+            continue;
+          }
           throw err;
+        }
         // The server may have accepted part of the body before the drop.
         offset = Math.min(next, file.size);
         progress.set(offset);
@@ -1451,6 +1829,7 @@ function startTusStreamUpload(item, file, controls) {
         const secs = (performance.now() - chunkStarted) / 1000;
         offset = next;
         progress.set(offset);
+        update({ id: item.id, tusOffset: offset });
         failures = 0;
         if (secs > 0.2 && sent > 0) {
           const rate = sent / secs;
@@ -1460,14 +1839,23 @@ function startTusStreamUpload(item, file, controls) {
       }
       if (r.status === 409) {
         const next = await discoverOffset();
-        if (next === null)
+        if (next === null) {
+          if (safe) {
+            serverLost = true;
+            continue;
+          }
           throw new Error("Upload session was lost");
+        }
         offset = next;
+        continue;
+      }
+      if (r.status === 404 && safe) {
+        serverLost = true;
         continue;
       }
       if (r.status === 429) {
         failures++;
-        if (failures > STREAM_MAX_FAILURES)
+        if (failures > maxStreamFailures)
           throw new Error("Upload rate limited");
         await new Promise((res) => setTimeout(res, 2000 * failures));
         continue;
@@ -1476,12 +1864,17 @@ function startTusStreamUpload(item, file, controls) {
       if (!retryable)
         throw new Error(`Upload rejected: ${r.status}`);
       failures++;
-      if (failures > STREAM_MAX_FAILURES)
+      if (failures > maxStreamFailures)
         throw new Error(`Upload failed: ${r.status}`);
       // The body may have been accepted up to the point the connection broke.
       const next = await discoverOffset();
-      if (next === null)
+      if (next === null) {
+        if (safe) {
+          serverLost = true;
+          continue;
+        }
         throw new Error("Upload session was lost");
+      }
       if (next > offset) {
         offset = next;
         progress.set(offset);
@@ -1490,6 +1883,8 @@ function startTusStreamUpload(item, file, controls) {
       continue;
     }
 
+    if (finished)
+      return;
     // Everything was accepted but the final response was lost (409 path).
     offset = (await discoverOffset()) ?? file.size;
     if (offset < file.size)
@@ -1519,8 +1914,23 @@ function startTusStreamUpload(item, file, controls) {
     }
     complete(data);
   })().catch((err) => {
+    if (healthTimer)
+      clearInterval(healthTimer);
     if (signal.aborted) {
       update({ id: item.id, state: "cancelled" });
+      return;
+    }
+    if (item.resumeAttempt) {
+      // A resumed upload keeps its TUS session and saved offset. Going back
+      // to paused on a transient failure lets the user reselect and retry
+      // instead of discarding the session as a terminal error.
+      update({
+        id: item.id,
+        state: "paused",
+        pausedAt: Date.now(),
+        errorCode: "",
+        errorMessage: ""
+      });
       return;
     }
     update({
@@ -1541,7 +1951,7 @@ function startTusUpload(item, file, controls) {
   const controller = new AbortController;
   const signal = controller.signal;
   const run = (async () => {
-    const sessionId = generateId();
+    const sessionId = item.tusSessionId || generateId();
     const probeState = { done: false, use: false };
     let curGzip = null;
     const tier = detectNetTier();
@@ -1557,11 +1967,28 @@ function startTusUpload(item, file, controls) {
       }
     } catch {}
     const fixedDefaults = !tweakEngineEnabled();
+    const safe = !!item.safeUpload;
+    const maxPartRuns = safe ? MAX_PART_RUNS + 3 : MAX_PART_RUNS;
+    const partsSnapshot = item.tusParts && typeof item.tusParts === "object" ? { ...item.tusParts } : {};
+    let lastPartsSave = 0;
+    const savePart = (index, patch, force) => {
+      const key = String(index);
+      partsSnapshot[key] = { ...(partsSnapshot[key] || {}), ...patch };
+      const now = Date.now();
+      if (!force && now - lastPartsSave < 1500)
+        return;
+      lastPartsSave = now;
+      update({ id: item.id, tusParts: { ...partsSnapshot } });
+    };
     const wantedStreams = fixedDefaults ? PARALLEL_STREAMS : streamsForRate(hintBps || TIER_DEFAULT_BPS[tier]);
-    const numParts = Math.max(1, Math.min(TUS_MAX_PARTS, PARALLEL_STREAMS * 3, Math.floor(file.size / TUS_MIN_PART)));
+    const savedParts = Number.isInteger(item.numParts) && item.numParts > 0 ? item.numParts : 0;
+    const numParts = savedParts
+      ? Math.max(1, Math.min(TUS_MAX_PARTS, savedParts))
+      : Math.max(1, Math.min(TUS_MAX_PARTS, PARALLEL_STREAMS * 3, Math.floor(file.size / TUS_MIN_PART)));
     let targetWorkers = Math.min(wantedStreams, numParts);
     const uploadStart = performance.now();
     const PROGRESS_LEAD_BYTES = 16 * 1024 * 1024;
+    const resumeProgress = Math.max(0, Math.min(99.4, Number(item.progress) || 0));
     const progress = new LiveProgress((pct) => {
       update({ id: item.id, progress: Math.min(pct, 99.4) });
     }, { maxProjectAhead: 4 * 1024 * 1024 });
@@ -1577,14 +2004,40 @@ function startTusUpload(item, file, controls) {
       const ratio = ackedSum > 0 ? sum(partSent) / ackedSum : 1;
       progress.setTotal(Math.min(file.size, Math.max(sum(partSent), Math.round(file.size * ratio))));
     };
-    update({ id: item.id, state: "uploading", progress: 0 });
-    let reserveId = "";
-    let reserveUrl = "";
-    let reserveRawUrl = "";
-    let reserveDownloadUrl = "";
-    let reserveDeleteToken = "";
+    update({
+      id: item.id,
+      state: "uploading",
+      progress: resumeProgress,
+      tusSessionId: sessionId,
+      numParts
+    });
+    let reserveId = item.reserveId || "";
+    let reserveUrl = item.reserveUrl || "";
+    let reserveRawUrl = item.reserveRawUrl || "";
+    let reserveDownloadUrl = item.reserveDownloadUrl || "";
+    let reserveDeleteToken = item.reserveDeleteToken || "";
+    let reserveCleared = false;
+    const clearReserve = async () => {
+      if (!reserveId || reserveCleared)
+        return;
+      reserveCleared = true;
+      reserveId = "";
+      reserveUrl = "";
+      reserveRawUrl = "";
+      reserveDownloadUrl = "";
+      reserveDeleteToken = "";
+      update({
+        id: item.id,
+        reserveId: "",
+        reserveUrl: "",
+        reserveRawUrl: "",
+        reserveDownloadUrl: "",
+        reserveDeleteToken: "",
+        serverId: ""
+      });
+    };
     let reserveReady = Promise.resolve();
-    if (item.quickLink) {
+    if (item.quickLink && !reserveId) {
       reserveReady = (async () => {
         try {
           const reserve = await reserveQuickLink(item, signal);
@@ -1595,13 +2048,33 @@ function startTusUpload(item, file, controls) {
             reserveDownloadUrl = reserve.downloadUrl;
             reserveDeleteToken = reserve.deleteToken;
             if (reserveUrl)
-              update({ id: item.id, reserveUrl, reserveRawUrl, reserveDownloadUrl, serverId: reserveId });
+              update({
+                id: item.id,
+                reserveId,
+                reserveUrl,
+                reserveRawUrl,
+                reserveDownloadUrl,
+                reserveDeleteToken,
+                serverId: reserveId
+              });
           }
         } catch {}
       })();
     }
     const getReserveId = () => reserveId;
     const getReserveToken = () => reserveDeleteToken;
+    const partTusIds = new Set([
+      ...(Array.isArray(item.tusIds) ? item.tusIds : []),
+      item.tusId
+    ].filter((id) => typeof id === "string" && id));
+    const partControls = {
+      ...controls,
+      onTusCreate: (tusId, info) => {
+        if (tusId)
+          partTusIds.add(tusId);
+        controls.onTusCreate?.(tusId, info);
+      }
+    };
     const results = new Array(numParts);
     let cursor = 0;
     const runCounts = new Array(numParts).fill(0);
@@ -1673,8 +2146,14 @@ function startTusUpload(item, file, controls) {
               onDispatch: (bytes) => {
                 inflightEst += bytes;
               },
+              onPartState: (patch) => {
+                savePart(i, patch, true);
+              },
+              onPartOffset: (offset) => {
+                savePart(i, { offset }, false);
+              },
               rateHint: () => rateNow
-            }, reserveReady, getReserveId, getReserveToken, controls, tier, probeState).catch((err) => {
+            }, reserveReady, getReserveId, getReserveToken, clearReserve, partControls, tier, probeState, safe).catch((err) => {
               if (signal.aborted)
                 return { status: 0 };
               throw err;
@@ -1682,7 +2161,7 @@ function startTusUpload(item, file, controls) {
           } catch (err) {
             if (signal.aborted)
               return;
-            if (runCounts[i] < MAX_PART_RUNS) {
+            if (runCounts[i] < maxPartRuns) {
               retryQueue.push(i);
               scheduleRespawn();
             } else {
@@ -1838,10 +2317,48 @@ function startTusUpload(item, file, controls) {
         localStorage.setItem(LAST_SPEED_KEY, String(learnedAcked / elapsedSec));
       } catch {}
     }
+    const findReadyPart = async (ids, timeoutMs) => {
+      const list = [...new Set(ids)].filter(Boolean).slice(0, 24);
+      if (!list.length)
+        return null;
+      const deadline = performance.now() + timeoutMs;
+      while (!signal.aborted && performance.now() < deadline) {
+        for (const id of list) {
+          try {
+            const res = await fetchWithTimeout(publicFileInfo(id), { signal }, 8000);
+            if (res.ok) {
+              const info = await res.json();
+              if (info?.status === "ready" && info.url)
+                return info;
+            }
+          } catch {}
+          if (signal.aborted)
+            return null;
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      return null;
+    };
     let merged = settled.find((r) => r.status === 200 && r.data?.url);
     if (!merged && reserveId && !signal.aborted) {
       update({ id: item.id, state: "finalizing" });
       const info = await waitForReservedFile(reserveId, signal);
+      if (info) {
+        merged = {
+          status: 200,
+          data: {
+            ...info,
+            delete_token: reserveDeleteToken || info.delete_token || ""
+          }
+        };
+      }
+    }
+    if (!merged && !signal.aborted) {
+      // A saved part id doubles as the finished file id once its merge wins.
+      // Probe the ids we know about before declaring failure, which also
+      // recovers a merge whose response was lost during the navigation.
+      update({ id: item.id, state: "finalizing" });
+      const info = await findReadyPart(partTusIds, 8000);
       if (info) {
         merged = {
           status: 200,
@@ -1877,6 +2394,16 @@ function startTusUpload(item, file, controls) {
       });
       return;
     }
+    if (item.resumeAttempt) {
+      update({
+        id: item.id,
+        state: "paused",
+        pausedAt: Date.now(),
+        errorCode: "",
+        errorMessage: ""
+      });
+      return;
+    }
     update({
       id: item.id,
       errorCode: "UPLOAD_FAILED",
@@ -1886,6 +2413,16 @@ function startTusUpload(item, file, controls) {
   })().catch((err) => {
     if (signal.aborted) {
       update({ id: item.id, state: "cancelled" });
+      return;
+    }
+    if (item.resumeAttempt) {
+      update({
+        id: item.id,
+        state: "paused",
+        pausedAt: Date.now(),
+        errorCode: "",
+        errorMessage: ""
+      });
       return;
     }
     update({

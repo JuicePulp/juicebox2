@@ -68,6 +68,15 @@ export function readUploadPassword() {
   const val = document.querySelector("[data-upload-password]")?.value || "";
   return val.trim();
 }
+export function readSafeUploadEnabled() {
+  if (typeof localStorage === "undefined")
+    return false;
+  try {
+    return localStorage.getItem("juicebox_safe_upload") === "true";
+  } catch {
+    return false;
+  }
+}
 export const TUS_THRESHOLD = 30 * 1024 * 1024;
 export const TUS_START_CHUNK = 16 * 1024 * 1024;
 export const TUS_MIN_CHUNK = 8 * 1024 * 1024;

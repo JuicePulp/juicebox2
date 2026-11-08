@@ -147,6 +147,13 @@
 </div>
 <div class="form-field">
 <label class="select-option select-option--toggle" data-cuelume-toggle>
+<input type="checkbox" data-safe-upload-toggle="" aria-label="{{ cx.t("host.safe_upload") }}">
+<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
+<span class="select-option__text"><span class="select-option__label">{{ cx.t("host.safe_upload") }}</span><span class="select-option__desc">{{ cx.t("host.safe_upload_desc") }}</span></span>
+</label>
+</div>
+<div class="form-field">
+<label class="select-option select-option--toggle" data-cuelume-toggle>
 <input type="checkbox" data-ultrafast-toggle="" aria-label="UltraFast">
 <span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
 <span class="select-option__text"><span class="select-option__label">UltraFast</span><span class="select-option__desc">Upload directly from your device (requires paired device)</span></span>

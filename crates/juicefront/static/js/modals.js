@@ -1,5 +1,5 @@
-import { initPairModal } from "./pair.js?v=2.1.32";
-import { playSound } from "./sounds.js?v=2.1.32";
+import { initPairModal } from "./pair.js?v=2.2.0";
+import { playSound } from "./sounds.js?v=2.2.0";
 import { setTweakEngineEnabled, tweakEngineEnabled } from "./upload-tweaks.js";
 import { announce } from "./util.js";
 

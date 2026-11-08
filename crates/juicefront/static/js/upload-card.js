@@ -1,6 +1,6 @@
 import { t } from "./i18n.js";
 import { announce, formatSize } from "./util.js";
-import { playSound } from "./sounds.js?v=2.1.32";
+import { playSound } from "./sounds.js?v=2.2.0";
 import {
   iconHTML,
   iconForMime,
@@ -11,16 +11,17 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js?v=2.1.32";
+} from "./copy.js?v=2.2.0";
 import {
   UPLOAD_URL,
   readMaxFileSize,
   readUploadPassword,
+  readSafeUploadEnabled,
   TUS_THRESHOLD,
   ULTRAFAST_RESERVE_URL,
-} from "./upload-config.js?v=2.1.32";
+} from "./upload-config.js?v=2.2.0";
 import { apiFetch, apiFetchJob, publicFileInfo } from "./api.js";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.1.32";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0";
 import {
   enhanceHostSelector,
   readSelectedHost,
@@ -30,9 +31,9 @@ import {
   readUltraFastEnabled,
   readUltraFastSupported,
   initHostGlow,
-} from "./enhance-host.js?v=2.1.32";
+} from "./enhance-host.js?v=2.2.0";
 import { connectPresence, isAppMode } from "./presence.js";
-import { resolveUploadHost } from "./upload-router.js?v=2.1.32";
+import { resolveUploadHost } from "./upload-router.js?v=2.2.0";
 import { validateFileClient } from "./file-validation.js";
 import { upsertLocalFile } from "./upload-storage.js";
 import {
@@ -43,9 +44,11 @@ import {
   getUploads,
   wasRemoved,
   connectUploads,
+  findPausedUpload,
+  resumeUpload,
 } from "./upload-client-loader.js";
-import { extractServerId } from "./upload-engine.js?v=2.1.32";
-import { initHostSelector } from "./host-selector.js?v=2.1.32";
+import { extractServerId } from "./upload-engine.js?v=2.2.0";
+import { initHostSelector } from "./host-selector.js?v=2.2.0";
 
 var assetVersion = (() => {
   try {
@@ -67,6 +70,9 @@ var rowPartsCache = new WeakMap();
 var suppressAdopt = 0;
 var listContentRef = null;
 var emptyTextRef = null;
+var resumeMessages = new Map();
+var resumeInput = null;
+var resumeTargetId = "";
 
 function autoCopyUrl(url, copyBar) {
   if (!url || !navigator.clipboard) return;
@@ -169,11 +175,153 @@ function handleCobaltKeydown(e) {
 function setEmpty(visible) {
   if (emptyTextRef) emptyTextRef.classList.toggle("visible", visible);
 }
+
+async function fileFingerprint(file) {
+  const fallback = "meta:" + file.name + ":" + file.size + ":" + file.lastModified;
+  try {
+    if (!file || typeof crypto === "undefined" || !crypto.subtle)
+      return fallback;
+    const sliceSize = 256 * 1024;
+    const first = new Uint8Array(await file.slice(0, Math.min(file.size, sliceSize)).arrayBuffer());
+    const last = new Uint8Array(await file.slice(Math.max(0, file.size - sliceSize), file.size).arrayBuffer());
+    const prefix = new TextEncoder().encode(file.name + "\u0000" + file.size + "\u0000");
+    const data = new Uint8Array(prefix.length + first.length + last.length);
+    data.set(prefix, 0);
+    data.set(first, prefix.length);
+    data.set(last, prefix.length + first.length);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest))
+      .map(function (byte) {
+        return byte.toString(16).padStart(2, "0");
+      })
+      .join("");
+  } catch {
+    return fallback;
+  }
+}
+
+function pausedFileMatches(item, file, fingerprint) {
+  if (!item || !file) return false;
+  if (item.fingerprint && fingerprint) return item.fingerprint === fingerprint;
+  return item.filename === file.name && item.size === file.size && item.lastModified === file.lastModified;
+}
+
+function clearErrorRow(row) {
+  if (!row) return;
+  row.classList.remove("error");
+  var parts = getRowParts(row);
+  parts.fill.classList.remove("error");
+  parts.pill.classList.remove("error");
+}
+
+function clearPausedRow(row) {
+  if (!row) return;
+  row.classList.remove("paused");
+  var parts = getRowParts(row);
+  parts.fill.classList.remove("paused");
+  parts.pill.classList.remove("paused");
+  var button = row.querySelector(".resume-upload-btn");
+  if (button) button.remove();
+}
+
+function ensureResumeButton(row) {
+  var button = row.querySelector(".resume-upload-btn");
+  if (button) {
+    button.textContent = t(LOCALE, "upload.resume_file");
+    return button;
+  }
+  button = document.createElement("button");
+  button.type = "button";
+  button.className = "resume-upload-btn";
+  button.textContent = t(LOCALE, "upload.resume_file");
+  button.addEventListener("click", function () {
+    openResumePicker(row);
+  });
+  var actionArea = row.querySelector(".file-action-area");
+  (actionArea || row).appendChild(button);
+  return button;
+}
+
+function ensureResumeInput() {
+  if (resumeInput) return resumeInput;
+  resumeInput = document.createElement("input");
+  resumeInput.type = "file";
+  resumeInput.hidden = true;
+  resumeInput.setAttribute("aria-hidden", "true");
+  resumeInput.addEventListener("change", function () {
+    var id = resumeTargetId;
+    var file = resumeInput.files && resumeInput.files[0];
+    resumeTargetId = "";
+    resumeInput.value = "";
+    if (id && file) void resumeSelectedFile(id, file);
+  });
+  document.body.appendChild(resumeInput);
+  return resumeInput;
+}
+
+function openResumePicker(row) {
+  resumeTargetId = row.getAttribute("data-upload-id") || "";
+  var input = ensureResumeInput();
+  input.value = "";
+  input.click();
+}
+
+function setResumeMessage(id, message) {
+  if (message) resumeMessages.set(id, message);
+  else resumeMessages.delete(id);
+  var item = getUploads().find(function (upload) {
+    return upload.id === id;
+  });
+  if (item) syncRow(item);
+}
+
+async function resumePausedItem(item, file, fingerprint) {
+  if (!item || !file) return;
+  var row = rowIds.get(item.id);
+  if (!row) {
+    adoptItem(item);
+    row = rowIds.get(item.id);
+  }
+  if (item.requiresPassword && !readUploadPassword()) {
+    setResumeMessage(item.id, t(LOCALE, "upload.resume_password"));
+    var password = document.querySelector("[data-upload-password]");
+    if (password) password.focus();
+    return;
+  }
+  if (!pausedFileMatches(item, file, fingerprint)) {
+    setResumeMessage(item.id, t(LOCALE, "upload.resume_mismatch"));
+    return;
+  }
+  resumeMessages.delete(item.id);
+  var id = resumeUpload(item.id, file, {
+    password: item.requiresPassword ? readUploadPassword() : ""
+  }, fingerprint);
+  if (!id) {
+    setResumeMessage(item.id, item.requiresPassword ? t(LOCALE, "upload.resume_password") : t(LOCALE, "upload.resume_mismatch"));
+    return;
+  }
+  playSound("loading", { emphasis: "subtle" });
+}
+
+async function resumeSelectedFile(id, file) {
+  var item = getUploads().find(function (upload) {
+    return upload.id === id;
+  });
+  if (!item || item.state !== "paused") return;
+  var fingerprint = await fileFingerprint(file);
+  if (!pausedFileMatches(item, file, fingerprint)) {
+    setResumeMessage(id, t(LOCALE, "upload.resume_mismatch"));
+    return;
+  }
+  await resumePausedItem(item, file, fingerprint);
+}
+
 function removeItem(item) {
   var id = item.getAttribute("data-upload-id");
   if (id) {
     cancelUpload(id);
     rowIds.delete(id);
+    resumeMessages.delete(id);
   }
   item.classList.add("exiting");
   setTimeout(function () {
@@ -226,6 +374,9 @@ function wipeFailedReservation(item) {
   } catch (e) {}
 }
 function failItem(item, pill, fill, status, errorCode, rawMessage) {
+  var uploadId = item.getAttribute("data-upload-id");
+  if (uploadId) resumeMessages.delete(uploadId);
+  clearPausedRow(item);
   item.classList.add("error");
   pill.classList.add("error");
   fill.classList.add("error");
@@ -288,6 +439,8 @@ function showQuickLink(item, row) {
   );
 }
 function completeRow(item, row) {
+  clearPausedRow(row);
+  clearErrorRow(row);
   var parts = getRowParts(row);
   var fill = parts.fill;
   var status = parts.status;
@@ -372,9 +525,32 @@ function syncRow(item) {
   var status = parts.status;
   var pill = parts.pill;
 
+  if (item.state !== "paused") {
+    clearPausedRow(row);
+    resumeMessages.delete(item.id);
+  }
+  if (item.state === "queued" || item.state === "compressing" || item.state === "uploading" || item.state === "finalizing")
+    clearErrorRow(row);
+
   showQuickLink(item, row);
 
   switch (item.state) {
+    case "paused": {
+      clearErrorRow(row);
+      row.classList.add("paused");
+      fill.classList.remove("finalizing");
+      fill.classList.remove("indeterminate");
+      fill.classList.add("paused");
+      fill.style.setProperty("--progress", (Number(item.progress) || 0) + "%");
+      var pausedDivider = fill.closest('[role="progressbar"]');
+      if (pausedDivider) {
+        pausedDivider.setAttribute("aria-valuenow", String(Number(item.progress || 0).toFixed(1)));
+      }
+      pill.classList.add("paused");
+      status.textContent = resumeMessages.get(item.id) || t(LOCALE, "upload.interrupted");
+      ensureResumeButton(row);
+      break;
+    }
     case "queued":
     case "compressing":
       status.textContent =
@@ -938,6 +1114,7 @@ function adoptItem(data) {
   if (rowIds.has(data.id)) return;
   setEmpty(false);
   var item = buildRow(data.filename || "upload", formatSize(data.size || 0), iconForMime(data.mimeType || ""));
+  if (data.state === "paused") item.classList.add("paused");
   item.querySelector(".delete-btn").addEventListener("click", function () {
     dismissRow(item);
   });
@@ -955,20 +1132,28 @@ function setRowDeleteHandler(item, handler) {
   replacement.addEventListener("click", handler);
 }
 
-function startItem(file) {
+async function startItem(file) {
   setEmpty(false);
+  var fingerprint = await fileFingerprint(file);
+  var paused = findPausedUpload(file, fingerprint);
+  if (paused) {
+    await resumePausedItem(paused, file, fingerprint);
+    return;
+  }
   var item = buildRow(file.name, formatSize(file.size), extIcon(file.name));
   setRowDeleteHandler(item, function () {
     dismissRow(item);
   });
   listContentRef.prepend(item);
-  uploadItem(file, item);
+  uploadItem(file, item, fingerprint);
 }
 
-async function uploadItem(file, item) {
+async function uploadItem(file, item, fingerprint) {
   var fill = item.querySelector(".progress-fill");
   var status = item.querySelector(".status-text");
   var pill = item.querySelector(".status-pill");
+  if (!fingerprint)
+    fingerprint = await fileFingerprint(file);
 
   if (file.size > readMaxFileSize()) {
     failItem(item, pill, fill, status, "FILE_TOO_LARGE", t(LOCALE, "error.file_too_large"));
@@ -1001,7 +1186,9 @@ async function uploadItem(file, item) {
       customHost: readSelectedHost() || await resolveUploadHost(),
       uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
+      safeUpload: readSafeUploadEnabled(),
       password: readUploadPassword(),
+      fingerprint: fingerprint,
     });
   } finally {
     suppressAdopt--;
@@ -1345,6 +1532,7 @@ export function initUploadCard() {
   var input = getInputRef();
   var dropZone = getDropZoneRef();
   if (form) form.addEventListener("submit", function (e) {
+    if (!document.documentElement.hasAttribute("data-upload-ready")) return;
     e.preventDefault();
   });
   enhanceServerFiles();
@@ -1355,6 +1543,8 @@ export function initUploadCard() {
       Array.from(input.files).forEach(startItem);
       input.value = "";
     });
+    document.documentElement.setAttribute("data-upload-ready", "");
+    document.documentElement.removeAttribute("data-upload-fallback");
   }
   if (dropZone) dropZone.removeAttribute("for");
 

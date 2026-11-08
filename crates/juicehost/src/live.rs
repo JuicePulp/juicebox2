@@ -50,6 +50,18 @@ pub struct LiveSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub struct LivePartSnapshot {
+    pub target_id: String,
+    pub part_id: String,
+    pub offset: u64,
+    pub length: u64,
+    pub written: u64,
+    pub ready: bool,
+    pub total_size: u64,
+    pub complete: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct LiveSource {
     pub upload_id: String,
     pub base_offset: u64,
@@ -362,6 +374,37 @@ impl LiveUploads {
             complete: snapshot.complete,
             filename: snapshot.filename,
             mime: snapshot.mime,
+        })
+    }
+
+    /// Return the progress of one registered part. Unlike `snapshot`, this is
+    /// keyed by the part id, so a client can ask whether juicehost has the
+    /// bytes for the exact TUS resource it is about to resume.
+    #[must_use]
+    pub fn part_snapshot(&self, id: &str) -> Option<LivePartSnapshot> {
+        let target_id = self.parts.get(id)?.value().clone();
+        let upload = self.uploads.get(&target_id)?.value().clone();
+        if upload.is_stale() {
+            self.remove_target(&target_id);
+            return None;
+        }
+        let state = upload.state.lock().unwrap_or_else(|e| e.into_inner());
+        let LiveState::Parts(ref map) = *state else {
+            return None;
+        };
+        let part = map.values().find(|part| part.id == id)?;
+        let complete = !map.is_empty()
+            && map.values().all(|part| part.ready)
+            && map.values().map(|part| part.length).sum::<u64>() >= upload.total_size;
+        Some(LivePartSnapshot {
+            target_id: upload.target_id.clone(),
+            part_id: part.id.clone(),
+            offset: part.offset,
+            length: part.length,
+            written: part.written.min(part.length),
+            ready: part.ready,
+            total_size: upload.total_size,
+            complete,
         })
     }
 
