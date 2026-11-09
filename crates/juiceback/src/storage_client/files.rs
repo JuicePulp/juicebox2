@@ -91,6 +91,7 @@ pub async fn freeze_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
     host: Option<&str>,
+    capability: Option<&str>,
 ) -> Result<(), String> {
     let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
@@ -98,7 +99,7 @@ pub async fn freeze_file_on_juicehost(
     }
     let client = StorageClient::resolve(state, custom_host).await?;
 
-    let headers = client.headers_with(None)?;
+    let headers = client.headers_with(capability)?;
 
     let resp = client
         .http()
@@ -124,6 +125,7 @@ pub async fn unfreeze_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
     host: Option<&str>,
+    capability: Option<&str>,
 ) -> Result<(), String> {
     let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
@@ -131,7 +133,7 @@ pub async fn unfreeze_file_on_juicehost(
     }
     let client = StorageClient::resolve(state, custom_host).await?;
 
-    let headers = client.headers_with(None)?;
+    let headers = client.headers_with(capability)?;
 
     let resp = client
         .http()

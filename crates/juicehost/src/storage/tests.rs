@@ -331,7 +331,7 @@ async fn local_freeze_blocks_reads_with_frozen() {
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    assert!(backend.freeze("fr1").await.unwrap());
+    assert!(backend.freeze("fr1", None).await.unwrap());
     assert!(backend.is_frozen("fr1").await.unwrap());
     assert!(matches!(
         backend.stat("fr1").await,
@@ -358,7 +358,7 @@ async fn local_freeze_blocks_mutations() {
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    backend.freeze("fr1").await.unwrap();
+    backend.freeze("fr1", None).await.unwrap();
     assert!(matches!(
         backend.delete("fr1", None).await,
         Err(StorageError::Frozen)
@@ -378,38 +378,61 @@ async fn local_freeze_blocks_mutations() {
         Err(StorageError::Frozen)
     ));
     
-    assert_eq!(backend.unfreeze("fr1").await.unwrap(), true);
+    assert_eq!(backend.unfreeze("fr1", None).await.unwrap(), true);
     assert!(!backend.is_frozen("fr1").await.unwrap());
     assert_eq!(backend.get("fr1").await.unwrap().data.as_ref(), b"secret");
+}
+
+#[tokio::test]
+async fn local_freeze_requires_matching_capability() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("fr1", "f.txt", Bytes::from("secret"), Some("tok"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        backend.freeze("fr1", Some("wrong")).await,
+        Err(StorageError::Forbidden)
+    ));
+    assert!(!backend.is_frozen("fr1").await.unwrap());
+    assert!(backend.freeze("fr1", Some("tok")).await.unwrap());
+    assert!(backend.is_frozen("fr1").await.unwrap());
+    assert!(matches!(
+        backend.unfreeze("fr1", Some("wrong")).await,
+        Err(StorageError::Forbidden)
+    ));
+    assert!(backend.is_frozen("fr1").await.unwrap());
+    assert!(backend.unfreeze("fr1", Some("tok")).await.unwrap());
+    assert!(!backend.is_frozen("fr1").await.unwrap());
 }
 
 #[tokio::test]
 async fn local_freeze_is_idempotent_and_needs_existing_file() {
     let (_dir, backend) = setup_local_backend().await;
     assert!(matches!(
-        backend.freeze("ghost").await,
+        backend.freeze("ghost", None).await,
         Err(StorageError::NotFound)
     ));
     assert!(matches!(
-        backend.unfreeze("ghost").await,
+        backend.unfreeze("ghost", None).await,
         Err(StorageError::NotFound)
     ));
     backend
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    assert!(backend.freeze("fr1").await.unwrap());
-    assert!(backend.freeze("fr1").await.unwrap());
-    assert!(backend.unfreeze("fr1").await.unwrap());
-    assert!(backend.unfreeze("fr1").await.unwrap());
+    assert!(backend.freeze("fr1", None).await.unwrap());
+    assert!(backend.freeze("fr1", None).await.unwrap());
+    assert!(backend.unfreeze("fr1", None).await.unwrap());
+    assert!(backend.unfreeze("fr1", None).await.unwrap());
     assert!(!backend.is_frozen("fr1").await.unwrap());
 }
 
 #[tokio::test]
 async fn local_freeze_rejects_invalid_ids() {
     let (_dir, backend) = setup_local_backend().await;
-    assert!(backend.freeze("../evil").await.is_err());
-    assert!(backend.freeze("a.b").await.is_err());
+    assert!(backend.freeze("../evil", None).await.is_err());
+    assert!(backend.freeze("a.b", None).await.is_err());
     assert!(!backend.is_frozen("../evil").await.unwrap());
     assert!(!backend.is_frozen("").await.unwrap());
 }
@@ -422,7 +445,7 @@ async fn local_freeze_marker_survives_restart() {
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    backend.freeze("fr1").await.unwrap();
+    backend.freeze("fr1", None).await.unwrap();
     drop(backend);
     let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend2.init_cache().await.unwrap();
@@ -431,7 +454,7 @@ async fn local_freeze_marker_survives_restart() {
         backend2.stat("fr1").await,
         Err(StorageError::Frozen)
     ));
-    assert!(backend2.unfreeze("fr1").await.unwrap());
+    assert!(backend2.unfreeze("fr1", None).await.unwrap());
     assert_eq!(backend2.get("fr1").await.unwrap().data.as_ref(), b"secret");
 }
 

@@ -186,12 +186,19 @@ impl LocalBackend {
 
 #[async_trait::async_trait]
 impl super::freeze::FreezeStore for LocalBackend {
-    async fn freeze(&self, id: &str) -> Result<bool, StorageError> {
+    async fn freeze(
+        &self,
+        id: &str,
+        capability: Option<&str>,
+    ) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
         if !self.extensions.contains_key(id) {
             return Err(StorageError::NotFound);
+        }
+        if let Some(capability) = capability {
+            capability::verify(self, id, capability).await?;
         }
         let path = self
             .frozen_path(id)
@@ -217,15 +224,22 @@ impl super::freeze::FreezeStore for LocalBackend {
         }
     }
 
-    async fn unfreeze(&self, id: &str) -> Result<bool, StorageError> {
+    async fn unfreeze(
+        &self,
+        id: &str,
+        capability: Option<&str>,
+    ) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
-        if let Some(path) = self.frozen_path(id) {
-            let _ = tokio::fs::remove_file(&path).await;
-        }
         if !self.extensions.contains_key(id) {
             return Err(StorageError::NotFound);
+        }
+        if let Some(capability) = capability {
+            capability::verify(self, id, capability).await?;
+        }
+        if let Some(path) = self.frozen_path(id) {
+            let _ = tokio::fs::remove_file(&path).await;
         }
         Ok(true)
     }

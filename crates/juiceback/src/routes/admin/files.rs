@@ -395,9 +395,14 @@ pub async fn freeze_file_handler(
         .as_deref()
         .map(str::trim)
         .filter(|h| !h.is_empty());
-    crate::storage_client::freeze_file_on_juicehost(&state, &id, host)
-        .await
-        .map_err(AppError::Internal)?;
+    crate::storage_client::freeze_file_on_juicehost(
+        &state,
+        &id,
+        host,
+        Some(&record.delete_token),
+    )
+    .await
+    .map_err(AppError::Internal)?;
     tracing::info!("admin freeze: id={id}");
     Ok(Json(serde_json::json!({ "frozen": true })))
 }
@@ -431,9 +436,14 @@ pub async fn unfreeze_file_handler(
         .as_deref()
         .map(str::trim)
         .filter(|h| !h.is_empty());
-    crate::storage_client::unfreeze_file_on_juicehost(&state, &id, host)
-        .await
-        .map_err(AppError::Internal)?;
+    crate::storage_client::unfreeze_file_on_juicehost(
+        &state,
+        &id,
+        host,
+        Some(&record.delete_token),
+    )
+    .await
+    .map_err(AppError::Internal)?;
     tracing::info!("admin unfreeze: id={id}");
     Ok(Json(serde_json::json!({ "frozen": false })))
 }

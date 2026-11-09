@@ -104,11 +104,18 @@ impl S3Backend {
 
 #[async_trait::async_trait]
 impl FreezeStore for S3Backend {
-    async fn freeze(&self, id: &str) -> Result<bool, StorageError> {
+    async fn freeze(
+        &self,
+        id: &str,
+        capability: Option<&str>,
+    ) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
         self.find_object(id).await?;
+        if let Some(capability) = capability {
+            capability::verify(self, id, capability).await?;
+        }
         self.client
             .put(
                 &Self::freeze_key(id),
@@ -119,12 +126,19 @@ impl FreezeStore for S3Backend {
             .map_err(Into::into)
     }
 
-    async fn unfreeze(&self, id: &str) -> Result<bool, StorageError> {
+    async fn unfreeze(
+        &self,
+        id: &str,
+        capability: Option<&str>,
+    ) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
-        let _ = self.client.delete(&Self::freeze_key(id)).await;
         self.find_object(id).await?;
+        if let Some(capability) = capability {
+            capability::verify(self, id, capability).await?;
+        }
+        let _ = self.client.delete(&Self::freeze_key(id)).await;
         Ok(true)
     }
 

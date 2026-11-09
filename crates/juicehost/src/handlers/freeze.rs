@@ -6,22 +6,18 @@ use axum::{
     response::Json,
 };
 
+use super::common::required_file_capability;
 use crate::{
     error::JuicehostError,
     state::AppState,
     storage::{R2Store, valid_component as is_valid_id},
 };
 
-fn require_freeze_admin(headers: &HeaderMap, api_key: &str) -> Result<(), JuicehostError> {
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if api_key.is_empty() || !juiceutils::constant_time_eq(api_key, provided) {
-        tracing::warn!("auth: rejected freeze request - invalid or missing API key");
-        return Err(JuicehostError::Unauthorized);
-    }
-    Ok(())
+fn freeze_auth(headers: &HeaderMap, api_key: &str) -> Result<Option<String>, JuicehostError> {
+    required_file_capability(headers, api_key).map_err(|e| {
+        tracing::warn!("auth: rejected freeze request - invalid API key or capability");
+        e
+    })
 }
 
 #[utoipa::path(
@@ -43,7 +39,7 @@ pub async fn freeze_file(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, JuicehostError> {
-    require_freeze_admin(&headers, &state.api_key)?;
+    let capability = freeze_auth(&headers, &state.api_key)?;
 
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -51,7 +47,7 @@ pub async fn freeze_file(
 
     state
         .storage
-        .freeze(&id)
+        .freeze(&id, capability.as_deref())
         .await
         .map_err(JuicehostError::from)?;
 
@@ -86,7 +82,7 @@ pub async fn unfreeze_file(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, JuicehostError> {
-    require_freeze_admin(&headers, &state.api_key)?;
+    let capability = freeze_auth(&headers, &state.api_key)?;
 
     if !is_valid_id(&id) {
         return Err(JuicehostError::BadRequest);
@@ -94,7 +90,7 @@ pub async fn unfreeze_file(
 
     state
         .storage
-        .unfreeze(&id)
+        .unfreeze(&id, capability.as_deref())
         .await
         .map_err(JuicehostError::from)?;
 
@@ -115,34 +111,45 @@ mod tests {
     }
 
     #[test]
-    fn freeze_admin_rejects_missing_key() {
-        assert!(require_freeze_admin(&HeaderMap::new(), "secret").is_err());
+    fn freeze_auth_rejects_missing_key_and_capability() {
+        assert!(freeze_auth(&HeaderMap::new(), "secret").is_err());
     }
 
     #[test]
-    fn freeze_admin_rejects_wrong_key() {
-        assert!(require_freeze_admin(&key_headers("wrong"), "secret").is_err());
+    fn freeze_auth_rejects_wrong_key_without_capability() {
+        assert!(freeze_auth(&key_headers("wrong"), "secret").is_err());
     }
 
     #[test]
-    fn freeze_admin_accepts_exact_key() {
-        assert!(require_freeze_admin(&key_headers("secret"), "secret").is_ok());
+    fn freeze_auth_accepts_exact_key() {
+        assert!(matches!(
+            freeze_auth(&key_headers("secret"), "secret"),
+            Ok(None)
+        ));
     }
 
     #[test]
-    fn freeze_admin_fails_closed_without_configured_key() {
-        
-        
-        assert!(require_freeze_admin(&HeaderMap::new(), "").is_err());
-        let mut headers = HeaderMap::new();
-        headers.insert("x-juicehost-file-capability", "anything".parse().unwrap());
-        assert!(require_freeze_admin(&headers, "").is_err());
-    }
-
-    #[test]
-    fn freeze_admin_ignores_capability_headers() {
+    fn freeze_auth_accepts_capability_with_wrong_key() {
         let mut headers = key_headers("wrong");
-        headers.insert("x-juicehost-file-capability", "anything".parse().unwrap());
-        assert!(require_freeze_admin(&headers, "secret").is_err());
+        headers.insert("x-juicehost-file-capability", "tok".parse().unwrap());
+        assert!(matches!(
+            freeze_auth(&headers, "secret"),
+            Ok(Some(cap)) if cap == "tok"
+        ));
+    }
+
+    #[test]
+    fn freeze_auth_fails_closed_without_configured_key_or_capability() {
+        assert!(freeze_auth(&HeaderMap::new(), "").is_err());
+    }
+
+    #[test]
+    fn freeze_auth_accepts_capability_without_configured_key() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-juicehost-file-capability", "tok".parse().unwrap());
+        assert!(matches!(
+            freeze_auth(&headers, ""),
+            Ok(Some(cap)) if cap == "tok"
+        ));
     }
 }
