@@ -425,9 +425,13 @@ pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<Str
     if promote_host.is_none() && state.config.juicehost_url.trim().is_empty() {
         return Err("no storage host configured".to_string());
     }
-    let key =
-        crate::storage_client::promote_file_on_juicehost(state, id, promote_host.as_deref(), None)
-            .await?;
+    let key = crate::storage_client::promote_file_on_juicehost(
+        state,
+        id,
+        promote_host.as_deref(),
+        Some(&record.delete_token),
+    )
+    .await?;
     let id_owned = id.to_string();
     let key_owned = key.clone();
     state
@@ -451,7 +455,13 @@ pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), St
         .as_deref()
         .map(str::trim)
         .filter(|h| !h.is_empty());
-    crate::storage_client::demote_file_on_juicehost(state, id, host).await?;
+    crate::storage_client::demote_file_on_juicehost(
+        state,
+        id,
+        host,
+        Some(&record.delete_token),
+    )
+    .await?;
     let id_owned = id.to_string();
     state
         .db_call("demote_mark_standard_unpinned", move |db| {

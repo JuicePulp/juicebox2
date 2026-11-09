@@ -3,6 +3,28 @@ use std::sync::Arc;
 use super::client::StorageClient;
 use crate::{db, state::AppState};
 
+async fn resolve_capability(
+    state: &Arc<AppState>,
+    id: &str,
+    custom_host: Option<&str>,
+    capability: Option<&str>,
+) -> Option<String> {
+    if let Some(capability) = capability.map(str::trim).filter(|c| !c.is_empty()) {
+        return Some(capability.to_string());
+    }
+    if custom_host.is_none() {
+        return None;
+    }
+    let id_owned = id.to_string();
+    state
+        .db_call("get_file", move |db| db::get_file(db, &id_owned))
+        .await
+        .ok()
+        .flatten()
+        .map(|record| record.delete_token)
+        .filter(|token| !token.is_empty())
+}
+
 pub async fn rename_file_on_juicehost(
     state: &Arc<AppState>,
     old_id: &str,
@@ -55,14 +77,16 @@ pub async fn demote_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
     host: Option<&str>,
+    capability: Option<&str>,
 ) -> Result<(), String> {
     let custom_host = host.map(str::trim).filter(|h| !h.is_empty());
     if custom_host.is_none() && state.config.juicehost_url.is_empty() {
         return Ok(());
     }
     let client = StorageClient::resolve(state, custom_host).await?;
+    let capability = resolve_capability(state, id, custom_host, capability).await;
 
-    let headers = client.headers_with(None)?;
+    let headers = client.headers_with(capability.as_deref())?;
 
     let resp = client
         .http()
@@ -166,8 +190,9 @@ pub async fn promote_file_on_juicehost(
         return Err("JUICEHOST_URL is not set".into());
     }
     let client = StorageClient::resolve(state, custom_host).await?;
+    let capability = resolve_capability(state, id, custom_host, capability).await;
 
-    let headers = client.headers_with(capability)?;
+    let headers = client.headers_with(capability.as_deref())?;
 
     let resp = client
         .http()
@@ -218,7 +243,7 @@ pub async fn delete_file_on_juicehost(
         .ok()
         .flatten()
         .is_some_and(|record| record.tier == "hot");
-    if hot && let Err(e) = demote_file_on_juicehost(state, id, host).await {
+    if hot && let Err(e) = demote_file_on_juicehost(state, id, host, capability).await {
         tracing::warn!("juicehost delete: R2 demote failed for id={id}: {e}");
     }
 
