@@ -39,6 +39,11 @@ pub async fn delete_file(
         .await
         .map_err(JuicehostError::from)?;
 
+    // A completed direct upload can still have a live-upload entry. If it
+    // outlives the stored file, serving the deleted ID waits on that entry
+    // instead of returning 404.
+    state.live_uploads.remove_target(&id);
+
     if !deleted {
         return Err(JuicehostError::NotFound);
     }
