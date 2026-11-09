@@ -69,7 +69,7 @@ supervisor's original environment).
 ## Policy on AI-Generated Code
 
 We allow the use of AI tools (like LLMs or coding agents) to write code **however** a qualified and skilled human developer must review and take full responsibility for it.
-That means ABSOLUTELY NO AI AGENTS ARE ALLOWED.
+That means ABSOLUTELY NO AUTONOMOUS AI AGENTS ARE ALLOWED.
 
 Write it yourself if you can please.. and AI-generated code WILL receive stricter reviews and takes longer to be merged.
 
