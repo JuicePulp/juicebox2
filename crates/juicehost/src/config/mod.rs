@@ -61,14 +61,17 @@ pub struct Config {
 
     pub frontend_url: Option<String>,
 
+    /// Blank means none was configured.
     pub api_key: String,
 
+    /// Only meaningful when no key is set.
     pub allow_no_auth: bool,
 
     pub allowed_origins: Vec<String>,
 
     pub danger_level: ProtectionLevel,
 
+    /// Peer networks trusted to supply forwarded client IPs; empty trusts none.
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
 
     pub s3_bucket: Option<String>,
@@ -123,8 +126,11 @@ pub struct Config {
 
     pub allowed_ttl_hours: Vec<f64>,
 
+    /// Upload-ticket signing key; loading fails closed when it cannot be
+    /// resolved.
     pub ticket_jwt_secret: String,
 
+    /// Mixed into hashed client IPs; empty disables it.
     pub ip_pepper: String,
 
     pub ban_list_file: Option<PathBuf>,
@@ -198,6 +204,7 @@ const fn default_public_port() -> u16 {
     PublicSettings::DEFAULT_PORT
 }
 
+/// Unspecified values fall back to the public listener.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QuicFile {
     pub host: Option<String>,
@@ -335,6 +342,7 @@ fn default_danger_level() -> String {
     String::from("high")
 }
 
+/// Credentials come only from environment variables.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct S3File {
     #[serde(default)]
@@ -350,6 +358,7 @@ pub struct S3File {
     pub allow_http: bool,
 }
 
+/// Credentials come only from environment variables.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct R2File {
     #[serde(default)]
@@ -366,6 +375,7 @@ fn default_r2_region() -> String {
     String::from("auto")
 }
 
+/// Caps expressed in GB, MB, and seconds before conversion.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LimitsFile {
     #[serde(default = "default_min_free_space_gb")]
@@ -468,6 +478,7 @@ pub struct FeaturesFile {
     #[serde(default = "default_file_cache_max_age")]
     pub file_cache_max_age_secs: u64,
 
+    /// Must be in `allowed_ttl_hours`.
     #[serde(default = "default_default_ttl")]
     pub default_ttl_hours: f64,
 
@@ -516,6 +527,8 @@ impl Default for BanFile {
     }
 }
 
+/// Searches `JUICEHOST_CONFIG`, the working directory, then `/etc/juicebox`;
+/// falls back to defaults.
 fn load_file_config() -> FileConfig {
     juiceutils::config::load_service_config(
         "juicehost",
@@ -529,6 +542,7 @@ impl Config {
         Self::try_load_from(&load_file_config())
     }
 
+    /// Ignores config files; uses defaults plus env overrides.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::try_load_from(&FileConfig::default())
     }

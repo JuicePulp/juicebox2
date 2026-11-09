@@ -2,6 +2,7 @@ use rusqlite::{Connection, Result, params};
 
 use super::types::FeedbackRecord;
 
+/// `reporter_ip` must already be encrypted; this layer does no IP handling.
 pub fn insert_feedback(
     conn: &Connection,
     message: &str,

@@ -8,6 +8,7 @@ use file::load_file_config;
 
 use crate::cobalt::CobaltEndpoint;
 
+/// Messages name the setting but never include secret values.
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error(transparent)]
@@ -22,6 +23,7 @@ pub enum ConfigError {
     PasswordTooLong { max_len: usize },
 }
 
+/// Secrets come from the environment, not TOML; `Debug` redacts them.
 #[derive(Clone)]
 pub struct Config {
     pub host: String,
@@ -46,6 +48,7 @@ pub struct Config {
 
     pub ip_encryption_key: String,
 
+    /// Empty means unsalted hashes.
     pub ip_pepper: String,
 
     pub storage_encryption_key: String,
@@ -70,6 +73,8 @@ pub struct Config {
 
     pub quic_cert_path: Option<PathBuf>,
 
+    /// Only these CIDRs' forwarded-for header is trusted; other clients use the
+    /// socket address.
     pub trusted_proxy_cidrs: Vec<juiceutils::proxy::IpCidr>,
     pub report_retention_days: u64,
     pub feedback_retention_days: u64,
@@ -114,6 +119,7 @@ pub struct Config {
     pub dte_mint_burst: u32,
     pub region_public_juicehosts: HashMap<String, String>,
 
+    /// Allows private/loopback fetches. SSRF hazard; local development only.
     pub allow_private_fetch: bool,
 
     pub r2_enabled: bool,
@@ -436,6 +442,7 @@ impl Config {
         let r2_max_promote_bytes =
             parse_env_u64("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
 
+        // One-minute floor so a misconfigured promoter cannot spin.
         let promo_interval_secs = file.promo.interval_secs.max(60);
         let promo_cool_after_secs = file.promo.cool_after_secs.max(60);
         let promo_min_views = file.promo.min_views;

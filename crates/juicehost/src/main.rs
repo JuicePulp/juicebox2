@@ -22,6 +22,7 @@ fn main() {
         Ok(config) => config,
         Err(error) => juiceutils::exit_on_config_error("juicehost", error),
     };
+    // the guard must live for the whole process; dropping it early stops reporting
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -118,6 +119,7 @@ fn main() {
         juicehost::handlers::stats::start_flusher(Arc::clone(&state));
         juicehost::handlers::audio_embed::spawn_pruner(Arc::clone(&state));
 
+        // without a pepper or a local file the ban list stays disabled, so skip the fetch
         if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {
             let ban_state = Arc::clone(&state);
             tokio::spawn(async move {
@@ -179,6 +181,7 @@ fn main() {
         }
     });
 
+    // bound the flush so a stuck Sentry transport cannot delay exit
     if let Some(client) = sentry::Hub::current().client() {
         client.close(Some(Duration::from_secs(2)));
     }

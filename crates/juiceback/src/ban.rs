@@ -19,6 +19,8 @@ use crate::{
 
 pub const STATUS_PATH: &str = "/api/ban-status";
 
+/// Bans are keyed by peppered hash, so changing the pepper invalidates all of
+/// them.
 pub fn check(state: &Arc<AppState>, raw_ip: &str) -> bool {
     state.is_banned(&hash_ip_for_ban(raw_ip, &state.config.ip_pepper))
 }

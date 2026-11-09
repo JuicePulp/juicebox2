@@ -155,6 +155,7 @@ pub struct GeoSettings {
 }
 
 impl Config {
+    /// Missing or invalid files fall back to defaults and are logged.
     #[must_use]
     pub fn load(path: &Path) -> Self {
         let Ok(text) = std::fs::read_to_string(path) else {
@@ -185,6 +186,7 @@ impl Config {
         self
     }
 
+    /// Falls back to `JUICEHOST_API_KEY` so a host install can share its key.
     #[must_use]
     pub fn api_key(&self) -> String {
         self.router

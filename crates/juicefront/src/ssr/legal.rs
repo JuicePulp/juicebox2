@@ -6,6 +6,8 @@ pub static TERMS_HTML: std::sync::LazyLock<String> =
 pub static PRIVACY_HTML: std::sync::LazyLock<String> =
     std::sync::LazyLock::new(|| render_txt_to_html(PRIVACY_TXT));
 
+/// Renders a Markdown subset; text is HTML-escaped before any markup is
+/// applied.
 pub fn render_txt_to_html(raw: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut in_list = false;
@@ -66,6 +68,7 @@ pub fn render_txt_to_html(raw: &str) -> String {
     out.join("\n")
 }
 
+// Levels are shifted down one because the page template supplies the h1.
 fn parse_heading(trimmed: &str) -> Option<String> {
     let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
     if !(1..=3).contains(&hashes) {
@@ -92,8 +95,9 @@ fn parse_item(trimmed: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+// Escape before inserting tags so document text cannot inject markup.
 fn inline(text: &str) -> String {
-    let escaped = crate::i18n::escape_html(text);
+    let escaped = juiceutils::text::escape_html(text);
     apply_markup(&escaped, "**", "strong", "em")
 }
 

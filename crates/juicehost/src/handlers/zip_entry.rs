@@ -18,8 +18,12 @@ use crate::{
     storage::{self, valid_component},
 };
 
+/// Cap on both compressed and decompressed entry size, guarding against zip
+/// bombs.
 const MAX_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 
+/// Rejects absolute paths, `..`, backslashes, and control characters so names
+/// cannot escape.
 fn valid_entry_path(path: &str) -> bool {
     if path.is_empty() || path.len() > 1024 || path.starts_with('/') || path.contains('\\') {
         return false;
@@ -33,6 +37,7 @@ fn valid_entry_path(path: &str) -> bool {
     !path.chars().any(|c| c.is_control())
 }
 
+/// Inflates deflate data, aborting once the output exceeds the entry cap.
 fn inflate_deflated(data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
     let decoder = flate2::read::DeflateDecoder::new(data);
@@ -48,6 +53,9 @@ fn inflate_deflated(data: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Serves `?path=` from the ZIP at `id` via the central directory; only
+/// stored/deflated entries, and protected files are refused so the shell cannot
+/// be bypassed.
 #[tracing::instrument(skip_all)]
 pub async fn zip_entry_file(
     State(state): State<Arc<AppState>>,
@@ -139,7 +147,7 @@ fn file_response(entry_path: &str, bytes: Bytes) -> Result<Response<Body>, Juice
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, bytes.len())
-        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CACHE_CONTROL, super::common::NO_STORE)
         .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads")
         .body(Body::from(bytes))
         .map_err(|_| JuicehostError::Internal)

@@ -414,11 +414,76 @@ fn test_renew_file_id() {
         None,
     );
     insert_file(&conn, &record).unwrap();
-    assert!(renew_file_id(&conn, "old_id", "new_id", "remote-new_id").unwrap());
+    assert!(renew_file_id(&conn, "old_id", "new_id", "remote-new_id", None).unwrap());
     assert!(get_file(&conn, "old_id").unwrap().is_none());
     let renewed = get_file(&conn, "new_id").unwrap().unwrap();
     assert_eq!(renewed.delete_token, "tok");
     assert_eq!(renewed.storage_path, "remote-new_id");
+    assert_eq!(renewed.filename, "f.txt");
+}
+
+#[test]
+fn test_renew_file_id_can_rename_file() {
+    let conn = setup_db();
+    let record = FileRecord::new(
+        "old_id".into(),
+        "f.txt".into(),
+        "text/plain".into(),
+        10,
+        "tok".into(),
+        100,
+        200,
+        None,
+        None,
+    );
+    insert_file(&conn, &record).unwrap();
+    assert!(
+        renew_file_id(
+            &conn,
+            "old_id",
+            "new_id",
+            "remote-new_id",
+            Some("renamed.txt")
+        )
+        .unwrap()
+    );
+    let renewed = get_file(&conn, "new_id").unwrap().unwrap();
+    assert_eq!(renewed.filename, "renamed.txt");
+}
+
+#[test]
+fn test_set_filename_updates_file_and_client_copy() {
+    let conn = setup_db();
+    let record = FileRecord::new(
+        "file_id".into(),
+        "f.txt".into(),
+        "text/plain".into(),
+        10,
+        "tok".into(),
+        100,
+        200,
+        None,
+        None,
+    );
+    insert_file(&conn, &record).unwrap();
+    let rec = ClientFileRecord {
+        id: "file_id".into(),
+        token: "tok".into(),
+        n: "f.txt".into(),
+        m: "text/plain".into(),
+        s: 10,
+        u: 100,
+        e: 200,
+    };
+    replace_client_files(&conn, "client-1", &[rec]).unwrap();
+
+    assert!(set_filename(&conn, "file_id", "g.txt").unwrap());
+    assert_eq!(
+        get_file(&conn, "file_id").unwrap().unwrap().filename,
+        "g.txt"
+    );
+    let files = list_client_files(&conn, "client-1").unwrap();
+    assert_eq!(files[0].n, "g.txt");
 }
 
 #[test]
@@ -744,6 +809,29 @@ fn test_update_client_file_id_swaps_key() {
 }
 
 #[test]
+fn test_update_client_file_id_renames_filename() {
+    let conn = setup_db();
+    let rec = ClientFileRecord {
+        id: "old_id".into(),
+        token: "tok".into(),
+        n: "f.txt".into(),
+        m: "text/plain".into(),
+        s: 10,
+        u: 100,
+        e: 200,
+    };
+    replace_client_files(&conn, "client-1", &[rec]).unwrap();
+    let tx = conn.unchecked_transaction().unwrap();
+    assert!(
+        update_client_file_id_in_tx(&tx, "client-1", "old_id", "new_id", Some("g.txt")).unwrap()
+    );
+    tx.commit().unwrap();
+    let files = list_client_files(&conn, "client-1").unwrap();
+    assert_eq!(files[0].id, "new_id");
+    assert_eq!(files[0].n, "g.txt");
+}
+
+#[test]
 fn test_update_client_file_id_clears_new_id_clash() {
     let conn = setup_db();
     let recs = vec![
@@ -942,7 +1030,7 @@ fn renew_ids_are_atomic_in_transaction() {
     conn.unchecked_transaction()
         .map(|tx| {
             insert_alias(&tx, "old", "new").unwrap();
-            assert!(renew_file_id(&tx, "old", "new", "remote-new").unwrap());
+            assert!(renew_file_id(&tx, "old", "new", "remote-new", None).unwrap());
             tx.commit().unwrap();
         })
         .unwrap();

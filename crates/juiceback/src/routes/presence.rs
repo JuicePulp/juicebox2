@@ -26,6 +26,7 @@ use crate::{
     utils::ClientIp,
 };
 
+/// Drop-based because the stream can abort at any await point.
 struct PresenceIpGuard {
     state: Arc<AppState>,
     ip: std::net::IpAddr,
@@ -65,6 +66,7 @@ pub struct PresenceDevice {
     pub device_name: String,
 }
 
+/// A contended mutex omits the device rather than blocking the caller.
 fn snapshot_device_list(state: &AppState, user_id: &str) -> Vec<PresenceDevice> {
     let guard = state.connected_devices.get(user_id);
     guard
@@ -82,6 +84,7 @@ fn snapshot_device_list(state: &AppState, user_id: &str) -> Vec<PresenceDevice> 
         .unwrap_or_default()
 }
 
+/// The live socket re-checks pairing, so unpairing closes it.
 pub async fn device_ws_handler(
     State(state): State<Arc<AppState>>,
     DeviceAuth(claims): DeviceAuth,
@@ -186,6 +189,7 @@ async fn handle_device_socket(
     let mut last_heartbeat = Instant::now();
     let stale_threshold = Duration::from_secs(90);
 
+    // Throttled so heartbeats do not write to SQLite on every message.
     let mut last_seen_write = Instant::now();
 
     loop {
@@ -252,6 +256,7 @@ async fn handle_device_socket(
                 }
             }
 
+            // Periodic so a revoked device or expired token closes even while idle.
             _ = tokio::time::sleep(Duration::from_secs(10)) => {
                 let did = device_id.clone();
                 let uid = user_id.clone();
@@ -326,6 +331,7 @@ pub async fn device_status_handler(
     ),
     tag = "Devices",
 )]
+/// Capped globally and at 8 per IP; the first event is the device list.
 pub async fn presence_sse_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -350,6 +356,7 @@ pub async fn presence_sse_handler(
         ip: client_ip.0,
         user_id: user_id.clone(),
     };
+    // Capacity 64; a receiver further behind ends its stream.
     let tx = state
         .presence_listeners
         .entry(user_id.clone())
@@ -415,6 +422,7 @@ pub async fn presence_sse_handler(
     ),
     tag = "Devices",
 )]
+/// No connected devices returns `ok: false` rather than an error.
 pub async fn ping_device_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,

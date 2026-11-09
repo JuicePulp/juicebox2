@@ -55,6 +55,8 @@ pub struct DirectUploadCompleteRequest {
     pub ticket: String,
 }
 
+/// Zero or over-limit `file_size` is rejected up front; protected uploads must
+/// use the relay path.
 #[utoipa::path(
     post,
     path = "/upload/direct/reserve",
@@ -205,6 +207,8 @@ pub async fn direct_upload_reserve_handler(
     }))
 }
 
+/// The ticket must match the file and session; a missing file or wrong size
+/// fails.
 #[utoipa::path(
     post,
     path = "/upload/direct/complete",

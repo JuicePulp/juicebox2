@@ -1,10 +1,12 @@
 use crate::config::{ConfigError, S3File};
 
+/// A bucket must be present to select S3 mode.
 #[derive(Debug)]
 pub struct S3Settings {
     bucket: Option<String>,
     region: Option<String>,
     endpoint: Option<String>,
+    /// Needed only for local S3 emulators.
     allow_http: bool,
     access_key: Option<String>,
     secret_key: Option<String>,
@@ -43,6 +45,7 @@ impl S3Settings {
 }
 
 impl S3Settings {
+    /// Credentials come from `S3_ACCESS_KEY` and `S3_SECRET_KEY`.
     pub fn load(file: &S3File) -> Result<Self, ConfigError> {
         let bucket = file.bucket.clone();
         let region = file.region.clone();

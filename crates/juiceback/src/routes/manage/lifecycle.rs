@@ -7,6 +7,8 @@ use crate::{db, error::AppError, state::AppState};
 
 const DELETE_PARALLELISM: usize = 20;
 
+/// Host first, then the row; `false` means the host delete succeeded but the
+/// row was already gone.
 pub async fn delete_file_everywhere(
     state: &Arc<AppState>,
     record: &db::FileRecord,
@@ -37,6 +39,7 @@ pub async fn delete_file_everywhere(
     Ok(deleted)
 }
 
+/// Bounded parallelism; host failures skip their row for later cleanup.
 pub async fn delete_files_everywhere(
     state: &Arc<AppState>,
     records: Vec<db::FileRecord>,
@@ -131,6 +134,7 @@ async fn remove_client_files(state: &Arc<AppState>, ids: &[String]) -> Result<us
 pub async fn pick_new_id(
     state: &Arc<AppState>,
     custom_raw: &str,
+    current_id: &str,
 ) -> Result<(String, bool), AppError> {
     if custom_raw.is_empty() {
         return Ok((nanoid::nanoid!(8), false));
@@ -142,6 +146,9 @@ pub async fn pick_new_id(
             crate::constants::MIN_CUSTOM_ID_LEN,
             crate::constants::MAX_CUSTOM_ID_LEN,
         )));
+    }
+    if normalized == current_id {
+        return Ok((normalized, true));
     }
     let probe = normalized.clone();
     let exists = state
@@ -158,6 +165,7 @@ pub async fn swap_ids_transactional(
     user_id: &str,
     old_id: &str,
     new_id: &str,
+    new_filename: Option<String>,
 ) -> Result<bool, AppError> {
     let alias_old = old_id.to_string();
     let alias_new = new_id.to_string();
@@ -170,8 +178,20 @@ pub async fn swap_ids_transactional(
     state
         .db_transaction("renew_file_ids", move |tx| {
             let _ = db::insert_alias(tx, &alias_old, &alias_new);
-            let updated = db::renew_file_id(tx, &old_id, &new_id2, &storage_path)?;
-            db::update_client_file_id_in_tx(tx, &owner, &old_owned_id, &new_owned_id)?;
+            let updated = db::renew_file_id(
+                tx,
+                &old_id,
+                &new_id2,
+                &storage_path,
+                new_filename.as_deref(),
+            )?;
+            db::update_client_file_id_in_tx(
+                tx,
+                &owner,
+                &old_owned_id,
+                &new_owned_id,
+                new_filename.as_deref(),
+            )?;
             Ok(updated)
         })
         .await
@@ -183,6 +203,7 @@ pub async fn rename_on_host_with_rollback(
     new_id: &str,
     host: Option<&str>,
     capability: &str,
+    old_filename: &str,
 ) -> Result<(), AppError> {
     if let Err(e) = crate::storage_client::rename_file_on_juicehost(
         state,
@@ -194,20 +215,28 @@ pub async fn rename_on_host_with_rollback(
     .await
     {
         tracing::error!("lifecycle: storage-host rename failed for id={old_id}, rolling back: {e}");
-        rollback_swap(state, new_id, old_id).await;
+        rollback_swap(state, new_id, old_id, old_filename).await;
         return Err(AppError::JuicehostRejected(e));
     }
     Ok(())
 }
 
-async fn rollback_swap(state: &Arc<AppState>, old_id: &str, new_id: &str) {
-    let old_id = old_id.to_string();
-    let new_id = new_id.to_string();
-    let alias_id = new_id.clone();
-    let storage_path = format!("remote-{new_id}");
+/// Best-effort inverse; errors are ignored because the caller is already
+/// reporting a failure.
+async fn rollback_swap(
+    state: &Arc<AppState>,
+    current_id: &str,
+    restore_id: &str,
+    restore_filename: &str,
+) {
+    let current = current_id.to_string();
+    let restore = restore_id.to_string();
+    let alias_id = restore.clone();
+    let storage_path = format!("remote-{restore}");
+    let filename = restore_filename.to_string();
     let _ = state
         .db_call("renew_file_id_rollback", move |db| {
-            db::renew_file_id(db, &old_id, &new_id, &storage_path)
+            db::renew_file_id(db, &current, &restore, &storage_path, Some(&filename))
         })
         .await;
 

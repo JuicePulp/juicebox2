@@ -16,6 +16,7 @@ document.documentElement.classList.add("js");
     if (!supportsModules)
       showFallback();
     else
+      // the module bundle sets data-upload-ready; assume it failed if it has not after 2s
       setTimeout(showFallback, 2000);
   }
   if (document.readyState === "loading")
@@ -68,6 +69,7 @@ try {
       sessionStorage.setItem(COUNT_KEY, JSON.stringify(list));
     } catch {}
   }
+  // cap reloads at 5 per minute so a dev-server crash loop cannot spin the tab
   function scheduleReconnect() {
     if (reloads().length >= 5) return;
     var delay = retryMs;

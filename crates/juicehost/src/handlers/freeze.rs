@@ -34,6 +34,8 @@ fn freeze_auth(headers: &HeaderMap, api_key: &str) -> Result<Option<String>, Jui
     ),
     tag = "Internal",
 )]
+/// Freezing also removes the R2 hot copy; a failed demote only logs because the
+/// freeze committed.
 pub async fn freeze_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -77,6 +79,8 @@ pub async fn freeze_file(
     ),
     tag = "Internal",
 )]
+/// Lifts the freeze; hot-tier status is not restored and requires a separate
+/// promote.
 pub async fn unfreeze_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

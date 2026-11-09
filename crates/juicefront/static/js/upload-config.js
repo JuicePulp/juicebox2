@@ -1,4 +1,6 @@
+/** Empty means same-origin; the page and worker share this base. */
 export const UPLOAD_URL = "";
+/** Server cap in bytes; the 500 MB fallback matches a stock juicehost when the DOM is unavailable. */
 export function readMaxFileSize() {
   if (typeof document === "undefined")
     return 524288000;
@@ -7,6 +9,7 @@ export function readMaxFileSize() {
   const n = val ? Number(val) : NaN;
   return Number.isFinite(n) && n > 0 ? n : 524288000;
 }
+/** Allowed TTL values in hours; the fallback list mirrors juicehost defaults for the worker. */
 export function readAllowedTtlHours() {
   if (typeof document === "undefined")
     return [0.5, 1, 6, 12, 24, 72, 168];
@@ -30,6 +33,7 @@ export function readDefaultTtlHours() {
   return Number.isFinite(n) && n > 0 ? n : 24;
 }
 let uploadModeHint = "";
+/** The worker has no DOM, so it receives the page's mode through this hint. */
 export function setUploadModeHint(mode) {
   if (typeof mode === "string" && mode)
     uploadModeHint = mode;
@@ -41,6 +45,7 @@ export function readUploadMode() {
     return "standard";
   return document.getElementById("server-config")?.getAttribute("data-upload-mode") || "standard";
 }
+/** `direct-prefer` returns only direct variants: stream for slow links, parallel for large files, ticket otherwise. */
 export function uploadMethodFor(mode, size, lastBps) {
   if (mode === "direct-prefer") {
     if (preferStream(mode, size, lastBps))
@@ -71,6 +76,7 @@ export function readSafeUploadEnabled() {
     return false;
   }
 }
+// Thresholds and chunk sizes in bytes; the `*_SECS` values are tuning targets, not timeouts.
 export const TUS_THRESHOLD = 30 * 1024 * 1024;
 export const TUS_START_CHUNK = 16 * 1024 * 1024;
 export const TUS_MIN_CHUNK = 8 * 1024 * 1024;
@@ -85,6 +91,15 @@ export const TUNER_INTERVAL_MS = 1200;
 export const INITIAL_WORKERS = 2;
 export const MAX_PART_RUNS = 2;
 export const DIRECT_COMPLETE_TIMEOUT_MS = 5 * 60 * 1000;
+/** Last learned throughput in bytes/sec; zero when unknown. */
+export function lastUploadBps() {
+  try {
+    const stored = Number(localStorage.getItem(LAST_SPEED_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : 0;
+  } catch {
+    return 0;
+  }
+}
 export function streamsForRate(bytesPerSec) {
   const mbps = bytesPerSec * 8 / 1e6;
   if (mbps < 10)
@@ -95,6 +110,7 @@ export function streamsForRate(bytesPerSec) {
     return 7;
   return PARALLEL_STREAMS;
 }
+/** Best-effort network class from the Network Information API; unknown counts as wifi. */
 export function detectNetTier() {
   try {
     const c = navigator.connection;

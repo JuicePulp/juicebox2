@@ -1,12 +1,14 @@
 import { iconHTML } from "./copy.js?v=2.2.0";
 import { announce } from "./util.js";
 
+// The qrcode module is loaded only when a QR is opened to keep first paint light.
 async function qrFactory() {
   const mod = await import("./vendor/qrcode.mjs");
   return mod.default ?? mod.qrcode ?? globalThis.qrcode;
 }
 
 export const QR_CANVAS_SIZE = 512;
+// Safe only because `qrMatrix` uses error correction H; the logo covers real modules.
 const LOGO_RATIO = 0.25;
 const LOGO_SRC = "/static/assets/logo_big.png";
 
@@ -19,6 +21,7 @@ function qrContext(canvas) {
   return canvas.getContext("2d");
 }
 
+// Wake lock stops a phone dimming mid-scan; browsers drop it when hidden, so re-request it.
 let wakeLock = null;
 async function holdFullBrightness() {
   if (wakeLock) return;
@@ -38,6 +41,7 @@ function releaseFullBrightness() {
   wakeLock = null;
 }
 
+/** Drops the scheme and file extension so the code needs fewer modules and scans farther; the scheme is assumed on decode. */
 export function compactQrPayload(url) {
   const trimmed = String(url || "").trim();
   try {
@@ -68,6 +72,7 @@ export async function qrMatrix(text) {
 }
 
 function paintModules(ctx, matrix, size) {
+  // The QR spec requires a 4-module quiet zone; scanners reject codes without it.
   const quiet = 4;
   const total = matrix.count + quiet * 2;
   const cell = size / total;
@@ -148,6 +153,7 @@ export function qrFilenameForUrl(url) {
   return fallback ? `juicebox-${fallback}.png` : "juicebox-qr.png";
 }
 
+/** Downloads the canvas as a PNG; the blob URL lives long enough for the navigation to start. */
 export function downloadQrCanvas(canvas, url) {
   canvas.toBlob((blob) => {
     if (!blob) return;
@@ -262,6 +268,7 @@ export function closeQrModal() {
   lastFocused = null;
 }
 
+/** Opens the modal for `url`; `labels` supplies localized text. Rendering is fire-and-forget. */
 export function openQrModal(url, labels) {
   if (!url) return;
   labels = labels || {};

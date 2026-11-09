@@ -16,6 +16,7 @@ function iconStore() {
   return iconCache;
 }
 
+/** Inlines an SVG from the `#jb-icons` sprite; ids get a per-call suffix so copies cannot share gradients. */
 export function iconHTML(name, size, className) {
   var raw = iconStore()[name] || "";
   if (!raw) return "";
@@ -66,6 +67,7 @@ var VANITY_KEYS = {
   UNKNOWN: "error.unknown",
 };
 
+/** A raw server message wins; otherwise the code is mapped to a translated string. */
 export function vanityMsg(locale, errorCode, rawMessage) {
   if (rawMessage) return rawMessage;
   if (errorCode && VANITY_KEYS[errorCode]) return t(locale, VANITY_KEYS[errorCode]);
@@ -182,6 +184,7 @@ export function updateUrlVariants(group, variants) {
   return group;
 }
 
+/** Idempotent: updates an existing sibling group instead of adding a second one. */
 export function attachUrlVariantsAfter(anchor, variants, labels) {
   if (!anchor || !anchor.parentElement || !variants) return null;
   var existing = anchor.parentElement.querySelector(":scope > [data-url-variants]");
@@ -201,6 +204,7 @@ if (typeof document !== "undefined") {
   });
 }
 
+/** A rejected clipboard write is dropped silently: no fallback path and no error UI. */
 export function makeCopyBar(url, strings) {
   strings = strings || {};
   var btn = document.createElement("button");
@@ -233,6 +237,7 @@ export function makeCopyBar(url, strings) {
 
 var confirmTimers = new WeakMap();
 
+/** `immediate` or shift-click deletes without confirming; otherwise the first click arms the button for 10 seconds. */
 export function createDeleteButton(opts) {
   var btn = document.createElement("button");
   btn.type = "button";

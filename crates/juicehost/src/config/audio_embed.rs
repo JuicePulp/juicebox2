@@ -9,6 +9,7 @@ pub struct AudioEmbedFile {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
+    /// Caps clip length in seconds; 0 renders the full source.
     #[serde(default = "default_max_seconds")]
     pub max_seconds: u64,
 
@@ -21,9 +22,11 @@ pub struct AudioEmbedFile {
     #[serde(default = "default_cache_max_mb")]
     pub cache_max_mb: u64,
 
+    /// Must be even.
     #[serde(default = "default_width")]
     pub width: u32,
 
+    /// Must be even.
     #[serde(default = "default_height")]
     pub height: u32,
 

@@ -50,6 +50,8 @@ pub async fn favicon() -> Response {
     ),
     tag = "General",
 )]
+/// Liveness only: probes no storage or backend; capacity lives at
+/// `/api/storage`.
 pub async fn health() -> Response {
     let body = serde_json::json!({
         "status": "ok",
@@ -73,6 +75,8 @@ pub async fn health() -> Response {
     ),
     tag = "General",
 )]
+/// Uses proxy headers only when the peer is a trusted proxy, so forwarded
+/// values cannot be spoofed.
 pub async fn ip_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -134,6 +138,8 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
     ),
     tag = "Internal",
 )]
+/// Never 404s for a well-formed id; `exists: false` and `frozen: true` are
+/// distinct.
 #[tracing::instrument(skip_all)]
 pub async fn stat_file(
     State(state): State<Arc<AppState>>,
@@ -179,6 +185,7 @@ pub async fn stat_file(
     tag = "Internal",
 )]
 #[tracing::instrument(skip_all)]
+/// Returns the stored ciphertext verbatim; decryption happens at the caller.
 pub async fn ciphertext_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -221,12 +228,16 @@ pub(crate) async fn serve_stored_bytes(
         _ => JuicehostError::Internal,
     })?;
     let total_size = meta.size;
+    // cloned into the stream so the download slot is held until the last chunk is
+    // sent
     let permit = std::sync::Arc::new(
         Arc::clone(&state.download_semaphore)
             .try_acquire_owned()
             .map_err(|_| JuicehostError::ServiceUnavailable)?,
     );
 
+    // only objects the backend recorded as hot copies under `hot/` may be read from
+    // R2
     if let BackendStatus::Known(body) = &status
         && body.get("tier").and_then(|v| v.as_str()) == Some("hot")
         && let Some(key) = body.get("r2_key").and_then(|v| v.as_str())
@@ -248,7 +259,7 @@ pub(crate) async fn serve_stored_bytes(
                                 format!("bytes {start}-{end}/{total_size}"),
                             )
                             .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                            .header(axum::http::header::CACHE_CONTROL, "no-store")
+                            .header(axum::http::header::CACHE_CONTROL, super::common::NO_STORE)
                             .body(Body::from_stream(stream.map(move |item| {
                                 let _permit = std::sync::Arc::clone(&permit);
                                 item.map_err(|_| {
@@ -280,7 +291,7 @@ pub(crate) async fn serve_stored_bytes(
                 .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
                 .header(axum::http::header::CONTENT_LENGTH, total_size)
                 .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                .header(axum::http::header::CACHE_CONTROL, "no-store")
+                .header(axum::http::header::CACHE_CONTROL, super::common::NO_STORE)
                 .body(Body::from_stream(stream.map(move |item| {
                     let _permit = std::sync::Arc::clone(&permit);
                     item.map_err(|_| {
@@ -312,7 +323,7 @@ pub(crate) async fn serve_stored_bytes(
                         format!("bytes {start}-{end}/{total_size}"),
                     )
                     .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                    .header(axum::http::header::CACHE_CONTROL, "no-store")
+                    .header(axum::http::header::CACHE_CONTROL, super::common::NO_STORE)
                     .body(Body::from_stream(stream.map(move |item| {
                         let _permit = std::sync::Arc::clone(&permit);
                         item.map_err(|_| {
@@ -345,7 +356,7 @@ pub(crate) async fn serve_stored_bytes(
         .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
         .header(axum::http::header::CONTENT_LENGTH, total_size)
         .header(axum::http::header::ACCEPT_RANGES, "bytes")
-        .header(axum::http::header::CACHE_CONTROL, "no-store")
+        .header(axum::http::header::CACHE_CONTROL, super::common::NO_STORE)
         .body(Body::from_stream(stream.map(move |item| {
             let _permit = std::sync::Arc::clone(&permit);
             item.map_err(|_| axum::Error::new(std::io::Error::other("ciphertext stream failed")))

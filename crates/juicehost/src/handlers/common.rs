@@ -1,26 +1,35 @@
 use axum::{
     body::Body,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
+    response::Response,
 };
 use futures::StreamExt;
 
 use crate::{error::JuicehostError, state::AppState};
 
+pub(crate) const NO_STORE: &str = "no-store";
+
+const FILE_STATUS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+const FILE_STATUS_CACHE_MAX_ENTRIES: usize = 8_192;
+
 #[must_use]
 pub(crate) fn optional_file_capability(headers: &HeaderMap) -> Option<String> {
     headers
-        .get("x-juicehost-file-capability")
+        .get(juiceproto::headers::FILE_CAPABILITY)
         .and_then(|v| v.to_str().ok())
         .filter(|v| !v.is_empty())
         .map(str::to_string)
 }
 
+/// `Ok(None)` for a matching API key (list-wide access); otherwise a capability
+/// scopes the caller to one file. An empty configured key disables key auth,
+/// leaving capabilities as the only way in.
 pub(crate) fn required_file_capability(
     headers: &HeaderMap,
     api_key: &str,
 ) -> Result<Option<String>, JuicehostError> {
     let has_api_key = headers
-        .get("x-juicehost-api-key")
+        .get(juiceproto::headers::HOST_API_KEY)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|provided| juiceutils::constant_time_eq(api_key, provided));
     if !api_key.is_empty() && has_api_key {
@@ -36,7 +45,7 @@ pub(crate) fn backend_request(state: &AppState, url: String) -> reqwest::Request
     if state.api_key.is_empty() {
         request
     } else {
-        request.header("x-juicehost-api-key", &state.api_key)
+        request.header(juiceproto::headers::HOST_API_KEY, &state.api_key)
     }
 }
 
@@ -83,11 +92,27 @@ pub(crate) enum BackendStatus {
     Unavailable,
 }
 
+impl BackendStatus {
+    pub(crate) fn into_known(self) -> Option<serde_json::Value> {
+        match self {
+            Self::Known(body) => Some(body),
+            _ => None,
+        }
+    }
+}
+
+/// Successful status bodies are cached five seconds; the cache is pruned on
+/// overflow, then cleared.
 pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
+    if let Some(entry) = state.file_status_cache.get(id)
+        && entry.0.elapsed() < FILE_STATUS_CACHE_TTL
+    {
+        return BackendStatus::Known(entry.1.clone());
+    }
     let Some(backend_url) = state.backend_url.as_ref() else {
         return BackendStatus::Unavailable;
     };
-    let status_url = format!("{backend_url}/internal/file/{id}/status");
+    let status_url = juiceproto::config::file_status_url(backend_url, id);
     let Ok(resp) = backend_request(state, status_url).send().await else {
         return BackendStatus::Unavailable;
     };
@@ -98,11 +123,50 @@ pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendSt
         return BackendStatus::Unavailable;
     }
     match resp.json::<serde_json::Value>().await {
-        Ok(body) => BackendStatus::Known(body),
+        Ok(body) => {
+            if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
+                state
+                    .file_status_cache
+                    .retain(|_, (at, _)| at.elapsed() < FILE_STATUS_CACHE_TTL);
+                if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
+                    state.file_status_cache.clear();
+                }
+            }
+            state
+                .file_status_cache
+                .insert(id.to_owned(), (std::time::Instant::now(), body.clone()));
+            BackendStatus::Known(body)
+        }
         Err(_) => BackendStatus::Unavailable,
     }
 }
 
+pub(crate) fn file_cache_control_value(
+    state: &AppState,
+    ttl_remaining_secs: Option<u64>,
+) -> String {
+    if !state.file_cache_enabled {
+        return NO_STORE.to_string();
+    }
+    match ttl_remaining_secs {
+        Some(secs) if secs > 5 => {
+            let age = secs.saturating_sub(5).min(state.file_cache_max_age_secs);
+            format!("public, max-age={age}, s-maxage={age}, immutable")
+        }
+        _ => NO_STORE.to_string(),
+    }
+}
+
+pub(crate) fn prevent_file_caching(mut response: Response<Body>) -> Response<Body> {
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static(NO_STORE),
+    );
+    response
+}
+
+/// `Ignore` means send the full body; `Unsatisfiable` is valid but outside the
+/// file and must map to 416.
 #[derive(Debug, PartialEq)]
 pub(crate) enum RangeResult {
     Satisfiable(u64, u64),
@@ -112,6 +176,8 @@ pub(crate) enum RangeResult {
     Ignore,
 }
 
+/// Parses a single `bytes=` range, clamping to `max_len` and the file size;
+/// multi-range is ignored.
 #[must_use]
 pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> RangeResult {
     let range_val = range_val.trim();

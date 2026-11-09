@@ -10,6 +10,7 @@ use utoipa::OpenApi;
 
 use crate::{auth::InternalApiKey, error::AppError, routes::api_doc::ApiDoc, state::AppState};
 
+/// Liveness only: always `ok`, without touching the database or juicehost.
 #[utoipa::path(
     get,
     path = "/api/health",
@@ -25,6 +26,7 @@ pub async fn health_handler() -> Json<serde_json::Value> {
     }))
 }
 
+/// Returns a degraded payload when no cached config can be obtained.
 #[utoipa::path(
     get,
     path = "/api/config",
@@ -105,6 +107,7 @@ pub async fn ip_handler(
     }))
 }
 
+/// Always 200 with `banned`, `valid`, or `error`; the ban check runs first.
 #[utoipa::path(
     post,
     path = "/api/validate-host",
@@ -217,6 +220,7 @@ pub async fn validate_host_handler(
     })))
 }
 
+/// Database errors are treated as no announcement.
 #[utoipa::path(
     get,
     path = "/api/announcement",
@@ -244,6 +248,7 @@ pub async fn announcement_handler(State(state): State<Arc<AppState>>) -> Json<se
     }
 }
 
+/// Hashes the supplied IP and reports only its ban state.
 #[utoipa::path(
     get,
     path = "/api/ban-status",
@@ -285,6 +290,7 @@ pub async fn ban_status_handler(
     }
 }
 
+/// Internal API key required; the pepper and full hash list are sensitive.
 #[utoipa::path(
     get,
     path = "/internal/ban-snapshot",

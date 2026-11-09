@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, Result, params};
 
 use super::{common::sort_direction, types::HosterRecord};
 
+/// Records a health check; `first_seen_at` is preserved.
 pub fn upsert_hoster(conn: &Connection, host: &str, status: &str, error: &str) -> Result<()> {
     conn.execute(
         "INSERT INTO hosters (host, first_seen_at, last_seen_at, last_status, last_error)

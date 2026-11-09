@@ -1,59 +1,80 @@
 use std::{collections::HashMap, sync::LazyLock};
 
-pub const LOCALES: &[(&str, &str)] = &[
-    ("en", "English"),
-    ("fr", "Français"),
-    ("ru", "Русский"),
-    ("es", "Español"),
-    ("ja", "日本語"),
+#[derive(Clone, Copy)]
+pub struct Locale {
+    pub code: &'static str,
+    pub name: &'static str,
+    /// Empty for the default locale.
+    prefix: &'static str,
+    bundle: &'static str,
+}
+
+pub const LOCALES: &[Locale] = &[
+    Locale {
+        code: "en",
+        name: "English",
+        prefix: "",
+        bundle: include_str!("../i18n/en.json"),
+    },
+    Locale {
+        code: "fr",
+        name: "Français",
+        prefix: "/fr",
+        bundle: include_str!("../i18n/fr.json"),
+    },
+    Locale {
+        code: "ru",
+        name: "Русский",
+        prefix: "/ru",
+        bundle: include_str!("../i18n/ru.json"),
+    },
+    Locale {
+        code: "es",
+        name: "Español",
+        prefix: "/es",
+        bundle: include_str!("../i18n/es.json"),
+    },
+    Locale {
+        code: "ja",
+        name: "日本語",
+        prefix: "/ja",
+        bundle: include_str!("../i18n/ja.json"),
+    },
 ];
 
+/// Used when no prefix matches and for missing translations.
 pub const DEFAULT_LOCALE: &str = "en";
 
-pub const LOCALE_PREFIXES: &[&str] = &["fr", "ru", "es", "ja"];
+fn find(code: &str) -> Option<&'static Locale> {
+    LOCALES.iter().find(|locale| locale.code == code)
+}
 
 pub fn is_valid_locale(code: &str) -> bool {
-    LOCALES.iter().any(|(c, _)| *c == code)
+    find(code).is_some()
 }
 
-fn locale_static(code: &str) -> &'static str {
-    match code {
-        "fr" => "fr",
-        "ru" => "ru",
-        "es" => "es",
-        "ja" => "ja",
-        _ => "en",
-    }
-}
-
-pub fn locale_prefix(locale: &str) -> &str {
-    if locale == DEFAULT_LOCALE {
-        ""
-    } else {
-        match locale {
-            "fr" => "/fr",
-            "ru" => "/ru",
-            "es" => "/es",
-            "ja" => "/ja",
-            _ => "",
-        }
-    }
+pub fn locale_prefix(locale: &str) -> &'static str {
+    find(locale).map_or("", |locale| locale.prefix)
 }
 
 pub fn lp(locale: &str, path: &str) -> String {
     format!("{}{path}", locale_prefix(locale))
 }
 
+/// Unknown prefixes pass through unchanged as English.
 pub fn split_locale(path: &str) -> (&'static str, String) {
-    for prefix in LOCALE_PREFIXES {
-        if path == format!("/{prefix}") {
-            return (locale_static(prefix), "/".to_owned());
+    for locale in LOCALES.iter().filter(|locale| !locale.prefix.is_empty()) {
+        if path == locale.prefix {
+            return (locale.code, "/".to_owned());
         }
-        if let Some(rest) = path.strip_prefix(&format!("/{prefix}/")) {
-            return (locale_static(prefix), format!("/{rest}"));
+        if let Some(rest) = path
+            .strip_prefix(locale.prefix)
+            .and_then(|p| p.strip_prefix('/'))
+        {
+            return (locale.code, format!("/{rest}"));
         }
     }
-    ("en", path.to_owned())
+    (DEFAULT_LOCALE, path.to_owned())
 }
 
 struct Bundles {
@@ -62,14 +83,9 @@ struct Bundles {
 
 static BUNDLES: LazyLock<Bundles> = LazyLock::new(|| {
     let mut maps = HashMap::new();
-    for (code, text) in [
-        ("en", include_str!("../i18n/en.json")),
-        ("fr", include_str!("../i18n/fr.json")),
-        ("ru", include_str!("../i18n/ru.json")),
-        ("es", include_str!("../i18n/es.json")),
-        ("ja", include_str!("../i18n/ja.json")),
-    ] {
-        let parsed: serde_json::Value = serde_json::from_str(text).expect("i18n JSON must parse");
+    for locale in LOCALES {
+        let parsed: serde_json::Value =
+            serde_json::from_str(locale.bundle).expect("i18n JSON must parse");
         let dict = parsed
             .get("dict")
             .and_then(|dict| dict.as_object())
@@ -81,11 +97,12 @@ static BUNDLES: LazyLock<Bundles> = LazyLock::new(|| {
                     .collect()
             })
             .unwrap_or_default();
-        maps.insert(code.to_owned(), dict);
+        maps.insert(locale.code.to_owned(), dict);
     }
     Bundles { maps }
 });
 
+/// Falls back to English; a missing key is returned verbatim.
 pub fn t(locale: &str, key: &str) -> String {
     lookup(locale, key).unwrap_or_else(|| key.to_owned())
 }
@@ -110,6 +127,7 @@ pub fn interpolate(template: &str, params: &[(&str, &str)]) -> String {
     }
     out
 }
+
 pub fn embedded_json(locale: &str) -> String {
     let locale = if is_valid_locale(locale) {
         locale
@@ -121,21 +139,7 @@ pub fn embedded_json(locale: &str) -> String {
     serde_json::json!({ "locale": locale, "dict": dict }).to_string()
 }
 
-pub fn escape_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
+/// Encodes all but ASCII alphanumerics and `-_.!~*'()` as UTF-8 bytes.
 pub fn pct_encode(text: &str) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(text.len());
@@ -177,13 +181,17 @@ mod tests {
     fn all_locales_cover_english_keys() {
         let en_keys: Vec<String> = BUNDLES.maps["en"].keys().cloned().collect();
         assert!(!en_keys.is_empty());
-        for (code, _) in LOCALES.iter().skip(1) {
-            let map = &BUNDLES.maps[*code];
+        for locale in LOCALES.iter().skip(1) {
+            let map = &BUNDLES.maps[locale.code];
             let missing: Vec<&String> = en_keys
                 .iter()
                 .filter(|key| !map.contains_key(*key))
                 .collect();
-            assert!(missing.is_empty(), "{code} missing keys: {missing:?}");
+            assert!(
+                missing.is_empty(),
+                "{} missing keys: {missing:?}",
+                locale.code
+            );
         }
     }
 }

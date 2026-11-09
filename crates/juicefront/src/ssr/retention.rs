@@ -1,5 +1,6 @@
 use crate::i18n;
 
+/// Fallback TTL choices, in hours, when a host advertises none.
 pub const DEFAULT_ALLOWED_TTL_HOURS: &[f64] = juiceutils::config::defaults::ALLOWED_TTL_HOURS;
 pub const DEFAULT_TTL_HOURS: f64 = juiceutils::config::defaults::DEFAULT_TTL_HOURS;
 
@@ -22,6 +23,7 @@ fn known_key(hours: f64) -> Option<&'static str> {
     }
 }
 
+/// Groups TTLs for visual separators: 0 sub-day, 1 hour-based, 2 whole days.
 pub fn ttl_tier(hours: f64) -> u8 {
     let hours = if hours.is_finite() {
         hours

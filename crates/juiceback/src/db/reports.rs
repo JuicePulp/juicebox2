@@ -2,6 +2,7 @@ use rusqlite::{Connection, Result, params};
 
 use super::types::ReportRecord;
 
+/// `reporter_ip` must already be encrypted; this layer does no IP handling.
 pub fn insert_report(
     conn: &Connection,
     file_url: &str,
@@ -61,6 +62,7 @@ pub fn get_report(conn: &Connection, id: i64) -> Result<Option<ReportRecord>> {
     rows.next().transpose()
 }
 
+/// Extracts the id from the last path segment; `None` when invalid.
 #[must_use]
 pub fn file_id_from_url(file_url: &str) -> Option<String> {
     let path = file_url.split('?').next()?;

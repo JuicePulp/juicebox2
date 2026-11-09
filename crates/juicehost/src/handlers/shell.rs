@@ -1,12 +1,11 @@
-use std::time::{Duration, Instant};
-
 use axum::{
     body::Body,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
+use juiceutils::text::escape_html;
 
-use super::common::backend_request;
+use super::common::{BackendStatus, NO_STORE, backend_file_status};
 use crate::{error::not_found_html, state::AppState};
 
 const SHELL_TEMPLATE: &str = include_str!("../templates/unlock_shell.html");
@@ -14,64 +13,8 @@ const SHELL_APP_JS: &str = include_str!("../templates/shell_app.js");
 const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
-pub(crate) enum BackendStatus {
-    Known(serde_json::Value),
-
-    Unknown,
-
-    Unavailable,
-}
-
-impl BackendStatus {
-    pub(crate) fn into_known(self) -> Option<serde_json::Value> {
-        match self {
-            Self::Known(body) => Some(body),
-            _ => None,
-        }
-    }
-}
-
-const FILE_STATUS_CACHE_TTL: Duration = Duration::from_secs(5);
-const FILE_STATUS_CACHE_MAX_ENTRIES: usize = 8_192;
-
-pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
-    if let Some(entry) = state.file_status_cache.get(id)
-        && entry.0.elapsed() < FILE_STATUS_CACHE_TTL
-    {
-        return BackendStatus::Known(entry.1.clone());
-    }
-    let Some(backend_url) = state.backend_url.as_ref() else {
-        return BackendStatus::Unavailable;
-    };
-    let status_url = format!("{backend_url}/internal/file/{id}/status");
-    let Ok(resp) = backend_request(state, status_url).send().await else {
-        return BackendStatus::Unavailable;
-    };
-    if resp.status() == StatusCode::NOT_FOUND {
-        return BackendStatus::Unknown;
-    }
-    if !resp.status().is_success() {
-        return BackendStatus::Unavailable;
-    }
-    match resp.json::<serde_json::Value>().await {
-        Ok(body) => {
-            if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
-                state
-                    .file_status_cache
-                    .retain(|_, (at, _)| at.elapsed() < FILE_STATUS_CACHE_TTL);
-                if state.file_status_cache.len() >= FILE_STATUS_CACHE_MAX_ENTRIES {
-                    state.file_status_cache.clear();
-                }
-            }
-            state
-                .file_status_cache
-                .insert(id.to_owned(), (Instant::now(), body.clone()));
-            BackendStatus::Known(body)
-        }
-        Err(_) => BackendStatus::Unavailable,
-    }
-}
-
+/// Seconds until backend-reported expiry, or `None` when caching is off or
+/// expiry is unknown.
 pub(crate) async fn remaining_ttl_secs(state: &AppState, id: &str) -> Option<u64> {
     if !state.file_cache_enabled {
         return None;
@@ -152,6 +95,8 @@ fn backend_file_meta(body: &serde_json::Value) -> BackendFileMeta {
     }
 }
 
+/// Returns an R2 key only for hot-tier files with a safe `hot/` path, rejecting
+/// traversal.
 fn hot_r2_key(body: &serde_json::Value) -> Option<String> {
     if body.get("tier").and_then(|v| v.as_str()) != Some("hot") {
         return None;
@@ -241,7 +186,7 @@ pub(crate) async fn gate_decision(
             let mut resp = not_found_html().into_response();
             resp.headers_mut().insert(
                 header::CACHE_CONTROL,
-                header::HeaderValue::from_static("no-store"),
+                header::HeaderValue::from_static(NO_STORE),
             );
             GateDecision::Respond(resp)
         }
@@ -267,15 +212,6 @@ fn hashed_filename(filename: &str) -> String {
     hasher.update(b"juicebox-filename-v1:");
     hasher.update(filename.as_bytes());
     hex::encode(hasher.finalize())[..16].to_string()
-}
-
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 fn render_shell(
@@ -320,6 +256,7 @@ fn render_shell(
                     ],
                 },
             });
+            // Escape `</` so the JSON cannot close the surrounding script tag.
             let serialized = serde_json::to_string(&payload)
                 .unwrap_or_default()
                 .replace("</", "<\\/");
@@ -365,7 +302,7 @@ fn render_shell(
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CACHE_CONTROL, NO_STORE)
         .header(
             header::CONTENT_SECURITY_POLICY,
             "default-src 'none'; script-src 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; frame-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",

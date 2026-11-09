@@ -1,4 +1,5 @@
 import { TEXT_LIKE_RE } from "./upload-config.js";
+/** Returns `{ file, isGzip }`; falls back to the original on error or under 10% savings. */
 export async function compressFile(file) {
   if (file.size < 1024 * 1024)
     return { file, isGzip: false };

@@ -1,8 +1,11 @@
+//! The extension stays in the URL path so responses can be content-typed.
+
 #[must_use]
 pub fn public_url(base_url: &str, storage_host: Option<&str>, id: &str, filename: &str) -> String {
     public_url_for_route("v", base_url, storage_host, id, filename)
 }
 
+/// Prefers the storage host; a host without a scheme gets `https`.
 #[must_use]
 pub fn public_url_for_route(
     route: &str,

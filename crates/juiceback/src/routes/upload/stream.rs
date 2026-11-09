@@ -8,20 +8,21 @@ use tokio::{
 };
 use tokio_util::io::StreamReader;
 
-use crate::{error::AppError, state::AppState, upload_mode::UploadMode};
+use crate::{error::AppError, state::AppState};
 
 type PushChannels = (
     mpsc::Sender<Result<Bytes, String>>,
     tokio::task::JoinHandle<Result<(), String>>,
 );
 
+/// The push reports errors through the join handle, so backpressure surfaces as
+/// a send error.
 pub fn spawn_upload_push(
     state: &Arc<AppState>,
     file_id: &str,
     filename: &str,
     mime_type: &str,
     host: Option<&str>,
-    upload_mode: UploadMode,
     capability: &str,
     live_total: Option<u64>,
 ) -> PushChannels {
@@ -33,7 +34,6 @@ pub fn spawn_upload_push(
     let push_filename = filename.to_string();
     let push_mime = mime_type.to_string();
     let push_host = host.map(str::to_owned);
-    let push_mode = upload_mode;
     let push_capability = capability.to_string();
 
     let push_handle = tokio::spawn(async move {
@@ -44,7 +44,6 @@ pub fn spawn_upload_push(
             &push_mime,
             rx,
             push_host,
-            &push_mode,
             Some(&push_capability),
             live_total,
         )
@@ -61,20 +60,12 @@ pub async fn stream_upload_to_juicehost(
     filename: &str,
     mime_type: &str,
     host: Option<&str>,
-    upload_mode: UploadMode,
     max_size: i64,
     capability: &str,
     live_total: Option<u64>,
 ) -> Result<(i64, u64, std::time::Duration, std::time::Duration), AppError> {
     let (tx, push_handle) = spawn_upload_push(
-        state,
-        file_id,
-        filename,
-        mime_type,
-        host,
-        upload_mode,
-        capability,
-        live_total,
+        state, file_id, filename, mime_type, host, capability, live_total,
     );
 
     let read_start = std::time::Instant::now();
@@ -165,6 +156,8 @@ pub async fn stream_upload_to_juicehost(
     Ok((total_bytes, chunk_count, push_backpressure, push_wait))
 }
 
+/// Caps the decoded size (zip-bomb defence); the first `FILE_SNIFF_PREFIX_LEN`
+/// bytes are validated.
 pub async fn pipe_gunzip_to_sender<S>(
     stream: S,
     tx: &mpsc::Sender<Result<Bytes, String>>,
@@ -262,21 +255,13 @@ pub async fn stream_gzip_upload_to_juicehost(
     filename: &str,
     mime_type: &str,
     host: Option<&str>,
-    upload_mode: UploadMode,
     max_size: i64,
     capability: &str,
     danger: crate::file_validation::ProtectionLevel,
     live_total: Option<u64>,
 ) -> Result<(i64, std::time::Duration, std::time::Duration), AppError> {
     let (tx, push_handle) = spawn_upload_push(
-        state,
-        file_id,
-        filename,
-        mime_type,
-        host,
-        upload_mode,
-        capability,
-        live_total,
+        state, file_id, filename, mime_type, host, capability, live_total,
     );
 
     let read_start = std::time::Instant::now();
@@ -325,6 +310,8 @@ pub async fn stream_gzip_upload_to_juicehost(
     Ok((total_bytes, read_time, push_wait))
 }
 
+/// Needs the final plaintext size for the encryption header, unknown until the
+/// body ends.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -338,7 +325,6 @@ pub async fn stream_protected_upload_to_juicehost(
     host: Option<&str>,
     max_size: i64,
     capability: &str,
-    upload_mode: UploadMode,
     dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
     let first_chunk = field
@@ -392,7 +378,6 @@ pub async fn stream_protected_upload_to_juicehost(
         capability,
         spool_file.path(),
         total,
-        upload_mode,
         dek,
     )
     .await?;
@@ -401,6 +386,7 @@ pub async fn stream_protected_upload_to_juicehost(
     Ok((total_bytes, header))
 }
 
+/// The decoded prefix is validated before any ciphertext is produced.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -414,7 +400,6 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
     host: Option<&str>,
     max_size: i64,
     capability: &str,
-    upload_mode: UploadMode,
     danger: crate::file_validation::ProtectionLevel,
     dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
@@ -461,7 +446,6 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
         capability,
         spool_file.path(),
         total,
-        upload_mode,
         dek,
     )
     .await?;

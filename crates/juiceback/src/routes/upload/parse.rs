@@ -10,7 +10,7 @@ use super::{
     },
     ticket::clamp_ttl_seconds,
 };
-use crate::{db::FileRecord, error::AppError, state::AppState, upload_mode::UploadMode};
+use crate::{db::FileRecord, error::AppError, state::AppState};
 
 pub struct UploadParams {
     pub(crate) file_id: String,
@@ -18,7 +18,6 @@ pub struct UploadParams {
     pub(crate) mime_type: String,
     pub(crate) total_bytes: i64,
     pub(crate) selected_host: Option<String>,
-    pub(crate) selected_upload_mode: UploadMode,
     pub(crate) ttl_seconds: i64,
     pub(crate) reservation: Option<FileRecord>,
     pub(crate) file_capability: String,
@@ -28,6 +27,8 @@ pub struct UploadParams {
     pub(crate) protection: Option<super::protected::UploadProtection>,
 }
 
+/// Metadata must precede the `file` part; a `reserve_id` requires a verified
+/// `reservation_token`.
 pub async fn parse_multipart(
     multipart: &mut Multipart,
     state: &Arc<AppState>,
@@ -50,7 +51,6 @@ pub async fn parse_multipart(
     let mut mime_type = String::new();
     let mut total_bytes: i64 = 0;
     let mut selected_host: Option<String> = state.config.default_storage_host.clone();
-    let mut selected_upload_mode = UploadMode::Standard;
     let mut reservation = None;
     let mut file_capability = default_capability;
     let mut password: Option<String> = None;
@@ -68,9 +68,6 @@ pub async fn parse_multipart(
             if let Ok(val) = text.parse::<f64>() {
                 ttl_seconds = clamp_ttl_seconds(&allowed_ttl, default_ttl, Some(val));
             }
-        } else if name == "upload_mode" {
-            let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
-            selected_upload_mode = UploadMode::from(text.trim());
         } else if name == "host" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().trim_end_matches('/').to_string();
@@ -129,12 +126,6 @@ pub async fn parse_multipart(
             let protected =
                 password.is_some() || reservation.as_ref().is_some_and(|r| r.is_protected());
 
-            let push_mode = if protected && state.config.encrypted_force_relay {
-                UploadMode::Standard
-            } else {
-                selected_upload_mode
-            };
-
             let live_total = reservation
                 .as_ref()
                 .map(|r| r.size_bytes.max(0) as u64)
@@ -159,7 +150,6 @@ pub async fn parse_multipart(
                         selected_host.as_deref(),
                         max_size as i64,
                         &file_capability,
-                        push_mode,
                         danger,
                         &dek,
                     )
@@ -174,7 +164,6 @@ pub async fn parse_multipart(
                         selected_host.as_deref(),
                         max_size as i64,
                         &file_capability,
-                        push_mode,
                         &dek,
                     )
                     .await?
@@ -190,7 +179,6 @@ pub async fn parse_multipart(
                     &sanitized_filename,
                     &mime_type,
                     selected_host.as_deref(),
-                    selected_upload_mode,
                     max_size as i64,
                     &file_capability,
                     danger,
@@ -218,7 +206,6 @@ pub async fn parse_multipart(
                     &sanitized_filename,
                     &mime_type,
                     selected_host.as_deref(),
-                    selected_upload_mode,
                     max_size as i64,
                     &file_capability,
                     live_total,
@@ -226,6 +213,7 @@ pub async fn parse_multipart(
                 .await?;
                 total_bytes = bytes;
             }
+            // The file is expected last; later fields would arrive after bytes are stored.
             break;
         }
     }
@@ -236,7 +224,6 @@ pub async fn parse_multipart(
         mime_type,
         total_bytes,
         selected_host,
-        selected_upload_mode,
         ttl_seconds,
         reservation,
         file_capability,

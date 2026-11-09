@@ -68,6 +68,88 @@ async fn resolve_missing_file_is_404() {
 }
 
 #[tokio::test]
+async fn renew_with_same_id_renames_filename() {
+    let state = common::test_state();
+    insert_ready_file(&state, "reg00001", None).await;
+    let app = common::mock_router(std::sync::Arc::clone(&state));
+    let payload = serde_json::json!({
+        "custom_id": "reg00001",
+        "filename": "renamed clip.mkv"
+    });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/file/reg00001/renew")
+                .header("content-type", "application/json")
+                .header("x-delete-token", "tok-reg00001")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["id"], "reg00001");
+    assert_eq!(json["filename"], "renamed clip.mkv");
+    assert_eq!(json["url"], "http://localhost:6402/v/reg00001.mkv");
+
+    let record = get_file(&state.db.get().unwrap(), "reg00001")
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.filename, "renamed clip.mkv");
+}
+
+#[tokio::test]
+async fn renew_with_new_id_renames_filename_and_url() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/internal/file/reg00002/rename"))
+        .respond_with(wiremock::ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let mut config = common::test_config();
+    config.juicehost_url = server.uri();
+    let state = common::state_from_config(config);
+    insert_ready_file(&state, "reg00002", None).await;
+    let app = common::mock_router(std::sync::Arc::clone(&state));
+    let payload = serde_json::json!({
+        "custom_id": "freshname",
+        "filename": "renamed.txt"
+    });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/file/reg00002/renew")
+                .header("content-type", "application/json")
+                .header("x-delete-token", "tok-reg00002")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["id"], "freshname");
+    assert_eq!(json["filename"], "renamed.txt");
+    assert_eq!(json["url"], "http://localhost:6402/v/freshname.txt");
+
+    let db = state.db.get().unwrap();
+    assert!(get_file(&db, "reg00002").unwrap().is_none());
+    let record = get_file(&db, "freshname").unwrap().unwrap();
+    assert_eq!(record.filename, "renamed.txt");
+    assert_eq!(record.storage_path, "remote-freshname");
+}
+
+#[tokio::test]
 async fn resolve_returns_host_and_tier() {
     let state = common::test_state();
     insert_ready_file(&state, "reg00001", Some("https://f-eu1.juicey.dev")).await;

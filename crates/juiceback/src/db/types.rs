@@ -20,6 +20,7 @@ pub struct AdminUser {
     pub created_at: i64,
 }
 
+/// Abuse report; `reporter_ip` is an encrypted blob, not a readable address.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ReportRecord {
     pub id: i64,
@@ -30,6 +31,7 @@ pub struct ReportRecord {
     pub email: Option<String>,
     pub created_at: i64,
 
+    /// Password the reporter supplied, stored in cleartext.
     pub password: Option<String>,
 }
 
@@ -42,6 +44,7 @@ pub struct FeedbackRecord {
     pub created_at: i64,
 }
 
+/// Ban entry; `ip` is a keyed hash, not a raw address.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BanRecord {
     pub ip: String,
@@ -74,6 +77,7 @@ pub struct Announcement {
     pub updated_at: i64,
 }
 
+/// Timestamps are unix seconds; content may be local or on a storage host.
 #[derive(Debug, Clone)]
 pub struct FileRecord {
     pub id: String,
@@ -90,14 +94,17 @@ pub struct FileRecord {
 
     pub storage_path: String,
 
+    /// Secret authorizing deletion; compare in constant time.
     pub delete_token: String,
 
     pub uploaded_at: i64,
 
     pub expires_at: i64,
 
+    /// Encrypted IP blob, `None` when unknown.
     pub uploader_ip: Option<String>,
 
+    /// Remote juicehost base URL, `None` for local storage.
     pub storage_host: Option<String>,
 
     pub status: String,
@@ -106,8 +113,10 @@ pub struct FileRecord {
 
     pub r2_key: String,
 
+    /// Set when an admin chose the tier; the promoter must not move it.
     pub tier_pinned: bool,
 
+    /// Argon2 hash of the link password, `None` for public files.
     pub password_hash: Option<String>,
 
     pub is_encrypted: bool,
@@ -120,6 +129,7 @@ pub struct FileRecord {
 
     pub dek_escrow: Option<String>,
 
+    /// Crypto format version; `1` means per-file key material is present.
     pub key_version: i64,
 }
 
@@ -251,6 +261,7 @@ impl ProtectionMaterial {
     }
 }
 
+/// Browser wire shape; `token` is write-only and never serialized.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClientFileRecord {
     pub id: String,
@@ -268,6 +279,7 @@ pub struct ClientFileRecord {
     pub e: i64,
 }
 
+/// Fetch job; `done`/`failed` are terminal, progress is advisory.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct FetchJob {
     pub id: String,

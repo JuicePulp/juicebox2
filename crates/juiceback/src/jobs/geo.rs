@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use crate::{db, state::AppState};
 
 const BATCH_MAX: usize = 100;
+/// Plain HTTP is what the free tier offers.
 const GEO_ENDPOINT: &str = "http://ip-api.com/batch";
 
 pub async fn run_geo_loop(state: Arc<AppState>) {
@@ -21,6 +22,7 @@ struct Target {
     ip_hash: String,
 }
 
+/// Only public addresses are sent to the third-party service.
 fn is_routable(ip: &str) -> bool {
     match ip.parse::<std::net::IpAddr>() {
         Ok(addr) => crate::storage_client::is_public_ip(addr),

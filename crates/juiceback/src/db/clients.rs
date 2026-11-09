@@ -13,6 +13,7 @@ pub fn device_belongs_to_user(conn: &Connection, device_id: &str, user_id: &str)
         .is_some())
 }
 
+/// False should surface as not found to avoid leaking ids.
 pub fn client_owns_file(conn: &Connection, user_id: &str, file_id: &str) -> Result<bool> {
     Ok(conn
         .query_row(
@@ -24,6 +25,7 @@ pub fn client_owns_file(conn: &Connection, user_id: &str, file_id: &str) -> Resu
         .is_some())
 }
 
+/// Upserts the row's metadata but never overwrites the stored delete token.
 pub fn add_client_file(conn: &Connection, user_id: &str, record: &FileRecord) -> Result<()> {
     conn.execute(
         "INSERT INTO client_files
@@ -87,6 +89,7 @@ pub fn import_verified_client_files(
     Ok(imported)
 }
 
+/// Replaces the whole list in one transaction; empty drops everything.
 pub fn replace_client_files(
     conn: &Connection,
     client_key: &str,
@@ -135,7 +138,7 @@ pub fn update_client_file_id(
     new_id: &str,
 ) -> Result<bool> {
     let tx = conn.unchecked_transaction()?;
-    let renamed = update_client_file_id_in_tx(&tx, client_key, old_id, new_id)?;
+    let renamed = update_client_file_id_in_tx(&tx, client_key, old_id, new_id, None)?;
     tx.commit()?;
     Ok(renamed)
 }
@@ -145,14 +148,19 @@ pub fn update_client_file_id_in_tx(
     client_key: &str,
     old_id: &str,
     new_id: &str,
+    new_filename: Option<&str>,
 ) -> Result<bool> {
+    if old_id == new_id {
+        return Ok(false);
+    }
     tx.execute(
         "DELETE FROM client_files WHERE client_key = ?1 AND file_id = ?2",
         params![client_key, new_id],
     )?;
     let affected = tx.execute(
-        "UPDATE client_files SET file_id = ?1 WHERE client_key = ?2 AND file_id = ?3",
-        params![new_id, client_key, old_id],
+        "UPDATE client_files SET file_id = ?1, filename = COALESCE(?4, filename) \
+         WHERE client_key = ?2 AND file_id = ?3",
+        params![new_id, client_key, old_id, new_filename],
     )?;
     Ok(affected > 0)
 }

@@ -1,7 +1,7 @@
 import { initPairModal } from "./pair.js?v=2.2.0";
 import { playSound } from "./sounds.js?v=2.2.0";
 import { setTweakEngineEnabled, tweakEngineEnabled } from "./upload-tweaks.js";
-import { announce } from "./util.js";
+import { announce, readCookie, writeCookie } from "./util.js";
 
 (function () {
   var cfg = document.querySelector("[data-i18n-config]");
@@ -20,6 +20,7 @@ import { announce } from "./util.js";
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
+  // Only non-default locales get a URL prefix; the default locale lives at the root.
   var LOCALE_RE = new RegExp("^\\/(" + nonDefault.map(escapeRegExp).join("|") + ")(\\/|$)");
   var VALID = new Set(LOCALE_CODES);
   var lastFocus = null;
@@ -41,19 +42,13 @@ import { announce } from "./util.js";
   }
 
   function adTestingOn() {
-    try {
-      return document.cookie.split("; ").some(function (c) {
-        var eq = c.indexOf("=");
-        return eq > 0 && c.slice(0, eq) === "ADTESTING" && c.slice(eq + 1).toUpperCase() === "TRUE";
-      });
-    } catch (e) {}
-    return false;
+    return readCookie("ADTESTING").toUpperCase() === "TRUE";
   }
 
   function toggleAdTesting() {
     var on = adTestingOn();
     var next = on ? "false" : "true";
-    try { document.cookie = "ADTESTING=" + next + "; path=/; max-age=31536000; samesite=lax"; } catch (e) {}
+    writeCookie("ADTESTING", next, 31536000);
     try { localStorage.setItem("ADTESTING", next); } catch (e) {}
   }
 
@@ -100,6 +95,7 @@ import { announce } from "./util.js";
 
   var chordPending = null;
   var chordTimer = null;
+  // Chords expire so a half-entered sequence cannot swallow later keystrokes.
   var CHORD_TIMEOUT = 4000;
 
   var chordHideTimer = null;
@@ -244,6 +240,7 @@ import { announce } from "./util.js";
     if (isTyping()) { clearChord(); return; }
 
     if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd+U opens the picker instead of view-source; banned or offline nodes shake instead.
       if (e.key === "u" || e.key === "U") {
         e.preventDefault();
         var unavailable = document.documentElement.hasAttribute("data-banned") ||
@@ -362,6 +359,7 @@ import { announce } from "./util.js";
 
   
   
+  // Old links and the host selector still use `#host-modal`; the settings modal replaced it.
   function retargetLegacySettingsHash() {
     if (location.hash === "#host-modal") {
       history.replaceState(null, "", "#settings-modal");

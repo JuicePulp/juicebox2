@@ -27,6 +27,7 @@ pub enum ConfigError {
     InvalidKeyLength { name: String },
 }
 
+/// The QUIC listener always sits one port above the HTTP port.
 pub mod ports {
     pub const FRONTEND: u16 = 6400;
     pub const BACKEND: u16 = 6401;
@@ -118,6 +119,7 @@ fn candidate_paths(env_var: &str, names: &[&str]) -> Vec<PathBuf> {
     paths
 }
 
+/// Variables already set win, so the real environment overrides the file.
 pub fn load_dotenv() {
     let Ok(text) = std::fs::read_to_string(".env") else {
         return;
@@ -142,6 +144,7 @@ pub fn load_dotenv() {
     }
 }
 
+/// Whitespace-only values are rejected as unset.
 pub fn required_secret(name: &str) -> Result<String, ConfigError> {
     std::env::var(name)
         .map_err(|_| ConfigError::Missing {
@@ -173,6 +176,7 @@ pub fn is_placeholder_secret(value: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with("change_me") || trimmed.starts_with("change_this")
 }
 
+/// `Ok(None)` means unset or blank.
 pub fn env_bool(name: &str) -> Result<Option<bool>, ConfigError> {
     match std::env::var(name) {
         Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
@@ -202,6 +206,7 @@ pub fn ticket_secret(fallback: &str) -> Result<String, ConfigError> {
     Ok(secret)
 }
 
+/// Error messages never echo the secret.
 pub fn validate_jwt_secret(secret: &str) -> Result<(), ConfigError> {
     if secret.trim().is_empty() {
         return Err(ConfigError::MissingJwtSecret);

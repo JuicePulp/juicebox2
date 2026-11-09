@@ -19,5 +19,17 @@
 !/juicefront.toml.example
 !/.env.example
 
+!/apps
+/apps/mobile/.gradle/
+/apps/mobile/.kotlin/
+/apps/mobile/build/
+/apps/mobile/app/build/
+/apps/mobile/core/build/
+/apps/mobile/local.properties
+/apps/mobile/**/local.properties
+/apps/mobile/keystore.properties
+/apps/mobile/*.jks
+/apps/mobile/*.keystore
+
 # Generated rustdoc output (rebuilt via cargo doc, served from static/).
 rustdoc/

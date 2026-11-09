@@ -84,6 +84,7 @@ pub(crate) fn upload_json_response(
     resp
 }
 
+/// A zero-byte file gets the minimum lifetime.
 pub(crate) fn compute_ticket_ttl_secs(
     file_size_bytes: u64,
     assumed_bps: f64,
@@ -112,6 +113,7 @@ pub(crate) fn dte_ticket_ttl_secs(state: &Arc<AppState>, file_size_bytes: u64) -
     )
 }
 
+/// No-op when DTE is disabled, since tickets only exist for direct uploads.
 pub(crate) fn enforce_mint_limit(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -130,6 +132,8 @@ pub(crate) fn enforce_mint_limit(
     }
 }
 
+/// Only from a configured trusted proxy; a client-supplied header is otherwise
+/// ignored.
 pub(crate) fn region_host(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -139,7 +143,7 @@ pub(crate) fn region_host(
         return None;
     }
     let region = headers
-        .get("x-juicebox-region")?
+        .get(juiceproto::headers::REGION)?
         .to_str()
         .ok()?
         .trim()

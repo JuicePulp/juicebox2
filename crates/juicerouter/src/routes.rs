@@ -20,6 +20,7 @@ use crate::{
     state::{AppState, HealthState, NodeHealth, RouteDecision, RouteKind, Selection},
 };
 
+/// Responses are never cached so failover takes effect immediately.
 pub fn build(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -121,6 +122,7 @@ struct UploadTargetQuery {
     region: Option<String>,
 }
 
+// `cf-ipcountry` carries the country; the `cf-ray` suffix carries the colo.
 async fn upload_target(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use super::{errors::format_error_response, target::require_juicehost_url};
-use crate::{state::AppState, upload_mode::UploadMode};
+use crate::state::AppState;
 
 fn normalized_origin(value: &str) -> Option<String> {
     let trimmed = value.trim().trim_end_matches('/');
@@ -18,6 +17,7 @@ fn normalized_origin(value: &str) -> Option<String> {
         .map(|url| url.origin().ascii_serialization())
 }
 
+/// `None` when `host` is the default, so the push uses the local connection.
 fn local_push_host<'a>(state: &Arc<AppState>, host: Option<&'a str>) -> Option<&'a str> {
     let host = host.map(str::trim).filter(|host| !host.is_empty())?;
     let Some(default_host) = state.config.default_storage_host.as_deref() else {
@@ -29,73 +29,6 @@ fn local_push_host<'a>(state: &Arc<AppState>, host: Option<&'a str>) -> Option<&
     }
 }
 
-pub struct QuicFallbackBuffer {
-    ram: Vec<bytes::Bytes>,
-    ram_bytes: usize,
-    spilled_bytes: u64,
-    spill: Option<tempfile::NamedTempFile>,
-}
-
-impl QuicFallbackBuffer {
-    pub fn new() -> Self {
-        Self {
-            ram: Vec::new(),
-            ram_bytes: 0,
-            spilled_bytes: 0,
-            spill: None,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.ram.is_empty() && self.spilled_bytes == 0
-    }
-
-    pub fn push(&mut self, chunk: &bytes::Bytes) -> Result<(), String> {
-        if let Some(spill) = self.spill.as_mut() {
-            use std::io::Write as _;
-            spill
-                .write_all(chunk)
-                .map_err(|e| format!("fallback spill failed: {e}"))?;
-            self.spilled_bytes += chunk.len() as u64;
-            return Ok(());
-        }
-        if self.ram_bytes + chunk.len() > crate::constants::QUIC_SPILL_THRESHOLD_BYTES {
-            let mut spill = tempfile::NamedTempFile::new()
-                .map_err(|e| format!("fallback spill failed: {e}"))?;
-            use std::io::Write as _;
-            for c in self.ram.drain(..) {
-                spill
-                    .write_all(&c)
-                    .map_err(|e| format!("fallback spill failed: {e}"))?;
-                self.spilled_bytes += c.len() as u64;
-            }
-            spill
-                .write_all(chunk)
-                .map_err(|e| format!("fallback spill failed: {e}"))?;
-            self.spilled_bytes += chunk.len() as u64;
-            self.spill = Some(spill);
-            return Ok(());
-        }
-        self.ram_bytes += chunk.len();
-        self.ram.push(chunk.clone());
-        Ok(())
-    }
-
-    pub async fn materialize(mut self) -> Result<Vec<bytes::Bytes>, String> {
-        if let Some(spill) = self.spill.take() {
-            let data = tokio::fs::read(spill.path())
-                .await
-                .map_err(|e| format!("fallback replay failed: {e}"))?;
-            return Ok(vec![bytes::Bytes::from(data)]);
-        }
-        Ok(std::mem::take(&mut self.ram))
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
-)]
 #[tracing::instrument(skip_all)]
 pub async fn push_file_streaming(
     state: &Arc<AppState>,
@@ -104,7 +37,6 @@ pub async fn push_file_streaming(
     mime_type: &str,
     chunk_rx: tokio::sync::mpsc::Receiver<Result<bytes::Bytes, String>>,
     host: Option<String>,
-    mode: &UploadMode,
     capability: Option<&str>,
     live_total: Option<u64>,
 ) -> Result<(), String> {
@@ -112,61 +44,6 @@ pub async fn push_file_streaming(
     let client =
         super::client::StorageClient::resolve(state, local_push_host(state, custom_host)).await?;
     let target_base = client.base_url().to_string();
-
-    const ENABLE_QUIC_PUSH: bool = false;
-    if ENABLE_QUIC_PUSH
-        && *mode == UploadMode::Quic
-        && custom_host.is_none()
-        && !state.config.juicehost_api_key.is_empty()
-    {
-        require_juicehost_url(&state.config.juicehost_url).map_err(|e| e.to_string())?;
-
-        let mut fallback = QuicFallbackBuffer::new();
-        let mut rx = chunk_rx;
-
-        match crate::quic::push_file_streaming_quic_streamed(
-            state,
-            id,
-            filename,
-            mime_type,
-            &mut rx,
-            &mut fallback,
-        )
-        .await
-        {
-            Ok(()) => {
-                drop(fallback);
-                return Ok(());
-            }
-            Err(e) => {
-                if e.contains("(status=") {
-                    return Err(e);
-                }
-                tracing::warn!("QUIC push failed for {id}, falling back to HTTP: {e}");
-            }
-        }
-
-        while let Some(chunk) = rx.recv().await {
-            if let Ok(data) = chunk {
-                fallback.push(&data)?;
-            }
-        }
-
-        if fallback.is_empty() {
-            return Err("no data received for QUIC push".into());
-        }
-
-        return push_buffered_to_http(
-            state,
-            id,
-            filename,
-            mime_type,
-            fallback.materialize().await?,
-            None,
-            capability,
-        )
-        .await;
-    }
 
     let encoded_fn =
         percent_encoding::utf8_percent_encode(filename, percent_encoding::NON_ALPHANUMERIC)
@@ -179,13 +56,13 @@ pub async fn push_file_streaming(
     let mut request = client
         .http()
         .post(&url)
-        .header("x-mime-type", mime_type)
+        .header(juiceproto::headers::MIME_TYPE, mime_type)
         .headers(client.headers_with(None)?);
     if let Some(capability) = capability {
-        request = request.header("x-juicehost-file-capability", capability);
+        request = request.header(juiceproto::headers::FILE_CAPABILITY, capability);
     }
     if let Some(total) = live_total {
-        request = request.header("x-juicebox-live-total", total.to_string());
+        request = request.header(juiceproto::headers::LIVE_TOTAL, total.to_string());
     }
     let resp = request
         .body(body)
@@ -213,32 +90,10 @@ pub async fn push_file_streaming(
         );
         Err(format!(
             "{} (url={})",
-            format_error_response(status.as_u16(), body_text),
+            juiceproto::error::format_service_error(status.as_u16(), &body_text),
             url
         ))
     }
-}
-
-async fn push_buffered_to_http(
-    state: &Arc<AppState>,
-    id: &str,
-    filename: &str,
-    mime_type: &str,
-    chunks: Vec<bytes::Bytes>,
-    host: Option<&str>,
-    capability: Option<&str>,
-) -> Result<(), String> {
-    let data = tokio::task::spawn_blocking(move || {
-        let total: usize = chunks.iter().map(bytes::Bytes::len).sum();
-        let mut data = Vec::with_capacity(total);
-        for c in chunks {
-            data.extend_from_slice(&c);
-        }
-        data
-    })
-    .await
-    .map_err(|_| "data concatenation panicked".to_string())?;
-    push_file_to_juicehost(state, id, filename, mime_type, data, host, capability).await
 }
 
 #[tracing::instrument(skip_all)]
@@ -269,7 +124,7 @@ pub async fn push_file_to_juicehost(
     let url = format!("{}/internal/file", client.base_url());
     let mut request = client.http().post(&url).headers(client.headers_with(None)?);
     if let Some(capability) = capability {
-        request = request.header("x-juicehost-file-capability", capability);
+        request = request.header(juiceproto::headers::FILE_CAPABILITY, capability);
     }
     let resp = request
         .multipart(form)
@@ -303,48 +158,8 @@ pub async fn push_file_to_juicehost(
         );
         Err(format!(
             "{} (url={})",
-            format_error_response(status.as_u16(), body),
+            juiceproto::error::format_service_error(status.as_u16(), &body),
             url
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn fallback_buffer_ram_roundtrip() {
-        let mut buf = QuicFallbackBuffer::new();
-        assert!(buf.is_empty());
-        buf.push(&bytes::Bytes::from_static(b"hello ")).unwrap();
-        buf.push(&bytes::Bytes::from_static(b"world")).unwrap();
-        assert!(!buf.is_empty());
-        assert!(buf.spill.is_none());
-        let parts = buf.materialize().await.unwrap();
-        let total: Vec<u8> = parts.concat();
-        assert_eq!(total, b"hello world");
-    }
-
-    #[tokio::test]
-    async fn fallback_buffer_spills_and_replays() {
-        let mut buf = QuicFallbackBuffer::new();
-
-        let piece = bytes::Bytes::from(vec![0xABu8; 64 * 1024]);
-        for _ in 0..160 {
-            buf.push(&piece).unwrap();
-        }
-        assert!(buf.spill.is_some());
-        assert!(buf.ram.is_empty());
-        let parts = buf.materialize().await.unwrap();
-        let total: Vec<u8> = parts.concat();
-        assert_eq!(total.len(), 10 * 1024 * 1024);
-        assert!(total.iter().all(|&b| b == 0xAB));
-    }
-
-    #[tokio::test]
-    async fn fallback_buffer_empty_materializes_empty() {
-        let buf = QuicFallbackBuffer::new();
-        assert!(buf.materialize().await.unwrap().is_empty());
     }
 }

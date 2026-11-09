@@ -1,37 +1,9 @@
 use std::sync::Arc;
 
-use super::{
-    errors::format_error_response,
-    target::{
-        check_storage_host, custom_juicehost_target, require_juicehost_url,
-        resolve_juicehost_target,
-    },
+use super::target::{
+    check_storage_host, custom_juicehost_target, require_juicehost_url, resolve_juicehost_target,
 };
 use crate::state::AppState;
-
-#[test]
-fn format_error_response_with_json() {
-    let body = r#"{"error": "STORAGE_FULL", "message": "disk is full"}"#.to_string();
-    let result = format_error_response(507, body);
-    assert!(result.contains("[STORAGE_FULL]"));
-    assert!(result.contains("disk is full"));
-    assert!(result.contains("status=507"));
-}
-
-#[test]
-fn format_error_response_empty_body() {
-    let result = format_error_response(500, String::new());
-    assert!(result.contains("UNKNOWN_ERROR"));
-    assert!(result.contains("body=<empty>"));
-    assert!(result.contains("status=500"));
-}
-
-#[test]
-fn format_error_response_invalid_json() {
-    let result = format_error_response(403, "forbidden".to_string());
-    assert!(result.contains("forbidden"));
-    assert!(result.contains("status=403"));
-}
 
 fn test_state() -> Arc<AppState> {
     let config = crate::config::Config {

@@ -24,6 +24,7 @@ pub struct AnnouncementResponse {
     pub updated_at: i64,
 }
 
+/// `mode` defaults to `warning`, `is_active` to true.
 #[derive(Deserialize, ToSchema)]
 pub struct AnnouncementRequest {
     pub message: String,

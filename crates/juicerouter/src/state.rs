@@ -1,3 +1,5 @@
+//! Region registry and node health. The router stores no file data.
+
 use std::{
     sync::{Arc, RwLock},
     time::{Duration, Instant},
@@ -11,6 +13,7 @@ use crate::config::{Config, GeoSettings};
 
 const HOME_REGION: &str = "home";
 
+/// `RouteMissing` and `AuthError` are config faults, not transient failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthState {
@@ -22,6 +25,7 @@ pub enum HealthState {
 }
 
 impl HealthState {
+    // Lower ranks win: config faults outrank an unreachable node.
     fn rank(self) -> u8 {
         match self {
             Self::Healthy => 0,
@@ -120,12 +124,6 @@ impl Registry {
         Self { nodes }
     }
 
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn get(&self, region: &str) -> Option<&Node> {
-        self.nodes.iter().find(|node| node.region == region)
-    }
-
     fn best_in<'a>(&'a self, region: &str) -> Option<&'a Node> {
         if region == HOME_REGION {
             return None;
@@ -151,6 +149,7 @@ impl Registry {
             })
     }
 
+    /// The home node is never an upload target.
     #[must_use]
     pub fn select(
         &self,
@@ -258,6 +257,7 @@ pub struct RouteDecision {
     pub expires_at: Option<i64>,
 }
 
+/// `stream_client` has no overall timeout so proxied transfers are not cut off.
 pub struct AppState {
     pub config: Config,
     pub registry: Registry,
@@ -297,6 +297,7 @@ impl AppState {
         })
     }
 
+    /// Probes a known-missing file; a 404 means the host is healthy.
     pub async fn probe_node(&self, node: &Node) {
         let url = format!("{}/internal/file/00000000/stat", node.url);
         let started = Instant::now();
@@ -304,8 +305,11 @@ impl AppState {
         let mut request = self.client.get(url).timeout(timeout);
         if !self.api_key.is_empty() {
             request = request
-                .header("x-juicehost-api-key", &self.api_key)
-                .header("x-juiceback-origin", &self.config.router.juiceback_origin);
+                .header(juiceproto::headers::HOST_API_KEY, &self.api_key)
+                .header(
+                    juiceproto::headers::BACKEND_ORIGIN,
+                    &self.config.router.juiceback_origin,
+                );
         }
         let health = match request.send().await {
             Ok(response) => {
@@ -361,6 +365,7 @@ impl AppState {
         }
     }
 
+    /// In-progress uploads get a 2s TTL; successes cache normally.
     pub async fn resolve(&self, id: &str) -> Result<Option<ResolveRecord>, ResolveError> {
         if let Some(entry) = self.cache.get(id) {
             let ttl = if entry.1.status == "uploading" {
@@ -378,7 +383,7 @@ impl AppState {
         );
         let mut request = self.client.get(url);
         if !self.api_key.is_empty() {
-            request = request.header("x-juicehost-api-key", &self.api_key);
+            request = request.header(juiceproto::headers::HOST_API_KEY, &self.api_key);
         }
         let response = request.send().await.map_err(|error| {
             tracing::warn!("resolve {id} failed: {error}");
@@ -408,6 +413,7 @@ impl AppState {
         Ok(Some(record))
     }
 
+    /// R2 wins over a configured storage host; an uploading file has no target.
     #[must_use]
     pub fn decision(
         &self,
@@ -507,7 +513,7 @@ mod tests {
     fn registry_includes_home_node_once() {
         let registry = Registry::new(&config());
         assert_eq!(registry.nodes.len(), 3);
-        assert!(registry.get("home").is_some());
+        assert!(registry.nodes.iter().any(|node| node.region == HOME_REGION));
     }
 
     #[test]

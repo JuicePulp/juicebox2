@@ -11,7 +11,6 @@ pub const FILE_SNIFF_PREFIX_LEN: usize = 1024;
 pub const MAX_TUS_SESSIONS: usize = 1000;
 pub const MAX_TUS_PARALLEL_PARTS: usize = 64;
 pub const TUS_PATCH_MAX_BYTES: usize = 96 * 1024 * 1024;
-pub const QUIC_SPILL_THRESHOLD_BYTES: usize = 8 * 1024 * 1024;
 pub const BYTES_PER_MIB: f64 = 1024.0 * 1024.0;
 pub const STALE_UPLOAD_TIMEOUT_SECS: i64 = 3600;
 pub const CLEANUP_BATCH_SIZE: usize = 500;
@@ -54,6 +53,7 @@ pub const DTE_MINT_LIMIT: u32 = 60;
 pub const DTE_MINT_WINDOW_SECS: u64 = 600;
 pub const DTE_MINT_BURST: u32 = 15;
 
+/// Snaps to the nearest allowed value; panics on an empty list (a config bug).
 #[must_use]
 pub fn clamp_to_nearest(value: f64, allowed: &[f64]) -> f64 {
     assert!(!allowed.is_empty(), "allowed_ttl_hours must not be empty");

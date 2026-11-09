@@ -13,8 +13,9 @@ use utoipa::ToSchema;
 use crate::{db, error::AppError, notify, state::AppState, utils::ClientIp};
 
 const COOKIE_NAME: &str = "jb_files";
-const COOKIE_MAX_AGE: &str = "2592000";
+const COOKIE_MAX_AGE: i64 = 2_592_000;
 
+/// Oldest entries are evicted first to keep the cookie under header limits.
 pub const MAX_FILE_COOKIE_ENTRIES: usize = 25;
 
 #[derive(Deserialize, ToSchema)]
@@ -44,6 +45,8 @@ pub struct ReportRequest {
     ),
     tag = "General",
 )]
+/// Reporter IP is encrypted and a keyed hash is kept for bans; notifications
+/// are fire-and-forget.
 pub async fn report_submit_handler(
     State(state): State<Arc<AppState>>,
     Extension(client_ip): Extension<ClientIp>,
@@ -203,12 +206,14 @@ pub async fn feedback_submit_handler(
     Ok(Redirect::to("/feedback?submitted=1"))
 }
 
+/// The token is unused; the handler authorizes by session ownership.
 #[derive(Deserialize)]
 pub struct DeleteRequest {
     #[serde(default)]
     pub token: String,
 }
 
+/// The base64 cookie is not encrypted.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileCookieEntry {
     pub id: String,
@@ -216,6 +221,7 @@ pub struct FileCookieEntry {
     pub token: String,
 }
 
+/// Returns empty on a missing or malformed cookie; it never fails the request.
 fn parse_file_cookie(header: &HeaderValue) -> Vec<FileCookieEntry> {
     let cookie_str = header.to_str().unwrap_or("");
     for part in cookie_str.split(';') {
@@ -253,6 +259,7 @@ pub fn file_cookie_header(existing: &HeaderMap, new_entry: &FileCookieEntry) -> 
     cookie_header_value(&val, existing)
 }
 
+/// `Secure` unless the request is plain HTTP on localhost.
 fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
     let is_localhost = existing
         .get(header::HOST)
@@ -266,13 +273,17 @@ fn cookie_header_value(val: &str, existing: &HeaderMap) -> HeaderValue {
         .is_some_and(|p| p == "https");
     let secure = !(is_localhost && !is_https);
 
-    let secure_flag = if secure { "; Secure" } else { "" };
-    HeaderValue::from_str(&format!(
-        "{COOKIE_NAME}={val}; Path=/; SameSite=Strict{secure_flag}; Max-Age={COOKIE_MAX_AGE}"
+    HeaderValue::from_str(&crate::cookies::header(
+        COOKIE_NAME,
+        val,
+        COOKIE_MAX_AGE,
+        false,
+        secure,
     ))
     .unwrap_or_else(|_| HeaderValue::from_static("jb_files=; Path=/; Max-Age=0"))
 }
 
+/// Replaces the old id's entry so the cookie never points at a retired id.
 #[must_use]
 pub fn rename_file_cookie_header(
     existing: &HeaderMap,
@@ -360,6 +371,7 @@ pub fn upload_redirect(
     response
 }
 
+/// A missing `Accept` counts as not HTML.
 #[must_use]
 pub fn wants_html(headers: &axum::http::HeaderMap) -> bool {
     headers

@@ -1,3 +1,4 @@
+import { readCookie, writeCookie } from "./util.js";
 const PING_TIMEOUT_MS = 6000;
 const PING_ROUNDS = 3;
 const PING_MAX_CONSECUTIVE_FAILURES = 2;
@@ -10,20 +11,14 @@ function readSavedHost() {
     if (ls.trim())
       return ls.trim();
   } catch {}
-  try {
-    const m = document.cookie.split("; ").find((c) => c.startsWith("juicebox_host="));
-    if (m)
-      return decodeURIComponent(m.split("=")[1] || "").trim();
-  } catch {}
-  return "";
+  return readCookie("juicebox_host").trim();
 }
+// The cookie matters for SSR: the server picks the host before this script runs.
 function saveHost(url) {
   try {
     localStorage.setItem("juicebox_host", url);
   } catch {}
-  try {
-    document.cookie = `juicebox_host=${encodeURIComponent(url)}; path=/; ` + `max-age=${30 * 86400}; SameSite=Lax`;
-  } catch {}
+  writeCookie("juicebox_host", url, 30 * 86400);
   const input = document.querySelector("[data-host-input]");
   if (input)
     input.value = url;
@@ -41,8 +36,6 @@ function syncConfigBits(cfg) {
       serverCfg.setAttribute("data-danger-level", String(cfg.danger_level));
     if (typeof cfg.quick_link === "boolean")
       serverCfg.setAttribute("data-quick-link", String(cfg.quick_link));
-    if (typeof cfg.quic === "boolean")
-      serverCfg.setAttribute("data-quic", String(cfg.quic));
   }
   if (cfg.danger_level) {
     try {
@@ -181,6 +174,7 @@ async function pingOnce(s) {
     if (!res.ok)
       throw new Error(`status ${res.status}`);
     const cfg = await res.json();
+    // `max_file_size_bytes` distinguishes a JuiceHost from any other 200 response.
     if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg) || !("max_file_size_bytes" in cfg)) {
       throw new Error("not a JuiceHost node");
     }
@@ -197,6 +191,7 @@ async function pingOnce(s) {
     }
     if (s.state === "checking")
       return;
+    // A browser blocks http pings from an https page, so report it as offline instead of hanging.
     if (s.url.startsWith("http://") && window.location.protocol === "https:") {
       s.state = "offline";
       s.latencyMs = null;
@@ -283,6 +278,7 @@ async function pingOnce(s) {
     }
   }
   function selectRow(s) {
+    // An empty saved host means auto: the upload router or current origin decides.
     if (s.auto) {
       saveHost("");
       markSelected("");

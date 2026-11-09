@@ -1,8 +1,13 @@
+//! Build step: compiles the icon SVGs into a lookup table and stamps the commit
+//! and static-asset versions into the binary.
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
 };
 
+/// Locates `.git/HEAD` so a commit or branch switch rebuilds the version stamp,
+/// falling back to the checkout-relative path when git is unavailable.
 fn git_head_path() -> Option<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     if let Some(dir) = std::process::Command::new("git")
@@ -24,6 +29,8 @@ fn git_head_path() -> Option<PathBuf> {
     fallback.is_file().then_some(fallback)
 }
 
+/// FNV-1a over sorted relative paths and file contents, so any static edit
+/// changes the cache-busting asset version and unrelated rebuilds do not.
 fn hash_static_tree(dir: &Path) -> u64 {
     fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(dir) {
@@ -66,6 +73,7 @@ fn hash_static_tree(dir: &Path) -> u64 {
 fn main() {
     println!("cargo:rerun-if-changed=icons/");
     if let Some(head) = git_head_path() {
+        // HEAD moves on commit and branch switch; rebuild to refresh the stamp.
         println!("cargo:rerun-if-changed={}", head.display());
     }
     println!("cargo:rerun-if-changed=build.rs");

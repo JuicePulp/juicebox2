@@ -9,15 +9,7 @@ publish = false
 
 [features]
 default = ["quic"]
-quic = [
-    "quinn",
-    "quinn-proto",
-    "h3",
-    "h3-quinn",
-    "rustls",
-    "rustls-pki-types",
-    "juiceutils/quic",
-]
+quic = ["juiceutils/quic"]
 
 [dependencies]
 aes-gcm.workspace = true
@@ -32,8 +24,6 @@ chrono.workspace = true
 dashmap.workspace = true
 flate2.workspace = true
 futures.workspace = true
-h3 = { workspace = true, optional = true }
-h3-quinn = { workspace = true, optional = true }
 hex.workspace = true
 infer.workspace = true
 jsonwebtoken.workspace = true
@@ -44,15 +34,11 @@ mimalloc.workspace = true
 mime_guess.workspace = true
 nanoid.workspace = true
 percent-encoding.workspace = true
-quinn = { workspace = true, optional = true }
-quinn-proto = { workspace = true, optional = true }
 r2d2.workspace = true
 r2d2_sqlite.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true
-rustls = { workspace = true, optional = true }
-rustls-pki-types = { workspace = true, optional = true }
 sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
 sentry-tracing = { workspace = true, features = ["logs"] }
 serde.workspace = true

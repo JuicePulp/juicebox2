@@ -31,6 +31,7 @@ pub enum ProxyError {
     Response(#[source] axum::http::Error),
 }
 
+/// `host` and `content-length` are dropped so the HTTP client sets them.
 const HOP_BY_HOP: &[&str] = &[
     "connection",
     "keep-alive",
@@ -64,6 +65,8 @@ pub enum Upstream {
     Juicehost,
 }
 
+/// Iterating `HeaderMap` yields only the first value, so repeated `set-cookie`
+/// is re-added by hand.
 pub fn clean_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
     let mut out = Vec::with_capacity(input.len());
     for (name, value) in input {
@@ -81,6 +84,7 @@ pub fn clean_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
     out
 }
 
+/// Keeps `connection` and `upgrade`, which the WebSocket handshake needs.
 pub fn clean_ws_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
     const WS_STRIPPED: &[&str] = &[
         "keep-alive",
@@ -99,6 +103,8 @@ pub fn clean_ws_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
         .collect()
 }
 
+/// Incoming `X-Forwarded-For` is trusted only from a trusted peer; otherwise
+/// replaced with the peer so it cannot be spoofed.
 pub fn outgoing_forwarded_for(
     incoming: Option<&str>,
     peer: Option<IpAddr>,
@@ -219,6 +225,7 @@ async fn proxy_request(
     let status = upstream_response.status();
     let cleaned = clean_headers(upstream_response.headers());
     let shutdown = std::sync::Arc::clone(&state.shutdown);
+    // End in-flight downloads on shutdown, or graceful drain waits for them.
     let stop = async move { shutdown.notified().await };
     let body_stream = upstream_response
         .bytes_stream()
@@ -237,6 +244,7 @@ async fn proxy_request(
         .map_err(ProxyError::Response)
 }
 
+/// Redirects are not followed: upstream 3xx responses are relayed unchanged.
 pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))

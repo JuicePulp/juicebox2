@@ -14,6 +14,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::sync::{Notify, Semaphore};
 use tower::Service;
 
+/// Throwaway certificate for local development.
 #[must_use]
 
 pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
@@ -25,6 +26,7 @@ pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'s
     (cert_der, key_der)
 }
 
+/// First run generates and saves a self-signed pair; the key is written 0600.
 pub fn get_or_generate_cert(
     cert_path: &std::path::Path,
 ) -> Result<(CertificateDer<'static>, PrivateKeyDer<'static>), String> {
@@ -78,6 +80,7 @@ fn write_private_key(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
     std::io::Write::write_all(&mut options.open(path)?, bytes)
 }
 
+/// DER form, for client pinning.
 pub fn load_cert_for_pinning(
     cert_path: &std::path::Path,
 ) -> Result<CertificateDer<'static>, String> {
@@ -129,6 +132,7 @@ pub async fn start_quic_server(
     .await;
 }
 
+/// Certificate problems are logged without failing the caller.
 pub async fn start_quic_server_with_limits(
     router: axum::Router,
     addr: std::net::SocketAddr,
@@ -216,6 +220,8 @@ pub async fn start_quic_server_with_limits(
     }
 }
 
+// Unvalidated addresses get a cheap Retry; past the limit, connections are
+// refused.
 async fn run_quic_server(endpoint: &Endpoint, router: axum::Router, limits: QuicServerLimits) {
     let connection_limit = Arc::new(Semaphore::new(limits.max_connections));
     let request_limit = Arc::new(Semaphore::new(limits.max_requests));
@@ -334,6 +340,7 @@ async fn handle_h3_conn(
     Ok(())
 }
 
+// Requests stream into the Axum router so large uploads work over H3.
 async fn proxy_axum(
     router: &mut axum::Router,
     req: Request<()>,

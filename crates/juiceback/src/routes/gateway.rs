@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 
 use crate::{crypto_file, db, error::AppError, state::AppState};
 
+/// `mem_kib` in KiB, `time` passes, `lanes` parallel lanes.
 #[derive(Serialize, ToSchema)]
 pub struct KdfParams {
     mem_kib: u32,
@@ -18,6 +19,7 @@ pub struct KdfParams {
     lanes: u32,
 }
 
+/// `V1` decrypts in the browser; `Legacy` is password-only and server-side.
 #[derive(Serialize, ToSchema)]
 #[serde(tag = "key_version")]
 pub enum ParamsResponse {
@@ -42,6 +44,7 @@ pub enum ParamsResponse {
     },
 }
 
+/// A digest of the real name, so the filename stays hidden until unlocked.
 fn hashed_filename(filename: &str) -> String {
     let mut input = Vec::with_capacity(32 + filename.len());
     input.extend_from_slice(b"juicebox-filename-v1:");
@@ -57,6 +60,7 @@ fn ciphertext_url_for(state: &Arc<AppState>, id: &str) -> String {
     )
 }
 
+/// Unauthenticated; exposes only public crypto params and the hashed filename.
 #[utoipa::path(
     get,
     path = "/api/gateway/params/{id}",
@@ -118,6 +122,7 @@ pub struct UnlockRequest {
     pub password: String,
 }
 
+/// Empty for legacy password-only files.
 #[derive(Serialize, ToSchema)]
 struct UnlockResponse {
     dek: String,
@@ -127,6 +132,7 @@ struct UnlockResponse {
     mime_type: String,
 }
 
+/// Per-file-key unlocks are rate-limited per IP; responses are `no-store`.
 #[utoipa::path(
     post,
     path = "/api/gateway/unlock",

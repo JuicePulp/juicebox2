@@ -34,6 +34,7 @@ export function initHaptics() {
     return;
   window.__jbBuzz = true;
   const INTERACTIVE = 'button:not(:disabled),a[href],[role="button"],summary,label,input[type="checkbox"],input[type="radio"],select';
+  // capture so the buzz starts before a click handler navigates away
   document.addEventListener("pointerdown", (e) => {
     if (!(e.target instanceof Element))
       return;

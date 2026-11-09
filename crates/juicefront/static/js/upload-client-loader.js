@@ -6,6 +6,7 @@ const version = (() => {
   }
 })();
 
+// Busts the ESM cache after a deploy; without it a tab keeps the old engine for its lifetime.
 const client = await import(
   version
     ? `./upload-client.js?v=${encodeURIComponent(version)}`

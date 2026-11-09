@@ -31,6 +31,9 @@ fn default_concat_filename() -> String {
     ),
     tag = "Internal",
 )]
+/// Rejects empty, duplicate, self-referential, or oversized part lists before
+/// reading, holds one upload permit, and requires the capability for every
+/// part.
 pub async fn concat_files(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

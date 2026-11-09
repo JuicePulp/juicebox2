@@ -27,6 +27,8 @@ pub fn mock_router(state: Arc<AppState>) -> axum::Router {
     build_router(state).layer(MockConnectInfo(mock_addr()))
 }
 
+/// Baseline config: in-memory DB, private fetch allowed, external providers
+/// off.
 #[must_use]
 pub fn test_config() -> Config {
     Config {
@@ -120,6 +122,7 @@ pub fn test_config() -> Config {
     }
 }
 
+/// Trusts the loopback proxy so `x-forwarded-for` is honored.
 #[must_use]
 pub fn test_config_with_proxies() -> Config {
     let mut config = test_config();
@@ -263,6 +266,7 @@ pub fn state_from_config(config: Config) -> Arc<AppState> {
 
 #[must_use]
 pub fn state_from_config_with_jh(config: Config, jh: JuicehostConfig) -> Arc<AppState> {
+    // Single-connection pool: holding two handles at once would block.
     let manager = r2d2_sqlite::SqliteConnectionManager::memory();
     let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
     juiceback::db::init_db(&pool.get().unwrap()).unwrap();

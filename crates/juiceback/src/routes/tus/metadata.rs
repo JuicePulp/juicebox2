@@ -2,6 +2,8 @@ use base64::Engine;
 
 use crate::error::AppError;
 
+/// All three of `session_id`, `part_index`, and `total_parts` must be present,
+/// or none.
 pub(crate) fn validate_parallel_metadata(
     session_id: Option<&str>,
     part_index: Option<usize>,
@@ -34,6 +36,7 @@ pub(crate) fn parse_parallel_number(value: Option<&str>) -> Result<Option<usize>
         .transpose()
 }
 
+/// Rejects overflow or a chunk past the declared length.
 #[must_use = "a rejected offset must stop the PATCH"]
 pub(crate) fn checked_upload_offset(
     offset: u64,
@@ -49,6 +52,7 @@ pub(crate) fn checked_upload_offset(
     Ok(new_offset)
 }
 
+/// Malformed pairs are skipped; callers supply defaults.
 #[must_use]
 pub(crate) fn parse_tus_metadata(
     header: Option<&axum::http::HeaderValue>,
@@ -59,6 +63,7 @@ pub(crate) fn parse_tus_metadata(
     let mut pairs = Vec::new();
     for pair in raw.split(',') {
         let pair = pair.trim();
+        // TUS separates key and base64 value with a space, not '='.
         let Some(eq) = pair.find(' ') else {
             continue;
         };

@@ -70,6 +70,7 @@ export function initRipple() {
     const noise = document.createElement("span");
     noise.className = "ripple-noise";
     btn.appendChild(noise);
+    // force a reflow so the hold transition animates from scale(0)
     ripple.offsetHeight;
     ripple.classList.add("ripple-wave--hold");
     requestAnimationFrame(() => noise.classList.add("ripple-noise--visible"));

@@ -101,6 +101,7 @@
       invoke.onload = done;
       invoke.onerror = function () {
         
+        // one blocked invoke usually means the whole ad domain is blocked
         cascadeFailed = true;
         markAllBlocked(zones);
         done();
@@ -150,6 +151,7 @@
 
   function armLoadWatcher(holder) {
     if (typeof MutationObserver === "undefined") return;
+    // the invoke script inserts its iframe after load, so wait for the node
     var obs = new MutationObserver(function () {
       var iframe = holder.querySelector("iframe");
       if (!iframe || iframe.dataset.boxIwatched) return;

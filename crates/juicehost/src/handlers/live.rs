@@ -11,6 +11,8 @@ use serde::Deserialize;
 use super::common::backend_request;
 use crate::{error::JuicehostError, state::AppState, storage::valid_component};
 
+/// Declares where one part sits in the target file; `offset + length` must fit
+/// inside it.
 #[derive(Debug, Deserialize)]
 pub struct LivePartRequest {
     pub part_id: String,
@@ -78,6 +80,8 @@ pub async fn remove_live_upload(
     StatusCode::NO_CONTENT
 }
 
+/// Resolves a part id, then a target id, then a stored file; unknown ids return
+/// `found: false`, not 404.
 pub async fn live_part_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -138,6 +142,8 @@ pub async fn live_part_status(
     })))
 }
 
+/// A committed file wins over local tracking, which wins over juiceback; the
+/// backend fallback reports zero bytes.
 pub async fn upload_progress(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -179,7 +185,7 @@ pub async fn upload_progress(
     }
 
     if let Some(ref backend_url) = state.backend_url {
-        let status_url = format!("{backend_url}/internal/file/{id}/status");
+        let status_url = juiceproto::config::file_status_url(backend_url, &id);
         if let Ok(resp) = backend_request(&state, status_url).send().await
             && resp.status().is_success()
             && let Ok(body) = resp.json::<serde_json::Value>().await

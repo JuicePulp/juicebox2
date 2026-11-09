@@ -2,6 +2,7 @@ use std::{fmt::Write as _, sync::Arc};
 
 use crate::{config::Config, state::AppState};
 
+/// A missing channel is not an error; `reporter_ip` must already be hashed.
 pub fn dispatch_report_notifications(
     state: &Arc<AppState>,
     config: &Arc<Config>,
@@ -32,6 +33,7 @@ pub fn dispatch_report_notifications(
     {
         let semaphore = state.notification_semaphore.clone();
         let host = host.clone();
+        // 465 is implicit TLS, which `SmtpTransport::relay` assumes.
         let port = config.smtp_port.unwrap_or(465);
         let username = config.smtp_username.clone();
         let password = config.smtp_password.clone();
@@ -157,6 +159,7 @@ async fn send_webhook(
     Ok(())
 }
 
+/// Implicit-TLS send on a blocking thread, because lettre is synchronous.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"

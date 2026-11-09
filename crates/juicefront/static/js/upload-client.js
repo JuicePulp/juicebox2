@@ -7,9 +7,9 @@ import {
   UPLOAD_URL,
   readUploadMode,
   uploadMethodFor,
-  LAST_SPEED_KEY
+  lastUploadBps
 } from "./upload-config.js?v=2.2.0";
-import { deleteTus } from "./tus.js";
+import { deleteTus, uniqueTusIds } from "./tus.js";
 import { upsertLocalFile } from "./upload-storage.js";
 import {
   loadQueueItems,
@@ -18,19 +18,14 @@ import {
   removeQueueItem,
   flushQueue
 } from "./upload-store.js?v=2.2.0";
-import { announce } from "./util.js";
+import { announce, isTerminal } from "./util.js";
 const listeners = new Set;
 let items = [];
 const persistedIds = new Set;
 const persistPromises = new Map;
 const removedIds = new Set;
+// A reloaded page cannot reattach to an in-flight worker upload, so these become resumable.
 const HYDRATED_ACTIVE_STATES = new Set(["queued", "compressing", "uploading", "finalizing"]);
-
-function uniqueTusIds(item) {
-  if (!item) return [];
-  const ids = [...(Array.isArray(item.tusIds) ? item.tusIds : []), item.tusId];
-  return [...new Set(ids.filter((id) => typeof id === "string" && id))];
-}
 
 function hydrateRecord(record) {
   if (!record || !record.id)
@@ -71,6 +66,7 @@ if (typeof window !== "undefined") {
       items.sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
     }
   } catch {}
+  // `pagehide` rather than `beforeunload` so iOS Safari still flushes the queue.
   window.addEventListener("pagehide", () => {
     void flushQueue();
   });
@@ -139,6 +135,7 @@ let workerValidating = false;
 const workerInputs = new Map;
 const workerAckTimers = new Map;
 const workerAcked = new Set;
+// The worker must ack an enqueue within this window or the upload restarts locally.
 const WORKER_ACK_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 8000;
 const PONG_TIMEOUT_MS = 6000;
@@ -153,9 +150,6 @@ const WORKER_INSTANCE_NAME = (() => {
 let heartbeatTimer = null;
 let pingStartedAt = 0;
 
-function isTerminal(state) {
-  return state === "done" || state === "error" || state === "cancelled";
-}
 function clearWorkerTimer(id) {
   const timer = workerAckTimers.get(id);
   if (timer) {
@@ -204,6 +198,7 @@ function startHeartbeat() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 }
+// Worker-acked items restart as paused; that transfer may still be running.
 function restartWithoutWorker() {
   pingStartedAt = 0;
   if (heartbeatTimer) {
@@ -285,6 +280,7 @@ function onWorkerMessage(e) {
     removeItem(msg.id);
   }
 }
+// Cache-busts the worker module after a deploy so a stale upload engine cannot persist.
 function workerScriptUrl() {
   const url = new URL("./upload-worker.js", import.meta.url);
   try {
@@ -294,6 +290,7 @@ function workerScriptUrl() {
   } catch {}
   return url;
 }
+// One SharedWorker per version; no hello within 4 s means upload locally.
 function ensurePort() {
   if (typeof window === "undefined") return null;
   if (workerDead) return null;
@@ -327,6 +324,7 @@ function ensurePort() {
 const localItems = new Map;
 const localHandles = new Map;
 function localUpsert(patch) {
+  // Safe mode keeps a failed upload resumable instead of surfacing a hard error.
   if (patch.state === "error") {
     const existing = localItems.get(patch.id) || items.find((entry) => entry.id === patch.id);
     const safe = patch.safeUpload ?? existing?.safeUpload;
@@ -389,14 +387,7 @@ function matchesPausedFile(item, file, fingerprint) {
 export function findPausedUpload(file, fingerprint) {
   return items.find((item) => matchesPausedFile(item, file, fingerprint)) || null;
 }
-function lastUploadBps() {
-  try {
-    const stored = Number(localStorage.getItem(LAST_SPEED_KEY));
-    return Number.isFinite(stored) && stored > 0 ? stored : 0;
-  } catch {
-    return 0;
-  }
-}
+/** Starts an upload and returns its queue id; an active duplicate of the same file is reused. */
 export function enqueueUpload(input) {
   const duplicate = findActiveDuplicate(input.file);
   if (duplicate) {
@@ -471,6 +462,7 @@ export function enqueueUpload(input) {
   return id;
 }
 
+/** Resumes a paused item; returns `""` when the file, fingerprint, or required password does not match. */
 export function resumeUpload(id, file, options = {}, fingerprint = "") {
   const current = items.find((item) => item.id === id);
   if (!current || !file)
@@ -581,6 +573,7 @@ export function updateUpload(id, patch) {
   }
   localUpsert({ id, ...patch });
 }
+// The cross-tab lock serializes the read-modify-write so tabs do not lose each other's rows.
 function maybePersist(item) {
   if (item.state !== "done" || !item.url)
     return Promise.resolve(false);

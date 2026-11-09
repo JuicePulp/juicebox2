@@ -11,6 +11,7 @@ use crate::{
     state::AppState,
 };
 
+/// Both the endpoint and bearer key must be set; a lone URL is unconfigured.
 pub(crate) fn bun_fetch_configured(state: &AppState) -> bool {
     state.config.bun_fetch_url.is_some() && state.config.bun_fetch_key.is_some()
 }

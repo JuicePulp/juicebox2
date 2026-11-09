@@ -36,6 +36,7 @@ pub struct ServerFile {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Defaults to `port` plus `QUIC_OFFSET` when unset.
     #[serde(default)]
     pub quic_port: Option<u16>,
     #[serde(default = "default_database_path")]
@@ -129,6 +130,7 @@ pub struct CloudflareFile {
     pub zone_id: Option<String>,
 }
 
+/// Each entry is a separate instance, not a fallback chain.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CobaltFile {
     #[serde(default)]
@@ -141,6 +143,7 @@ pub struct CobaltFile {
     #[serde(default)]
     pub session_api_url: Option<String>,
 
+    /// Session-authenticated instances; require `COBALT_SESSION_API_KEY`.
     #[serde(default)]
     pub session_api_urls: Vec<String>,
     #[serde(default = "default_fetch_empty_retry_delay")]
@@ -510,6 +513,8 @@ impl Default for PromoFile {
     }
 }
 
+/// First existing candidate wins; a malformed file is logged and replaced with
+/// defaults.
 pub(crate) fn load_file_config() -> FileConfig {
     juiceutils::config::load_service_config(
         "juiceback",

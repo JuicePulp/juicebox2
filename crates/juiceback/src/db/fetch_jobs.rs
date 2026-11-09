@@ -42,6 +42,7 @@ pub fn get_fetch_job(conn: &Connection, id: &str) -> Result<Option<FetchJob>> {
     }
 }
 
+/// Only transitions in-flight jobs; false when already finished.
 pub fn finish_fetch_job(
     conn: &Connection,
     id: &str,
@@ -57,6 +58,7 @@ pub fn finish_fetch_job(
     Ok(affected == 1)
 }
 
+/// Progress writes are ignored once the job reaches a terminal status.
 pub fn update_fetch_job_progress(
     conn: &Connection,
     id: &str,
@@ -74,6 +76,7 @@ pub fn update_fetch_job_progress(
     Ok(())
 }
 
+/// Deletes finished jobs past retention and fails stalled pending jobs.
 pub fn cleanup_fetch_jobs(conn: &Connection, now: i64) -> Result<usize> {
     let mut deleted = conn.execute(
         "DELETE FROM fetch_jobs WHERE status != 'pending' AND updated_at <= ?1",

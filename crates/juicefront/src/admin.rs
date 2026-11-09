@@ -12,6 +12,8 @@ use crate::{
     state::AppState,
 };
 
+/// Fails closed: redirects to `/admin/login` unless the API accepts the session
+/// cookie.
 pub async fn admin_guard(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,

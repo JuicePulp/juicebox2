@@ -10,8 +10,6 @@ publish = false
 [dependencies]
 jsonwebtoken.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
 
 [lints]

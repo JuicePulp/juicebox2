@@ -19,6 +19,8 @@ use super::{
 };
 use crate::{error::AppError, state::AppState};
 
+/// `204` with the new offset, `200` with the file JSON at the end, or `202`
+/// when only a parallel part finished.
 #[utoipa::path(
     patch,
     path = "/api/tus/{id}",
@@ -91,6 +93,7 @@ pub async fn patch_upload_handler(
     res
 }
 
+/// Rejects as soon as the cap is exceeded rather than buffering everything.
 pub(super) async fn collect_bounded_body(body: Body, cap: usize) -> Result<Vec<u8>, AppError> {
     let mut buf = Vec::new();
     let mut stream = body.into_data_stream();
@@ -104,6 +107,7 @@ pub(super) async fn collect_bounded_body(body: Body, cap: usize) -> Result<Vec<u
     Ok(buf)
 }
 
+/// Caps the decoded size, stopping a small body from expanding into a bomb.
 pub(super) fn decode_gzip_bounded(raw: Vec<u8>, cap: usize) -> Result<Bytes, AppError> {
     use std::io::Read as _;
     let mut decoder = flate2::read::GzDecoder::new(raw.as_slice());
@@ -140,7 +144,10 @@ async fn patch_upload_handler_impl(
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok());
-    let gzip = headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip");
+    let gzip = headers
+        .get(juiceproto::headers::FILE_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        == Some("gzip");
 
     let reserve_override = headers
         .get("x-reserve-id")
@@ -148,7 +155,7 @@ async fn patch_upload_handler_impl(
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
     let reservation_token_override = headers
-        .get("x-delete-token")
+        .get(juiceproto::headers::DELETE_TOKEN)
         .and_then(|v| v.to_str().ok())
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
@@ -184,6 +191,7 @@ async fn patch_upload_handler_impl(
     };
 
     if let Some(ref reserve_id) = reserve_override {
+        // A session can be adopted into a reservation created after it.
         let token = reservation_token_override.as_deref().unwrap_or_default();
         let reservation = crate::reservation::verify_by_id(&state, reserve_id, token).await?;
         let upload_host = state
@@ -205,6 +213,7 @@ async fn patch_upload_handler_impl(
     }
 
     if content_length == Some(0) && upload_offset >= total_length {
+        // Empty PATCH at the end retries completion without resending bytes.
         return advance_and_maybe_complete(
             &state,
             &id,
@@ -219,6 +228,7 @@ async fn patch_upload_handler_impl(
     }
 
     if gzip || protected {
+        // Both paths need the whole chunk in memory; the body cap bounds it.
         let raw = collect_bounded_body(body, crate::constants::TUS_PATCH_MAX_BYTES).await?;
         let body_bytes = if gzip && !raw.is_empty() {
             let cap = crate::constants::TUS_PATCH_MAX_BYTES;
@@ -322,6 +332,7 @@ fn validate_first_chunk(
     filename: &str,
     bytes: &[u8],
 ) -> Result<(), AppError> {
+    // Missing config fails closed at the strictest level.
     let level = state
         .juicehost_config()
         .map_or(crate::file_validation::ProtectionLevel::High, |jh| {
@@ -333,6 +344,8 @@ fn validate_first_chunk(
     .map_or(Ok(()), Err)
 }
 
+/// Records `upload.offset` after each accepted frame, so a reconnect resumes at
+/// the last frame handed to the push task.
 async fn stream_patch_body(
     state: &Arc<AppState>,
     id: &str,
@@ -347,6 +360,7 @@ async fn stream_patch_body(
     let mut pending: Option<Bytes> = None;
 
     if upload_offset == 0 {
+        // Peek one frame so a blocked file is rejected before the push task starts.
         while let Some(frame) = stream.next().await {
             let chunk =
                 frame.map_err(|_| AppError::BadRequest("patch body stream error".into()))?;
@@ -412,6 +426,7 @@ async fn stream_patch_body(
             return Err(AppError::TusSessionNotFound);
         }
         if let Some(mut upload) = state.tus.get_mut(id) {
+            // Recorded per frame so an aborted stream keeps a resumable offset.
             upload.offset = new_offset;
             upload.last_activity = chrono::Utc::now().timestamp();
         }
@@ -432,10 +447,12 @@ async fn stream_patch_body(
 
 async fn abort_session(state: &Arc<AppState>, id: &str) {
     state.tus_senders.remove(id);
+    // Let the push task settle before releasing the session.
     let _ = await_storage_push(state, id).await;
     state.tus.remove(id);
 }
 
+/// A failed completion keeps the session so the client can retry.
 #[expect(clippy::too_many_arguments, reason = "handler context threading")]
 async fn advance_and_maybe_complete(
     state: &Arc<AppState>,
@@ -474,7 +491,6 @@ async fn advance_and_maybe_complete(
                 dek_wrapped: upload.dek_wrapped.clone(),
                 dek_salt: upload.dek_salt.clone(),
                 dek_escrow: upload.dek_escrow.clone(),
-                upload_mode: upload.upload_mode,
             };
             (true, Some(meta))
         } else {
@@ -506,6 +522,7 @@ async fn advance_and_maybe_complete(
         Ok(data) => {
             state.tus.remove(id);
             state.tus_senders.remove(id);
+            // A body without a url is only a part-complete marker.
             let status = if data.get("url").is_some() {
                 StatusCode::OK
             } else {
@@ -513,6 +530,7 @@ async fn advance_and_maybe_complete(
             };
             let mut resp = (status, Json(data)).into_response();
             if status == StatusCode::OK {
+                // Only a live file gets the download cookie.
                 resp.headers_mut()
                     .insert(axum::http::header::SET_COOKIE, cookie_hdr);
             }

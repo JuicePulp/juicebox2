@@ -8,6 +8,7 @@ pub struct StorageClient {
 }
 
 impl StorageClient {
+    /// Applies SSRF checks and picks the matching auth headers.
     pub async fn resolve(state: &Arc<AppState>, host: Option<&str>) -> Result<Self, String> {
         let target = resolve_juicehost_target(state, host)
             .await
@@ -23,6 +24,7 @@ impl StorageClient {
         &self.target.client
     }
 
+    /// Adds the per-file capability when given; rejects invalid header values.
     pub fn headers_with(
         &self,
         capability: Option<&str>,
@@ -30,7 +32,7 @@ impl StorageClient {
         let mut headers = self.target.headers.clone();
         if let Some(cap) = capability {
             headers.insert(
-                "x-juicehost-file-capability",
+                juiceproto::headers::FILE_CAPABILITY,
                 cap.parse::<reqwest::header::HeaderValue>()
                     .map_err(|_| "invalid file capability".to_string())?,
             );
@@ -54,7 +56,7 @@ mod tests {
         let headers = client.headers_with(Some("tok123")).unwrap();
         assert_eq!(
             headers
-                .get("x-juicehost-file-capability")
+                .get(juiceproto::headers::FILE_CAPABILITY)
                 .and_then(|v| v.to_str().ok()),
             Some("tok123")
         );
@@ -62,7 +64,7 @@ mod tests {
             client
                 .headers_with(None)
                 .unwrap()
-                .get("x-juicehost-file-capability")
+                .get(juiceproto::headers::FILE_CAPABILITY)
                 .is_none()
         );
     }

@@ -5,11 +5,13 @@ use juiceutils::{
 
 use crate::config::{ConfigError, DirectorySettings, SecurityFile};
 
+/// CORS origins fall back to the backend URL.
 #[derive(Debug)]
 pub struct SecuritySettings {
     api_key: String,
     allow_no_auth: bool,
     allowed_origins: Vec<String>,
+    /// Content-protection level; unknown names resolve to `High`.
     danger_level: ProtectionLevel,
     trusted_proxy_cidrs: Vec<proxy::IpCidr>,
 }
@@ -40,6 +42,8 @@ impl SecuritySettings {
         &self.trusted_proxy_cidrs
     }
 
+    /// `JUICEHOST_API_KEY` and `JUICEHOST_ALLOW_NO_AUTH` override the file
+    /// section.
     pub fn load(file: &SecurityFile, directories: &DirectorySettings) -> Result<Self, ConfigError> {
         let api_key = juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
 

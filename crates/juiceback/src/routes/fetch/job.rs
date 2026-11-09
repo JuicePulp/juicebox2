@@ -64,6 +64,7 @@ async fn fail_fetch_job(state: &Arc<AppState>, job_id: &str, msg: &str) {
         .await;
 }
 
+/// Bounded retries, then bun-fetch, then yt-dlp, in that order.
 pub(crate) async fn run_fetch_job_inner(
     state: &Arc<AppState>,
     job_id: &str,
@@ -81,6 +82,8 @@ pub(crate) async fn run_fetch_job_inner(
         (jh.max_file_size_bytes, jh.default_ttl_hours)
     };
 
+    // Reserve the tail of the timeout for transfer and finalize; rescue retries get
+    // the rest.
     let budget = std::time::Duration::from_secs(
         crate::constants::FETCH_JOB_TIMEOUT_SECS.saturating_sub(180),
     );
@@ -195,6 +198,7 @@ pub(crate) async fn run_fetch_job_inner(
     last
 }
 
+/// An empty-stream instance is excluded and the race restarts against the rest.
 pub(crate) async fn fetch_via(
     state: &Arc<AppState>,
     job_id: &str,
@@ -310,6 +314,7 @@ fn is_rescue_err(err: &str) -> bool {
     is_empty_stream_error(err) || cobalt::is_instance_failure_error(err)
 }
 
+/// Matches on message text; changing the wording silently disables retries.
 #[must_use]
 pub(crate) fn is_empty_stream_error(err: &str) -> bool {
     err.contains("returned no data") || err.contains("blocked extraction")

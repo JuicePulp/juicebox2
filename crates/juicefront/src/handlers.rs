@@ -52,8 +52,8 @@ pub struct CardAction {
 fn hreflang_links_absolute(headers: &HeaderMap, stripped: &str) -> Vec<Hreflang> {
     i18n::LOCALES
         .iter()
-        .copied()
-        .map(|(code, _)| {
+        .map(|locale| {
+            let code = locale.code;
             let href = if code == i18n::DEFAULT_LOCALE {
                 stripped.to_owned()
             } else if stripped == "/" {
@@ -81,6 +81,7 @@ fn absolute_url(headers: &HeaderMap, path_query: &str) -> String {
     format!("{scheme}://{host}{path_query}")
 }
 
+/// Cookie values are not percent-decoded; callers must handle that.
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let header = headers.get("cookie")?.to_str().ok()?;
     for part in header.split(';') {
@@ -105,6 +106,7 @@ fn query_map(uri: &axum::http::Uri) -> HashMap<String, String> {
 
 const HEALTH_CACHE_TTL: Duration = Duration::from_secs(1);
 const BAN_CACHE_TTL: Duration = Duration::from_secs(10);
+/// Hard cap so a flood of distinct client IPs cannot grow the ban cache.
 const BAN_CACHE_MAX_ENTRIES: usize = 4096;
 
 async fn cached_backend_offline(state: &AppState) -> bool {
@@ -121,6 +123,7 @@ async fn cached_backend_offline(state: &AppState) -> bool {
     !healthy
 }
 
+/// The client IP comes only from forwarding headers a trusted proxy set.
 pub(crate) async fn cached_ban(
     state: &AppState,
     headers: &HeaderMap,
@@ -202,7 +205,6 @@ struct ModalsTpl {
 
 struct ServerFlags {
     quick_link: bool,
-    quic: bool,
     custom_id: bool,
     cobalt: bool,
 }
@@ -229,6 +231,7 @@ fn modals_html(
     let config = &eff.config;
     let danger = config.danger_level.as_deref().unwrap_or("high");
     let blocked_key = format!("host.blocked_{danger}");
+    // A configured danger level may lack copy; fall back to high-severity wording.
     let blocked_text = {
         let text = cx.t(&blocked_key);
         if text == blocked_key {
@@ -244,9 +247,9 @@ fn modals_html(
     let base_path = i18n::split_locale(url_path).1;
     let lang_links = i18n::LOCALES
         .iter()
-        .copied()
-        .map(|(code, label)| {
-            let href = if code == "en" {
+        .map(|entry| {
+            let code = entry.code;
+            let href = if code == i18n::DEFAULT_LOCALE {
                 base_path.clone()
             } else if base_path == "/" {
                 format!("/{code}")
@@ -255,7 +258,7 @@ fn modals_html(
             };
             LangLink {
                 code,
-                label: label.to_owned(),
+                label: entry.name.to_owned(),
                 href,
                 active: code == locale,
             }
@@ -265,7 +268,6 @@ fn modals_html(
         cx: cx.clone(),
         flags: ServerFlags {
             quick_link: config.quick_link.unwrap_or(true),
-            quic: config.quic.unwrap_or(true),
             custom_id: config.custom_id.unwrap_or(true),
             cobalt: config.cobalt.unwrap_or(false),
         },
@@ -314,7 +316,7 @@ fn modals_html(
         locale_codes_json: serde_json::to_string(
             &i18n::LOCALES
                 .iter()
-                .map(|(code, _)| *code)
+                .map(|locale| locale.code)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or_else(|_| "[]".to_owned()),
@@ -384,6 +386,7 @@ fn ad_zones() -> std::collections::HashMap<String, AdZone> {
 }
 
 fn ads_html(locale: &'static str, headers: &HeaderMap) -> String {
+    // `ADTESTING=TRUE` opts a browser into ad slots outside production.
     let eligible = cookie_value(headers, "ADTESTING").is_some_and(|value| value == "TRUE");
     let zones = ad_zones();
     if zones.is_empty() {
@@ -443,6 +446,7 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
         cx: Cx::new(locale),
         modals_html: modals,
         ads_html: ads,
+        // Escape "</" so inlined JSON cannot terminate the surrounding script element.
         i18n_json: i18n::embedded_json(locale).replace("</", "<\\/"),
         icons_json: crate::icons::bundle_json(crate::icons::RUNTIME_ICONS).replace("</", "<\\/"),
         extra_scripts,
@@ -523,6 +527,7 @@ struct PageCtx {
 }
 
 impl PageCtx {
+    /// `None` means an unknown locale prefix, served as not-found.
     fn resolve(locale_path: Option<Path<String>>, uri: &axum::http::Uri) -> Option<Self> {
         let locale = locale_from_path(locale_path)?;
         Some(Self {
@@ -590,6 +595,7 @@ fn flags_html(offline: bool, banned: bool) -> String {
     )
 }
 
+/// Buffers the stream so the status is known before any byte is sent.
 async fn stream_page(
     status: StatusCode,
     stream: impl futures::Stream<Item = Result<bytes::Bytes, std::convert::Infallible>> + Send + 'static,
@@ -608,6 +614,7 @@ async fn stream_page(
         .unwrap_or_default()
 }
 
+/// Concatenation order is the cascade order: later files override earlier ones.
 const CSS_BUNDLE: &str = concat!(
     include_str!("../static/styles/upload.css"),
     "\n",
@@ -674,6 +681,7 @@ struct CssAssets {
 
 static CSS_ASSETS: std::sync::OnceLock<CssAssets> = std::sync::OnceLock::new();
 
+/// FNV-1a 64-bit; used only for the stylesheet ETag.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for &byte in bytes {
@@ -716,6 +724,7 @@ fn css_assets() -> &'static CssAssets {
     })
 }
 
+/// Caches immutably only for versioned URLs.
 pub async fn css_bundle(headers: HeaderMap, uri: axum::http::Uri) -> Response<Body> {
     let assets = css_assets();
     let accept = headers
@@ -777,8 +786,8 @@ fn locale_from_path(path: Option<Path<String>>) -> Option<&'static str> {
             }
             i18n::LOCALES
                 .iter()
-                .find(|(locale, _)| *locale == code)
-                .map(|(locale, _)| *locale)
+                .find(|locale| locale.code == code)
+                .map(|locale| locale.code)
         }
         None => Some(i18n::DEFAULT_LOCALE),
     }
@@ -864,6 +873,8 @@ fn json_num(value: &serde_json::Value, key: &str) -> i64 {
         .map_or(0, |num| num as i64)
 }
 
+/// Field lengths are clamped so a hostile `uploaded` payload cannot bloat the
+/// page.
 fn parse_uploaded(param: &str) -> Option<UploadedFile> {
     let bytes = base64url_decode(param)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
@@ -893,6 +904,8 @@ struct IndexTpl {
     hostsel_html: String,
 }
 
+/// Forwards Cloudflare geo headers; 503 if the router is unconfigured or
+/// unreachable.
 pub async fn upload_target_proxy(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -935,6 +948,7 @@ pub async fn upload_target_proxy(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+/// Methods other than GET are handed to the reverse proxy.
 pub async fn index(
     State(state): axum::extract::State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
@@ -1196,6 +1210,7 @@ struct FileModalsTpl {
     files: Vec<FileRow>,
 }
 
+/// Derives expiry and TTL values at `timestamp` (Unix ms).
 #[allow(clippy::too_many_arguments)]
 fn file_rows(
     cx: &Cx,
@@ -1258,8 +1273,8 @@ pub async fn files_rows_handler(
     let locale: &'static str = body.locale.as_deref().map_or(i18n::DEFAULT_LOCALE, |code| {
         i18n::LOCALES
             .iter()
-            .find(|(locale, _)| *locale == code)
-            .map_or(i18n::DEFAULT_LOCALE, |(locale, _)| *locale)
+            .find(|locale| locale.code == code)
+            .map_or(i18n::DEFAULT_LOCALE, |locale| locale.code)
     });
     let cx = Cx::new(locale);
     let data = shared(&state, &headers, peer.ip()).await;
@@ -1591,6 +1606,7 @@ struct LinuxFormat {
     href: String,
 }
 
+/// Hard-coded fallback survives GitHub outages and rate limits.
 async fn latest_tag(state: &AppState) -> String {
     const FALLBACK: &str = "v1.1.4";
     if let Ok(cache) = state.github_cache.lock()
@@ -1915,6 +1931,7 @@ pub async fn faq_page(
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let (shell, data) = content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path).await;
+    // Questions q1 through q10 are fixed by the translation bundles.
     let items: Vec<FaqItem> = (1..=10)
         .map(|num| FaqItem {
             q: cx.t(&format!("faq.q{num}")),
@@ -2201,7 +2218,7 @@ const ADMIN_ANNOUNCEMENT: AdminPage = AdminPage {
     scripts: &["/static/js/admin-announcement.js"],
 };
 
-fn admin_html(status: StatusCode, page: AdminPage) -> Response<Body> {
+fn admin_html(page: AdminPage) -> Response<Body> {
     let body = AdminTpl {
         page: page.page,
         title: page.title.to_owned(),
@@ -2214,40 +2231,39 @@ fn admin_html(status: StatusCode, page: AdminPage) -> Response<Body> {
     .render()
     .unwrap_or_default();
     Response::builder()
-        .status(status)
         .header("content-type", "text/html; charset=utf-8")
         .body(Body::from(body))
         .unwrap_or_default()
 }
 
 pub async fn admin_index() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_INDEX)
+    admin_html(ADMIN_INDEX)
 }
 
 pub async fn admin_login() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_LOGIN)
+    admin_html(ADMIN_LOGIN)
 }
 
 pub async fn admin_files() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_FILES)
+    admin_html(ADMIN_FILES)
 }
 
 pub async fn admin_bans() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_BANS)
+    admin_html(ADMIN_BANS)
 }
 
 pub async fn admin_hosters() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_HOSTERS)
+    admin_html(ADMIN_HOSTERS)
 }
 
 pub async fn admin_reports() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_REPORTS)
+    admin_html(ADMIN_REPORTS)
 }
 
 pub async fn admin_feedback() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_FEEDBACK)
+    admin_html(ADMIN_FEEDBACK)
 }
 
 pub async fn admin_announcement() -> Response<Body> {
-    admin_html(StatusCode::OK, ADMIN_ANNOUNCEMENT)
+    admin_html(ADMIN_ANNOUNCEMENT)
 }

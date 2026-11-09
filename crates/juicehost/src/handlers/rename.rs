@@ -30,6 +30,8 @@ pub struct RenameRequest {
     ),
     tag = "Internal",
 )]
+/// Checks the capability against the old id only; a taken destination yields
+/// 409 and leaves the source intact.
 pub async fn rename_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

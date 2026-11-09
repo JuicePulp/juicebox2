@@ -6,6 +6,7 @@ use utoipa::ToSchema;
 
 use crate::{auth::InternalApiKey, db, error::AppError, state::AppState};
 
+/// Only `view` or `preview` can trigger promotion.
 #[derive(Deserialize, ToSchema)]
 pub struct HitRequest {
     pub file_id: String,
@@ -65,6 +66,7 @@ pub async fn hit_handler(
             db::record_file_hit_count(db, &hit_file_id, &ip_hash, kind, count, now)
         })
         .await?;
+    // Fire-and-forget so the follow-up work cannot fail the request.
     if kind == db::HitKind::View {
         let surface = body.surface.as_deref().unwrap_or("view").to_string();
         if surface == "preview" || surface == "view" {
@@ -111,6 +113,8 @@ struct PreparedHit {
     count: u64,
 }
 
+/// All hits are validated before any are written; one bad hit rejects the
+/// batch.
 #[derive(Deserialize, ToSchema)]
 pub struct HitBatchRequest {
     pub hits: Vec<HitRequest>,

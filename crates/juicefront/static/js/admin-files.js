@@ -1,4 +1,4 @@
-import { formatSize } from "./util.js";
+import { formatSize, esc } from "./util.js";
 import { publicFileInfo } from "./api.js";
 
     var PAGE = 200;
@@ -8,6 +8,7 @@ import { publicFileInfo } from "./api.js";
     var searchTimer = null;
     var filesObserver = null;
     var isLoadingMore = false;
+    // The query that produced `allFiles`; `fetchMore` pages with this, not the search box.
     var currentQuery = { q: "", sort: "uploaded_at", dir: "desc" };
 
     function formatTime(sec) {
@@ -23,12 +24,6 @@ import { publicFileInfo } from "./api.js";
         if (mins < 60) return mins + "m";
         if (hours < 24) return hours + "h";
         return days + "d";
-    }
-
-    function esc(s) {
-        var d = document.createElement("div");
-        d.appendChild(document.createTextNode(s));
-        return d.innerHTML;
     }
 
     function buildParams(offset) {
@@ -126,6 +121,7 @@ import { publicFileInfo } from "./api.js";
         return displayedCount < filterByType(allFiles).length || allFiles.length < currentTotal;
     }
 
+    // Silent variant for infinite scroll: a failure must not replace the table with an error.
     async function fetchPageSilent(params) {
         var qs = "q=" + encodeURIComponent(params.q) +
             "&sort=" + encodeURIComponent(params.sort) +
@@ -161,6 +157,7 @@ import { publicFileInfo } from "./api.js";
         }
         var seen = {};
         var i;
+        // Deduped because new uploads shift the offset window, so pages can overlap.
         for (i = 0; i < allFiles.length; i++) seen[allFiles[i].id] = true;
         for (i = 0; i < result.items.length; i++) {
             if (!seen[result.items[i].id]) {
@@ -180,6 +177,7 @@ import { publicFileInfo } from "./api.js";
     function renderTable() {
         var listEl = document.getElementById("files-list");
         if (!listEl) return;
+        // Drop the old observer before replacing the DOM, or it fires on detached nodes.
         if (filesObserver) {
             filesObserver.disconnect();
             filesObserver = null;
@@ -376,6 +374,7 @@ import { publicFileInfo } from "./api.js";
         try {
             var res = await fetch("/api/admin/file/" + encodeURIComponent(id), { method: "DELETE" });
             if (res.ok) {
+                // Removed locally; `currentTotal` is not decremented.
                 allFiles = allFiles.filter(function (f) { return f.id !== id; });
                 displayedCount = Math.min(displayedCount, filterByType(allFiles).length);
                 renderTable();

@@ -20,7 +20,8 @@ pub async fn fetch_snapshot_once(state: &Arc<AppState>) {
     let resp = match state
         .backend_client
         .get(&url)
-        .header("x-juicehost-api-key", &state.api_key)
+        .header(juiceproto::headers::HOST_API_KEY, &state.api_key)
+        // snapshot can be large; 10s beats the client's 2s default
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -47,6 +48,7 @@ pub async fn fetch_snapshot_once(state: &Arc<AppState>) {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // an empty pepper disables ban checks; keep the existing list
     if pepper.is_empty() {
         tracing::warn!("ban snapshot fetch from {url} returned empty pepper");
         return;

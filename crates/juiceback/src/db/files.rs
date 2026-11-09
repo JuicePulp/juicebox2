@@ -44,11 +44,13 @@ pub fn finish_reservation(
     Ok(FinishReservationResult::NotUploading)
 }
 
+/// Column order must match `row_to_file_record`.
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
     delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
     password_hash, is_encrypted, enc_header, dek_wrapped, dek_salt, dek_escrow, key_version, \
     tier, r2_key, tier_pinned, title, author";
 
+/// Missing values from older rows fall back to ready/standard/0.
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
     let status: String = row
@@ -132,6 +134,7 @@ pub async fn insert_new_file(
     Ok(record)
 }
 
+/// Forces `uploading` so an incomplete upload is never served as ready.
 pub async fn insert_pending_file(
     state: &std::sync::Arc<crate::state::AppState>,
     mut record: FileRecord,
@@ -144,6 +147,7 @@ pub async fn insert_pending_file(
     Ok(record)
 }
 
+/// Errors if the row is not `uploading`; extends expiry by upload time.
 pub async fn finish_file(
     state: &std::sync::Arc<crate::state::AppState>,
     id: String,
@@ -207,6 +211,7 @@ pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRec
     rows.collect()
 }
 
+/// No shared transaction; orphaned stats are pruned later.
 pub fn delete_file(conn: &Connection, id: &str) -> Result<bool> {
     let affected = conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
     if affected > 0 {
@@ -245,20 +250,38 @@ pub fn list_all_files(conn: &Connection) -> Result<Vec<FileRecord>> {
     rows.collect()
 }
 
+/// Rewrites the id, storage path, and optional filename, carrying the stats
+/// row along.
 pub fn renew_file_id(
     conn: &Connection,
     old_id: &str,
     new_id: &str,
     new_storage_path: &str,
+    new_filename: Option<&str>,
 ) -> Result<bool> {
     let affected = conn.execute(
-        "UPDATE files SET id = ?1, storage_path = ?2 WHERE id = ?3",
-        params![new_id, new_storage_path, old_id],
+        "UPDATE files SET id = ?1, storage_path = ?2, filename = COALESCE(?4, filename) WHERE id = ?3",
+        params![new_id, new_storage_path, old_id, new_filename],
     )?;
     if affected > 0 {
         conn.execute(
             "UPDATE file_stats SET file_id = ?1 WHERE file_id = ?2",
             params![new_id, old_id],
+        )?;
+    }
+    Ok(affected > 0)
+}
+
+/// Renames in place and keeps the denormalized client copy in step.
+pub fn set_filename(conn: &Connection, id: &str, filename: &str) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE files SET filename = ?1 WHERE id = ?2",
+        params![filename, id],
+    )?;
+    if affected > 0 {
+        conn.execute(
+            "UPDATE client_files SET filename = ?1 WHERE file_id = ?2",
+            params![filename, id],
         )?;
     }
     Ok(affected > 0)
@@ -277,6 +300,7 @@ pub fn delete_alias(conn: &Connection, old_id: &str) -> Result<bool> {
     Ok(affected > 0)
 }
 
+/// Follows up to 10 alias hops; `None` when already canonical.
 pub fn resolve_alias(conn: &Connection, old_id: &str) -> Result<Option<String>> {
     let mut current = old_id.to_string();
     for _ in 0..10 {
@@ -302,6 +326,7 @@ pub fn resolve_alias(conn: &Connection, old_id: &str) -> Result<Option<String>> 
     Ok(Some(current))
 }
 
+/// Keyset pagination; pass the previous batch's last id as `after_id`.
 pub fn list_expired_batch(
     conn: &Connection,
     after_id: &str,
@@ -330,6 +355,7 @@ pub fn list_abandoned_uploads_batch(
     rows.collect()
 }
 
+/// Returns the file-row count, not the stats count.
 pub fn delete_files_by_ids(conn: &Connection, ids: &[String]) -> Result<usize> {
     if ids.is_empty() {
         return Ok(0);

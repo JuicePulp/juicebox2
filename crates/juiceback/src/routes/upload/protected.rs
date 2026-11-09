@@ -19,6 +19,8 @@ pub fn relay_required() -> AppError {
     AppError::BadRequest(USE_RELAY_FOR_PROTECTED.into())
 }
 
+/// The DEK is wrapped with a password-derived KEK and separately escrowed under
+/// the server key, so files can be served and deleted without the password.
 #[derive(Clone)]
 pub struct ProtectionSetup {
     pub password_hash: String,
@@ -43,6 +45,7 @@ impl ProtectionSetup {
     }
 }
 
+/// Hashing and wrapping are CPU-bound, so they run on a blocking thread.
 pub async fn prepare_protection(
     state: &Arc<AppState>,
     password: &str,
@@ -78,6 +81,7 @@ pub async fn prepare_protection(
     .map_err(|_| AppError::Internal("protection setup panicked".into()))?
 }
 
+/// Recovers the DEK from escrow without the user's password.
 pub fn unwrap_escrow(state: &Arc<AppState>, escrow_hex: &str) -> Result<FileKey, AppError> {
     let key = state
         .config
@@ -125,6 +129,7 @@ impl UploadProtection {
     }
 }
 
+/// An existing reservation's key wins over a supplied password.
 pub async fn resolve_multipart_protection(
     state: &Arc<AppState>,
     password: Option<String>,
@@ -143,6 +148,7 @@ pub async fn resolve_multipart_protection(
     )))
 }
 
+/// The caller must drop the sender to finish.
 pub fn spawn_spool_task(
     max_size: i64,
 ) -> (
@@ -178,6 +184,8 @@ pub fn spawn_spool_task(
     (tx, handle)
 }
 
+/// The returned header records the plaintext length and must be stored
+/// alongside the file.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -191,19 +199,11 @@ pub async fn push_encrypted_file(
     capability: &str,
     path: &std::path::Path,
     plain_len: u64,
-    upload_mode: crate::upload_mode::UploadMode,
     dek: &FileKey,
 ) -> Result<[u8; crate::crypto_file::HEADER_LEN], AppError> {
     let header = crate::crypto_file::encode_header(plain_len);
     let (tx, push_handle) = crate::routes::upload::stream::spawn_upload_push(
-        state,
-        file_id,
-        filename,
-        mime_type,
-        host,
-        upload_mode,
-        capability,
-        None,
+        state, file_id, filename, mime_type, host, capability, None,
     );
     tx.send(Ok(Bytes::copy_from_slice(&header)))
         .await
@@ -268,6 +268,7 @@ pub async fn mark_protected(
     Ok(())
 }
 
+/// Deterministic path so a resumed upload finds its bytes.
 #[must_use]
 pub fn tus_spool_path(id: &str) -> PathBuf {
     std::env::temp_dir().join(format!("juicebox-tus-protected-{id}"))

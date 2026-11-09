@@ -5,6 +5,7 @@ use axum::{
 };
 use serde_json::json;
 
+/// The `error` code is public API.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("file not found")]
@@ -137,7 +138,7 @@ impl IntoResponse for AppError {
             ),
 
             Self::JuicehostUnreachable(ref e) => {
-                let clean = extract_error_message(e);
+                let clean = juiceproto::error::service_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "File storage backend is unreachable"
                 } else {
@@ -146,7 +147,7 @@ impl IntoResponse for AppError {
                 (StatusCode::BAD_GATEWAY, "STORAGE_UNREACHABLE", clean)
             }
             Self::JuicehostRejected(ref e) => {
-                let clean = extract_error_message(e);
+                let clean = juiceproto::error::service_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "File storage backend rejected the upload"
                 } else {
@@ -155,7 +156,7 @@ impl IntoResponse for AppError {
                 (StatusCode::BAD_GATEWAY, "STORAGE_REJECTED", clean)
             }
             Self::InsufficientStorage(ref e) => {
-                let clean = extract_error_message(e);
+                let clean = juiceproto::error::service_error_message(e);
                 let clean = if clean.trim().is_empty() {
                     "This instance is out of storage! Try again later."
                 } else {
@@ -194,6 +195,7 @@ impl IntoResponse for AppError {
                 "INVALID_MULTIPART",
                 "Invalid multipart data",
             ),
+            // Internal detail is never echoed to the client; `log_error` records it.
             Self::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
@@ -217,16 +219,8 @@ impl IntoResponse for AppError {
     }
 }
 
-fn extract_error_message(e: &str) -> &str {
-    e.strip_prefix('[')
-        .and_then(|s| s.find("] "))
-        .map(|i| &e[i + 2..])
-        .and_then(|s| s.rsplit_once(" (status="))
-        .map(|(msg, _)| msg)
-        .unwrap_or(e)
-}
-
 impl AppError {
+    /// Logs operational detail; client-facing errors stay silent.
     pub fn log_error(&self) {
         match self {
             Self::JuicehostUnreachable(e) => tracing::error!("juicehost unreachable: {e}"),
@@ -434,19 +428,20 @@ mod tests {
 
     #[test]
     fn extract_error_message_with_prefix() {
-        let msg = extract_error_message("[STORAGE_FULL] disk is full (status=507)");
+        let msg =
+            juiceproto::error::service_error_message("[STORAGE_FULL] disk is full (status=507)");
         assert_eq!(msg, " disk is full");
     }
 
     #[test]
     fn extract_error_message_without_prefix() {
-        let msg = extract_error_message("plain error");
+        let msg = juiceproto::error::service_error_message("plain error");
         assert_eq!(msg, "plain error");
     }
 
     #[test]
     fn extract_error_message_empty() {
-        let msg = extract_error_message("");
+        let msg = juiceproto::error::service_error_message("");
         assert_eq!(msg, "");
     }
 

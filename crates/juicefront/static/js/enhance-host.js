@@ -1,4 +1,4 @@
-import { formatMaxSize } from "./util.js";
+import { formatMaxSize, readCookie, writeCookie } from "./util.js";
 import { clearHostGlow, shouldGlowHost } from "./presence.js";
 import { setSoundEnabled } from "./sounds.js?v=2.2.0";
 import { hapticsEnabled, setHapticsEnabled } from "./haptics.js";
@@ -37,12 +37,10 @@ export function readSelectedHost() {
     return input.value.trim();
   return "";
 }
-export function readSelectedUploadMode() {
-  return localStorage.getItem("juicebox_upload_mode") || "standard";
-}
 export function readQuickLinkEnabled() {
   return localStorage.getItem("juicebox_quick_link") === "true";
 }
+/** Server-enforced blocked-types level; `high` until config overrides it. */
 export function readDangerLevel() {
   return localStorage.getItem("juicebox_danger_level") || "high";
 }
@@ -153,11 +151,13 @@ function parseHostUrl(host) {
     return "invalid";
   return { base: url.origin, scheme: url.protocol };
 }
+/** Probes `<host>/api/config`; a `TypeError` is ambiguous, so a `no-cors` retry decides between `unreachable` and `blocked`. */
 async function fetchHostConfig(host) {
   const parsed = parseHostUrl(host);
   if (typeof parsed === "string") {
     return { ok: false, reason: parsed };
   }
+  // Browsers refuse http subresources from an https page before the request is even sent.
   if (parsed.scheme === "http:" && window.location.protocol === "https:") {
     return { ok: false, reason: "mixed" };
   }
@@ -199,25 +199,17 @@ export function enhanceHostSelector(locale) {
   const status = document.querySelector("[data-host-status]");
   if (!input || !checkBtn || !applyBtn || !status)
     return;
-  const cookieHost = document.cookie.split("; ").find((c) => c.startsWith("juicebox_host="))?.split("=")[1];
-  const saved = localStorage.getItem("juicebox_host") || (cookieHost ? decodeURIComponent(cookieHost) : "");
+  const saved = localStorage.getItem("juicebox_host") || readCookie("juicebox_host");
   if (saved)
     input.value = saved;
   const saveHost = () => {
     const val = input.value.trim();
     localStorage.setItem("juicebox_host", val);
-    document.cookie = `juicebox_host=${encodeURIComponent(val)}; path=/; max-age=2592000; SameSite=Lax`;
+    // Mirrored into a 30-day cookie so the choice travels with requests to the server.
+    writeCookie("juicebox_host", val, 2592000);
   };
   input.addEventListener("change", saveHost);
   input.addEventListener("blur", saveHost);
-  const quicToggle = document.querySelector("[data-quic-toggle]");
-  if (quicToggle) {
-    const savedMode = localStorage.getItem("juicebox_upload_mode") || "standard";
-    quicToggle.checked = savedMode === "quic";
-    quicToggle.addEventListener("change", () => {
-      localStorage.setItem("juicebox_upload_mode", quicToggle.checked ? "quic" : "standard");
-    });
-  }
   const quickLinkToggle = document.querySelector("[data-quick-link-toggle]");
   if (quickLinkToggle) {
     quickLinkToggle.checked = readQuickLinkEnabled();
@@ -239,6 +231,7 @@ export function enhanceHostSelector(locale) {
   const pwInput = document.querySelector("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
   var syncPwState = null;
+  // Stored in plaintext and restored on load so encrypted drop zones stay armed across reloads.
   if (pwInput) {
     try {
       const savedPw = localStorage.getItem("juicebox_upload_password") || "";
@@ -320,7 +313,6 @@ export function enhanceHostSelector(locale) {
   const serverCfg = document.getElementById("server-config");
   if (serverCfg) {
     const ql = serverCfg.getAttribute("data-quick-link");
-    const qc = serverCfg.getAttribute("data-quic");
     const dl = serverCfg.getAttribute("data-danger-level");
     if (ql === "false" && quickLinkToggle) {
       quickLinkToggle.disabled = true;
@@ -332,22 +324,12 @@ export function enhanceHostSelector(locale) {
         localStorage.setItem("juicebox_quick_link", "false");
       }
     }
-    if (qc === "false" && quicToggle) {
-      quicToggle.disabled = true;
-      quicToggle.checked = false;
-      localStorage.setItem("juicebox_upload_mode", "standard");
-    }
     if (dl) {
       localStorage.setItem("juicebox_danger_level", dl);
       updateDangerLevelDisplay(dl, locale);
     }
   } else {
     fetch("/api/config", { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).then((cfg) => {
-      if (!cfg.quic && quicToggle) {
-        quicToggle.disabled = true;
-        quicToggle.checked = false;
-        localStorage.setItem("juicebox_upload_mode", "standard");
-      }
       if (!cfg.quick_link && quickLinkToggle) {
         quickLinkToggle.disabled = true;
         quickLinkToggle.checked = false;
@@ -362,9 +344,6 @@ export function enhanceHostSelector(locale) {
         updateDangerLevelDisplay(cfg.danger_level, locale);
       }
     }).catch(() => {
-      if (quicToggle) {
-        quicToggle.disabled = true;
-      }
       if (quickLinkToggle) {
         quickLinkToggle.disabled = true;
       }
@@ -384,8 +363,6 @@ export function enhanceHostSelector(locale) {
         serverCfg.setAttribute("data-danger-level", String(cfg.danger_level));
       if (typeof cfg.quick_link === "boolean")
         serverCfg.setAttribute("data-quick-link", String(cfg.quick_link));
-      if (typeof cfg.quic === "boolean")
-        serverCfg.setAttribute("data-quic", String(cfg.quic));
     }
     if (typeof cfg.max_file_size_bytes === "number") {
       updateDropMaxSize(cfg.max_file_size_bytes);
@@ -401,13 +378,6 @@ export function enhanceHostSelector(locale) {
       localStorage.setItem("juicebox_quick_link", "false");
     } else if (cfg.quick_link && quickLinkToggle) {
       quickLinkToggle.disabled = false;
-    }
-    if (!cfg.quic && quicToggle) {
-      quicToggle.disabled = true;
-      quicToggle.checked = false;
-      localStorage.setItem("juicebox_upload_mode", "standard");
-    } else if (cfg.quic && quicToggle) {
-      quicToggle.disabled = false;
     }
     window.dispatchEvent(new CustomEvent("juicehost-config-updated", { detail: cfg }));
   };

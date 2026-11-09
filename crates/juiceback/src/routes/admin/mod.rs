@@ -1,3 +1,5 @@
+//! Every handler except login/logout uses the `AdminUser` extractor.
+
 use std::sync::Arc;
 
 use axum::Router;

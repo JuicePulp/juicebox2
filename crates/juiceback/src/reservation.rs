@@ -6,6 +6,7 @@ use crate::{
     state::AppState,
 };
 
+/// Record must still be uploading and the token must match, in constant time.
 pub fn verify(record: Option<FileRecord>, token: &str) -> Result<FileRecord, AppError> {
     let record = record.ok_or(AppError::NotFound)?;
     if record.status != FileRecord::STATUS_UPLOADING {
@@ -34,6 +35,7 @@ pub async fn verify_by_id(
     verify(record, token)
 }
 
+/// The final stored size, not the originally declared one.
 pub struct FinishRequest {
     pub id: String,
     pub delete_token: String,
@@ -43,6 +45,7 @@ pub struct FinishRequest {
     pub uploader_ip: Option<String>,
 }
 
+/// Retried finish returns the ready record; `Strict` reports it as a conflict.
 #[derive(Clone, Copy)]
 pub enum FinishPolicy {
     Strict,

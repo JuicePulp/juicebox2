@@ -6,11 +6,13 @@ use object_store::ObjectStoreExt;
 
 use crate::error::StorageError;
 
+/// Holds no capability or freeze state.
 pub struct R2Store {
     client: Arc<dyn object_store::ObjectStore>,
 }
 
 impl R2Store {
+    /// Requires an `https://` endpoint and builds an S3-compatible client.
     pub fn new(
         bucket: &str,
         endpoint: &str,
@@ -36,6 +38,8 @@ impl R2Store {
         })
     }
 
+    /// Key for a hot object; the extension is part of the key, so lookups need
+    /// it.
     pub fn hot_key(id: &str, ext: &str) -> String {
         format!("hot/{id}.{ext}")
     }
@@ -44,6 +48,7 @@ impl R2Store {
         format!("hot/{id}.")
     }
 
+    /// Restricts keys to short ASCII path segments and rejects traversal.
     fn valid_key(key: &str) -> bool {
         if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
             return false;
@@ -93,6 +98,7 @@ impl R2Store {
             .get_opts(
                 &object_store::path::Path::from(key),
                 object_store::GetOptions {
+                    // `GetRange` is half-open, but the public API takes an inclusive end.
                     range: Some(object_store::GetRange::Bounded(start..end + 1)),
                     ..Default::default()
                 },
@@ -123,6 +129,7 @@ impl R2Store {
         }
         attributes.insert(
             object_store::Attribute::CacheControl,
+            // Hot objects never change for a given key, so a long max-age is safe.
             "public, max-age=86400".to_string().into(),
         );
         let opts = object_store::PutOptions {

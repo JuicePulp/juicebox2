@@ -10,6 +10,7 @@ pub struct JuicehostConfig {
     pub custom_id_enabled: bool,
 }
 
+/// Missing fields fall back to compiled defaults.
 pub async fn fetch_juicehost_config(
     client: &reqwest::Client,
     juicehost_url: &str,

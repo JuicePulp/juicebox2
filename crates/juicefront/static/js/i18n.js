@@ -19,6 +19,7 @@ export function locale() {
   return getBundle().locale || "en";
 }
 
+/** Looks up `key`, falling back to the key itself; `locale` is unused because the bundle is chosen server-side. */
 export function t(locale, key, params) {
   var b = getBundle();
   var value = (b.dict && b.dict[key]) || key;
@@ -39,6 +40,7 @@ var KNOWN_TTL = {
   168: "retention.7d",
 };
 
+/** Formats hours as a retention label, defaulting invalid values to 24h. */
 export function ttlLabel(loc, hours) {
   var known = KNOWN_TTL[hours];
   if (known) return t(loc, known);

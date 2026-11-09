@@ -1,3 +1,4 @@
+/// True only for a 2xx `status: "ok"` within 3s; any error counts as down.
 pub async fn check_backend_health(http: &reqwest::Client, juiceback_url: &str) -> bool {
     let url = format!("{juiceback_url}/api/health");
     let fetch = async {

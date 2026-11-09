@@ -1,5 +1,6 @@
 use crate::config::{ConfigError, LimitsFile};
 
+/// Byte sizes are already converted from GB and MB.
 #[derive(Debug)]
 pub struct LimitsSettings {
     min_free_space_bytes: u64,

@@ -31,6 +31,7 @@ impl Default for FetchOptions {
 }
 
 impl FetchOptions {
+    /// Unknown values fall back to defaults rather than erroring.
     #[must_use]
     pub fn sanitized(
         audio_only: bool,
@@ -85,6 +86,7 @@ impl FetchOptions {
     }
 }
 
+/// `flac` is sent as `wav` because cobalt has no flac mode.
 #[must_use]
 pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
     let audio_format = if opts.audio_format == "flac" {
@@ -164,6 +166,8 @@ impl CobaltResponse {
         matches!(self, Self::Tunnel { .. } | Self::Redirect { .. })
     }
 
+    /// Only `content.video.unavailable` counts; other errors may succeed
+    /// elsewhere.
     #[must_use]
     pub fn is_client_refused(&self) -> bool {
         matches!(
@@ -173,11 +177,13 @@ impl CobaltResponse {
         )
     }
 
+    /// True for instance-unhealthy codes, not link-bad codes.
     #[must_use]
     pub fn is_instance_failure(&self) -> bool {
         matches!(self, Self::Error { code } if is_instance_error_code(code))
     }
 
+    /// Tolerant parse: missing fields and unknown statuses become `Error`.
     #[must_use]
     pub fn from_json(value: serde_json::Value) -> Self {
         let status = value
@@ -280,6 +286,7 @@ pub fn is_instance_error_code(code: &str) -> bool {
     ) || code.starts_with("error.api.unknown_status:")
 }
 
+// Tags instance-side failures so retry logic can tell them from content errors.
 const INSTANCE_FAILURE_PREFIX: &str = "fetch service instance failed: ";
 
 #[must_use]
@@ -297,6 +304,7 @@ pub fn is_instance_failure_error(err: &str) -> bool {
     err.starts_with(INSTANCE_FAILURE_PREFIX)
 }
 
+/// Non-2xx JSON is still parsed, because cobalt reports errors that way.
 pub async fn process(
     client: &reqwest::Client,
     api_url: &str,
@@ -336,6 +344,8 @@ pub async fn process(
     Ok(CobaltResponse::from_json(value))
 }
 
+/// Races all non-excluded instances; on total failure prefers content, then
+/// instance, then transport errors.
 pub async fn process_race(
     client: &reqwest::Client,
     endpoints: &[CobaltEndpoint],

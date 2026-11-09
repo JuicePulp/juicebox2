@@ -55,8 +55,12 @@ pub struct StorageMetrics {
     pub out_of_space: bool,
 }
 
+/// Storage contract; implementations must reject invalid IDs and enforce
+/// capabilities/freezes before mutating.
 #[async_trait::async_trait]
 pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
+    /// Stores a new object, binding `capability` when given; never overwrites
+    /// an ID.
     async fn put(
         &self,
         id: &str,
@@ -85,6 +89,7 @@ pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
         None
     }
 
+    /// Streams an inclusive byte range; out-of-bounds ranges are an error.
     async fn get_range_stream(
         &self,
         id: &str,
@@ -94,8 +99,11 @@ pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
 
     async fn get_stream(&self, id: &str) -> Result<ByteStream, StorageError>;
 
+    /// Removes the object and its capability; false when the ID is absent.
     async fn delete(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError>;
 
+    /// Moves the object and its capability to `new_id`, failing if the target
+    /// exists.
     async fn rename(
         &self,
         old_id: &str,
@@ -103,6 +111,8 @@ pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
         capability: Option<&str>,
     ) -> Result<(), StorageError>;
 
+    /// Appends the parts in order into `target_id`, then deletes the source
+    /// parts.
     async fn concat(
         &self,
         target_id: &str,

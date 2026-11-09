@@ -17,10 +17,13 @@ use crate::{
     state::AppState,
 };
 
+/// Separates unlock tokens from other JWTs signed with the same secret.
 pub const UNLOCK_ISSUER: &str = "juiceback-unlock";
 const UNLOCK_TTL_SECS: usize = 300;
+/// Uniform rejection so a wrong password and a missing one look identical.
 const FORBIDDEN_BODY: &str = "invalid password";
 
+/// `sub` is the file id, so a token cannot be replayed against another file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnlockClaims {
     sub: String,
@@ -29,6 +32,7 @@ struct UnlockClaims {
     iat: usize,
 }
 
+/// One cookie per file, so unlocking one file does not unlock another.
 fn unlock_cookie_name(id: &str) -> String {
     format!("jb_unlock_{id}")
 }
@@ -52,7 +56,7 @@ fn mint_unlock_token(jwt_secret: &str, file_id: &str, now: i64) -> Result<String
 fn valid_unlock_cookie(headers: &HeaderMap, file_id: &str, jwt_secret: &str) -> bool {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     let name = unlock_cookie_name(file_id);
-    let Some(token) = crate::auth::cookie_value(headers, &name) else {
+    let Some(token) = crate::cookies::value(headers, &name) else {
         return false;
     };
     let mut validation = Validation::new(Algorithm::HS256);
@@ -67,6 +71,7 @@ fn valid_unlock_cookie(headers: &HeaderMap, file_id: &str, jwt_secret: &str) -> 
     }
 }
 
+/// HttpOnly, same-site; `secure` mirrors the deployment setting.
 fn set_unlock_cookie(
     headers: &mut HeaderMap,
     file_id: &str,
@@ -90,6 +95,7 @@ fn set_unlock_cookie(
     Ok(())
 }
 
+/// Unprotected files also return 404 so this path only serves gated ones.
 async fn protected_record(state: &Arc<AppState>, id: &str) -> Result<db::FileRecord, AppError> {
     let lookup = id.to_string();
     let record = state
@@ -144,7 +150,7 @@ fn request_password(headers: &HeaderMap, query: &UnlockQuery) -> Option<String> 
         return Some(pw.to_string());
     }
     if let Some(pw) = headers
-        .get("x-file-password")
+        .get(juiceproto::headers::FILE_PASSWORD)
         .and_then(|v| v.to_str().ok())
         .filter(|p| !p.is_empty())
     {
@@ -165,6 +171,7 @@ fn base64_decode(input: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+/// Offloads the deliberately slow hash check off the async runtime.
 async fn verify_password_blocking(password: String, hash: String) -> Result<bool, AppError> {
     tokio::task::spawn_blocking(move || crate::auth::verify_password(&password, &hash))
         .await
@@ -172,6 +179,7 @@ async fn verify_password_blocking(password: String, hash: String) -> Result<bool
         .map_err(AppError::Internal)
 }
 
+/// A valid cookie short-circuits the hash check.
 async fn credentials_ok(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -191,6 +199,7 @@ async fn credentials_ok(
     Ok(verify_password_blocking(password, hash).await?)
 }
 
+/// Rate-limited per IP; browsers redirect, API clients get `{"ok":true}`.
 #[tracing::instrument(skip_all)]
 pub async fn unlock_submit_handler(
     State(state): State<Arc<AppState>>,
@@ -276,6 +285,8 @@ pub async fn unlock_submit_handler(
     Ok(resp)
 }
 
+/// Suffix ranges (`-N`) mean the last N bytes; multi-range and malformed specs
+/// get 416.
 fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> {
     let spec = value.trim().strip_prefix("bytes=").unwrap_or("");
     if spec.is_empty() {
@@ -315,6 +326,8 @@ fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> 
     Ok(Some((start, end)))
 }
 
+/// `cipher_skip` is non-zero only when the host ignored the range and returned
+/// the file from offset zero.
 fn decrypt_cipher_stream(
     key: FileKey,
     cipher: impl futures::Stream<Item = Result<Bytes, String>> + Send + Unpin + 'static,
@@ -382,6 +395,7 @@ fn decrypt_cipher_stream(
     ),
     tag = "Files",
 )]
+/// `HEAD` and `RANGE` are honored; only successful `GET`s count as views.
 #[tracing::instrument(skip_all)]
 pub async fn content_handler(
     State(state): State<Arc<AppState>>,
@@ -433,6 +447,7 @@ pub async fn content_handler(
     Ok(response)
 }
 
+/// The encryption header doubles as the ETag.
 pub(crate) async fn serve_protected_bytes(
     state: &Arc<AppState>,
     record: &db::FileRecord,

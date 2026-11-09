@@ -55,6 +55,7 @@ async fn main() {
         .unwrap_or_else(|error| panic!("server error: {error}"));
 }
 
+// The 5s floor stops a tiny configured interval from hammering nodes.
 async fn health_loop(state: Arc<state::AppState>) {
     let interval = Duration::from_secs(state.config.router.probe_interval_secs.max(5));
     let mut ticker = tokio::time::interval(interval);

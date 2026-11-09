@@ -38,6 +38,8 @@ struct LivePart {
     ready: bool,
 }
 
+/// Progress for one target; `uploaded` counts written bytes, `available` is the
+/// contiguous servable prefix.
 #[derive(Debug, Clone)]
 pub struct LiveSnapshot {
     pub target_id: String,
@@ -61,6 +63,7 @@ pub struct LivePartSnapshot {
     pub complete: bool,
 }
 
+/// Readable window at an absolute file offset. `end` is exclusive.
 #[derive(Debug, Clone)]
 pub struct LiveSource {
     pub upload_id: String,
@@ -86,6 +89,8 @@ pub struct LiveWriter {
 }
 
 impl LiveWriter {
+    /// Adds to the written count; the registry clamps it to the part length or
+    /// total size.
     pub fn add(&self, bytes: usize) {
         if bytes > 0 {
             self.live.add_written(&self.upload_id, bytes as u64);
@@ -119,7 +124,11 @@ impl LiveUploads {
         Self::default()
     }
 
+    /// Registers a single-body upload, or upgrades a zero-size placeholder
+    /// keeping bytes already counted.
     pub fn ensure_single(&self, id: &str, filename: &str, mime: &str, total_size: u64) {
+        // a part id shares the target namespace, so it must not be registered as a
+        // target
         if self.parts.contains_key(id) {
             return;
         }
@@ -144,6 +153,8 @@ impl LiveUploads {
                         changed: Notify::new(),
                         touched: Mutex::new(Instant::now()),
                     });
+                    // release both guards before inserting; DashMap is not reentrant on the same
+                    // shard
                     drop(state);
                     drop(entry);
                     self.uploads.insert(id.to_string(), new);
@@ -171,6 +182,8 @@ impl LiveUploads {
         }
     }
 
+    /// Registers or updates part offsets and lengths, preserving progress for
+    /// parts at the same offset.
     pub fn register_parts(
         &self,
         target_id: &str,
@@ -237,6 +250,8 @@ impl LiveUploads {
         })
     }
 
+    /// Adds written bytes for a target or part, saturating at the expected
+    /// length.
     pub fn add_written(&self, id: &str, bytes: u64) {
         if bytes == 0 {
             return;

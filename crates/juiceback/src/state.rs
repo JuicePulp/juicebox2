@@ -7,6 +7,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use crate::{
     config::Config,
     error::AppError,
+    hosts::DeploymentHosts,
     storage_client::JuicehostConfig,
     tus::{PartSessionMap, TusMap, TusSenderMap},
 };
@@ -16,6 +17,7 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 pub struct ConnectedDevice {
     pub device_id: String,
     pub device_name: String,
+    /// Closing it signals disconnect.
     pub sender: tokio::sync::mpsc::Sender<String>,
     pub connected_at: std::time::Instant,
     pub last_heartbeat: std::time::Instant,
@@ -39,6 +41,7 @@ pub enum PresenceEvent {
 pub struct AppState {
     pub db: DbPool,
     pub config: Arc<Config>,
+    pub hosts: DeploymentHosts,
     pub http: reqwest::Client,
     pub tus: TusMap,
 
@@ -48,21 +51,17 @@ pub struct AppState {
 
     pub push_handles: Arc<DashMap<String, tokio::task::JoinHandle<Result<(), String>>>>,
 
+    /// In-memory mirror of the ban list, checked on every request.
     pub banned_ips: DashMap<String, ()>,
 
     pub juicehost_headers: reqwest::header::HeaderMap,
 
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
 
+    /// `None` means the startup fetch failed and the server is degraded.
     pub jh_config: Arc<std::sync::RwLock<Option<Arc<JuicehostConfig>>>>,
 
     pub jh_config_updated_at: Arc<std::sync::RwLock<Option<std::time::Instant>>>,
-
-    #[cfg(feature = "quic")]
-    pub quic_endpoint: std::sync::Arc<tokio::sync::OnceCell<h3_quinn::quinn::Endpoint>>,
-
-    #[cfg(feature = "quic")]
-    pub quic_cert_path: Option<std::path::PathBuf>,
 
     pub connected_devices: DashMap<String, Vec<Arc<tokio::sync::Mutex<ConnectedDevice>>>>,
 
@@ -82,9 +81,6 @@ impl AppState {
         juicehost_headers: reqwest::header::HeaderMap,
         jh_config: Option<JuicehostConfig>,
     ) -> Arc<Self> {
-        #[cfg(feature = "quic")]
-        let quic_cert_path = config.quic_cert_path.clone();
-
         let mint_limiter = Arc::new(crate::mint_limiter::MintLimiter::new(
             config.dte_mint_limit,
             config.dte_mint_window_secs,
@@ -99,10 +95,12 @@ impl AppState {
 
         let max_concurrent_uploads = config.max_concurrent_uploads.max(1) as usize;
         let config_fresh = jh_config.is_some();
+        let hosts = DeploymentHosts::from_config(&config);
 
         Arc::new(Self {
             db: pool,
             config: Arc::new(config),
+            hosts,
             http,
             tus: crate::tus::new_tus_state(),
             tus_senders: crate::tus::new_tus_sender_map(),
@@ -115,10 +113,6 @@ impl AppState {
             jh_config_updated_at: Arc::new(std::sync::RwLock::new(
                 config_fresh.then(std::time::Instant::now),
             )),
-            #[cfg(feature = "quic")]
-            quic_endpoint: std::sync::Arc::new(tokio::sync::OnceCell::new()),
-            #[cfg(feature = "quic")]
-            quic_cert_path,
             connected_devices: DashMap::new(),
             presence_listeners: DashMap::new(),
             presence_semaphore: Arc::new(tokio::sync::Semaphore::new(
@@ -136,23 +130,12 @@ impl AppState {
         self.banned_ips.contains_key(ip)
     }
 
+    /// Internal auth headers only go to these.
     pub(crate) fn is_official_host(&self, host: &str) -> bool {
-        let host = host.trim().trim_end_matches('/');
-        if host.is_empty() {
-            return false;
-        }
-        let matches = |raw: &str| raw.trim().trim_end_matches('/') == host;
-        matches(&self.config.juicehost_url)
-            || matches(&self.config.public_base_url)
-            || matches(&self.config.public_juicehost_url)
-            || self.config.router_base_url.as_deref().is_some_and(matches)
-            || self
-                .config
-                .region_public_juicehosts
-                .values()
-                .any(|url| matches(url))
+        self.hosts.is_trusted_target(host)
     }
 
+    /// `ServiceUnavailable` in degraded mode.
     pub fn juicehost_config(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         let cfg = self
             .jh_config
@@ -181,6 +164,7 @@ impl AppState {
         Ok(fresh)
     }
 
+    /// Retries the fetch once if startup left the cache empty.
     pub async fn juicehost_config_or_refresh(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         if let Ok(cfg) = self.juicehost_config() {
             return Ok(cfg);
@@ -270,6 +254,7 @@ impl AppState {
         Ok(count)
     }
 
+    /// `name` only labels panic errors.
     pub async fn db_call<T, F>(self: &Arc<Self>, name: &'static str, f: F) -> Result<T, AppError>
     where
         F: FnOnce(&rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
@@ -286,6 +271,7 @@ impl AppState {
         .map_err(|_| AppError::TaskPanicked(format!("db task '{name}' panicked")))?
     }
 
+    /// Commits only on `Ok`; an `Err` rolls back.
     pub async fn db_transaction<T, F>(
         self: &Arc<Self>,
         name: &'static str,

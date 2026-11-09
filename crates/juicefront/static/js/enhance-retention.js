@@ -13,6 +13,7 @@ function scrubTick(direction) {
 }
 
 let lastRetentionBuzzAt = 0;
+// Pointer moves arrive faster than the haptic engine can render; coalesce the buzzes.
 const RETENTION_TICK_MIN_MS = 30;
 function retentionTick() {
   const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
@@ -21,6 +22,7 @@ function retentionTick() {
   haptic("tick");
 }
 
+// Hiding the scrollbar shifts the layout, so record its width in a CSS variable first.
 function lockPageScroll() {
   try {
     const root = document.documentElement;
@@ -68,6 +70,7 @@ function ttlTier(hours) {
   return 1;
 }
 
+/** Rebuilds the radio list, preferring the stored choice, then the server default, then the first allowed value. */
 function buildOptions(fieldset, locale, allowed, def, stored) {
   fieldset.innerHTML = "";
   let prevTier = null;
@@ -164,6 +167,7 @@ function syncStored(card) {
   }
 }
 
+/** Splits a label like `"2d"` into number and unit so the readout can animate the plural `s` separately. */
 function splitRetentionLabel(label) {
   const m = String(label || "").match(/^(\d+(?:\.\d+)?)(.*)$/);
   const num = m ? m[1] : "";
@@ -199,6 +203,7 @@ function ensureValueWrap(labelGroup) {
   return wrap;
 }
 
+/** Enhances the fieldset; the returned handle's `destroy()` removes listeners and generated DOM so `rebuildRetention` avoids duplicates. */
 export function enhanceRetention(card, locale = "en") {
   const toolbar = card.querySelector("[data-rttoolbar]");
   const fieldset = toolbar?.querySelector(".rtt-options");
@@ -432,6 +437,7 @@ export function enhanceRetention(card, locale = "en") {
     endTimers = [];
     drag = { id: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, touch: e.pointerType !== "mouse" };
     if (drag.touch) {
+      // Touch captures up front; the mouse waits for the movement threshold so clicks still work.
       try {
         fieldset.setPointerCapture(e.pointerId);
       } catch {}

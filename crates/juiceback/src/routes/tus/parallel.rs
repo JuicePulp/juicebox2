@@ -7,6 +7,8 @@ use crate::{
     state::AppState,
 };
 
+/// Repeats of the same index do not inflate the count, so a retried part cannot
+/// trigger assembly early.
 #[must_use]
 pub(crate) fn note_part_finalized(
     session: &crate::tus::PartSession,
@@ -20,6 +22,8 @@ pub(crate) fn note_part_finalized(
     session.finalized_parts.len() >= total
 }
 
+/// Returns ordered parts once; the winner marks `finalizing` so a late part
+/// cannot resume.
 pub(crate) fn try_collect_finalized_parts(
     state: &Arc<AppState>,
     session_id: &str,
@@ -72,6 +76,7 @@ pub(crate) fn try_collect_finalized_parts(
     Some((part_ids, full_size))
 }
 
+/// `None` if an index is missing or the sum overflows.
 #[must_use]
 pub(crate) fn collect_ordered_parts(
     session: &crate::tus::PartSession,
@@ -200,6 +205,8 @@ pub(crate) async fn finalize_concat(
     )
 }
 
+/// Only the part that observes the full set performs the concat; the rest get a
+/// `part_complete` marker.
 pub(crate) async fn complete_parallel_part(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
@@ -215,6 +222,7 @@ pub(crate) async fn complete_parallel_part(
     };
     let total = session.total_parts;
     {
+        // Every part must agree on the reservation; `None` is cached too.
         let mut expected = session
             .completion_reserve_id
             .lock()
@@ -248,6 +256,8 @@ pub(crate) async fn complete_parallel_part(
     }
 }
 
+/// Polls briefly for the record, since the finishing part may still be
+/// mid-write.
 async fn finalized_parallel_part(
     state: &Arc<AppState>,
     meta: &TusUploadMeta,

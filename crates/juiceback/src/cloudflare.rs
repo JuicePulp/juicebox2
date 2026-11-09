@@ -10,6 +10,7 @@ pub async fn purge_tags(config: Arc<Config>, tags: Vec<String>) {
     purge_cache(config, serde_json::json!({ "tags": tags }), "tags").await;
 }
 
+/// No-op without credentials or an empty list; the request is spawned.
 async fn purge_cache(config: Arc<Config>, body: serde_json::Value, kind: &'static str) {
     let (Some(token), Some(zone_id)) = (&config.cf_api_token, &config.cf_zone_id) else {
         return;

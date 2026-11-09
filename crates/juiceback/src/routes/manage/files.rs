@@ -14,17 +14,27 @@ use crate::{
     db,
     db::FileRecord,
     error::AppError,
-    routes::{UserId, noscript},
+    routes::{UserId, noscript, upload::sanitize_filename},
     state::AppState,
     utils::constant_time_eq,
 };
 
+/// `token` is accepted but ownership comes from the session.
 #[derive(Deserialize)]
 pub struct RenameForm {
     pub token: String,
     pub custom_id: String,
+    #[serde(default)]
+    pub filename: Option<String>,
 }
 
+fn requested_filename(raw: Option<String>) -> Option<String> {
+    raw.map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .map(|name| sanitize_filename(&name))
+}
+
+/// `delete_token` only for proven owners; timestamps in Unix seconds.
 #[derive(Serialize, ToSchema)]
 pub struct FileInfoResponse {
     pub id: String,
@@ -96,9 +106,12 @@ pub struct RenewResponse {
     pub custom: bool,
 }
 
+/// Omitted or empty means a random 8-character id. `filename` keeps the
+/// current name when omitted or blank.
 #[derive(Deserialize, ToSchema, Default)]
 pub struct RenewRequest {
     pub custom_id: Option<String>,
+    pub filename: Option<String>,
 }
 
 #[utoipa::path(
@@ -114,6 +127,8 @@ pub struct RenewRequest {
     ),
     tag = "Files",
 )]
+/// Resolves aliases so a retired id still answers; never returns the delete
+/// token.
 #[tracing::instrument(skip_all)]
 pub async fn file_info_handler(
     State(state): State<Arc<AppState>>,
@@ -158,6 +173,7 @@ pub async fn file_info_handler(
     ),
     tag = "Files",
 )]
+/// Authorization is session ownership only.
 pub async fn delete_file_form_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -174,6 +190,7 @@ pub async fn delete_file_form_handler(
     Ok(response)
 }
 
+/// Session ownership or matching token.
 async fn delete_file_inner(
     state: &Arc<AppState>,
     user_id: &str,
@@ -223,13 +240,16 @@ async fn delete_file_inner(
     ),
     tag = "Files",
 )]
+/// Session ownership or the `x-delete-token` header.
 pub async fn delete_file_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<(HeaderMap, StatusCode), AppError> {
-    let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
+    let token = headers
+        .get(juiceproto::headers::DELETE_TOKEN)
+        .and_then(|v| v.to_str().ok());
 
     delete_file_inner(&state, &user_id, &id, token).await?;
 
@@ -247,7 +267,7 @@ pub async fn delete_file_handler(
     params(
         ("id" = String, Path, description = "The current file ID"),
     ),
-    request_body(content = RenewRequest, description = "Optional custom_id and x-delete-token header"),
+    request_body(content = RenewRequest, description = "Optional custom_id, filename, and x-delete-token header"),
     responses(
         (status = 200, description = "File ID renewed", body = RenewResponse),
         (status = 400, description = "Invalid custom ID"),
@@ -258,6 +278,7 @@ pub async fn delete_file_handler(
     ),
     tag = "Files",
 )]
+/// A failed host rename rolls the db swap back.
 pub async fn renew_file_id_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -265,7 +286,9 @@ pub async fn renew_file_id_handler(
     Path(id): Path<String>,
     body: Option<Json<RenewRequest>>,
 ) -> Result<(HeaderMap, Json<RenewResponse>), AppError> {
-    let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok());
+    let token = headers
+        .get(juiceproto::headers::DELETE_TOKEN)
+        .and_then(|v| v.to_str().ok());
     let id2 = id.clone();
     let record = state
         .db_call("get_file", move |db| db::get_file(db, &id2))
@@ -293,40 +316,65 @@ pub async fn renew_file_id_handler(
         ));
     }
 
-    let custom_id_raw = body.and_then(|Json(r)| r.custom_id).unwrap_or_default();
+    let request = body.map(|Json(request)| request).unwrap_or_default();
+    let filename = requested_filename(request.filename);
+    let effective_filename = filename.clone().unwrap_or_else(|| record.filename.clone());
+    let custom_id_raw = request.custom_id.unwrap_or_default();
 
-    let (new_id, is_custom) = super::lifecycle::pick_new_id(&state, &custom_id_raw).await?;
+    let (new_id, is_custom) = super::lifecycle::pick_new_id(&state, &custom_id_raw, &id).await?;
 
-    let updated = super::lifecycle::swap_ids_transactional(&state, &user_id, &id, &new_id).await?;
+    if new_id == id {
+        if let Some(name) = filename {
+            let file_id = id.clone();
+            let renamed = state
+                .db_call("set_filename", move |db| {
+                    db::set_filename(db, &file_id, &name)
+                })
+                .await?;
+            if !renamed {
+                return Err(AppError::NotFound);
+            }
+        }
+    } else {
+        let updated = super::lifecycle::swap_ids_transactional(
+            &state,
+            &user_id,
+            &id,
+            &new_id,
+            filename.clone(),
+        )
+        .await?;
 
-    if !updated {
-        return Err(AppError::NotFound);
+        if !updated {
+            return Err(AppError::NotFound);
+        }
+
+        super::lifecycle::rename_on_host_with_rollback(
+            &state,
+            &id,
+            &new_id,
+            record.storage_host.as_deref(),
+            &record.delete_token,
+            &record.filename,
+        )
+        .await?;
     }
-
-    let host_opt = record.storage_host.as_deref();
-    super::lifecycle::rename_on_host_with_rollback(
-        &state,
-        &id,
-        &new_id,
-        host_opt,
-        &record.delete_token,
-    )
-    .await?;
 
     let (url, raw_url, download_url) = crate::utils::share_links(
         &state.config,
         record.storage_host.as_deref(),
         &new_id,
-        &record.filename,
+        &effective_filename,
     );
 
     crate::cloudflare::purge_file(&state.config, &record);
 
     tracing::info!(
-        "renew: old_id={} new_id={} custom={}",
+        "renew: old_id={} new_id={} custom={} renamed={}",
         id,
         new_id,
-        is_custom
+        is_custom,
+        effective_filename != record.filename
     );
 
     let mut headers_out = HeaderMap::new();
@@ -341,13 +389,14 @@ pub async fn renew_file_id_handler(
             url,
             raw_url,
             download_url,
-            filename: record.filename,
+            filename: effective_filename,
             expires_at: record.expires_at,
             custom: is_custom,
         }),
     ))
 }
 
+/// No token fallback; requires session ownership.
 pub async fn rename_file_form_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -379,23 +428,50 @@ pub async fn rename_file_form_handler(
         ));
     }
 
-    let (new_id, _) = super::lifecycle::pick_new_id(&state, &form.custom_id).await?;
+    let RenameForm {
+        custom_id,
+        filename,
+        ..
+    } = form;
+    let filename = requested_filename(filename);
+    let (new_id, _) = super::lifecycle::pick_new_id(&state, &custom_id, &id).await?;
 
-    let updated = super::lifecycle::swap_ids_transactional(&state, &user_id, &id, &new_id).await?;
+    if new_id == id {
+        if let Some(name) = filename {
+            let file_id = id.clone();
+            let renamed = state
+                .db_call("set_filename", move |db| {
+                    db::set_filename(db, &file_id, &name)
+                })
+                .await?;
+            if !renamed {
+                return Err(AppError::NotFound);
+            }
+        }
+    } else {
+        let updated = super::lifecycle::swap_ids_transactional(
+            &state,
+            &user_id,
+            &id,
+            &new_id,
+            filename.clone(),
+        )
+        .await?;
 
-    if !updated {
-        return Err(AppError::NotFound);
+        if !updated {
+            return Err(AppError::NotFound);
+        }
+
+        super::lifecycle::rename_on_host_with_rollback(
+            &state,
+            &id,
+            &new_id,
+            record.storage_host.as_deref(),
+            &record.delete_token,
+            &record.filename,
+        )
+        .await?;
     }
-
-    let host_opt = record.storage_host.as_deref();
-    super::lifecycle::rename_on_host_with_rollback(
-        &state,
-        &id,
-        &new_id,
-        host_opt,
-        &record.delete_token,
-    )
-    .await?;
 
     let cookie_hdr =
         noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token);

@@ -14,6 +14,8 @@ use super::metadata::{
 };
 use crate::{error::AppError, state::AppState, tus::TusUpload, upload_mode::UploadMode};
 
+/// Re-creating an existing parallel part returns `409` with the live sibling or
+/// `X-Juicebox-Part-Completing`.
 #[utoipa::path(
     post,
     path = "/api/tus",
@@ -121,6 +123,7 @@ pub async fn create_upload_handler(
         })
         .transpose()?;
     if password.is_some() && parallel.is_some() {
+        // Protected uploads cannot use the direct parallel path.
         return Err(crate::routes::upload::protected::relay_required());
     }
 
@@ -143,6 +146,7 @@ pub async fn create_upload_handler(
             }
             reservation_hash = reservation.password_hash.clone();
         }
+        // The reservation's host wins over client metadata.
         storage_host = reservation.storage_host;
     }
 
@@ -205,6 +209,7 @@ pub async fn create_upload_handler(
             ));
         }
         file_capability = session.capability.clone();
+        // A part whose TUS resource expired or was deleted can restart in place.
         let stale_part = session.part_ids.get(&pi).is_some_and(|existing_id| {
             !state.tus.contains_key(existing_id.value())
                 && !session.finalized_parts.contains_key(&pi)
@@ -355,6 +360,7 @@ pub async fn create_upload_handler(
         )
         .await
     {
+        // Live preview is best effort; the upload must not fail because of it.
         tracing::warn!("tus live preview unavailable for {target}: {error}");
     }
 

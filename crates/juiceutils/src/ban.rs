@@ -1,3 +1,5 @@
+//! In-memory IP ban list. Addresses are stored only as peppered HMACs.
+
 use std::{collections::HashSet, net::IpAddr, path::Path, sync::RwLock};
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -5,6 +7,7 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Normalizes textual IPv6 first so one address always hashes the same.
 #[must_use]
 
 pub fn hash_ip_for_ban(ip: &str, pepper: &str) -> String {
@@ -32,6 +35,7 @@ struct BanListInner {
     hashes: HashSet<String>,
 }
 
+/// With no pepper the list is disabled and allows every address.
 pub struct BanList {
     inner: RwLock<BanListInner>,
 }
@@ -135,6 +139,8 @@ impl BanList {
             .remove(hash)
     }
 
+    /// Accepts bare arrays or objects with `entries`/`hashes`/`ip`; returns
+    /// `(added, skipped)`.
     pub fn load_file(&self, path: &Path, config_pepper: &str) -> (usize, usize) {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,

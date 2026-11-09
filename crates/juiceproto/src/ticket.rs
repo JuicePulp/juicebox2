@@ -67,6 +67,7 @@ pub fn mint(claims: &TicketClaims, secret: &str) -> Result<String, jsonwebtoken:
     )
 }
 
+/// Rejects empty claims even with a valid signature.
 pub fn verify(token: &str, secret: &str) -> Result<TicketClaims, jsonwebtoken::errors::Error> {
     let claims = jsonwebtoken::decode::<TicketClaims>(
         token,

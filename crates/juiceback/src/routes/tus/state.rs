@@ -5,6 +5,8 @@ use tokio::sync::mpsc;
 
 use crate::{error::AppError, state::AppState};
 
+/// Missing handles are not an error when the upload reached its declared
+/// length, making completion retries idempotent.
 pub(crate) async fn await_storage_push(
     state: &Arc<AppState>,
     upload_id: &str,
@@ -37,7 +39,6 @@ pub(crate) fn spawn_push_task(
     let push_filename = upload.filename.clone();
     let push_mime = upload.mime_type.clone();
     let push_host = upload.storage_host.clone();
-    let push_mode = upload.upload_mode;
     let push_capability = upload.capability.clone();
     let sid = upload.session_id.clone();
     let pi = upload.part_index;
@@ -55,7 +56,6 @@ pub(crate) fn spawn_push_task(
             &push_mime,
             rx,
             push_host,
-            &push_mode,
             Some(&push_capability),
             Some(total_len),
         )
@@ -70,6 +70,7 @@ pub(crate) fn spawn_push_task(
     state.push_handles.insert(handle_id, handle);
 }
 
+/// The slot is only freed when it still points at this upload.
 pub(crate) fn release_parallel_slot(
     state: &Arc<AppState>,
     id: &str,

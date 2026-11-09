@@ -17,6 +17,7 @@ pub struct S3Backend {
 }
 
 impl S3Backend {
+    /// Builds the client; a plain `http://` endpoint is rejected unless explicitly allowed.
     pub fn new(
         bucket: &str,
         region: &str,
@@ -53,6 +54,8 @@ impl S3Backend {
         object_store::path::Path::from(format!("files/{id}.{ext}"))
     }
 
+    /// Returns the first object under `files/{id}.`; duplicate extensions must
+    /// be prevented by reservations.
     async fn find_object(&self, id: &str) -> Result<object_store::ObjectMeta, StorageError> {
         use futures::StreamExt;
 
@@ -153,6 +156,7 @@ impl CapStore for S3Backend {
     }
 
     async fn cap_read(&self, id: &str) -> Result<String, StorageError> {
+        // Any failure is `Forbidden`; never distinguish missing from unreadable.
         let data = self
             .client
             .get(&Self::capability_key(id))
@@ -161,6 +165,7 @@ impl CapStore for S3Backend {
             .bytes()
             .await
             .map_err(|_| StorageError::Forbidden)?;
+        // Invalid UTF-8 cannot match a hex digest; degrade to empty.
         Ok(std::str::from_utf8(&data).unwrap_or_default().to_string())
     }
 
@@ -175,6 +180,8 @@ impl S3Backend {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
         let reservation = Self::reservation_key(id);
+        // Create mode makes the claim atomic; a second writer gets a precondition
+        // failure.
         self.client
             .put_opts(
                 &reservation,
@@ -199,6 +206,8 @@ impl S3Backend {
         Ok(reservation)
     }
 
+    /// Best-effort release; a leaked reservation blocks the ID until cleaned
+    /// up.
     async fn release_id(&self, reservation: &object_store::path::Path) {
         if let Err(e) = self.client.delete(reservation).await {
             tracing::warn!("failed to release S3 ID reservation {reservation}: {e}");
@@ -227,6 +236,8 @@ impl S3Backend {
         result.map(|_| ()).map_err(Into::into)
     }
 
+    /// Copies then deletes; a failed delete rolls back the copy so the rename
+    /// is all or nothing.
     async fn rename_object(&self, old_id: &str, new_id: &str) -> Result<(), StorageError> {
         let meta = self.stat(old_id).await?;
         let source = Self::object_key(old_id, &meta.extension);
@@ -447,6 +458,8 @@ impl StorageBackend for S3Backend {
             .map_err(|e| StorageError::Io(format!("S3 get failed: {e}")))?;
 
         let obj_meta = get_result.meta.clone();
+        // Some S3-compatible stores omit an ETag; use a timestamp so clients still get
+        // a validator.
         let etag = obj_meta.e_tag.clone().unwrap_or_else(|| {
             use std::time::{SystemTime, UNIX_EPOCH};
             let ts = SystemTime::now()
@@ -611,6 +624,8 @@ impl StorageBackend for S3Backend {
     }
 }
 
+/// Precondition and already-exists failures map to `Conflict`; everything else
+/// is `Io`.
 impl From<object_store::Error> for StorageError {
     fn from(error: object_store::Error) -> Self {
         match error {

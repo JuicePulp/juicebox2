@@ -73,6 +73,7 @@ function handleCopyCode() {
 }
 function startPairingPoll() {
   let attempts = 0;
+  // 100 attempts at 3s each, so a fresh code is watched for about five minutes
   const maxAttempts = 100;
   pollInterval = setInterval(async () => {
     attempts++;

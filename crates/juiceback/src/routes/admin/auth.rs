@@ -9,9 +9,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::common::AdminUser;
+use super::common::{ADMIN_COOKIE_NAME, AdminUser};
 use crate::{auth, db, error::AppError, state::AppState, utils::ClientIp};
 
+/// Failed attempts per `(username, client IP hash)` before a `LOCKOUT_SECS`
+/// lockout.
 const MAX_FAILURES: u32 = 5;
 const LOCKOUT_SECS: i64 = 600;
 
@@ -45,14 +47,8 @@ pub struct CheckResponse {
     tag = "Admin",
 )]
 pub async fn logout_handler(State(state): State<Arc<AppState>>) -> Response {
-    let cookie = format!(
-        "token=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{}",
-        if state.config.secure_cookies {
-            "; Secure"
-        } else {
-            ""
-        }
-    );
+    let cookie =
+        crate::cookies::header(ADMIN_COOKIE_NAME, "", 0, true, state.config.secure_cookies);
     (
         StatusCode::FOUND,
         [
@@ -63,6 +59,7 @@ pub async fn logout_handler(State(state): State<Arc<AppState>>) -> Response {
         .into_response()
 }
 
+/// Lockout and delay do not reveal whether the account exists.
 #[utoipa::path(
     post,
     path = "/api/admin/login",
@@ -99,6 +96,7 @@ pub async fn login_handler(
             )
         })
         .await
+        // Fail open on a failed count read; the credential check still gates.
         .unwrap_or(0);
 
     if failed_count >= MAX_FAILURES {
@@ -123,6 +121,7 @@ pub async fn login_handler(
         })
         .await?;
     let Some(user) = user else {
+        // Record unknown usernames too, so lockout and timing do not reveal accounts.
         state
             .db_call("insert_failed_login", {
                 let uname = username.clone();
@@ -166,15 +165,12 @@ pub async fn login_handler(
         .map_err(|_| AppError::Internal("jwt signing task panicked".into()))?
         .map_err(AppError::Internal)?;
 
-    let cookie = format!(
-        "token={}; Path=/; Max-Age={}; HttpOnly; SameSite=Strict{}",
-        token,
+    let cookie = crate::cookies::header(
+        ADMIN_COOKIE_NAME,
+        &token,
         crate::constants::ADMIN_JWT_COOKIE_MAX_AGE_SECS,
-        if state.config.secure_cookies {
-            "; Secure"
-        } else {
-            ""
-        }
+        true,
+        state.config.secure_cookies,
     );
 
     let body = Json(LoginResponse {

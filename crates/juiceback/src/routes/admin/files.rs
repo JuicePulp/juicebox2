@@ -275,6 +275,7 @@ pub async fn delete_file_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Pins the file so the cooling job leaves it alone.
 #[utoipa::path(
     post,
     path = "/api/admin/file/{id}/warm",
@@ -331,6 +332,7 @@ pub async fn cool_file_handler(
     ))
 }
 
+/// Only the juicehost object is frozen; the database row is unchanged.
 #[utoipa::path(
     post,
     path = "/api/admin/file/{id}/freeze",

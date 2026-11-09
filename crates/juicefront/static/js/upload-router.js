@@ -1,5 +1,6 @@
 
 const ENDPOINT = "/router/upload-target";
+// The home host is the default route; callers treat it as "use the current origin".
 const HOME_HOST = "https://f.juicey.dev";
 const SUCCESS_TTL_MS = 60_000;
 const FAILURE_TTL_MS = 15_000;
@@ -12,6 +13,7 @@ export function clearUploadHostCache() {
   cache = { host: "", at: 0, ttl: FAILURE_TTL_MS };
 }
 
+/** Returns a host origin, or `""` for the current origin; concurrent callers share one request. */
 export async function resolveUploadHost() {
   if (Date.now() - cache.at < cache.ttl) {
     return cache.host;

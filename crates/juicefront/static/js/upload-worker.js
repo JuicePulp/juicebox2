@@ -2,7 +2,7 @@ import {
   startUpload
 } from "./upload-engine.js?v=2.2.0";
 import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0";
-import { deleteTus } from "./tus.js";
+import { deleteTus, uniqueTusIds } from "./tus.js";
 import {
   queueItem,
   queueItemNow,
@@ -10,21 +10,12 @@ import {
 } from "./upload-store.js?v=2.2.0";
 const ctx = self;
 const entries = new Map;
+// A removed id must stay gone even if a late engine callback still reports it.
 const dismissed = new Set;
 const ports = new Set;
+// Bounds worker memory; finished entries are evicted oldest-first once this is exceeded.
 const MAX_ITEMS = 100;
 const ACTIVE_STATES = new Set(["queued", "compressing", "uploading", "finalizing"]);
-function isTerminal(state) {
-  return state === "done" || state === "error" || state === "cancelled";
-}
-function tusIdsFor(item, extra = []) {
-  const ids = [
-    ...extra,
-    ...(Array.isArray(item?.tusIds) ? item.tusIds : []),
-    item?.tusId
-  ];
-  return [...new Set(ids.filter((id) => typeof id === "string" && id))];
-}
 function emit(message) {
   for (const port of ports) {
     try {
@@ -87,6 +78,7 @@ function handleEnqueue(msg, _port) {
   if (entries.has(msg.id)) {
     const existing = entries.get(msg.id);
     if (existing && existing.item.state === "paused") {
+      // A paused item has a stale handle after reload; replace it to resume from the saved offset.
       try {
         existing.handle?.abort();
       } catch {}
@@ -125,7 +117,7 @@ function handleEnqueue(msg, _port) {
   delete item.pausedAt;
   delete item.errorCode;
   delete item.errorMessage;
-  const entry = { item, handle: null, tusIds: tusIdsFor(base) };
+  const entry = { item, handle: null, tusIds: uniqueTusIds(base) };
   entries.set(item.id, entry);
   queueItemNow(item);
   entryItem(item);
@@ -149,7 +141,7 @@ function handleCancel(id) {
   if (!entry)
     return;
   entry.handle?.abort();
-  for (const tusId of tusIdsFor(entry.item, entry.tusIds)) {
+  for (const tusId of uniqueTusIds(entry.item, entry.tusIds)) {
     deleteTus(UPLOAD_URL, tusId);
   }
   void removeQueueItem(id);
@@ -161,7 +153,7 @@ function handleRemove(id) {
   const entry = entries.get(id);
   if (entry) {
     entry.handle?.abort();
-    for (const tusId of tusIdsFor(entry.item, entry.tusIds)) {
+    for (const tusId of uniqueTusIds(entry.item, entry.tusIds)) {
       deleteTus(UPLOAD_URL, tusId);
     }
   }
@@ -190,6 +182,7 @@ ctx.onconnect = (event) => {
           entryItem(entry.item);
       }
     } else if (msg.type === "ping") {
+      // Ping/pong is the client's liveness check; a missed pong triggers a main-thread fallback.
       try { port.postMessage({ type: "pong" }); } catch {}
     }
   };

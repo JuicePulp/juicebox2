@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{HeaderMap, header, request::Parts},
+    http::{HeaderMap, request::Parts},
 };
 use serde::Deserialize;
 
 use crate::{auth, db, error::AppError, state::AppState};
 
+/// Extraction verifies the cookie and re-reads the row each request.
 #[derive(Clone)]
 pub struct AdminUser {
     pub claims: auth::AdminClaims,
@@ -45,6 +46,7 @@ where
     }
 }
 
+/// `limit` is clamped to 200; non-`asc` `dir` is descending.
 #[derive(Deserialize)]
 pub struct ListParams {
     #[serde(default)]
@@ -76,14 +78,9 @@ const fn default_limit() -> i64 {
     50
 }
 
+pub(crate) const ADMIN_COOKIE_NAME: &str = "token";
+
 #[must_use]
 fn extract_jwt(headers: &HeaderMap) -> Option<String> {
-    let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
-    for pair in cookie.split(';') {
-        let pair = pair.trim();
-        if let Some(value) = pair.strip_prefix("token=") {
-            return Some(value.to_string());
-        }
-    }
-    None
+    crate::cookies::value(headers, ADMIN_COOKIE_NAME)
 }

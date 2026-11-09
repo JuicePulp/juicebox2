@@ -1,3 +1,5 @@
+//! IP geolocation cache and queue: encrypted addresses plus hashed results.
+
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, Result, params};
@@ -8,6 +10,7 @@ pub struct GeoLite {
     pub city: String,
 }
 
+/// Deduplicates on `ip_hash`; repeats are ignored.
 pub fn enqueue_geo_ip(conn: &Connection, enc_ip: &str, ip_hash: &str, now: i64) -> Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO geo_queue(enc_ip, ip_hash, attempts, enqueued_at)
@@ -52,6 +55,7 @@ pub fn delete_geo_queue(conn: &Connection, ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
+/// Increments attempts and drops rows that reach 10.
 pub fn bump_geo_attempts(conn: &Connection, ids: &[i64]) -> Result<()> {
     if ids.is_empty() {
         return Ok(());

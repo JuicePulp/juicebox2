@@ -23,6 +23,7 @@ use crate::{
     state::AppState,
 };
 
+/// Earlier parts may be a byte larger; the parts sum exactly.
 pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
     let step = total.div_ceil(n.max(1) as u64);
     (0..n)
@@ -30,9 +31,12 @@ pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
         .collect()
 }
 
+/// Kept below the edge proxy's body limit so a part is never rejected early.
 pub(crate) const DIRECT_MAX_PART_BYTES: u64 = 96 * 1024 * 1024;
+/// More parts buys no throughput and multiplies overhead.
 pub(crate) const DIRECT_MAX_PARTS: usize = 64;
 
+// Compile-time guard; the build fails if the constant is raised.
 const _: () = assert!(DIRECT_MAX_PART_BYTES < 100 * 1024 * 1024);
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -239,6 +243,8 @@ pub async fn direct_parallel_reserve_handler(
     }))
 }
 
+/// Idempotent: a retry finds the target already the right size or a completed
+/// file.
 #[utoipa::path(
     post,
     path = "/upload/direct/parallel/complete",
@@ -340,6 +346,8 @@ pub async fn direct_parallel_complete_handler(
                     )));
                 }
                 None => {
+                    // Another request may have merged; if the size is correct now, treat it as
+                    // complete.
                     if stat_target_size(&state, &file).await? == Some(expected_size) {
                         merged = true;
                         break;

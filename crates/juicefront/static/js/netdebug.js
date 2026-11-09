@@ -44,6 +44,7 @@ async function probe() {
       probeRtt = Math.round(performance.now() - t0);
   } catch {}
 }
+// Battery is optional; Safari and some embedded browsers do not expose it.
 async function readBattery() {
   try {
     const nav = navigator;
@@ -296,6 +297,7 @@ function drawGraph() {
   ctx.fillStyle = "#fff";
   ctx.fill();
 }
+// Prefer the active upload's tuner state so a finished session does not look stale.
 function render() {
   const txt = elText();
   if (!txt || !open)

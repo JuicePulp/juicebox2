@@ -40,11 +40,14 @@ impl LocalBackend {
         })
     }
 
+    /// Rebuilds the ID index, removes leftover temp files, and rejects
+    /// symlinks, duplicates, and bad names.
     pub async fn init_cache(&self) -> Result<(), std::io::Error> {
         let mut entries = tokio::fs::read_dir(&self.files_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with(".cap.") {
+                // Sidecar markers must be regular files; a symlink here is corrupt state.
                 let file_type = entry.file_type().await?;
                 if file_type.is_symlink() || !file_type.is_file() {
                     return Err(std::io::Error::new(
@@ -56,6 +59,7 @@ impl LocalBackend {
             }
 
             if name.starts_with(".frz.") {
+                // Any freeze marker, even a symlink, means frozen; fail closed.
                 continue;
             }
             if name.starts_with('.') && (name.ends_with(".reserve") || name.ends_with(".tmp")) {
@@ -138,6 +142,8 @@ impl LocalBackend {
     }
 }
 
+/// Removes the `.reserve` marker on drop so failed or cancelled writes release
+/// the ID.
 struct LocalReservation {
     path: PathBuf,
 }
@@ -262,6 +268,7 @@ impl CapStore for LocalBackend {
 
     async fn cap_read(&self, id: &str) -> Result<String, StorageError> {
         let path = self.capability_path(id).ok_or(StorageError::Forbidden)?;
+        // Any read failure is `Forbidden`, never revealing whether a marker exists.
         tokio::fs::read_to_string(path)
             .await
             .map_err(|_| StorageError::Forbidden)
@@ -338,6 +345,8 @@ impl LocalBackend {
                 file.write_all(&chunk)
                     .await
                     .map_err(|e| StorageError::Io(format!("write failed: {e}")))?;
+                // Flush in coarse steps so live readers see progress without flushing on every
+                // chunk.
                 if total.saturating_sub(visible) >= 256 * 1024 {
                     file.flush()
                         .await
@@ -440,6 +449,7 @@ impl LocalBackend {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
+        // The marker is keyed by ID alone, so it also locks out other extensions.
         let path = self.files_dir.join(format!(".{id}.reserve"));
         tokio::fs::OpenOptions::new()
             .write(true)
@@ -470,6 +480,8 @@ impl LocalBackend {
         options.read(true);
         #[cfg(unix)]
         {
+            // Refuse symlinks so a swapped-in link cannot redirect reads outside the files
+            // directory.
             options.custom_flags(libc::O_NOFOLLOW);
         }
         let file = options.open(path).await.map_err(|e| {
@@ -492,6 +504,7 @@ impl LocalBackend {
     }
 }
 
+/// Linux reflink ioctl number; clones extents without copying bytes.
 #[cfg(target_os = "linux")]
 const FICLONERANGE: libc::c_ulong = 0x4020_940d;
 
@@ -529,6 +542,8 @@ fn try_reflink_range(
     Ok(false)
 }
 
+/// Copies one part at `dst_off`, preferring reflink, then `copy_file_range`,
+/// then buffered copy.
 async fn copy_part_fast(
     part: &mut tokio::fs::File,
     target_file: &mut tokio::fs::File,
@@ -595,6 +610,7 @@ fn copy_part_blocking(
             if rc < 0 {
                 let err = std::io::Error::last_os_error();
                 match err.raw_os_error() {
+                    // Unsupported on this filesystem pair; fall back to buffered copying.
                     Some(code)
                         if code == libc::ENOSYS
                             || code == libc::EXDEV
@@ -739,6 +755,7 @@ impl StorageBackend for LocalBackend {
         ensure_not_frozen(self, id).await?;
 
         if start > meta.size || end >= meta.size {
+            // `end` is inclusive, so it must stay strictly below the file size.
             return Err(StorageError::Io(format!(
                 "range {}-{} out of bounds for {} byte file",
                 start, end, meta.size
@@ -939,6 +956,8 @@ impl LocalBackend {
     }
 }
 
+/// Publishes `src` at `dst` without overwriting, falling back to rename; on
+/// `Conflict`, `src` stays.
 pub(super) async fn link_or_rename(src: &Path, dst: &Path) -> Result<(), StorageError> {
     match tokio::fs::hard_link(src, dst).await {
         Ok(()) => {

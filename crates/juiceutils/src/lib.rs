@@ -1,10 +1,12 @@
 pub mod ban;
 pub mod config;
 pub mod file_validation;
+pub mod host;
 pub mod icons;
 pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
+pub mod text;
 pub mod urls;
 pub mod web;
 
@@ -27,6 +29,7 @@ pub fn exit_on_config_error(service: &str, error: impl std::fmt::Display) -> ! {
     std::process::exit(1);
 }
 
+/// Paths the UI polls or scrapers hit constantly; excluded from access logs.
 #[must_use]
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(
@@ -50,12 +53,14 @@ pub use server::{
     start_quic_server, start_quic_server_with_limits,
 };
 
+/// Compare secrets without short-circuiting on the first differing byte.
 #[must_use]
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+/// Another scheme or extra parts yield `None`.
 #[must_use]
 pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     let auth = headers.get("authorization")?.to_str().ok()?;
@@ -69,6 +74,7 @@ pub fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     }
 }
 
+/// Resolve on Ctrl+C or SIGTERM so callers can drain connections.
 pub async fn shutdown_signal(service_name: &str) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -97,6 +103,7 @@ pub async fn shutdown_signal(service_name: &str) {
     }
 }
 
+/// File and preview routes get a looser CSP; others stay strict.
 pub async fn add_security_headers(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,

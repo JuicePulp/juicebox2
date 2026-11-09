@@ -1,3 +1,5 @@
+/** Client-side extension blocklist that mirrors the server's upload danger levels. */
+
 const LEVEL_ORDER = {
   none: 0,
   low: 1,

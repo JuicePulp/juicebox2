@@ -10,6 +10,7 @@ use axum::{
 
 use crate::state::AppState;
 
+/// Client address captured once per request; `None` when unavailable.
 #[derive(Clone)]
 pub struct ViewerIp(pub Option<String>);
 
@@ -39,8 +40,11 @@ pub struct HitKey {
 }
 
 const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+/// Caps keys per POST so one slow backend call cannot stall the flusher.
 const FLUSH_BATCH_LIMIT: usize = 1_000;
 
+/// Counts a view in memory; no-op without a backend, and buffered counts are
+/// lost on shutdown.
 pub(crate) fn report_file_hit(
     state: &AppState,
     file_id: &str,
@@ -60,6 +64,8 @@ pub(crate) fn report_file_hit(
     *state.hit_buffer.entry(key).or_insert(0) += 1;
 }
 
+/// Missed ticks are skipped, so a slow backend cannot trigger a burst of
+/// consecutive flushes.
 pub fn start_flusher(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(FLUSH_INTERVAL);
@@ -71,6 +77,8 @@ pub fn start_flusher(state: Arc<AppState>) {
     });
 }
 
+/// Drops counts when the backend errors, but re-queues them on a transport
+/// failure, so an outage is retried while a rejected batch is not.
 async fn flush_once(state: &AppState) {
     let Some(backend_url) = state.backend_url.as_deref() else {
         state.hit_buffer.clear();
@@ -113,7 +121,7 @@ async fn flush_once(state: &AppState) {
         .json(&serde_json::json!({ "hits": hits }))
         .timeout(Duration::from_secs(3));
     if !state.api_key.is_empty() {
-        request = request.header("x-juicehost-api-key", &state.api_key);
+        request = request.header(juiceproto::headers::HOST_API_KEY, &state.api_key);
     }
     match request.send().await {
         Ok(resp) if resp.status().is_success() => {}

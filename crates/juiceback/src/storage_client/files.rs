@@ -3,6 +3,8 @@ use std::sync::Arc;
 use super::client::StorageClient;
 use crate::{db, state::AppState};
 
+/// Custom hosts never receive internal auth headers, so fall back to the stored
+/// delete token.
 async fn resolve_capability(
     state: &Arc<AppState>,
     id: &str,
@@ -73,6 +75,7 @@ pub async fn rename_file_on_juicehost(
     }
 }
 
+/// A 404 is treated as success because the file is already out of the hot tier.
 pub async fn demote_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
@@ -183,6 +186,7 @@ pub async fn unfreeze_file_on_juicehost(
     }
 }
 
+/// Returns the R2 key juicehost reports; a success without a key is an error.
 pub async fn promote_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,
@@ -229,6 +233,7 @@ pub async fn promote_file_on_juicehost(
     }
 }
 
+/// Demotes first so the R2 object is not orphaned; 404 counts as success.
 pub async fn delete_file_on_juicehost(
     state: &Arc<AppState>,
     id: &str,

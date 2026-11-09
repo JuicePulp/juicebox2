@@ -66,6 +66,7 @@ pub async fn owned_files_handler(
     Ok(Json(OwnedFilesResponse { files }))
 }
 
+/// Each entry is re-checked against the `files` table and token.
 #[derive(Deserialize, ToSchema)]
 pub struct ClientFilesRequest {
     pub files: Vec<ClientFileRecord>,
@@ -76,6 +77,7 @@ pub struct ClientFilesResponse {
     pub files: Vec<ClientFileRecord>,
 }
 
+/// Bound so one request cannot fill the registry.
 const CLIENT_FILES_MAX: usize = 500;
 
 #[utoipa::path(
@@ -88,6 +90,7 @@ const CLIENT_FILES_MAX: usize = 500;
     ),
     tag = "Files",
 )]
+/// `count` is how many entries were newly linked, not submitted.
 pub async fn put_client_files_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,

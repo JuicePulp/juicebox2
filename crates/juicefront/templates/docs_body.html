@@ -19,15 +19,15 @@
 </ul>
 <hr>
 <h2>Hosting</h2>
-<p>Juicebox runs as two separate services: <strong>juiceback</strong> (API gateway) and <strong>juicehost</strong> (file storage). You need both running to handle uploads and file serving. QUIC/HTTP/3 is optional but recommended for faster uploads.</p>
+<p>Juicebox runs as two separate services: <strong>juiceback</strong> (API gateway) and <strong>juicehost</strong> (file storage). You need both running to handle uploads and file serving. QUIC/HTTP/3 is an optional alternate transport, not a speed optimization on normal links.</p>
 <h3>Ports</h3>
 <table>
 <caption class="sr-only">Service ports and protocols</caption>
 <tr><th>Service</th><th>Protocol</th><th>Default Port</th><th>Notes</th></tr>
 <tr><td>juiceback</td><td>TCP (HTTP/1.1 + H2)</td><td>6401</td><td>API endpoint</td></tr>
-<tr><td>juiceback</td><td>UDP (QUIC / HTTP/3)</td><td>6402</td><td>Fast uploads from modern browsers</td></tr>
+<tr><td>juiceback</td><td>UDP (QUIC / HTTP/3)</td><td>6402</td><td>Optional HTTP/3 endpoint</td></tr>
 <tr><td>juicehost</td><td>TCP (HTTP/1.1 + H2)</td><td>6402</td><td>Serves files and handles storage</td></tr>
-<tr><td>juicehost</td><td>UDP (QUIC / HTTP/3)</td><td>6403</td><td>Fast file push from juiceback</td></tr>
+<tr><td>juicehost</td><td>UDP (QUIC / HTTP/3)</td><td>6403</td><td>Optional HTTP/3 endpoint</td></tr>
 </table>
 <p>UDP and TCP ports are independent -- you can run QUIC on the same port number as a TCP service with no conflict.</p>
 <h3>How to host</h3>
@@ -38,11 +38,11 @@
 <li><strong>Start juicefront</strong> -- it needs the juiceback and juicehost URLs; it serves the frontend and proxies <code>/api/*</code> to juiceback.</li>
 </ol>
 <h3>QUIC / HTTP/3</h3>
-<p>QUIC uses UDP on the port shown above. It is only available when juiceback and juicehost are compiled with the <code>quic</code> feature (default on). The QUIC server reuses the same axum router as TCP so every endpoint is reachable over HTTP/3.</p>
+<p>QUIC uses UDP on the port shown above. It is only available when juiceback and juicehost are compiled with the <code>quic</code> feature (default on). The QUIC server reuses the same axum router as TCP so every endpoint is reachable over HTTP/3. It is an alternate transport, not a faster one: HTTP/3 has an advantage on lossy or high-latency paths, while plain HTTP/2 is faster on clean links.</p>
 <h3>Environment variables</h3>
 <p>The only strictly required variable is <code>JUICEHOST_API_KEY</code>, which must be the same on both services. Everything else has a sensible default. Refer to the rustdoc for each crate's config module to see the full list.</p>
 <h4>juiceback (API gateway)</h4>
-<p>juiceback is the API gateway. It handles authentication, rate limiting, file uploads, and serves the frontend. It connects to juicehost for file storage and optionally supports QUIC/HTTP/3 for faster uploads from modern browsers.</p>
+<p>juiceback is the API gateway. It handles authentication, rate limiting, file uploads, and serves the frontend. It connects to juicehost for file storage and can accept QUIC/HTTP/3 connections.</p>
 <h4>juicehost (file storage)</h4>
 <p>juicehost is the storage backend. It stores files on disk (or S3-compatible object storage), handles file serving, and manages cleanup of expired files. It exposes an internal API for juiceback to push and manage files.</p>
 <h4>juicefront (frontend)</h4>

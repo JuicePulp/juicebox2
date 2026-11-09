@@ -11,9 +11,10 @@ use crate::{
     cobalt::FetchOptions,
     db::{self, FileRecord},
     state::AppState,
-    upload_mode::UploadMode,
 };
 
+/// Reserves the pending record first; deletes it on error and flips live only
+/// after transfer checks.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -145,6 +146,8 @@ pub(crate) async fn download_and_store(
     .await;
 
     let (size_bytes, enc_header, detected) = result?;
+    // The object is durable now, so stop rollback; a later finalize failure leaves
+    // a pending row.
     cleanup.active = false;
     let (filename, mime_type) = reconcile_media(filename, mime_type, detected);
     let protection = setup
@@ -164,6 +167,8 @@ pub(crate) async fn download_and_store(
     .await
 }
 
+/// Deletes the pending row/object unless disarmed; spawned because `Drop`
+/// cannot await.
 struct CleanupOnDrop {
     state: Arc<AppState>,
     file_id: String,
@@ -209,6 +214,7 @@ fn configured_cobalt_hosts(config: &crate::config::Config) -> Vec<(String, u16)>
     out
 }
 
+/// http(s) only; other schemes or unparsable input are untrusted.
 fn tunnel_url_host_port(url: &str) -> Option<(String, u16)> {
     let parsed = url::Url::parse(url.trim()).ok()?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
@@ -220,6 +226,8 @@ fn tunnel_url_host_port(url: &str) -> Option<(String, u16)> {
     ))
 }
 
+/// Redirects are followed by hand so every hop passes the SSRF check; cobalt
+/// hosts are trusted because tunnels point at localhost.
 async fn fetch_tunnel_response(
     client: &reqwest::Client,
     state: &Arc<AppState>,
@@ -332,6 +340,7 @@ fn reconcile_media(
     )
 }
 
+/// ffmpeg needs a seekable input, so remote sources are spooled first.
 async fn spool_for_transcode(
     state: &Arc<AppState>,
     job_id: &str,
@@ -353,6 +362,7 @@ async fn spool_for_transcode(
     }
 }
 
+/// `Content-Length` is only a hint, so the cap is enforced per chunk.
 async fn spool_response(
     state: &Arc<AppState>,
     job_id: &str,
@@ -612,7 +622,6 @@ async fn transfer_to_juicehost(
             &push_mime,
             rx,
             push_host,
-            &UploadMode::Standard,
             Some(&push_capability),
             None,
         )
@@ -689,6 +698,8 @@ async fn transfer_to_juicehost(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
 )]
+/// Encrypting uploads need the plaintext length up front, so the body is
+/// spooled.
 async fn transfer_protected_to_juicehost(
     state: &Arc<AppState>,
     job_id: &str,
@@ -782,7 +793,6 @@ async fn transfer_protected_to_juicehost(
         capability,
         spool_file.path(),
         total,
-        crate::upload_mode::UploadMode::Standard,
         dek,
     )
     .await
@@ -790,6 +800,8 @@ async fn transfer_protected_to_juicehost(
     Ok((total, Some(hex::encode(header)), sniff_media(&prefix)))
 }
 
+/// Protection/ownership failures are logged but not fatal; the bytes are
+/// already durable.
 async fn finalize_stored_file(
     state: &Arc<AppState>,
     user_id: &str,

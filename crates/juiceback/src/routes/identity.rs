@@ -10,6 +10,8 @@ use axum::{
 
 use crate::{db, state::AppState};
 
+/// Extraction fails when the middleware did not install it: a wiring bug, not a
+/// client error.
 #[derive(Clone)]
 pub struct UserId(pub String);
 
@@ -34,6 +36,8 @@ impl<S: Send + Sync> FromRequestParts<S> for UserId {
     }
 }
 
+/// Routes reading `UserId` for ownership must not be added here, or they get a
+/// throwaway id.
 #[must_use]
 pub(crate) fn skips_session_db(path: &str) -> bool {
     matches!(
@@ -55,12 +59,13 @@ pub(crate) async fn user_identity_middleware(
     next: middleware::Next,
 ) -> Response<Body> {
     if skips_session_db(req.uri().path()) {
+        // Still provide an id so handlers never special-case its absence.
         req.extensions_mut()
             .insert(UserId(uuid::Uuid::new_v4().to_string()));
         return next.run(req).await;
     }
     let now = chrono::Utc::now().timestamp();
-    let session_token = crate::auth::cookie_value(req.headers(), crate::auth::SESSION_COOKIE_NAME);
+    let session_token = crate::cookies::value(req.headers(), crate::auth::SESSION_COOKIE_NAME);
     let user_id = if let Some(token) = session_token.as_ref() {
         let hash = crate::auth::session_token_hash(token);
         state
@@ -76,6 +81,8 @@ pub(crate) async fn user_identity_middleware(
     };
     let needs_cookie = user_id.is_none();
     let user_id = user_id.unwrap_or_else(|| {
+        // Older deployments signed the user id in a cookie; adopt it so old uploads
+        // still match.
         crate::auth::verify_legacy_user_cookie(req.headers(), &state.config.jwt_secret)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
     });
@@ -104,7 +111,7 @@ pub(crate) async fn user_identity_middleware(
         None
     };
     let had_legacy =
-        crate::auth::cookie_value(req.headers(), crate::auth::LEGACY_USER_COOKIE_NAME).is_some();
+        crate::cookies::value(req.headers(), crate::auth::LEGACY_USER_COOKIE_NAME).is_some();
 
     req.extensions_mut().insert(UserId(user_id.clone()));
 

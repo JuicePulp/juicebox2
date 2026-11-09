@@ -84,12 +84,15 @@ pub struct Config {
     pub juiceback_url: String,
     pub juicehost_url: String,
     pub api_internal_url: String,
+    /// Empty in the file means unset, so this is `None`, not an empty URL.
     pub router_url: Option<String>,
+    /// Peers whose `X-Forwarded-For` is believed; empty means trust nobody.
     pub trusted_proxies: Vec<IpCidr>,
     pub sentry_environment: String,
 }
 
 impl Config {
+    /// Resolves env vars over the TOML file; bad CIDRs warn and trust none.
     pub fn load() -> Self {
         let file: FileConfig = juiceutils::config::load_service_config(
             "juicefront",
@@ -98,6 +101,7 @@ impl Config {
         );
         let proxy = &file.proxy;
 
+        // Empty env values count as unset; blanking one does not fall back to the file.
         let juiceback_url = optional_secret("JUICEBACK_URL")
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| proxy.juiceback_url.clone());
@@ -132,6 +136,7 @@ impl Config {
         }
     }
 
+    /// Defaults a missing scheme and port; `None` if unparseable.
     pub fn upstream_host_port(base_url: &str) -> Option<(String, u16)> {
         let candidate = if base_url.contains("://") {
             base_url.to_string()

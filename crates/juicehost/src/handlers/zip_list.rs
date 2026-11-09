@@ -21,6 +21,7 @@ pub struct ZipEntry {
 
 const MAX_CD_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Largest possible end-of-central-directory record plus its comment field.
 const TAIL_WINDOW: u64 = 66_000;
 
 const MAX_ENTRIES: usize = 5_000;
@@ -58,6 +59,8 @@ pub(crate) async fn read_range_capped(
     Some(Bytes::from(out))
 }
 
+/// Locates the EOCD in the tail, rejecting multi-disk archives, ZIP64 markers,
+/// and oversized reads.
 fn find_eocd(tail: &[u8], file_size: u64) -> Option<(u64, u64, usize)> {
     if tail.len() < 22 {
         return None;
@@ -96,6 +99,8 @@ fn find_eocd(tail: &[u8], file_size: u64) -> Option<(u64, u64, usize)> {
     None
 }
 
+/// Decodes a name with lossy UTF-8, rejecting control characters so listing
+/// output stays safe.
 fn decode_name(raw: &[u8]) -> Option<String> {
     if raw.is_empty() {
         return None;
@@ -205,6 +210,8 @@ const MAX_TAR_SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TAR_ENTRIES: usize = 1_000;
 const TAR_CHUNK: u64 = 65_536;
 
+/// Listing result; `locked` marks an archive that needs a password so the UI
+/// can explain.
 pub struct ArchiveListing {
     pub entries: Vec<ZipEntry>,
     pub locked: bool,
@@ -243,6 +250,8 @@ pub async fn load_archive_entries(
     }
 }
 
+/// Loads the whole 7z file (up to the cap) and parses it on a blocking thread;
+/// password-protected => locked.
 async fn load_7z_entries(
     storage: &Arc<dyn StorageBackend>,
     id: &str,
@@ -311,6 +320,8 @@ fn parse_octal(raw: &[u8]) -> Option<u64> {
     u64::from_str_radix(text, 8).ok()
 }
 
+/// Scans TAR headers in chunks, stopping at two zero blocks or the cap; skips
+/// pax/global headers.
 async fn load_tar_entries(
     storage: &Arc<dyn StorageBackend>,
     id: &str,

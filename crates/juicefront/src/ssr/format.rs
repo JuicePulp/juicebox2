@@ -1,3 +1,4 @@
+/// Binary units, one decimal below 10, rounded otherwise; caps at TB.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -77,6 +78,7 @@ pub fn icon_for_mime(mime: &str) -> &'static str {
     }
 }
 
+/// `expires_at` is Unix seconds, `now_ms` milliseconds; zero renders `???`.
 pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     if expires_at == 0 {
         return "???".to_owned();
@@ -138,6 +140,7 @@ fn strip_host(host: &str) -> String {
         .to_owned()
 }
 
+/// Empty hosts count as default; scheme and trailing slash are ignored.
 pub fn is_default_host(host: &str, default_host: Option<&str>) -> bool {
     if host.is_empty() {
         return true;

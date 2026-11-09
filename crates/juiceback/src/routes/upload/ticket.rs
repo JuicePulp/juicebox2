@@ -9,6 +9,7 @@ use crate::{
     state::AppState,
 };
 
+/// Snaps to the nearest allowed value or the default; returns seconds.
 pub fn clamp_ttl_seconds(
     allowed_ttl: &[f64],
     default_ttl_hours: f64,
@@ -39,6 +40,7 @@ pub fn reject_blocked_filename(
     Ok(())
 }
 
+/// DTE tickets are sized so a slow but progressing upload still fits.
 pub fn ticket_ttl_secs(state: &Arc<AppState>, file_size: u64, legacy_secs: i64) -> i64 {
     if state.config.dte_enabled {
         dte_ticket_ttl_secs(state, file_size)
@@ -47,6 +49,8 @@ pub fn ticket_ttl_secs(state: &Arc<AppState>, file_size: u64, legacy_secs: i64) 
     }
 }
 
+/// Scoped to one file, user, and capability; juicehost verifies it with the
+/// shared secret.
 #[allow(clippy::too_many_arguments)]
 pub fn mint_ticket(
     state: &Arc<AppState>,
@@ -67,6 +71,7 @@ pub fn mint_ticket(
         .map_err(|e| AppError::Internal(format!("JWT encoding failed: {e}")))
 }
 
+/// Both must land or the id is unusable.
 pub async fn insert_owned_pending(
     state: &Arc<AppState>,
     user_id: &str,
@@ -82,6 +87,7 @@ pub async fn insert_owned_pending(
     Ok(record)
 }
 
+/// The middle URL bypasses the viewer page; the last is a direct download.
 pub fn public_urls_for(state: &Arc<AppState>, record: &FileRecord) -> (String, String, String) {
     crate::utils::share_links(
         &state.config,
@@ -91,6 +97,7 @@ pub fn public_urls_for(state: &Arc<AppState>, record: &FileRecord) -> (String, S
     )
 }
 
+/// `None` when encryption is unconfigured.
 pub fn encrypted_client_ip(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -100,6 +107,8 @@ pub fn encrypted_client_ip(
     crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key)
 }
 
+/// An offline or lock-contended device is skipped; the ticket is still
+/// returned.
 #[allow(clippy::too_many_arguments)]
 pub async fn notify_device(
     state: &Arc<AppState>,

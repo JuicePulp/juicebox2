@@ -1,5 +1,6 @@
 use sha2::{Digest, Sha256};
 
+/// Extension without the dot, or `bin` when the name has none.
 #[must_use]
 pub fn extract_extension(filename: &str) -> &str {
     std::path::Path::new(filename)
@@ -28,6 +29,7 @@ pub fn safe_extension(filename: &str) -> String {
     }
 }
 
+/// MIME type for an extension; text types get `charset=utf-8`.
 #[must_use]
 pub fn guess_mime(ext: &str) -> String {
     let mime = mime_guess::from_path(format!("file.{ext}")).first_or_octet_stream();

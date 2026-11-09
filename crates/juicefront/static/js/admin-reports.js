@@ -1,3 +1,4 @@
+import { esc } from "./util.js";
     var PAGE = 50;
     var allReports = [];
     var displayedCount = 0;
@@ -5,12 +6,6 @@
 
     function formatTime(sec) {
         return new Date(sec * 1000).toLocaleString();
-    }
-
-    function esc(s) {
-        var d = document.createElement("div");
-        d.appendChild(document.createTextNode(s));
-        return d.innerHTML;
     }
 
     function buildParams() {
@@ -175,6 +170,7 @@
         try {
             var res = await fetch("/api/admin/report/" + encodeURIComponent(id), { method: "DELETE" });
             if (res.ok) {
+                // Removed locally; `currentTotal` is not refetched.
                 allReports = allReports.filter(function (r) { return r.id !== id; });
                 displayedCount = Math.min(displayedCount, filterByReason(allReports).length);
                 renderTable();

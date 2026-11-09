@@ -18,7 +18,6 @@ use crate::{
     error::AppError,
     routes::{UserId, noscript},
     state::AppState,
-    upload_mode::UploadMode,
 };
 #[derive(serde::Deserialize, ToSchema)]
 pub struct ReserveUploadRequest {
@@ -44,6 +43,8 @@ pub struct ReserveResponse {
     pub is_encrypted: bool,
 }
 
+/// The client must present the `delete_token` as `x-delete-token` when
+/// completing the same id.
 #[utoipa::path(
     post,
     path = "/upload/reserve",
@@ -168,6 +169,8 @@ fn build_upload_response(
     Ok(upload_json_response(state, record, true, headers))
 }
 
+/// A global semaphore caps concurrent relays; a `reserve_id` requires
+/// `x-delete-token`.
 #[utoipa::path(
     post,
     path = "/upload",
@@ -188,7 +191,6 @@ pub async fn upload_handler(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let handler_start = std::time::Instant::now();
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
     let hashed_ip = crate::utils::hash_ip_for_ban(&raw_ip, &state.config.ip_pepper);
@@ -200,11 +202,14 @@ pub async fn upload_handler(
         .map_err(|_| AppError::TaskPanicked("upload semaphore closed".into()))?;
 
     let wants_html = noscript::wants_html(&headers);
-    let is_gzip = headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip");
+    let is_gzip = headers
+        .get(juiceproto::headers::FILE_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        == Some("gzip");
 
     let parse_start = std::time::Instant::now();
     let reservation_token = headers
-        .get("x-delete-token")
+        .get(juiceproto::headers::DELETE_TOKEN)
         .and_then(|value| value.to_str().ok());
     let fresh_capability = uuid::Uuid::new_v4().to_string();
 
@@ -303,15 +308,6 @@ pub async fn upload_handler(
         record.expires_at,
         crate::utils::truncate_hash(&hashed_ip)
     );
-
-    if params.selected_upload_mode == UploadMode::Quic {
-        crate::utils::log_quic_throughput(
-            &record.id,
-            record.size_bytes as u64,
-            handler_start.elapsed(),
-            parse_start.elapsed(),
-        );
-    }
 
     build_upload_response(
         &state,

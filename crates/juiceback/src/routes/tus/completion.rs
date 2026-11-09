@@ -8,6 +8,8 @@ use crate::{
     state::AppState,
 };
 
+/// Protected bytes never enter the push stream, so there is nothing to wait
+/// for.
 pub(crate) async fn complete_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
@@ -51,6 +53,7 @@ pub(crate) async fn finish_tus_upload(
                     dek,
                 )
             } else if let Some(reserve_id) = meta.reserve_id.as_deref() {
+                // Reuse the reservation's key material instead of a fresh key.
                 let lookup = reserve_id.to_string();
                 let reservation = state
                     .db_call("get_tus_protection_row", move |db| {
@@ -81,7 +84,6 @@ pub(crate) async fn finish_tus_upload(
                 &capability,
                 &spool,
                 meta.total_length,
-                meta.upload_mode,
                 &dek,
             )
             .await?;
@@ -94,6 +96,7 @@ pub(crate) async fn finish_tus_upload(
         };
 
     if meta.reserve_id.is_some() && meta.password_hash.is_none() {
+        // Rename before finishing: the row must point at existing bytes.
         crate::storage_client::rename_file_on_juicehost(
             state,
             &meta.id,

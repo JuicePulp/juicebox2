@@ -10,6 +10,7 @@ use axum::{
 use super::state::release_parallel_slot;
 use crate::{error::AppError, state::AppState};
 
+/// The read also refreshes `last_activity`.
 #[utoipa::path(
     get,
     path = "/api/tus/{id}",
@@ -124,6 +125,7 @@ pub async fn options_handler() -> Response {
         })
 }
 
+/// Unknown or completed ids return `404`.
 #[utoipa::path(
     delete,
     path = "/api/tus/{id}",

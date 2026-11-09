@@ -64,6 +64,7 @@ pub async fn list_hosters_handler(
     }))
 }
 
+/// Only hosts already in the `hosters` table can be banned; unknown hosts 404.
 #[utoipa::path(
     post,
     path = "/api/admin/hosters/{host}/ban",

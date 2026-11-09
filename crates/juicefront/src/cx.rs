@@ -2,6 +2,7 @@ use crate::{
     i18n, icons,
     ssr::{format, more_menu, retention},
 };
+
 #[derive(Debug, Clone)]
 pub struct Cx {
     pub locale: &'static str,
@@ -36,10 +37,12 @@ impl Cx {
         format::format_size(bytes)
     }
 
+    /// Always renders in MB or GB, matching how upload caps are stated.
     pub fn fmt_max(&self, bytes: u64) -> String {
         format::format_max_size(bytes)
     }
 
+    /// Non-finite hours fall back to the default window.
     pub fn ttl(&self, hours: f64) -> String {
         retention::ttl_label(self.locale, hours)
     }

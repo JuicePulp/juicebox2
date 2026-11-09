@@ -46,6 +46,7 @@ tokio = { workspace = true, features = ["macros", "rt", "signal", "sync", "time"
 toml.workspace = true
 tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

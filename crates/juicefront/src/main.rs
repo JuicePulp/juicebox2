@@ -38,6 +38,7 @@ mod ssr;
 mod state;
 mod ws;
 
+/// Handles SSR and compression load; mimalloc beats the system allocator here.
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
@@ -45,6 +46,7 @@ async fn shutdown_signal() {
     juiceutils::shutdown_signal("juicefront").await;
 }
 
+/// `None` means pages render without styles or scripts.
 fn static_base() -> Option<std::path::PathBuf> {
     for candidate in ["crates/juicefront/static", "static"] {
         let path = std::path::PathBuf::from(candidate);
@@ -60,6 +62,7 @@ async fn static_cache_policy(
     req: Request<Body>,
     next: middleware::Next,
 ) -> Response<Body> {
+    // Templates append `v=` to asset URLs, which is what makes a URL immutable.
     let versioned = req
         .uri()
         .query()
@@ -280,6 +283,7 @@ fn main() {
         }
 
         pages = pages.layer(compression);
+        // Cache wraps compression, so entries are stored per `Accept-Encoding` variant.
         pages = pages.layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             page_cache::middleware,
@@ -314,6 +318,7 @@ fn main() {
             .with_state(state.clone());
 
         let addr = format!("{}:{}", state.config.ui_host, state.config.ui_port);
+        // SO_REUSEADDR must be set before bind, so the listener is built by hand.
         let socket = TcpSocket::new_v4().expect("could not create a TCP socket");
         socket
             .set_reuseaddr(true)
@@ -338,6 +343,7 @@ fn main() {
         }
         axum::serve(
             listener,
+            // Connect info supplies the peer IP that ban checks and proxy trust depend on.
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async move { shutdown.notified().await })

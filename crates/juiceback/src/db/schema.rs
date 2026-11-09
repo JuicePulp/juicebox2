@@ -12,6 +12,7 @@ pub fn migration_count() -> u32 {
     MIGRATIONS.len() as u32
 }
 
+/// Highest applied migration; 0 on a fresh database.
 pub fn schema_version(conn: &Connection) -> Result<u32> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -27,6 +28,8 @@ pub fn schema_version(conn: &Connection) -> Result<u32> {
     Ok(max.unwrap_or(0))
 }
 
+/// Append only: the 1-based index is the version; inserting in the middle
+/// renumbers every later step.
 const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("failed_logins.ip_hash", m01_failed_logins_ip_hash),
     ("files.storage_host", m02_files_storage_host),
@@ -93,6 +96,7 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Guards against re-adding a column, including ones in the base schema.
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(conn
         .prepare(&format!("PRAGMA table_info({table})"))?
@@ -179,6 +183,7 @@ fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
 }
 
 fn m18_fetch_jobs_total_bytes(conn: &Connection) -> Result<()> {
+    // ignore the duplicate-column error for databases that already have it
     let _ = conn.execute(
         "ALTER TABLE fetch_jobs ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0",
         [],
@@ -335,6 +340,7 @@ fn m12_visitor_stats(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Base tables only; later columns and tables come from `MIGRATIONS`.
 fn create_base_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sessions (

@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 use super::common::{AdminUser, ListParams};
 use crate::{db, error::AppError, state::AppState};
 
+/// A truncated ban hash, never the stored encrypted IP.
 #[derive(Serialize, ToSchema)]
 pub struct AdminFeedbackEntry {
     pub id: i64,
@@ -68,6 +69,8 @@ pub async fn list_feedback_handler(
     let entries: Vec<AdminFeedbackEntry> = records
         .into_iter()
         .map(|r| {
+            // Decrypt only long enough to derive a display hash; the raw IP never reaches
+            // the client.
             let ip_hash = r
                 .reporter_ip
                 .as_ref()

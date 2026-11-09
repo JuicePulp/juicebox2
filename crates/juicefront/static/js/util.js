@@ -1,3 +1,4 @@
+/** HTML-escapes any value; `null` and `undefined` become an empty string. */
 export function esc(s) {
   var d = document.createElement("div");
   d.appendChild(document.createTextNode(s == null ? "" : String(s)));
@@ -17,6 +18,34 @@ export function announce(message) {
     document.body.appendChild(announcer);
   }
   announcer.textContent = message;
+}
+
+/** Queue states that will never change again. */
+export function isTerminal(state) {
+  return state === "done" || state === "error" || state === "cancelled";
+}
+
+export function hasCookie(name) {
+  try {
+    return document.cookie.split("; ").some((c) => c.startsWith(name + "="));
+  } catch {
+    return false;
+  }
+}
+
+export function readCookie(name) {
+  try {
+    const match = document.cookie.split("; ").find((c) => c.startsWith(name + "="));
+    return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeCookie(name, value, maxAgeSecs) {
+  try {
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSecs}; SameSite=Lax`;
+  } catch {}
 }
 
 export function formatSize(bytes) {

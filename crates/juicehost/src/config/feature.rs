@@ -1,5 +1,6 @@
 use crate::config::{ConfigError, FeaturesFile};
 
+/// TTLs are finite, positive, and mutually consistent.
 #[derive(Debug)]
 pub struct FeatureSettings {
     quick_link: bool,

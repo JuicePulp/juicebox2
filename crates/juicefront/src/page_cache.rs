@@ -17,11 +17,14 @@ use http_body_util::BodyExt;
 use crate::{i18n, state::AppState};
 
 const TTL: Duration = Duration::from_secs(10);
+/// Cap before expired entries are swept, then the whole map is cleared.
 const MAX_ENTRIES: usize = 256;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(4);
 
+/// Host header the refresher sends so it fills the keys real traffic reads.
 const PUBLIC_HOST: &str = "box.juicey.dev";
 
+/// A rendered response body; `to_response` rebuilds `Content-Length`.
 #[derive(Debug)]
 struct CachedPage {
     stored: Instant,
@@ -46,26 +49,27 @@ fn set_content_length(headers: &mut HeaderMap, len: usize) {
     }
 }
 
+/// Public pages served for every locale; the cache and the prewarmer both read
+/// this list.
+const PUBLIC_PAGES: &[&str] = &[
+    "/",
+    "/faq",
+    "/docs",
+    "/terms",
+    "/privacy",
+    "/report",
+    "/feedback",
+    "/download",
+];
+
 fn is_cacheable_path(path: &str) -> bool {
     let (_, stripped) = i18n::split_locale(path);
-    matches!(
-        stripped.as_str(),
-        "/" | "/index.html"
-            | "/faq"
-            | "/faq/"
-            | "/docs"
-            | "/docs/"
-            | "/terms"
-            | "/terms/"
-            | "/privacy"
-            | "/privacy/"
-            | "/report"
-            | "/report/"
-            | "/feedback"
-            | "/feedback/"
-            | "/download"
-            | "/download/"
-    )
+    let stripped = stripped.trim_end_matches('/');
+    stripped.is_empty()
+        || stripped == "/index.html"
+        || PUBLIC_PAGES
+            .iter()
+            .any(|page| *page != "/" && *page == stripped)
 }
 
 fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -111,6 +115,7 @@ fn cache_key(req: &Request<Body>, banned: bool) -> Option<String> {
         .unwrap_or("http");
     let selected_host = cookie_value(headers, "juicebox_host").unwrap_or("");
     let adtesting = cookie_value(headers, "ADTESTING").unwrap_or("");
+    // Unit separators cannot appear in header values, so fields cannot forge a key.
     Some(format!(
         "{scheme}\x1f{host}\x1f{path}\x1f{}\x1f{selected_host}\x1f{adtesting}\x1f{banned}",
         encoding_variant(headers)
@@ -149,6 +154,7 @@ impl PageCache {
     }
 }
 
+/// Only anonymous 200 HTML responses are cached; others are returned as-is.
 pub async fn middleware(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
@@ -216,6 +222,7 @@ pub async fn middleware(
     page.to_response()
 }
 
+/// Prewarm re-requests pages locally to cover the encodings browsers send.
 pub fn spawn_refresh(state: Arc<AppState>) {
     let port = state.config.ui_port;
     tokio::spawn(async move {
@@ -229,20 +236,21 @@ pub fn spawn_refresh(state: Arc<AppState>) {
         };
         tracing::debug!("page cache refresh started");
         let base = format!("http://127.0.0.1:{port}");
-        let paths = [
-            "/",
-            "/fr",
-            "/ru",
-            "/es",
-            "/ja",
-            "/faq",
-            "/docs",
-            "/terms",
-            "/privacy",
-            "/download",
-            "/report",
-            "/feedback",
-        ];
+        let mut paths = Vec::new();
+        for locale in i18n::LOCALES {
+            let prefix = i18n::locale_prefix(locale.code);
+            paths.push(if prefix.is_empty() {
+                "/".to_owned()
+            } else {
+                prefix.to_owned()
+            });
+        }
+        paths.extend(
+            PUBLIC_PAGES
+                .iter()
+                .filter(|page| **page != "/")
+                .map(|page| (*page).to_owned()),
+        );
         let encodings = [
             "gzip, br",
             "gzip, deflate, br, zstd",
@@ -251,7 +259,7 @@ pub fn spawn_refresh(state: Arc<AppState>) {
         ];
         loop {
             let mut refreshed = 0usize;
-            for path in paths {
+            for path in &paths {
                 for encoding in encodings {
                     let request = client
                         .get(format!("{base}{path}"))

@@ -14,6 +14,7 @@ export function readStoredFiles() {
   }
 }
 
+/** Merges by `id`, falling back to `delete_token` when the server-assigned id arrived after the first write. */
 export function upsertLocalFile(entry) {
   if (!entry || !entry.id || typeof localStorage === "undefined")
     return;

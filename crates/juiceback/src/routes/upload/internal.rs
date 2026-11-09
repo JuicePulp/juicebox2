@@ -7,6 +7,8 @@ use axum::{
 
 use crate::{auth::InternalApiKey, db, error::AppError, state::AppState};
 
+/// Internal callers see fields the public API hides; the API key is the only
+/// guard.
 #[utoipa::path(
     get,
     path = "/internal/file/{id}/status",

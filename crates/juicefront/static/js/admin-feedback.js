@@ -1,3 +1,4 @@
+import { esc } from "./util.js";
     var PAGE = 50;
     var allFeedback = [];
     var displayedCount = 0;
@@ -5,12 +6,6 @@
 
     function formatTime(sec) {
         return new Date(sec * 1000).toLocaleString();
-    }
-
-    function esc(s) {
-        var d = document.createElement("div");
-        d.appendChild(document.createTextNode(s));
-        return d.innerHTML;
     }
 
     function buildParams() {
@@ -166,6 +161,7 @@
         try {
             var res = await fetch("/api/admin/feedbacks/" + encodeURIComponent(id), { method: "DELETE" });
             if (res.ok) {
+                // Removed locally; `currentTotal` is not adjusted.
                 allFeedback = allFeedback.filter(function (f) { return f.id !== id; });
                 displayedCount = Math.min(displayedCount, allFeedback.length);
                 renderTable();

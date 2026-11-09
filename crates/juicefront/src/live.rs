@@ -7,12 +7,14 @@ use axum::{
 
 use crate::state::AppState;
 
+/// `JUICEFRONT_LIVE` overrides; unset means debug builds only.
 pub fn live_reload_enabled() -> bool {
     juiceutils::config::optional_secret("JUICEFRONT_LIVE").map_or(cfg!(debug_assertions), |value| {
         value == "1" || value.eq_ignore_ascii_case("true")
     })
 }
 
+/// Held open until shutdown, so a restart closes the listener and reloads.
 pub async fn live_handler(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {

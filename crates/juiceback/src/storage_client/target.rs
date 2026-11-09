@@ -1,3 +1,5 @@
+//! Host validation: normalizes hosts and blocks SSRF to private addresses.
+
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -34,6 +36,7 @@ pub(crate) enum HostError {
     ClientBuild(String),
 }
 
+/// Some callers treat an unset URL as "skip the remote operation".
 pub(crate) fn require_juicehost_url(url: &str) -> Result<(), HostError> {
     if url.is_empty() {
         Err(HostError::Empty("JUICEHOST_URL not set"))
@@ -48,8 +51,26 @@ pub(crate) struct JuicehostTarget {
     pub headers: reqwest::header::HeaderMap,
 }
 
-pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarget, HostError> {
-    let trimmed = host.trim();
+pub(crate) use juiceutils::host::{is_forbidden_hostname, is_public_ip};
+
+struct ValidatedHost {
+    parsed: url::Url,
+    normalized: String,
+    name: String,
+    resolved: Vec<std::net::SocketAddr>,
+}
+
+/// `url` keeps brackets on IPv6 literals; DNS and IP parsing want them bare.
+fn bare_hostname(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
+/// One parse and SSRF check shared by target construction and pre-upload
+/// validation.
+async fn validate_host(raw: &str, allow_private: bool) -> Result<ValidatedHost, HostError> {
+    let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(HostError::Empty("empty host"));
     }
@@ -74,9 +95,11 @@ pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarge
     if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(HostError::UnexpectedPath);
     }
-    let hostname = parsed
-        .host_str()
-        .ok_or(HostError::MissingHostname("host must include a hostname"))?;
+    let hostname = bare_hostname(
+        parsed
+            .host_str()
+            .ok_or(HostError::MissingHostname("host must include a hostname"))?,
+    );
     if hostname.ends_with('.') {
         return Err(HostError::TrailingDotHostname);
     }
@@ -89,6 +112,14 @@ pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarge
         return Err(HostError::ForbiddenHost(format!(
             "refusing to reach local or metadata host: {hostname}"
         )));
+    }
+    if allow_private {
+        return Ok(ValidatedHost {
+            parsed,
+            normalized: trimmed.to_string(),
+            name,
+            resolved: Vec::new(),
+        });
     }
 
     let mut resolved = if let Ok(ip) = name.parse::<std::net::IpAddr>() {
@@ -112,70 +143,38 @@ pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarge
             addr.ip()
         )));
     }
+    Ok(ValidatedHost {
+        parsed,
+        normalized: trimmed.to_string(),
+        name,
+        resolved,
+    })
+}
 
+/// Client pinned to the addresses that passed the public-address check.
+pub(crate) async fn custom_juicehost_target(host: &str) -> Result<JuicehostTarget, HostError> {
+    let validated = validate_host(host, false).await?;
+
+    // Bypass proxies and pin DNS to the validated addresses; a second lookup could
+    // be rebound.
     let mut builder = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none());
-    if name.parse::<std::net::IpAddr>().is_err() {
-        builder = builder.resolve_to_addrs(&name, &resolved);
+    if validated.name.parse::<std::net::IpAddr>().is_err() {
+        builder = builder.resolve_to_addrs(&validated.name, &validated.resolved);
     }
     let client = builder
         .build()
         .map_err(|e| HostError::ClientBuild(format!("failed to build custom host client: {e}")))?;
 
     Ok(JuicehostTarget {
-        base_url: parsed.origin().ascii_serialization(),
+        base_url: validated.parsed.origin().ascii_serialization(),
         client,
         headers: reqwest::header::HeaderMap::new(),
     })
 }
 
-pub(crate) fn is_public_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => is_public_ipv4(v4.octets()),
-        std::net::IpAddr::V6(v6) => {
-            let octets = v6.octets();
-            if let Some(v4) = v6.to_ipv4() {
-                return is_public_ipv4(v4.octets());
-            }
-            !(v6.is_unspecified()
-                || v6.is_loopback()
-                || v6.is_multicast()
-                || (octets[0] & 0xfe) == 0xfc
-                || (octets[0] == 0xfe && octets[1] & 0xc0 == 0x80)
-                || octets[..4] == [0x20, 0x01, 0x0d, 0xb8])
-        }
-    }
-}
-
-fn is_public_ipv4([a, b, c, _]: [u8; 4]) -> bool {
-    !matches!(
-        (a, b, c),
-        (0, _, _)
-            | (10, _, _)
-            | (100, 64..=127, _)
-            | (127, _, _)
-            | (169, 254, _)
-            | (172, 16..=31, _)
-            | (192, 0, 0 | 2)
-            | (192, 168, _)
-            | (198, 18 | 19 | 51, _)
-            | (203, 0, 113)
-            | (224..=255, _, _)
-    )
-}
-
-pub(crate) fn is_forbidden_hostname(name: &str) -> bool {
-    name == "localhost"
-        || name.ends_with(".localhost")
-        || name.ends_with(".local")
-        || name.ends_with(".internal")
-        || name == "metadata"
-        || name.starts_with("metadata.")
-        || name == "instance-data"
-        || name.starts_with("instance-data.")
-}
-
+/// Checks every resolved address; `allow_private` skips the check entirely.
 pub(crate) async fn resolve_host_public(
     host: &str,
     port: u16,
@@ -237,10 +236,12 @@ pub(crate) async fn check_outbound_url(
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(HostError::Credentials("url must not contain credentials"));
     }
-    let host = parsed
-        .host_str()
-        .ok_or(HostError::MissingHostname("url must include a hostname"))?
-        .to_ascii_lowercase();
+    let host = bare_hostname(
+        parsed
+            .host_str()
+            .ok_or(HostError::MissingHostname("url must include a hostname"))?,
+    )
+    .to_ascii_lowercase();
     if is_forbidden_hostname(&host) {
         return Err(HostError::ForbiddenHost(format!(
             "refusing to reach local or metadata host: {host}"
@@ -257,47 +258,11 @@ pub(crate) async fn check_storage_host(
     raw: &str,
     allow_private: bool,
 ) -> Result<String, HostError> {
-    let trimmed = raw.trim().trim_end_matches('/').to_string();
-    if trimmed.is_empty() {
-        return Err(HostError::Empty("empty host"));
-    }
-    let with_scheme = if trimmed.contains("://") {
-        trimmed.clone()
-    } else {
-        format!("https://{trimmed}")
-    };
-    let parsed = url::Url::parse(&with_scheme)
-        .map_err(|e| HostError::InvalidUrl(format!("invalid host: {e}")))?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(HostError::BadScheme(
-            "host scheme must be http or https".to_string(),
-        ));
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(HostError::Credentials("host must not contain credentials"));
-    }
-    if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(HostError::UnexpectedPath);
-    }
-    let hostname = parsed
-        .host_str()
-        .ok_or(HostError::MissingHostname("host must include a hostname"))?;
-    if hostname.ends_with('.') {
-        return Err(HostError::TrailingDotHostname);
-    }
-    let name = hostname.to_ascii_lowercase();
-    if is_forbidden_hostname(&name) {
-        return Err(HostError::ForbiddenHost(format!(
-            "refusing local or metadata host: {hostname}"
-        )));
-    }
-    let port = parsed
-        .port_or_known_default()
-        .ok_or(HostError::MissingPort("host must include a valid port"))?;
-    resolve_host_public(&name, port, allow_private).await?;
-    Ok(trimmed)
+    Ok(validate_host(raw, allow_private).await?.normalized)
 }
 
+/// Internal auth headers only go to official hosts over https, or a local
+/// plain-http address.
 pub(crate) async fn resolve_juicehost_target(
     state: &Arc<AppState>,
     host: Option<&str>,
@@ -322,8 +287,4 @@ pub(crate) async fn resolve_juicehost_target(
             })
         }
     }
-}
-
-pub(crate) fn juicehost_headers(state: &Arc<AppState>) -> reqwest::header::HeaderMap {
-    state.juicehost_headers.clone()
 }

@@ -1,27 +1,13 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crate::state::AppState;
 
-fn ban_targets(state: &AppState) -> Vec<String> {
-    let mut hosts = HashSet::new();
-    let push_one = |out: &mut HashSet<String>, raw: &str| {
-        let trimmed = raw.trim().trim_end_matches('/');
-        if !trimmed.is_empty() {
-            out.insert(trimmed.to_string());
-        }
-    };
-    push_one(&mut hosts, &state.config.juicehost_url);
-    for url in state.config.region_public_juicehosts.values() {
-        push_one(&mut hosts, url);
-    }
-    hosts.into_iter().collect()
-}
-
+/// No-op without the internal API key; per-host failures are only logged.
 async fn post_to_hosts(state: &Arc<AppState>, path: &str, body: serde_json::Value) {
     if state.config.juicehost_api_key.is_empty() {
         return;
     }
-    for host in ban_targets(state) {
+    for host in state.hosts.ban_targets() {
         let url = format!("{host}{path}");
         let resp = state
             .http
@@ -43,6 +29,7 @@ async fn post_to_hosts(state: &Arc<AppState>, path: &str, body: serde_json::Valu
     }
 }
 
+/// Fire-and-forget, so a ban request never waits on the network.
 pub fn push_ban(state: &Arc<AppState>, hash: &str) {
     let state = Arc::clone(state);
     let body = serde_json::json!({

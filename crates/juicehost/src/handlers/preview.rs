@@ -6,10 +6,11 @@ use axum::{
     http::{HeaderMap, Method, header},
     response::{IntoResponse, Response},
 };
+use juiceutils::text::escape_html;
 
 use super::{
     audio_embed::{self, AudioEmbedInfo},
-    common::backend_request,
+    common::{NO_STORE, backend_request},
     shell::{BackendFileMeta, ShellMode, protected_shell_response},
     stats::{ViewerIp, report_file_hit},
 };
@@ -20,7 +21,7 @@ use crate::{
     storage::valid_component as is_valid_id,
 };
 
-const NO_STORE: &str = "no-store";
+// Only the head of a text file is loaded for the inline preview.
 const TEXT_PREVIEW_MAX_BYTES: u64 = 262_144;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,15 +84,6 @@ pub(crate) fn human_size(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
-}
-
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 const PREVIEW_TEMPLATE: &str = include_str!("../templates/preview.html");
@@ -226,6 +218,8 @@ fn is_discordbot(headers: &HeaderMap) -> bool {
         .contains("discordbot")
 }
 
+/// Best-effort absolute origin from proxy headers, defaulting to https; a
+/// spoofed host only affects this response.
 fn request_base_url(headers: &HeaderMap) -> Option<String> {
     let host = headers
         .get("x-forwarded-host")
@@ -252,6 +246,9 @@ fn absolute_for(base: Option<&str>, path: &str) -> String {
     }
 }
 
+/// True when the request wants raw bytes rather than HTML. `sec-fetch-mode:
+/// navigate` counts as a browser; otherwise UA tokens win, then `Accept`, with
+/// a missing `Accept` falling back to the UA.
 pub(crate) fn is_bot(headers: &HeaderMap) -> bool {
     if headers
         .get("sec-fetch-mode")
@@ -359,6 +356,8 @@ fn kind_label(kind: PreviewKind) -> &'static str {
     }
 }
 
+/// Builds a Discord Components V2 payload; component type numbers follow
+/// Discord's schema.
 fn component_embed_payload(
     page: &PreviewPage,
     abs_raw: &str,
@@ -445,6 +444,8 @@ fn component_embed_payload(
     })
 }
 
+// `<`, `>` and `&` are escaped so the JSON cannot terminate the surrounding
+// script element.
 fn json_script_payload(value: &serde_json::Value) -> String {
     serde_json::to_string(value)
         .unwrap_or_default()
@@ -453,6 +454,8 @@ fn json_script_payload(value: &serde_json::Value) -> String {
         .replace('>', "\\u003e")
 }
 
+/// Wraps the embed in its script tag, degrading to a compact heading above 3000
+/// bytes.
 fn component_embed_script(
     page: &PreviewPage,
     abs_raw: &str,
@@ -562,6 +565,7 @@ fn text_head_from_bytes(bytes: &[u8]) -> Option<(String, u64, String)> {
     }
     let raw = String::from_utf8_lossy(&bytes[..valid]);
     let snippet: String = raw.chars().take(800).collect();
+    // Fence markers are neutralized so the snippet cannot escape its code block.
     Some((
         escape_html(&raw),
         valid as u64,
@@ -624,7 +628,7 @@ async fn load_remote_text_head(
 
 async fn backend_uploading_meta(state: &AppState, id: &str) -> Option<(String, u64)> {
     let backend_url = state.backend_url.as_ref()?;
-    let status_url = format!("{backend_url}/internal/file/{id}/status");
+    let status_url = juiceproto::config::file_status_url(backend_url, id);
     let resp = backend_request(state, status_url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
@@ -778,6 +782,7 @@ fn stage_html(page: &PreviewPage) -> String {
     }
 }
 
+/// Fills `preview.html`; every dynamic value is escaped before substitution.
 fn render_preview(
     page: &PreviewPage,
     headers: &HeaderMap,
@@ -792,6 +797,8 @@ fn render_preview(
     let abs_page = absolute_for(base.as_deref(), &page.page_url);
     let abs_download = absolute_for(base.as_deref(), &page.download_url);
     let audio_urls = audio_embed.and_then(|info| {
+        // Crawlers need absolute media URLs, so embeds are skipped without a request
+        // origin.
         let base = base.as_deref()?;
         Some(AudioEmbedUrls {
             video: absolute_for(Some(base), &info.video_path),
@@ -889,6 +896,8 @@ pub async fn preview_file_wildcard(
     preview_file_inner(state, headers, method, &id, &ext, &path, viewer.0).await
 }
 
+/// Text preview for a remote-only file; only Discord's crawler gets HTML, other
+/// bots get raw bytes.
 async fn remote_text_preview(
     state: &Arc<AppState>,
     headers: &HeaderMap,

@@ -18,8 +18,11 @@ pub struct Announcement {
     pub mode: Option<String>,
 }
 
+/// Keyed by backend URL so one process can serve several.
 pub type AnnouncementCache = Mutex<HashMap<String, (Option<Announcement>, Instant)>>;
 
+/// `None` on timeout, non-2xx or bad JSON; the negative result is cached for
+/// the same TTL.
 pub async fn fetch_announcement(state: &AppState) -> Option<Announcement> {
     let key = state.config.juiceback_url.clone();
     if let Ok(cache) = state.announcement_cache.lock()
@@ -63,6 +66,7 @@ pub struct Banner {
     pub learn_more: String,
 }
 
+/// A ban overrides any announcement; an unset `mode` defaults to `warning`.
 pub fn build_banner(locale: &str, banned: bool, announcement: Option<Announcement>) -> Banner {
     if banned {
         return Banner {

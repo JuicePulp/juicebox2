@@ -1,3 +1,4 @@
+import { esc } from "./util.js";
     var PAGE = 50;
     var allHosters = [];
     var displayedCount = 0;
@@ -6,12 +7,6 @@
     function formatTime(sec) {
         if (!sec) return "-";
         return new Date(sec * 1000).toLocaleString();
-    }
-
-    function esc(s) {
-        var d = document.createElement("div");
-        d.appendChild(document.createTextNode(s == null ? "" : String(s)));
-        return d.innerHTML;
     }
 
     function buildParams() {
@@ -135,6 +130,7 @@
         return null;
     }
 
+    /** Bans the host; an empty reason still bans, cancelling the prompt aborts. */
     async function banHoster(host) {
         var reason = prompt("Ban " + host + "?\nReason (optional):", "");
         if (reason === null) return;
@@ -147,6 +143,7 @@
             if (res.status === 201 || res.ok) {
                 var h = findHoster(host);
                 if (h) {
+                    // Patched in place; `banned_by` stays blank until a reload.
                     h.banned = true;
                     h.banned_reason = reason;
                     h.banned_at = Math.floor(Date.now() / 1000);

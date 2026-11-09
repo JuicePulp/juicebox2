@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use super::{
-    serve::{RangeResult, file_cache_control_value, parse_range},
+    common::{NO_STORE, RangeResult, file_cache_control_value, parse_range},
     shell::{GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
 };
 use crate::{
@@ -31,7 +31,9 @@ use crate::{
     storage::valid_component as is_valid_id,
 };
 
+// Bump to invalidate every cached embed when the rendered card changes.
 const CACHE_VERSION: u32 = 14;
+// A crawler waits this long before advertising still-generating media.
 const PREVIEW_WAIT: Duration = Duration::from_secs(3);
 const CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const TEMP_MAX_AGE: Duration = Duration::from_secs(60 * 60);
@@ -84,6 +86,7 @@ pub struct GeneratedAudioEmbed {
     pub seconds: u64,
 }
 
+/// Cache sidecar; any mismatch forces regeneration.
 #[derive(Debug, Serialize, Deserialize)]
 struct CacheMeta {
     version: u32,
@@ -124,6 +127,8 @@ fn eligible(state: &AppState, meta: &storage::FileMetadata) -> bool {
         && storage::guess_mime(&meta.extension).starts_with("audio/")
 }
 
+// Emoji and variation selectors are dropped; the bundled fonts cannot render
+// them.
 fn sanitize_text(raw: &str) -> String {
     let normalized: String = raw
         .chars()
@@ -179,6 +184,7 @@ fn author_for_video(raw: &str) -> String {
         .map_or(value.clone(), |author| author.trim_end().to_string())
 }
 
+// Text budgets are measured in font cells: CJK glyphs occupy two.
 fn char_units(c: char) -> usize {
     if c.is_ascii() || c == '\u{2026}' {
         1
@@ -282,6 +288,7 @@ fn wrap_text(value: &str, max_units: usize, max_lines: usize) -> Vec<String> {
     lines
 }
 
+// Cobalt and yt-dlp name downloads as "<title>-<11 character video id>".
 fn youtube_video_id_from_filename(filename: &str) -> Option<String> {
     let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
     let (_, id) = stem.rsplit_once('-')?;
@@ -296,6 +303,7 @@ fn youtube_video_id_from_filename(filename: &str) -> Option<String> {
     }
 }
 
+// Escapes characters that ffmpeg's filtergraph parser treats as syntax.
 fn escape_filter_path(path: &std::path::Path) -> String {
     let value = path.to_string_lossy();
     let mut escaped = String::with_capacity(value.len());
@@ -308,6 +316,7 @@ fn escape_filter_path(path: &std::path::Path) -> String {
     escaped
 }
 
+/// Returns the cached embed only when every input that shaped it still matches.
 async fn read_cache(
     state: &AppState,
     id: &str,
@@ -408,6 +417,8 @@ pub async fn prepare_for_discord(
     }
 }
 
+/// Generates or reuses an embed; concurrent callers for one id serialize on a
+/// per-id lock.
 pub async fn ensure_video(
     state: Arc<AppState>,
     id: String,
@@ -476,6 +487,7 @@ pub async fn ensure_video(
     }
 }
 
+/// Deletes its working files on drop, including on error paths.
 struct TempCleanup {
     paths: Vec<PathBuf>,
 }
@@ -550,6 +562,8 @@ async fn resolve_input(state: &AppState, id: &str, temp: &PathBuf) -> Result<Inp
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("read source: {e}"))?;
         written = written.saturating_add(chunk.len() as u64);
+        // Cap while streaming so an oversized or misreported object cannot fill the
+        // disk.
         if written > state.audio_embed.max_source_bytes() {
             return Err(String::from("source exceeds audio embed limit"));
         }
@@ -811,6 +825,8 @@ fn add_metadata_tag(tags: &mut Vec<(String, String)>, key: &str, value: Option<&
     }
 }
 
+// YouTube Music puts credits in fixed description lines such as `Released on:`
+// and `Composer:`.
 fn parse_youtube_metadata(value: &serde_json::Value) -> Vec<(String, String)> {
     let pick = |key: &str| {
         value
@@ -863,6 +879,8 @@ fn parse_youtube_metadata(value: &serde_json::Value) -> Vec<(String, String)> {
     tags
 }
 
+/// Fetches release metadata with yt-dlp; `YTDLP_*` env vars supply proxy, PO
+/// token, runtime, and cookies.
 async fn fetch_youtube_metadata(video_id: &str) -> Result<Vec<(String, String)>, String> {
     let bin = std::env::var("YTDLP_BIN").unwrap_or_else(|_| String::from("yt-dlp"));
     let mut cmd = tokio::process::Command::new(bin);
@@ -935,6 +953,7 @@ async fn enrich_source_metadata(source: &mut SourceInfo, thumb_key: Option<&str>
     }
 }
 
+// Text goes through a file so arbitrary titles never reach the filter syntax.
 fn drawtext(font: &FsPath, text: &FsPath, color: &str, size: u32, x: u32, y: u32) -> String {
     format!(
         "drawtext=fontfile={}:textfile={}:expansion=none:fontcolor={color}:fontsize={size}:x={x}:y={y}",
@@ -1073,6 +1092,8 @@ async fn convert_poster(ffmpeg: &str, background: &FsPath, out: &FsPath) -> Resu
     run_ffmpeg(ffmpeg, args).await
 }
 
+/// Renders the animated card: background, `geq` progress bar, `drawtext` clock.
+/// MP3/AAC is copied; everything else is re-encoded to AAC for Discord.
 async fn make_video(
     ffmpeg: &str,
     background: &FsPath,
@@ -1086,6 +1107,7 @@ async fn make_video(
     total_label: &str,
     copied_audio: bool,
 ) -> Result<(), String> {
+    // Colons separate drawtext options, so they must be escaped in the label.
     let total_label = total_label.replace(':', "\\:");
     let time_y = height.saturating_sub(TIME_Y_FROM_BOTTOM);
     let progress_y = height.saturating_sub(PROGRESS_BOTTOM_MARGIN + PROGRESS_HEIGHT);
@@ -1170,6 +1192,9 @@ async fn make_video(
     run_ffmpeg(ffmpeg, args).await
 }
 
+/// Builds and publishes the poster and video; all work uses `.`-prefixed temp
+/// files, and the sidecar is renamed last so a partial entry is never
+/// considered valid.
 async fn generate(
     state: &Arc<AppState>,
     id: &str,
@@ -1521,6 +1546,7 @@ enum EmbedKind {
     Poster,
 }
 
+// Media URLs may carry a `v<number>-<hash>/` cache-busting prefix from the CDN.
 fn strip_media_version(path: &str) -> &str {
     let Some((prefix, rest)) = path.split_once('/') else {
         return path;
@@ -1552,10 +1578,11 @@ fn parse_embed_path(path: &str) -> Option<(String, EmbedKind)> {
     Some((id.to_string(), kind))
 }
 
+// Uncached so a later successful generation becomes visible.
 fn media_not_found() -> Response<Body> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CACHE_CONTROL, NO_STORE)
         .body(Body::empty())
         .expect("static media error response is valid")
 }
@@ -1630,7 +1657,7 @@ pub async fn audio_embed_media(
         }
     );
     let cache_control = embed_cache_control(&state, &id).await;
-    let cache_tag = (cache_control != "no-store").then(|| format!("juicebox:{id}"));
+    let cache_tag = (cache_control != NO_STORE).then(|| format!("juicebox:{id}"));
     if let Some(value) = headers.get(header::IF_NONE_MATCH)
         && let Ok(value) = value.to_str()
         && value
@@ -1717,6 +1744,8 @@ struct CacheGroup {
     newest: Option<SystemTime>,
 }
 
+/// Expires old entries, then evicts least recently written ones down to 80% of
+/// the cap.
 async fn prune_cache(state: &AppState) {
     let dir = state.audio_embed.cache_dir();
     let mut entries = match tokio::fs::read_dir(dir).await {

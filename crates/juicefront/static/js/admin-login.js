@@ -14,6 +14,7 @@
                 });
 
                 if (!res.ok) {
+                    // Non-JSON error bodies (a proxy 502, say) fall back to a generic message.
                     const err = await res.json().catch(() => ({ message: "Login failed" }));
                     if (errEl) { errEl.textContent = err.message || "Login failed"; }
                     return;

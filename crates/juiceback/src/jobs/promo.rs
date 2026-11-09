@@ -136,6 +136,7 @@ pub async fn run_promo_loop(state: Arc<AppState>) {
     }
 }
 
+/// `None` = not official, `Some(None)` = default host.
 #[must_use]
 pub(crate) fn promotion_target(
     config: &crate::config::Config,
@@ -196,6 +197,7 @@ async fn cool_sweep_once(state: &Arc<AppState>) {
         return;
     }
 
+    // Bound concurrent demotes so one sweep does not stampede juicehost.
     let permits = Arc::new(Semaphore::new(COOL_CONCURRENCY));
     let mut pending = FuturesUnordered::new();
     for candidate in candidates {
@@ -358,6 +360,7 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
             continue;
         }
 
+        // Reserve before spawning so later candidates see the capacity.
         reserved_bytes = reserved_bytes.saturating_add(candidate.size_bytes as u64);
         reserved_count += 1;
         let state_clone = Arc::clone(state);
@@ -432,6 +435,7 @@ async fn promote_one(state: &Arc<AppState>, id: &str, host: Option<&str>) {
     }
 }
 
+/// Rejects files on non-official hosts.
 pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<String, String> {
     let lookup = id.to_string();
     let record = state

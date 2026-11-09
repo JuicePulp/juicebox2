@@ -15,12 +15,14 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode}
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+/// Pinned issuer, so a device token cannot pass as an admin token.
 pub const ISS_ADMIN: &str = "juiceback-admin";
 
 pub const ISS_DEVICE: &str = "juiceback-device";
 
-pub const INTERNAL_API_KEY_HEADER: &str = "x-juicehost-api-key";
+pub const INTERNAL_API_KEY_HEADER: &str = juiceproto::headers::HOST_API_KEY;
 
+/// Constant-time check; with no key configured, internal routes fail closed.
 pub fn verify_internal_api_key(
     state: &crate::state::AppState,
     headers: &HeaderMap,
@@ -58,6 +60,7 @@ where
     }
 }
 
+/// `sub` is the username; timestamps are Unix seconds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminClaims {
     pub sub: String,
@@ -75,6 +78,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|e| format!("hashing failed: {e}"))
 }
 
+/// `Ok(false)` is a wrong password; `Err` is a malformed stored hash.
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     let parsed = PasswordHash::new(hash).map_err(|e| format!("invalid hash format: {e}"))?;
     Ok(Argon2::default()
@@ -146,6 +150,7 @@ pub struct DeviceClaims {
     pub file_size: Option<u64>,
 }
 
+/// Re-checks the pairing every request, so unpairing applies immediately.
 #[derive(Debug, Clone)]
 pub struct DeviceAuth(pub DeviceClaims);
 
@@ -179,6 +184,7 @@ where
 
 pub const SESSION_COOKIE_NAME: &str = "jb_session";
 
+/// Legacy cookie kept for old sessions; cleared on login.
 pub const LEGACY_USER_COOKIE_NAME: &str = "jb_uid";
 
 pub const SESSION_MAX_AGE_SECS: i64 = 90 * 24 * 60 * 60;
@@ -190,33 +196,24 @@ pub struct UserClaims {
     pub exp: usize,
 }
 
+/// `HttpOnly`, `SameSite=Strict`; set `secure` behind HTTPS.
 #[must_use]
 pub fn create_session_cookie(token: &str, secure: bool) -> String {
-    let secure_attribute = if secure { "; Secure" } else { "" };
-    format!(
-        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE_SECS}{secure_attribute}"
+    crate::cookies::header(
+        SESSION_COOKIE_NAME,
+        token,
+        SESSION_MAX_AGE_SECS,
+        true,
+        secure,
     )
 }
 
 #[must_use]
 pub fn clear_legacy_user_cookie(secure: bool) -> String {
-    let secure_attribute = if secure { "; Secure" } else { "" };
-    format!(
-        "{LEGACY_USER_COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure_attribute}"
-    )
+    crate::cookies::header(LEGACY_USER_COOKIE_NAME, "", 0, true, secure)
 }
 
-#[must_use]
-pub fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
-    let cookie_header = headers.get("cookie")?.to_str().ok()?;
-    cookie_header
-        .split(';')
-        .find(|c| c.trim().starts_with(&format!("{name}=")))?
-        .trim()
-        .strip_prefix(&format!("{name}="))
-        .map(str::to_owned)
-}
-
+/// 32 random bytes as hex; callers persist only `session_token_hash`.
 #[must_use]
 pub fn new_session_token() -> String {
     let mut token = [0_u8; 32];
@@ -229,9 +226,11 @@ pub fn session_token_hash(token: &str) -> String {
     blake3::hash(token.as_bytes()).to_hex().to_string()
 }
 
+/// Rejects any `iss` claim, so admin/device JWTs cannot be replayed as user
+/// cookies.
 #[must_use]
 pub fn verify_legacy_user_cookie(headers: &axum::http::HeaderMap, secret: &str) -> Option<String> {
-    let jwt = cookie_value(headers, LEGACY_USER_COOKIE_NAME)?;
+    let jwt = crate::cookies::value(headers, LEGACY_USER_COOKIE_NAME)?;
 
     let token_data = decode::<serde_json::Value>(
         &jwt,

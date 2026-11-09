@@ -1,5 +1,7 @@
 use crate::{cobalt, error::AppError, state::AppState};
 
+/// http(s) only, no embedded credentials; rejects local/non-public addresses
+/// after resolving DNS.
 pub(crate) async fn validate_source_url(
     raw: &str,
     allow_private: bool,

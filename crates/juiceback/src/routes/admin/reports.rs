@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 use super::common::{AdminUser, ListParams};
 use crate::{db, error::AppError, state::AppState};
 
+/// `reporter_ip_hash` is truncated; `has_password` says preview can decrypt.
 #[derive(Serialize, ToSchema)]
 pub struct AdminReportEntry {
     pub id: i64,
@@ -74,6 +75,8 @@ pub async fn list_reports_handler(
     let reports: Vec<AdminReportEntry> = records
         .into_iter()
         .map(|r| {
+            // Decrypt only long enough to derive a display hash; the raw IP never reaches
+            // the client.
             let ip_hash = r
                 .reporter_ip
                 .as_ref()
@@ -133,6 +136,7 @@ pub async fn delete_report_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Each preview is logged at warn level as an audit trail.
 #[utoipa::path(
     get,
     path = "/api/admin/report/{id}/preview",

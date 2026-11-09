@@ -12,6 +12,8 @@ use crate::{
     state::AppState,
 };
 
+/// `delete_token` is required when the id is an uploading reservation;
+/// `uploader_ip` is encrypted.
 #[derive(Deserialize, ToSchema)]
 pub struct RegisterRequest {
     pub id: String,
@@ -38,6 +40,8 @@ pub struct RegisterResponse {
     pub expires_at: i64,
 }
 
+/// Internal API key required; a settled id is a conflict; TTL is clamped to the
+/// allowed set.
 #[utoipa::path(
     post,
     path = "/api/register",
@@ -70,6 +74,7 @@ pub async fn register_handler(
     };
 
     let ttl_hours_raw = payload.ttl_hours.unwrap_or(default_ttl);
+    // Snap to a selectable TTL so stored expiry always matches a client choice.
     let ttl_hours = crate::constants::clamp_to_nearest(ttl_hours_raw, &allowed_ttl);
 
     let now = chrono::Utc::now().timestamp();
@@ -107,6 +112,8 @@ pub async fn register_handler(
         if existing.status != FileRecord::STATUS_UPLOADING {
             return Err(AppError::Conflict("file ID already exists".into()));
         }
+        // A reservation can only be completed with its own delete token, stopping
+        // third-party claims.
         let reservation_token = payload
             .delete_token
             .clone()

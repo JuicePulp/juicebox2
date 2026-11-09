@@ -63,6 +63,7 @@ function makeQrButton(url, locale) {
   return btn;
 }
 
+/** Percent of TTL remaining, 0 to 100. Both arguments are epoch seconds. */
 function pctRemaining(expiresAt, uploadedAt) {
   const total = (expiresAt - uploadedAt) * 1000;
   if (total <= 0) return 0;
@@ -83,6 +84,7 @@ function remainingLabel(expiresAt, locale) {
   return t(locale, "files.expires", { time: days + "d" });
 }
 
+/** Accepts both API shapes: legacy camelCase rows use millisecond epochs; values above `1e11` are ms. */
 function normalizeFile(f) {
   let expires_at = f.expires_at;
   if (expires_at == null) {
@@ -119,6 +121,7 @@ function updateLocalFile(oldId, file) {
     for (const entry of stored) {
       if (!entry || entry.id !== oldId) continue;
       entry.id = file.id;
+      entry.filename = file.filename;
       entry.url = file.url;
       entry.raw_url = file.raw_url;
       entry.download_url = file.download_url;
@@ -210,10 +213,12 @@ function renameModalHtml(f, locale) {
     '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">x</a></div>' +
     '<form class="rename-form" method="POST" action="' + esc(publicFileRename(f.id)) + '"><div class="mdlbody">' +
     '<input type="hidden" name="token" value="' + esc(f.delete_token) + '">' +
+    '<div class="form-field"><label class="form-label" for="rename-filename-' + esc(f.id) + '">' + esc(t(locale, "files.filename_label")) + '</label>' +
+    '<input id="rename-filename-' + esc(f.id) + '" name="filename" class="form-input rename-filename" value="' + esc(f.filename || "") + '" maxlength="255" autocomplete="off" spellcheck="false"></div>' +
     '<div class="form-field"><label class="form-label" for="rename-input-' + esc(f.id) + '">' + esc(t(locale, "files.rename_placeholder")) + '</label>' +
     '<div class="rename-input-group"><span class="rename-input-prefix">/v/</span>' +
-    '<input id="rename-input-' + esc(f.id) + '" name="custom_id" class="form-input rename-input" value="' + esc(currentId) + '" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false"></div>' +
-    '<p class="rename-error" hidden></p></div></div>' +
+    '<input id="rename-input-' + esc(f.id) + '" name="custom_id" class="form-input rename-input" value="' + esc(currentId) + '" maxlength="32" minlength="3" pattern="[-A-Za-z0-9_]+" autocomplete="off" spellcheck="false"></div></div>' +
+    '<p class="rename-error" hidden></p></div>' +
     '<div class="mdlfooter rename-actions"><a href="#!" class="mdlbtn mdlbtn--secondary">' + esc(t(locale, "files.rename_cancel")) + '</a>' +
     '<button type="submit" class="mdlbtn mdlbtn--primary">' + esc(t(locale, "files.rename_save")) + '</button></div>' +
     "</form></div></div>"
@@ -240,6 +245,7 @@ function makeCopyBar(url, locale) {
     try {
       await navigator.clipboard.writeText(urlEl.textContent.trim() || url);
     } catch {}
+    // Confirmation is unconditional: an insecure origin or denied permission still shows "copied".
     btn.classList.add("copy-bar--copied");
     setTimeout(() => btn.classList.remove("copy-bar--copied"), 2000);
     announce(t(locale, "upload.copy_bar_announce"));
@@ -265,6 +271,7 @@ function flipRemove(el, card) {
     return;
   }
   const siblings = Array.from(container.querySelectorAll(".file-card:not(.exiting)"));
+  // FLIP: sibling rects must be captured before the card leaves the layout.
   const first = siblings.map((s) => s.getBoundingClientRect());
   el.remove();
   requestAnimationFrame(() => {
@@ -351,6 +358,7 @@ function wireRenameModal(card, modal, f, locale) {
   modal.dataset.wired = "1";
   const form = modal.querySelector(".rename-form");
   const input = modal.querySelector(".rename-input");
+  const nameInput = modal.querySelector(".rename-filename");
   let errorEl = modal.querySelector(".rename-error");
   if (!form || !input) return;
   if (!errorEl) {
@@ -370,11 +378,12 @@ function wireRenameModal(card, modal, f, locale) {
     e.preventDefault();
     errorEl.hidden = true;
     const customId = input.value.trim();
+    const filename = nameInput ? nameInput.value.trim() : "";
     try {
       const res = await fetch(publicFileRenew(f.id), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Delete-Token": f.delete_token },
-        body: JSON.stringify({ custom_id: customId }),
+        body: JSON.stringify({ custom_id: customId, filename: filename }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -391,12 +400,21 @@ function wireRenameModal(card, modal, f, locale) {
       f.url = data.url;
       f.raw_url = data.raw_url || swapUrlId(oldRawUrl, oldId, data.id);
       f.download_url = data.download_url || swapUrlId(oldDownloadUrl, oldId, data.id);
+      if (data.filename) f.filename = data.filename;
       updateLocalFile(oldId, f);
       if (host) {
         host.setAttribute("data-file-id", data.id);
         host.setAttribute("data-url", data.url);
         host.setAttribute("data-raw-url", f.raw_url);
         host.setAttribute("data-download-url", f.download_url);
+        if (data.filename) {
+          host.setAttribute("data-filename", f.filename);
+          const nameEl = host.querySelector(".file-card-name");
+          if (nameEl) {
+            nameEl.textContent = f.filename;
+            nameEl.title = f.filename;
+          }
+        }
         const group = host.querySelector("[data-url-variants]");
         if (group) {
           const setVariantUrl = (variant, value) => {
@@ -583,6 +601,7 @@ function updateOffline(card) {
   if (banner) banner.hidden = !document.documentElement.hasAttribute("data-backend-offline");
 }
 
+// Keyup is lost when focus leaves the window, so `blur` clears the held state too.
 const shiftState = { held: false, attached: false };
 function attachShift(card) {
   if (shiftState.attached) return;
@@ -649,6 +668,7 @@ export function initFilesCard() {
   window.addEventListener("juicebox-app-mode", () => {});
 }
 
+/** Fetches cards for uploads only in `localStorage`, in one batched request capped at 500 pairs. */
 async function backfillMissing(card, locale) {
   const grid = card.querySelector("[data-files-grid]");
   if (!grid) return;
@@ -687,6 +707,7 @@ async function backfillMissing(card, locale) {
   grid.hidden = false;
   while (grid.firstChild) grid.removeChild(grid.firstChild);
   let i = 0;
+  // Rebuild in 40-card frames: appending a whole large library at once blocks the main thread.
   const step = () => {
     const frag = document.createDocumentFragment();
     for (let n = 0; n < 40 && i < all.length; n++, i++) frag.appendChild(all[i]);

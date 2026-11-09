@@ -1,3 +1,5 @@
+//! Per-file and site-wide visitor counters, keyed by hashed IP.
+
 use rusqlite::{Connection, Result, params};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +28,7 @@ pub struct FileStatsAggregate {
     pub last_seen_at: i64,
 }
 
+/// Site-wide totals; `uploaders` counts distinct pairing clients, not accounts.
 #[derive(Debug, Default)]
 pub struct SiteOverview {
     pub site_visitors: i64,
@@ -151,6 +154,7 @@ pub fn delete_file_stats(conn: &Connection, file_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Prunes stats for files deleted outside `delete_file`.
 pub fn delete_orphan_file_stats(conn: &Connection) -> Result<usize> {
     let affected = conn.execute(
         "DELETE FROM file_stats WHERE file_id NOT IN (SELECT id FROM files)",

@@ -9,6 +9,7 @@ pub struct PublicSettings {
 impl PublicSettings {
     pub const DEFAULT_IP: &str = "127.0.0.1";
 
+    /// The QUIC listener derives from it.
     pub const DEFAULT_PORT: u16 = juiceutils::config::ports::HOST;
 
     #[must_use]

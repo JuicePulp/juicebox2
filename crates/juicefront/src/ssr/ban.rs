@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 
+/// Ban state for one client; timestamps are Unix seconds.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BanStatus {
     pub banned: bool,
@@ -17,6 +18,8 @@ struct BanResponse {
     banned_at: Option<i64>,
 }
 
+/// Fails open (3s timeout, transport error, non-2xx, bad JSON) so an outage
+/// cannot lock users out.
 pub async fn check_user_ban(
     http: &reqwest::Client,
     juiceback_url: &str,

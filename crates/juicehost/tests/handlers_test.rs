@@ -74,6 +74,8 @@ async fn test_state(dir: &std::path::Path) -> Arc<AppState> {
     backend.init_cache().await.unwrap();
     let mut cfg = test_config("", None);
 
+    // `allow_no_auth` bypasses the API key, so auth-specific tests build their own
+    // config.
     cfg.allow_no_auth = true;
     Arc::new(AppState::new(&cfg, backend))
 }
@@ -1115,6 +1117,7 @@ async fn banned_ip_blocked_from_file_serving() {
     let banned_ip = "203.0.113.9";
     let mut config = test_config("", None);
     config.ip_pepper = "test-pepper".into();
+    // Trusting every proxy lets the test set `x-forwarded-for` directly.
     config.trusted_proxy_cidrs = juiceutils::proxy::parse_trusted_proxy_cidrs("0.0.0.0/0").unwrap();
     let state = Arc::new(juicehost::state::AppState::new(
         &config,

@@ -9,6 +9,8 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn banned_ip_returns_403() {
+    // `x-forwarded-for` is only trusted because this state trusts the loopback
+    // proxy.
     let state = common::test_state_with_proxies();
     let hashed = juiceback::utils::hash_ip_for_ban("192.168.1.100", &state.config.ip_pepper);
     state.banned_ips.insert(hashed, ());

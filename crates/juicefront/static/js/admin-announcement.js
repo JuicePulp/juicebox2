@@ -1,3 +1,4 @@
+    /** A failed load is swallowed, so the fields stay empty and a save would clear the banner. */
     async function loadAnnouncement() {
         try {
             var res = await fetch("/api/admin/announcement");
@@ -21,6 +22,7 @@
             try {
                 var res = await fetch("/api/admin/announcement", {
                     method: "PUT",
+                    // PUT replaces the whole announcement, so every field must be sent.
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         message: document.getElementById("ann-message").value,

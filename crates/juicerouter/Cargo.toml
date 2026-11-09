@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 axum.workspace = true
 dashmap.workspace = true
+juiceproto = { path = "../juiceproto" }
 juiceutils = { path = "../juiceutils" }
 reqwest.workspace = true
 serde.workspace = true

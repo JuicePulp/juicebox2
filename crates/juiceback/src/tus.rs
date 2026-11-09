@@ -6,6 +6,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::upload_mode::UploadMode;
 
+/// `patch_lock` serializes offset updates for concurrent PATCHes.
 #[derive(Debug)]
 pub struct TusUpload {
     pub id: String,
@@ -18,6 +19,7 @@ pub struct TusUpload {
     pub last_activity: i64,
     pub delete_token: String,
 
+    // Hashed for ban checks; encrypted so support can recover the address.
     pub hashed_ip: String,
 
     pub encrypted_ip: String,
@@ -42,6 +44,7 @@ pub struct TusUpload {
 
     pub password_hash: Option<String>,
 
+    // Per-file data key: live copy, password-wrapped copy, and server escrow copy.
     pub dek: Option<crate::crypto_file::FileKey>,
 
     pub dek_wrapped: Option<String>,
@@ -65,6 +68,7 @@ pub fn new_tus_sender_map() -> TusSenderMap {
     Arc::new(DashMap::new())
 }
 
+/// `finalizing` makes finalize idempotent.
 pub struct PartSession {
     pub session_id: String,
     pub total_parts: usize,
@@ -83,6 +87,7 @@ pub struct PartSession {
 
     pub part_ids: DashMap<usize, String>,
     pub part_lengths: DashMap<usize, u64>,
+    // Caches reservation creation so concurrent finalizers agree, including `None`.
     pub completion_reserve_id: std::sync::Mutex<Option<Option<String>>>,
 }
 

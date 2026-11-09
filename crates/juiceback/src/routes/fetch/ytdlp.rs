@@ -10,6 +10,7 @@ use crate::{
     state::AppState,
 };
 
+/// Off unless `YTDLP_FALLBACK=1`; running an external downloader is opt-in.
 #[must_use]
 pub(crate) fn ytdlp_enabled() -> bool {
     std::env::var("YTDLP_FALLBACK").as_deref() == Ok("1")
@@ -115,6 +116,7 @@ pub fn build_ytdlp_args_for_test(
     build_ytdlp_args(proxy, pot_base_url, js_runtime, cookies_path, url, out_dir)
 }
 
+/// Empty option values are dropped, so an unset proxy omits `--proxy`.
 fn build_ytdlp_args(
     proxy: &str,
     pot_base_url: &str,
@@ -150,6 +152,8 @@ fn build_ytdlp_args(
     args
 }
 
+/// Proxies are tried in order; stale output is removed before each pass and
+/// after storing.
 #[expect(
     clippy::too_many_arguments,
     reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"

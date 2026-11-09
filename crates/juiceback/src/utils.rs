@@ -1,7 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
 
 use axum::{
@@ -19,6 +18,7 @@ pub use juiceutils::{
 
 use crate::state::AppState;
 
+/// 3 to 32 characters.
 #[must_use]
 pub fn is_valid_id(id: &str) -> bool {
     juiceutils::ids::is_valid_custom_id(
@@ -33,31 +33,11 @@ pub use juiceutils::{
     urls::{public_url, public_url_for_route},
 };
 
-#[must_use]
-pub fn official_hosts(config: &crate::config::Config) -> std::collections::HashSet<String> {
-    let mut hosts = std::collections::HashSet::new();
-    let mut push = |raw: &str| {
-        let trimmed = raw.trim().trim_end_matches('/');
-        if !trimmed.is_empty() {
-            hosts.insert(trimmed.to_string());
-        }
-    };
-    push(&config.juicehost_url);
-    push(&config.public_base_url);
-    push(&config.public_juicehost_url);
-    if let Some(router) = config.router_base_url.as_deref() {
-        push(router);
-    }
-    for url in config.region_public_juicehosts.values() {
-        push(url);
-    }
-    hosts
-}
-
+/// An empty host counts as official, matching records with no explicit storage
+/// host.
 #[must_use]
 pub fn is_official_host(config: &crate::config::Config, host: &str) -> bool {
-    let host = host.trim().trim_end_matches('/');
-    host.is_empty() || official_hosts(config).contains(host)
+    crate::hosts::DeploymentHosts::from_config(config).is_share_host(Some(host))
 }
 
 #[must_use]
@@ -83,7 +63,8 @@ pub fn share_link_for(
         .as_deref()
         .filter(|s| !s.trim().is_empty())
     {
-        let official = storage_host.map_or(true, |h| is_official_host(config, h));
+        let official =
+            crate::hosts::DeploymentHosts::from_config(config).is_share_host(storage_host);
         if official {
             return public_url_for_route(route, router, None, id, filename);
         }
@@ -105,25 +86,10 @@ pub fn share_links(
     )
 }
 
-pub fn log_quic_throughput(id: &str, size: u64, total: Duration, parse: Duration) {
-    let throughput = if total.as_secs_f64() > 0.0 {
-        size as f64 / total.as_secs_f64() / crate::constants::BYTES_PER_MIB
-    } else {
-        0.0
-    };
-    tracing::info!(
-        "quic_upload: id={} size={} total={:?} throughput={:.2} MB/s multipart_parse={:?}",
-        id,
-        size,
-        total,
-        throughput,
-        parse,
-    );
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct ClientIp(pub IpAddr);
 
+/// Forwarding headers are trusted only when the peer is a trusted proxy.
 #[must_use]
 pub fn client_ip(headers: &HeaderMap, peer_ip: IpAddr, state: &AppState) -> IpAddr {
     juiceutils::proxy::client_ip(headers, peer_ip, &state.config.trusted_proxy_cidrs)
@@ -145,6 +111,7 @@ pub async fn client_ip_middleware(
     next.run(req).await
 }
 
+/// Keyed on the resolved client IP, not the socket peer.
 #[derive(Clone, Debug)]
 pub struct TrustedClientIpKeyExtractor {
     trusted_proxy_cidrs: Arc<Vec<juiceutils::proxy::IpCidr>>,

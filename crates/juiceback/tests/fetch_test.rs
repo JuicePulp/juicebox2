@@ -334,6 +334,8 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
         .mount(&server)
         .await;
 
+    // Retry delay 0 avoids waiting; the `expect(0)` mock asserts juicehost is never
+    // touched.
     let config = common::fetch_config_with_delay(server.uri(), None, None, 0);
     let app = common::mock_router(common::state_from_config(config));
 
@@ -352,6 +354,7 @@ async fn empty_tunnel_response_fails_without_touching_juicehost() {
 
 #[tokio::test]
 async fn fetch_start_is_rate_limited_to_three_per_minute() {
+    // The start limit is three per minute regardless of `rate_limit_per_minute`.
     let app = common::mock_router(test_state("http://127.0.0.1:1".into()));
 
     let mut last = None;

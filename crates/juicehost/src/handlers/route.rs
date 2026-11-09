@@ -7,6 +7,7 @@ use axum::{
 use super::common::backend_request;
 use crate::state::AppState;
 
+/// Backend's view of where a file lives; `r2_url` wins over `storage_host`.
 pub(crate) struct RemoteLocation {
     pub(crate) status: String,
     pub(crate) storage_host: Option<String>,
@@ -46,6 +47,8 @@ pub(crate) async fn backend_location(state: &AppState, id: &str) -> Option<Remot
     })
 }
 
+/// Rewrites the URL extension to the recorded one; route `e` serves raw media
+/// and is untouched.
 fn canonical_route_path(route: &str, path: &str, filename: Option<&str>) -> String {
     if route == "e" {
         return path.to_string();
@@ -86,6 +89,8 @@ fn host_only(value: &str) -> Option<String> {
     Some(parsed.host_str()?.to_ascii_lowercase())
 }
 
+/// Gate on backend-supplied redirect targets so only `http`/`https` can be
+/// emitted.
 pub(crate) fn is_http_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
 }
@@ -101,6 +106,8 @@ pub(crate) async fn remote_redirect(
     remote_redirect_with(headers, route, path, &location)
 }
 
+/// Emits a 302 to the hot copy, or `None` while uploading, when the location is
+/// missing/non-HTTP, or when it points back at this host (which would loop).
 pub(crate) fn remote_redirect_with(
     headers: &HeaderMap,
     route: &str,
@@ -143,7 +150,7 @@ pub(crate) fn remote_redirect_with(
     Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, target)
-        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CACHE_CONTROL, super::common::NO_STORE)
         .body(Body::empty())
         .ok()
 }

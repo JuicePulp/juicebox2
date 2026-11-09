@@ -1,4 +1,5 @@
 import { apiPresence } from "./api.js";
+import { hasCookie } from "./util.js";
 let eventSource = null;
 let connected = false;
 let devices = [];
@@ -10,13 +11,7 @@ let consecutiveFailures = 0;
 let retryTimer = null;
 let visibilityWired = false;
 function hasSessionCookie() {
-  try {
-    return document.cookie.split("; ").some(function (c) {
-      return c.startsWith("jb_session=");
-    });
-  } catch {
-    return false;
-  }
+  return hasCookie("jb_session");
 }
 export function isAppMode() {
   return connected && devices.length > 0;
@@ -44,6 +39,7 @@ export function onDeviceDisconnected() {
   window.__juiceboxAppMode = devices.length > 0;
   window.dispatchEvent(new CustomEvent("juicebox-app-mode", { detail: { connected: isAppMode(), devices: [...devices] } }));
 }
+/** Opens the stream once per page, only with a session cookie and a visible tab; reconnects with exponential backoff. */
 export function connectPresence() {
   if (eventSource || typeof window === "undefined")
     return;
@@ -97,6 +93,7 @@ export function connectPresence() {
     if (retryTimer)
       clearTimeout(retryTimer);
     consecutiveFailures++;
+    // after 5 straight failures, drop to a 5 minute retry instead of 60s
     const delay = consecutiveFailures >= 5 ? SUSTAINED_RETRY_MS : retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     retryTimer = setTimeout(() => {
@@ -109,6 +106,7 @@ function wireVisibilityHandler() {
   if (visibilityWired || typeof document === "undefined")
     return;
   visibilityWired = true;
+  // hidden tabs close the stream so a background page does not hold a connection
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       if (retryTimer) {

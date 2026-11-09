@@ -1,3 +1,5 @@
+//! Bans are stored as peppered IP hashes, never plaintext.
+
 use std::sync::Arc;
 
 use axum::{
@@ -58,6 +60,7 @@ pub async fn list_bans_handler(
     }))
 }
 
+/// `hash` is already peppered; a raw `ip` is hashed with the server pepper.
 #[derive(Deserialize, ToSchema)]
 pub struct BanIpRequest {
     #[serde(default)]
@@ -70,6 +73,7 @@ pub struct BanIpRequest {
     pub reason: String,
 }
 
+/// Export carries only the hash, so a shared file cannot be reversed.
 #[derive(Serialize, ToSchema)]
 pub struct BanExportEntry {
     pub hash: String,
@@ -108,6 +112,7 @@ pub struct BanImportRequest {
     pub entries: Vec<BanImportEntry>,
 }
 
+/// Partial success: invalid entries are skipped and reported.
 #[derive(Serialize, ToSchema)]
 pub struct BanImportResponse {
     pub imported: usize,
@@ -160,6 +165,7 @@ pub async fn ban_ip_handler(
     Ok(StatusCode::CREATED)
 }
 
+/// The path segment is the ban hash, not a plaintext IP.
 #[utoipa::path(
     delete,
     path = "/api/admin/ban/{ip}",

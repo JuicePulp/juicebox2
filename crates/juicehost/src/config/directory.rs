@@ -29,6 +29,7 @@ impl DirectorySettings {
     pub fn load(file: &DirectoryFile) -> Self {
         let files_dir = file.files_dir.clone();
 
+        // A set env var wins; blank or "none" disables the URL.
         let url_setting = |env_name: &str, file_value: Option<String>| match std::env::var(env_name)
         {
             Ok(raw) => {

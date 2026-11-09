@@ -64,7 +64,7 @@ async fn require_api_key(
 
     let provided_key = req
         .headers()
-        .get("x-juicehost-api-key")
+        .get(juiceproto::headers::HOST_API_KEY)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -76,7 +76,7 @@ async fn require_api_key(
     if !state.allowed_origins.is_empty() {
         let origin = req
             .headers()
-            .get("x-juiceback-origin")
+            .get(juiceproto::headers::BACKEND_ORIGIN)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         if !state.allowed_origins.iter().any(|a| a == origin) {
@@ -97,9 +97,11 @@ async fn require_api_key_or_capability(
     next: middleware::Next,
 ) -> Response {
     if state.api_key.is_empty() {
+        // with no shared key, the header's presence is the only credential here;
+        // handlers verify the capability
         let has_capability = req
             .headers()
-            .get("x-juicehost-file-capability")
+            .get(juiceproto::headers::FILE_CAPABILITY)
             .is_some_and(|v| !v.is_empty());
         if state.allow_no_auth || has_capability {
             return next.run(req).await;
@@ -119,13 +121,15 @@ async fn require_api_key_or_ticket(
     if !state.api_key.is_empty()
         && let Some(provided_key) = req
             .headers()
-            .get("x-juicehost-api-key")
+            .get(juiceproto::headers::HOST_API_KEY)
             .and_then(|v| v.to_str().ok())
         && constant_time_eq(&state.api_key, provided_key)
     {
         return next.run(req).await;
     }
 
+    // ticket uploads are exempt from the origin allowlist enforced in
+    // require_api_key
     if let Some(token) = juiceutils::extract_bearer_token(req.headers())
         && juiceproto::ticket::verify(token, &state.ticket_jwt_secret).is_ok()
     {
@@ -141,6 +145,7 @@ async fn request_body_deadline(
     req: Request<Body>,
     next: middleware::Next,
 ) -> Response {
+    // deadlines must fire while the body streams, not only on total request time
     let (parts, body) = req.into_parts();
     let body = handlers::deadline_body(body, state.tcp_body_inactivity, state.tcp_request_total);
     next.run(Request::from_parts(parts, body)).await
@@ -260,6 +265,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             request_body_deadline,
         ))
         .layer({
+            // an empty allowlist intentionally opens CORS for public file serving
             if state.allowed_origins.is_empty() {
                 CorsLayer::permissive()
             } else {
@@ -280,9 +286,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                         axum::http::header::CONTENT_TYPE,
                         axum::http::header::AUTHORIZATION,
                         axum::http::header::RANGE,
-                        axum::http::header::HeaderName::from_static("x-juicehost-api-key"),
-                        axum::http::header::HeaderName::from_static("x-juiceback-origin"),
-                        axum::http::header::HeaderName::from_static("x-mime-type"),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::HOST_API_KEY,
+                        ),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::BACKEND_ORIGIN,
+                        ),
+                        axum::http::header::HeaderName::from_static(juiceproto::headers::MIME_TYPE),
                     ])
             }
         })
@@ -305,6 +315,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Binds `addr` and serves until shutdown; panics on bind failure, and caps
+/// in-flight requests globally.
 pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests: usize) {
     let socket = if addr.is_ipv4() {
         tokio::net::TcpSocket::new_v4()

@@ -6,6 +6,7 @@ use crate::{db, error::AppError, state::AppState};
 
 const MINT_LIMITER_PRUNE_INTERVAL_SECS: u64 = 120;
 
+/// A panic in one sweep is logged and the loop continues.
 pub async fn run_cleanup_loop(state: Arc<AppState>) {
     let interval = Duration::from_secs(state.config.cleanup_interval_minutes * 60);
     let mut ticker = tokio::time::interval(interval);
@@ -129,6 +130,7 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         state.part_sessions.remove(sid);
     }
 
+    // A reserve id still in the in-memory upload map means the upload is live.
     let active_reserves: std::collections::HashSet<String> = state
         .tus
         .iter()

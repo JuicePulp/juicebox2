@@ -1,3 +1,4 @@
+import { esc } from "./util.js";
     async function init() {
         const statusEl = document.getElementById("admin-status");
         if (!statusEl) return;
@@ -38,6 +39,7 @@
             if (logoutEl) {
                 logoutEl.addEventListener("click", (e) => {
                     e.preventDefault();
+                    // Full navigation, not fetch: the endpoint redirects and clears the session cookie.
                     location.href = "/api/admin/logout";
                 });
             }
@@ -45,12 +47,6 @@
             statusEl.innerHTML =
                 '<p>Authentication failed. <a href="/admin/login">Go to login</a></p>';
         }
-    }
-
-    function esc(s) {
-        return document
-            .createElement("div")
-            .appendChild(document.createTextNode(s)).parentNode.innerHTML;
     }
 
     init();

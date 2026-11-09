@@ -23,6 +23,8 @@ enum WsError {
     Copy(#[source] std::io::Error),
 }
 
+/// Since the handshake is accepted before the upstream dial, a dial failure
+/// only closes the client.
 pub async fn device_ws_proxy(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
@@ -62,6 +64,7 @@ pub async fn device_ws_proxy(
         header_block.extend_from_slice(value.as_bytes());
         header_block.extend_from_slice(b"\r\n");
     }
+    // The client's Host was stripped as hop-by-hop, so set the dialed host here.
     header_block.extend_from_slice(b"host: ");
     header_block.extend_from_slice(upstream_host.as_bytes());
     header_block.extend_from_slice(b"\r\n");

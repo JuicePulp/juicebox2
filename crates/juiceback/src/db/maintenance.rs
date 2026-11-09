@@ -34,6 +34,7 @@ pub fn cleanup_ephemeral_data(
     Ok(deleted)
 }
 
+/// Encrypts uploader/reporter IPs and hashes old plaintext bans. Idempotent.
 pub fn migrate_raw_ips_to_encrypted(
     conn: &Connection,
     encryption_key: &str,
@@ -49,6 +50,7 @@ pub fn migrate_raw_ips_to_encrypted(
             return false;
         }
 
+        // 64-hex hashes are already transformed
         if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             return false;
         }

@@ -56,6 +56,7 @@ pub fn delete_failed_logins_for_ip(conn: &Connection, username: &str, ip_hash: &
     Ok(())
 }
 
+/// Hash only; verification is the caller's job.
 pub fn get_admin_by_username(conn: &Connection, username: &str) -> Result<Option<AdminUser>> {
     let mut stmt = conn.prepare(
         "SELECT id, username, password_hash, created_at FROM admins WHERE username = ?1",

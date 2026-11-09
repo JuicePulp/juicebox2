@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::config::BanFile;
 
+/// Persistence is off when `list_file` is absent.
 #[derive(Debug)]
 pub struct BanSettings {
     list_file: Option<PathBuf>,

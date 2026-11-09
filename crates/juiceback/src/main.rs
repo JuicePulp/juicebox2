@@ -36,6 +36,7 @@ async fn shutdown_signal() {
     juiceutils::shutdown_signal("juiceback").await;
 }
 
+/// Also serves the `hash-password` subcommand without booting.
 fn main() {
     juiceutils::install_panic_handler("juiceback");
     juiceutils::config::load_dotenv();
@@ -137,17 +138,18 @@ fn main() {
         let mut juicehost_headers = reqwest::header::HeaderMap::new();
         if !config.juicehost_api_key.is_empty() {
             juicehost_headers.insert(
-                "x-juicehost-api-key",
+                juiceproto::headers::HOST_API_KEY,
                 config.juicehost_api_key.parse().expect("juicehost API key must be valid ASCII"),
             );
         }
         if !config.juiceback_origin.is_empty() {
             juicehost_headers.insert(
-                "x-juiceback-origin",
+                juiceproto::headers::BACKEND_ORIGIN,
                 config.juiceback_origin.parse().expect("juiceback origin must be valid ASCII"),
             );
         }
 
+        // Startup tolerates an unreachable juicehost: retry with backoff, then serve degraded.
         let mut jh_config: Option<juiceback::storage_client::JuicehostConfig> = None;
         {
             let mut last_err = String::new();
@@ -259,6 +261,7 @@ fn main() {
             let quic_router = juiceback::routes::build_router(Arc::clone(&state));
             let quic_cert = state.config.quic_cert_path.clone();
 
+            // Race HTTP and QUIC so a shutdown signal also stops the QUIC server.
             tokio::select! {
                 () = async {
                     juiceutils::start_quic_server(quic_router, quic_listen, quic_shutdown, "juiceback", quic_cert).await;

@@ -2,6 +2,7 @@ import { bind, play, setEnabled } from "./vendor/cuelume/index.js?v=2.2.0";
 
 var STORE_KEY = "juicebox_sound";
 var lastBurst = Object.create(null);
+// same sound within 600ms is dropped so bursts do not stack
 var BURST_GAP_MS = 600;
 
 function storedEnabled() {
@@ -52,6 +53,7 @@ try {
       document.removeEventListener("pointerdown", warmup, true);
       if (!storedEnabled()) return;
       try {
+        // iOS blocks audio until a gesture; play silence on the first one to unlock
         play("tap", { volume: 0 });
       } catch {}
     },

@@ -1,3 +1,5 @@
+//! IP ban list keyed by a peppered hash; raw addresses never reach this module.
+
 use rusqlite::{Connection, Result, params};
 
 use super::types::{BanRecord, ImportBan};
@@ -30,6 +32,7 @@ pub fn unban_ip(conn: &Connection, ip: &str) -> Result<bool> {
     Ok(affected > 0)
 }
 
+/// Returns the input length, not rows changed.
 pub fn insert_banned_ips(conn: &Connection, bans: &[ImportBan]) -> Result<usize> {
     let tx = conn.unchecked_transaction()?;
     for b in bans {

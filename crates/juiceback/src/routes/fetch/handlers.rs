@@ -169,6 +169,7 @@ pub async fn fetch_services_handler(
     }))
 }
 
+/// Another user's job is reported as missing, so ids cannot be probed.
 #[utoipa::path(
     get,
     path = "/api/fetch/{job_id}",

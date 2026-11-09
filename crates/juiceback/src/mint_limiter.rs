@@ -7,6 +7,7 @@ struct Bucket {
     count: u32,
 }
 
+/// `max(limit, burst)` per IP per fixed window; the window does not slide.
 pub struct MintLimiter {
     buckets: DashMap<String, Bucket>,
     limit: u32,

@@ -38,6 +38,8 @@ fn captured_pushes() -> Arc<Mutex<Vec<Vec<u8>>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
 
+// The content path reads ciphertext in ranged chunks, so the mock must honor
+// `Range`.
 async fn mock_ciphertext_endpoint(server: &MockServer, captured: Arc<Mutex<Vec<Vec<u8>>>>) {
     Mock::given(method("GET"))
         .and(path_regex("/internal/file/.*/ciphertext"))
@@ -211,6 +213,7 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
 
 #[tokio::test]
 async fn direct_reserve_with_password_is_rejected() {
+    // Port 1 is a dead address: rejection must happen before any juicehost call.
     let state = test_state("http://127.0.0.1:1".into());
     let app = common::mock_router(state);
     let resp = app
@@ -967,6 +970,7 @@ async fn unlock_rate_limits_guessing() {
 }
 
 async fn seed_admin(state: &Arc<AppState>) -> String {
+    // Placeholder hash: the admin preview only validates the session JWT.
     state
         .db_call("seed_test_admin", move |db| {
             db.execute(

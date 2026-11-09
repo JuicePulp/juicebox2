@@ -1,5 +1,9 @@
+//! Sessions keyed by a hash of the bearer token; the token is never stored.
+
 use rusqlite::{Connection, OptionalExtension, Result, params};
 
+/// Touches `last_seen_at` at most once per `SESSION_TOUCH_INTERVAL_SECS`;
+/// expired or unknown tokens yield `None`.
 pub fn resolve_session(
     conn: &Connection,
     token_hash: &str,

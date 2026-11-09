@@ -38,6 +38,7 @@ pub fn list_promo_candidates(
     rows.collect()
 }
 
+/// Activity is the newest of upload, last promo check, and last recorded view.
 pub fn list_cool_candidates(
     conn: &Connection,
     inactive_before: i64,
@@ -73,6 +74,7 @@ pub fn list_cool_candidates(
     rows.collect()
 }
 
+/// Maps file id to `(views_seen, downloads_seen, checked_at)`.
 pub fn read_promo_state(
     conn: &Connection,
     ids: &[String],
@@ -129,6 +131,7 @@ pub fn prune_promo_state(conn: &Connection) -> Result<usize> {
     )? as usize)
 }
 
+/// True when no attempt is recorded or the cooldown elapsed; negative = zero.
 pub fn embed_attempt_due(
     conn: &Connection,
     file_id: &str,
@@ -158,6 +161,7 @@ pub fn record_embed_attempt(conn: &Connection, file_id: &str, now: i64) -> Resul
     Ok(())
 }
 
+/// Moves to `tier` and clears the pin so automation may move it again.
 pub fn set_file_tier(conn: &Connection, id: &str, tier: &str, r2_key: &str) -> Result<usize> {
     Ok(conn.execute(
         "UPDATE files SET tier = ?1, r2_key = ?2, tier_pinned = 0 WHERE id = ?3",

@@ -1,5 +1,6 @@
 use std::path::Path;
 
+/// Levels include everything below them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProtectionLevel {
     None = 0,
@@ -9,6 +10,7 @@ pub enum ProtectionLevel {
 }
 
 impl ProtectionLevel {
+    /// Unknown values fall back to `High`.
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -182,6 +184,7 @@ pub fn friendly_block_reason(tier: DangerTier) -> String {
     }
 }
 
+/// Use before the body arrives, such as when creating an upload session.
 #[must_use]
 pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidation {
     if level == ProtectionLevel::None {
@@ -216,6 +219,7 @@ pub fn validate_filename(filename: &str, level: ProtectionLevel) -> FileValidati
     FileValidation::Allowed
 }
 
+/// Checks filename plus leading bytes, so padded or wrapped files slip through.
 #[must_use]
 pub fn validate_file(filename: &str, data: &[u8], level: ProtectionLevel) -> FileValidation {
     let filename_result = validate_filename(filename, level);

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+/// Mirrors backend JSON; fields default so partial records deserialize;
+/// timestamps are Unix seconds.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerFile {
     pub id: String,

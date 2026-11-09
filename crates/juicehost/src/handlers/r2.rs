@@ -26,6 +26,8 @@ use crate::{
     ),
     tag = "Internal",
 )]
+/// Copies local ciphertext to `hot/{id}.{ext}`; requires R2 and an upload
+/// permit, and leaves the tier record alone.
 pub async fn promote_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -72,6 +74,8 @@ pub async fn promote_file(
     ),
     tag = "Internal",
 )]
+/// Deletes every hot object for the id and reports the count; a no-op without
+/// R2.
 pub async fn demote_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

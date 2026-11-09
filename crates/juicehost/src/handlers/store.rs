@@ -31,6 +31,8 @@ use crate::{
     ),
     tag = "Internal",
 )]
+/// Multipart upload expecting `id`, `filename` and `file` fields. The body is
+/// buffered in memory, so large files belong on the streaming route.
 #[tracing::instrument(skip_all)]
 pub async fn store_file(
     State(state): State<Arc<AppState>>,
@@ -211,6 +213,9 @@ pub(crate) fn content_filename(filename: &str, detected: Option<&infer::Type>) -
     ),
     tag = "Internal",
 )]
+/// Raw-body upload streamed straight into storage, keeping memory flat.
+/// `x-mime-type` overrides the guessed MIME and `x-juicebox-live-total` opts
+/// the upload into progress tracking.
 #[tracing::instrument(skip_all)]
 pub async fn store_file_streaming(
     State(state): State<Arc<AppState>>,
@@ -234,13 +239,13 @@ pub async fn store_file_streaming(
     let stream = sized_stream(body, max_size, None);
     let storage_filename = content_filename(&filename, detected.as_ref());
     let mime = headers
-        .get("x-mime-type")
+        .get(juiceproto::headers::MIME_TYPE)
         .and_then(|v| v.to_str().ok())
         .filter(|v| !v.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| storage::guess_mime(storage::extract_extension(&storage_filename)));
     let live_total = headers
-        .get("x-juicebox-live-total")
+        .get(juiceproto::headers::LIVE_TOTAL)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
@@ -306,6 +311,9 @@ pub async fn store_file_streaming(
     ),
     tag = "Internal",
 )]
+/// Upload authorized by a signed ticket: the path id must match the ticket, a
+/// declared Content-Length must equal the signed size, and the ticket supplies
+/// the capability and filename. The body must arrive in full.
 #[tracing::instrument(skip_all)]
 pub async fn store_file_ticket(
     State(state): State<Arc<AppState>>,
@@ -400,6 +408,9 @@ pub async fn store_file_ticket(
     Ok(Json(serde_json::json!({"status": "ok", "id": id})))
 }
 
+/// Enforces the size cap as chunks flow; with `exact_size`, overflow and short
+/// bodies both fail as `SizeMismatch` so a ticket upload cannot be silently
+/// truncated.
 #[must_use]
 pub(crate) fn sized_stream(
     body: Body,

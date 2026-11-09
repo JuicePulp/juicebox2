@@ -55,6 +55,8 @@ impl QuicSettings {
         self.request_total_seconds
     }
 
+    /// Host and port default from the public listener; offset overflow errors
+    /// instead of wrapping.
     pub fn load(file: &QuicFile, public: &PublicSettings) -> Result<Self, ConfigError> {
         let host = file
             .host

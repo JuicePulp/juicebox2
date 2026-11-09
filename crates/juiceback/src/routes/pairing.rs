@@ -60,6 +60,8 @@ pub struct PairingDevice {
     tag = "Pairing",
 )]
 
+/// Past 5 outstanding codes per user or 10 per IP is refused; codes live 300s
+/// and are stored hashed.
 pub async fn generate_code_handler(
     State(state): State<Arc<AppState>>,
     UserId(user_id): UserId,
@@ -125,6 +127,8 @@ pub async fn generate_code_handler(
     tag = "Pairing",
 )]
 
+/// Input is uppercased, consumption is atomic, and expired versus used are
+/// distinct errors.
 pub async fn verify_code_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyCodeRequest>,
@@ -262,6 +266,8 @@ enum PairingClaim {
     AlreadyUsed,
 }
 
+/// Immediate transaction so two verifies cannot consume the code; a failed
+/// device insert rolls it back.
 fn claim_pairing_code(
     db: &rusqlite::Connection,
     code_hash: &str,
@@ -302,6 +308,7 @@ fn claim_pairing_code(
     Ok(PairingClaim::Claimed(user_id))
 }
 
+/// Omits `I`, `1`, `O`, `0` to reduce transcription errors.
 fn generate_pairing_code() -> String {
     let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".chars().collect();
     (0..9)
@@ -315,6 +322,7 @@ fn generate_pairing_code() -> String {
         .collect()
 }
 
+/// Format-only check, not existence.
 #[must_use]
 pub fn is_valid_pairing_code(code: &str) -> bool {
     let bytes = code.as_bytes();

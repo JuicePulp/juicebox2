@@ -6,6 +6,7 @@ use super::{
     types::{BanRecord, FeedbackRecord, FileRecord, ReportRecord},
 };
 
+/// Whitelists sort keys; unknown values fall back to `uploaded_at`.
 fn file_sort_column(sort: &str) -> &str {
     match sort {
         "filename" => "filename",
@@ -90,6 +91,7 @@ pub fn list_files_paginated(
     Ok((rows, total))
 }
 
+/// Same contract as `list_files_paginated`; includes the reporter's password.
 pub fn list_reports_paginated(
     conn: &Connection,
     search: &str,

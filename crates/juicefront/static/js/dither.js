@@ -5,6 +5,7 @@ var BAYER_4X4 = [
   [15, 7, 13, 5],
 ];
 
+/** Prepends one overlay to `zone`; `null` when one exists or 2D context is unavailable. */
 export function paintDitherOverlay(zone) {
   if (!zone || zone.querySelector(":scope > canvas.dither-layer")) return null;
   var rect = zone.getBoundingClientRect();

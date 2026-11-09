@@ -34,6 +34,7 @@ pub struct FetchStartResponse {
     pub job_id: String,
 }
 
+/// Includes `delete_token`; only serve to the owner.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct FetchFileResponse {
     pub id: String,
@@ -61,6 +62,7 @@ pub struct FetchFileResponse {
     pub is_encrypted: bool,
 }
 
+/// Omitted rather than zero/empty, to distinguish "not started".
 #[derive(Debug, Serialize, ToSchema)]
 pub struct FetchStatusResponse {
     pub job_id: String,
@@ -90,6 +92,7 @@ pub struct FetchServicesResponse {
     pub services: Vec<String>,
 }
 
+/// The message is safe to show the user; it is persisted as the job error.
 pub(crate) type FetchResult = Result<String, String>;
 
 pub(crate) enum ByteSource {

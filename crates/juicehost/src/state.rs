@@ -16,10 +16,13 @@ use crate::{
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
 
+    /// Expected in `x-juicehost-api-key`; empty allows only capability/ticket
+    /// requests unless `allow_no_auth`.
     pub api_key: String,
 
     pub allow_no_auth: bool,
 
+    /// Accepted `x-juiceback-origin` values; empty allows any origin.
     pub allowed_origins: Vec<String>,
 
     pub min_free_space_bytes: u64,
@@ -53,9 +56,13 @@ pub struct AppState {
     pub max_concat_parts: usize,
     pub tcp_body_inactivity: std::time::Duration,
     pub tcp_request_total: std::time::Duration,
+    /// Bounds concurrent uploads; exhausted permits surface as
+    /// `ServiceUnavailable`.
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
     pub download_semaphore: Arc<tokio::sync::Semaphore>,
 
+    /// Optional R2 hot tier; `None` when unconfigured or when the client failed
+    /// to build.
     pub r2: Option<Arc<R2Store>>,
 
     pub backend_client: reqwest::Client,
@@ -74,6 +81,8 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Builds state from `Config`; an R2 failure only disables the hot tier,
+    /// and the backend client keeps its 2s timeout.
     #[must_use]
     pub fn new(config: &Config, storage: Arc<dyn StorageBackend>) -> Self {
         Self {

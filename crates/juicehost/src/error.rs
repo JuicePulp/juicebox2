@@ -3,6 +3,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Response},
 };
+use juiceutils::text::escape_html;
 use serde::Serialize;
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -18,6 +19,8 @@ pub struct ErrorResponse {
     pub message: String,
 }
 
+/// Backend-agnostic storage failures; `BodyRead` and `Io` detail is not exposed
+/// to clients.
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("file not found")]
@@ -78,6 +81,8 @@ pub fn frozen_html() -> (StatusCode, Html<String>) {
     )
 }
 
+/// 418 page for an incomplete upload; sets `Retry-After` and escapes every
+/// value.
 pub fn teapot_html(
     filename: &str,
     public_url: &str,
@@ -105,15 +110,8 @@ pub fn teapot_html(
     (StatusCode::IM_A_TEAPOT, headers, Html(html))
 }
 
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
+/// Maps to a status and stable `error` code; only `BlockedFileType` exposes
+/// detail.
 #[derive(Debug, Error)]
 
 pub enum JuicehostError {

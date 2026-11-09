@@ -38,6 +38,7 @@ pub fn get_latest_announcement(conn: &Connection) -> Result<Option<Announcement>
     Ok(Some(row_to_announcement(row)?))
 }
 
+/// Deactivates the current row first, keeping at most one announcement.
 pub fn upsert_announcement(
     conn: &Connection,
     message: &str,

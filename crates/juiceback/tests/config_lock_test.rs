@@ -6,6 +6,8 @@ use juiceback::error::AppError;
 fn poisoned_config_lock_returns_error_instead_of_panicking() {
     let state = common::test_state();
     let lock = std::sync::Arc::clone(&state.jh_config);
+    // The thread panics while holding the write guard, poisoning the lock on
+    // purpose.
     let _ = std::thread::spawn(move || {
         let _guard = lock.write().unwrap();
         panic!("intentional poison for test");

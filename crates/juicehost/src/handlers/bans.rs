@@ -12,6 +12,7 @@ pub struct BanHashRequest {
     pub hash: String,
 }
 
+/// Replaces the whole list. An empty `hashes` clears every ban.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BanSnapshotRequest {
     pub pepper: String,
@@ -19,6 +20,7 @@ pub struct BanSnapshotRequest {
     pub hashes: Vec<String>,
 }
 
+/// Sticky: only the first non-empty pepper wins, so pushes cannot rotate it.
 fn ensure_pepper(state: &Arc<AppState>, pepper: &str) {
     if state.ban_list.pepper().is_empty() && !pepper.is_empty() {
         state.ban_list.set_pepper(pepper);
@@ -61,6 +63,7 @@ pub async fn push_ban(
     ),
     tag = "Internal",
 )]
+/// Lifts one ban; an unknown hash reports `removed: false` rather than failing.
 pub async fn push_unban(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<BanHashRequest>,
@@ -89,6 +92,8 @@ pub async fn push_unban(
     ),
     tag = "Internal",
 )]
+/// Applies a full replacement snapshot; a pepper is required even with no
+/// hashes.
 pub async fn push_snapshot(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<BanSnapshotRequest>,

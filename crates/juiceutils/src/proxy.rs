@@ -1,3 +1,6 @@
+//! Client IP resolution behind a reverse proxy; forwarding headers are honored
+//! only from trusted peers.
+
 use std::{net::IpAddr, str::FromStr};
 
 use axum::http::HeaderMap;
@@ -73,6 +76,8 @@ pub fn is_trusted(ip: IpAddr, trusted: &[IpCidr]) -> bool {
     trusted.iter().any(|cidr| cidr.contains(ip))
 }
 
+/// Walks `x-forwarded-for` right to left until an untrusted hop, so a client
+/// cannot spoof its address.
 #[must_use]
 pub fn client_ip(headers: &HeaderMap, peer: IpAddr, trusted: &[IpCidr]) -> IpAddr {
     if !is_trusted(peer, trusted) {

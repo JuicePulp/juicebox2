@@ -54,12 +54,7 @@ enum BuildOutcome {
     Failed,
 }
 
-impl BuildOutcome {
-    const fn ok(self) -> bool {
-        !matches!(self, Self::Failed)
-    }
-}
-
+/// `JUICEBOX_NO_BUILD=1` skips the build and expects binaries to exist.
 async fn ensure_services_built() -> BuildOutcome {
     if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -102,6 +97,7 @@ async fn ensure_services_built() -> BuildOutcome {
     }
 }
 
+/// `JUICEBOX_WATCH=0` disables watching; `JUICEBOX_NO_BUILD=1` implies it.
 fn watch_enabled() -> bool {
     if let Some(v) = juiceutils::config::optional_secret("JUICEBOX_WATCH") {
         return v == "1" || v.eq_ignore_ascii_case("true");
@@ -110,6 +106,7 @@ fn watch_enabled() -> bool {
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
+// Skip dotfiles so editor swap files and `.env` edits do not trigger rebuilds.
 fn watchable_file(path: &Path) -> bool {
     let visible = path
         .file_name()
@@ -217,6 +214,7 @@ fn snapshot_roots(roots: &[PathBuf]) -> HashMap<PathBuf, SystemTime> {
     next
 }
 
+/// Polling avoids an inotify dependency; scans run off the async runtime.
 struct FsWatcher {
     roots: Vec<PathBuf>,
     last: HashMap<PathBuf, SystemTime>,
@@ -318,10 +316,12 @@ fn spawn(name: &str) -> std::io::Result<Child> {
     Ok(child)
 }
 
+// A crash loop usually means a config error, so retrying is pointless.
 fn restart_enabled(name: &str) -> bool {
     std::env::var(format!("JUICERESTART_{}", name.to_uppercase())).map_or(true, |v| v != "0")
 }
 
+/// SIGTERM first so services can drain, then force-kill after ten seconds.
 async fn graceful_stop(child: &mut Child) {
     #[cfg(unix)]
     {
@@ -400,6 +400,7 @@ fn check_juicehost_config() -> Result<(), StartupError> {
     Ok(())
 }
 
+// Check secrets up front so the user sees one error, not three.
 fn check_service_config(name: &str) -> Result<(), StartupError> {
     match name {
         "juiceback" => check_juiceback_config(),
@@ -486,7 +487,7 @@ async fn main() {
         if sources_changed {
             tracing::info!("sources changed, rebuilding services for live reload");
             if *shutdown_rx.borrow() {
-            } else if ensure_services_built().await.ok() {
+            } else if ensure_services_built().await != BuildOutcome::Failed {
                 for (name, child) in &mut children {
                     tracing::info!("stopping {name} for live reload");
                     graceful_stop(child).await;

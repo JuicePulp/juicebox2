@@ -10,11 +10,13 @@ pub struct MenuItem {
     pub js_only: bool,
 }
 
+/// A menu slot; `item: None` renders as a divider.
 #[derive(Debug, Clone, Serialize)]
 pub struct MenuEntry {
     pub item: Option<MenuItem>,
 }
 
+/// Display order; hrefs starting with `#` open client-side modals.
 pub fn more_menu_items(locale: &str) -> Vec<MenuEntry> {
     let entry = |href: String, icon: &str, key: &str, js_only: bool| MenuEntry {
         item: Some(MenuItem {

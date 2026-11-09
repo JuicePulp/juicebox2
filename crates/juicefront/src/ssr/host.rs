@@ -4,28 +4,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use juiceutils::host::{is_blocked_host, normalize_host};
 
 use crate::state::AppState;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(3);
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct HostConfig {
-    pub max_file_size_bytes: Option<u64>,
-    pub max_ttl_hours: Option<f64>,
-    pub default_ttl_hours: Option<f64>,
-    pub allowed_ttl_hours: Option<Vec<f64>>,
-    pub danger_level: Option<String>,
-    pub quick_link: Option<bool>,
-    pub custom_id: Option<bool>,
-    pub quic: Option<bool>,
-    pub cobalt: Option<bool>,
-    pub upload_mode: Option<String>,
-    pub fetch_rate_limit_per_minute: Option<u64>,
-    pub public_base_url: Option<String>,
-}
+pub use juiceproto::config::HostConfigResponse as HostConfig;
 
 #[derive(Debug, Clone)]
 pub struct EffectiveHostConfig {
@@ -34,79 +20,12 @@ pub struct EffectiveHostConfig {
     pub host: String,
 }
 
+/// Config cache keyed by normalized base URL; entries are reused for 300s.
 pub type HostCache = Mutex<HashMap<String, (HostConfig, Instant)>>;
-
-pub fn normalize_host(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let with_scheme = if trimmed.contains("://") {
-        trimmed.to_owned()
-    } else {
-        format!("https://{trimmed}")
-    };
-    let parsed: url::Url = with_scheme.parse().ok()?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return None;
-    }
-    let mut normalized = parsed;
-    normalized.set_path("/");
-    normalized.set_query(None);
-    normalized.set_fragment(None);
-    Some(normalized.to_string().trim_end_matches('/').to_owned())
-}
-
-fn is_blocked_host(base: &str) -> bool {
-    let Ok(parsed) = base.parse::<url::Url>() else {
-        return true;
-    };
-    let host = parsed.host_str().unwrap_or("").to_lowercase();
-    let host = host.strip_prefix('[').unwrap_or(&host);
-    let host = host.strip_suffix(']').unwrap_or(host);
-
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
-    if host == "localhost" || host.ends_with(".local") || host.ends_with(".internal") {
-        return true;
-    }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return match ip {
-            std::net::IpAddr::V4(v4) => is_blocked_v4(v4),
-            std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-                Some(v4) => is_blocked_v4(v4),
-                None => v6.is_loopback() || v6.is_unspecified() || is_v6_private(&v6),
-            },
-        };
-    }
-    let dotted: Vec<&str> = host.split('.').collect();
-    if dotted.len() == 4 && dotted.iter().all(|part| part.parse::<u8>().is_ok()) {
-        let octets: Vec<u8> = dotted
-            .iter()
-            .map(|part| part.parse().unwrap_or(0))
-            .collect();
-        return is_blocked_v4(std::net::Ipv4Addr::new(
-            octets[0], octets[1], octets[2], octets[3],
-        ));
-    }
-    false
-}
-
-fn is_blocked_v4(v4: std::net::Ipv4Addr) -> bool {
-    let octets = v4.octets();
-    octets[0] == 10
-        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-        || (octets[0] == 192 && octets[1] == 168)
-        || (octets[0] == 169 && octets[1] == 254)
-        || octets[0] == 127
-}
-
-const fn is_v6_private(ip: &std::net::Ipv6Addr) -> bool {
-    let segments = ip.segments();
-    (segments[0] & 0xfe00) == 0xfc00 || (segments[0] & 0xffc0) == 0xfe80
-}
 
 fn sanitize(mut config: HostConfig) -> Option<HostConfig> {
     if let Some(ttl) = config.allowed_ttl_hours.take() {
+        // NaN and infinity would break the TTL math downstream.
         let kept: Vec<f64> = ttl.into_iter().filter(|v| v.is_finite()).collect();
         config.allowed_ttl_hours = if kept.is_empty() { None } else { Some(kept) };
     }
@@ -119,6 +38,8 @@ fn sanitize(mut config: HostConfig) -> Option<HostConfig> {
     Some(config)
 }
 
+/// `None` for invalid/blocked hosts; a failed refresh keeps the last cached
+/// entry.
 pub async fn fetch_host_config(
     state: &AppState,
     host: &str,
@@ -138,7 +59,7 @@ pub async fn fetch_host_config(
         let response = tokio::time::timeout(FETCH_TIMEOUT, async {
             let response = state
                 .http
-                .get(format!("{base}/api/config"))
+                .get(juiceproto::config::config_url(&base))
                 .send()
                 .await
                 .ok()?;
@@ -211,6 +132,7 @@ pub fn read_cookie_host(cookie_header: Option<&str>) -> Option<String> {
     None
 }
 
+/// Byte-wise decoding is fine for ASCII hostnames, not general UTF-8.
 pub fn percent_decode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let bytes = value.as_bytes();
@@ -239,6 +161,8 @@ const fn hex_val(byte: u8) -> Option<u8> {
     }
 }
 
+/// A custom host inherits `cobalt` when unset; invalid or blocked cookie hosts
+/// fall back to defaults.
 pub async fn resolve_effective_config(
     state: &AppState,
     cookie_host: Option<&str>,

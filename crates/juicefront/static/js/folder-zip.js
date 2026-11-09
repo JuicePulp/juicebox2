@@ -6,6 +6,7 @@ const ZIP_VERSION = 20;
 const ZIP_FLAG_UTF8 = 0x0800;
 const ZIP_METHOD_STORE = 0;
 const ZIP_METHOD_DEFLATE = 8;
+// No Zip64: sizes, offsets, and entry counts must fit these bounds or the writer throws.
 const U32_MAX = 0xffffffff;
 const U16_MAX = 0xffff;
 const EMPTY = new Uint8Array(0);
@@ -50,6 +51,7 @@ function dosDateTime(ms) {
   };
 }
 
+/** Normalises separators and drops `.` and empty segments; `..` becomes `_` so an entry cannot escape the extraction root. */
 function normalisePath(path) {
   return String(path || "")
     .replace(/\\/g, "/")
@@ -95,6 +97,7 @@ function tooLarge() {
   return err;
 }
 
+/** Assembles a ZIP `Blob`; throws `ZIP_TOO_LARGE` rather than overflow the classic fields. `onProgress` fires per entry. */
 export async function createZip(entries, { compress = true, onProgress } = {}) {
   const localParts = [];
   const centralParts = [];
@@ -202,6 +205,7 @@ export async function createZip(entries, { compress = true, onProgress } = {}) {
   });
 }
 
+/** `readEntries` returns one batch (often 100) at a time, so keep reading until it is empty. */
 function readAllEntries(reader) {
   return new Promise((resolve, reject) => {
     const out = [];
@@ -235,6 +239,7 @@ async function walk(entry, prefix, out, onBytes) {
   const dirPath = `${prefix}${entry.name}/`;
   const children = await readAllEntries(entry.createReader());
   if (!children.length) {
+    // Keep the empty directory so the archive round-trips the dropped tree.
     out.push({ path: dirPath, dir: true });
     return;
   }
@@ -250,6 +255,7 @@ export async function resolveDroppedFile(item) {
   return null;
 }
 
+/** Must run inside the `drop` handler: `DataTransfer.items` is emptied once the callback returns. */
 export function collectDropEntries(dataTransfer) {
   const dirs = [];
   const files = [];

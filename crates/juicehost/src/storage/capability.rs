@@ -15,15 +15,19 @@ pub fn hash(capability: &str) -> String {
     capability_hash(capability)
 }
 
+/// Constant-time comparison against a stored digest, tolerating trailing
+/// whitespace.
 #[must_use]
 pub fn matches(stored: &str, capability: &str) -> bool {
     juiceutils::constant_time_eq(stored.trim(), &hash(capability))
 }
 
+/// Binds a capability to an ID; fails with `Conflict` if one already exists.
 pub async fn mint<S: CapStore>(store: &S, id: &str, capability: &str) -> Result<(), StorageError> {
     store.cap_write(id, &hash(capability)).await
 }
 
+/// Returns `Forbidden` on mismatch or when no capability is stored.
 pub async fn verify<S: CapStore>(
     store: &S,
     id: &str,
@@ -41,6 +45,7 @@ pub async fn remove<S: CapStore>(store: &S, id: &str) {
     store.cap_delete(id).await;
 }
 
+/// Mints before running `op`, then removes the capability if `op` fails.
 pub async fn run_minted<S, T, F, Fut>(
     store: &S,
     id: &str,

@@ -92,6 +92,8 @@ async fn rate_limit_error_mapper(req: Request<Body>, next: middleware::Next) -> 
     mapped
 }
 
+/// Layers apply outermost-last, so CORS, tracing, and identity wrap the rate
+/// limiters and handlers.
 pub fn build_router(state: Arc<AppState>) -> Router {
     let mut upload_builder = GovernorConfigBuilder::default();
     upload_builder.period(std::time::Duration::from_secs_f64(
@@ -168,6 +170,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             Arc::clone(&fetch_governor_conf),
             Arc::clone(&tus_data_governor_conf),
         ];
+        // Governors keep a bucket per client IP; sweep periodically to bound memory.
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(120));
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -180,6 +183,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         });
     }
 
+    // Credentials are needed for cookie auth; origins are an explicit allowlist.
     let cors = {
         let origins: Vec<HeaderValue> = state
             .config
@@ -206,17 +210,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .allow_headers([
                 header::CONTENT_TYPE,
                 header::AUTHORIZATION,
-                header::HeaderName::from_static("x-file-encoding"),
+                header::HeaderName::from_static(juiceproto::headers::FILE_ENCODING),
                 header::HeaderName::from_static("upload-length"),
                 header::HeaderName::from_static("upload-offset"),
                 header::HeaderName::from_static("upload-metadata"),
                 header::HeaderName::from_static("tus-resumable"),
-                header::HeaderName::from_static("x-delete-token"),
-                header::HeaderName::from_static("x-file-password"),
+                header::HeaderName::from_static(juiceproto::headers::DELETE_TOKEN),
+                header::HeaderName::from_static(juiceproto::headers::FILE_PASSWORD),
                 header::RANGE,
             ])
     };
 
+    // Fall back to the compiled default until the juicehost config has been
+    // fetched.
     let max_size_bytes = state
         .jh_config
         .read()
@@ -248,6 +254,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .layer(GovernorLayer::new(upload_governor_conf.clone()))
         .layer(middleware::from_fn(rate_limit_error_mapper))
+        // Headroom for multipart framing on top of the declared file size.
         .layer(DefaultBodyLimit::max(
             max_size_bytes + crate::constants::UPLOAD_SIZE_OVERHEAD_BYTES,
         ));

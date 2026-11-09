@@ -24,7 +24,6 @@ import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2
 import {
   enhanceHostSelector,
   readSelectedHost,
-  readSelectedUploadMode,
   readQuickLinkEnabled,
   readDangerLevel,
   initHostGlow,
@@ -54,6 +53,7 @@ var assetVersion = (() => {
     return "";
   }
 })();
+// Folder zipping is only needed on a directory drop, so it stays out of the first load.
 var folderZip = await import(
   assetVersion
     ? `./folder-zip.js?v=${encodeURIComponent(assetVersion)}`
@@ -71,6 +71,7 @@ var resumeMessages = new Map();
 var resumeInput = null;
 var resumeTargetId = "";
 
+/** Copies the share URL, ignoring rejection because the Clipboard API can reject without a user gesture. */
 function autoCopyUrl(url, copyBar) {
   if (!url || !navigator.clipboard) return;
   navigator.clipboard.writeText(url).then(
@@ -157,6 +158,7 @@ function cobaltHasUrls() {
 }
 
 function handleCobaltKeydown(e) {
+  // Ignore Enter that confirms an IME composition instead of submitting.
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key !== "Enter") return;
   e.preventDefault();
@@ -173,6 +175,7 @@ function setEmpty(visible) {
   if (emptyTextRef) emptyTextRef.classList.toggle("visible", visible);
 }
 
+/** SHA-256 over name, size and 256 KiB at each end; falls back to metadata without `crypto.subtle`, so `pausedFileMatches` also compares raw fields. */
 async function fileFingerprint(file) {
   const fallback = "meta:" + file.name + ":" + file.size + ":" + file.lastModified;
   try {
@@ -481,6 +484,7 @@ function completeRow(item, row) {
         pill.offsetHeight;
         pill.classList.add("sliding");
         bar.classList.add("copy-bar--rounded");
+        // Two rAFs let the fixed pill height apply before it animates back to auto.
         requestAnimationFrame(function () {
           requestAnimationFrame(function () {
             pill.style.height = "";
@@ -687,6 +691,7 @@ function startCobaltFetch(url) {
     });
 }
 
+/** Polls every 1 s (5 s while hidden) for up to 900 attempts; a 404 or removed row stops the loop, and poll errors are retried. */
 function pollCobaltJob(jobId, item, fill, status, pill) {
   var INTERVAL = 1000;
   var HIDDEN_INTERVAL = 5000;
@@ -697,6 +702,7 @@ function pollCobaltJob(jobId, item, fill, status, pill) {
   }
   function poll() {
     if (attempts++ >= MAX_ATTEMPTS || !item.isConnected) return;
+    // Cache-bust: job status is polled and some proxies cache GETs.
     fetch(UPLOAD_URL + apiFetchJob(jobId) + "?t=" + Date.now())
       .then(function (res) {
         if (res.status === 404) {
@@ -911,6 +917,7 @@ async function uploadItem(file, item, fingerprint) {
     );
     return;
   }
+  // `enqueueUpload` publishes synchronously; suppress adoption so this row is not duplicated.
   suppressAdopt++;
   var id;
   try {
@@ -918,7 +925,6 @@ async function uploadItem(file, item, fingerprint) {
       file: file,
       ttlHours: ttlHours(),
       customHost: readSelectedHost() || await resolveUploadHost(),
-      uploadMode: readSelectedUploadMode(),
       quickLink: readQuickLinkEnabled(),
       safeUpload: readSafeUploadEnabled(),
       password: readUploadPassword(),
@@ -1017,6 +1023,7 @@ function startFolderZip(dirs, looseEntries) {
   }
 }
 
+/** The `?uploaded=` payload is attacker-controllable, so clamp every string and coerce numbers before it reaches the DOM. */
 function sanitizeUploaded(raw) {
   function str(v, max) {
     if (typeof v !== "string") return String(v == null ? "" : v).slice(0, max);
@@ -1251,6 +1258,7 @@ export function initUploadCard() {
     var params = new URLSearchParams(location.search);
     var uploaded = params.get("uploaded");
     if (uploaded) {
+      // base64url payload from the server-side upload redirect; strip it from the URL after use.
       var json = JSON.parse(atob(uploaded.replace(/-/g, "+").replace(/_/g, "/")));
       addUploadedItem(sanitizeUploaded(json));
       history.replaceState(null, "", location.pathname);
@@ -1261,6 +1269,7 @@ export function initUploadCard() {
   var input = getInputRef();
   var dropZone = getDropZoneRef();
   if (form) form.addEventListener("submit", function (e) {
+    // Until the file input is wired, let the form submit natively as the no-JS path.
     if (!document.documentElement.hasAttribute("data-upload-ready")) return;
     e.preventDefault();
   });
@@ -1272,6 +1281,7 @@ export function initUploadCard() {
       Array.from(input.files).forEach(startItem);
       input.value = "";
     });
+    // Tells `boot.js` the real picker is wired so the no-JS fallback is not armed.
     document.documentElement.setAttribute("data-upload-ready", "");
     document.documentElement.removeAttribute("data-upload-fallback");
   }

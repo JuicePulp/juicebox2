@@ -1,8 +1,11 @@
+//! AES-256-GCM for stored client IPs, as hex `nonce:ciphertext`.
+
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
 };
 
+/// `None` if the key is not 32 bytes of hex.
 #[must_use]
 pub fn encrypt_ip(ip: &str, key_hex: &str) -> Option<String> {
     let key_bytes = hex::decode(key_hex).ok()?;
@@ -17,6 +20,7 @@ pub fn encrypt_ip(ip: &str, key_hex: &str) -> Option<String> {
     ))
 }
 
+/// Malformed input or a wrong key returns `None`.
 #[must_use]
 pub fn decrypt_ip(encrypted: &str, key_hex: &str) -> Option<String> {
     let (nonce_hex, ct_hex) = encrypted.split_once(':')?;

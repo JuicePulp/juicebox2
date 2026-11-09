@@ -1,9 +1,13 @@
+import { isTerminal } from "./util.js";
+
 const DB_NAME = "juicebox_upload_queue";
 const DB_VERSION = 1;
 const STORE_NAME = "uploads";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Progress updates arrive faster than IndexedDB can commit, so writes are debounced.
 const WRITE_DELAY_MS = 180;
 
+// Allowlist, not denylist: file handles, passwords, and blobs must never reach disk.
 const KEEP_FIELDS = [
   "id",
   "filename",
@@ -79,6 +83,7 @@ function openDb() {
       reject(err);
       return;
     }
+    // `onblocked` can hang forever in some browsers, so cap the open.
     const timer = setTimeout(() => {
       if (settled)
         return;
@@ -167,9 +172,6 @@ function sanitize(item) {
   return out;
 }
 
-function isTerminal(state) {
-  return state === "done" || state === "error" || state === "cancelled";
-}
 
 function scheduleFlush(delayMs = WRITE_DELAY_MS) {
   if (flushTimer)
@@ -180,6 +182,7 @@ function scheduleFlush(delayMs = WRITE_DELAY_MS) {
   }, delayMs);
 }
 
+// Best effort: quota and private-mode failures are swallowed; the queue still works in memory.
 async function writeRecords(ids) {
   let db;
   try {
@@ -279,6 +282,7 @@ export async function flushQueue() {
   flushing = true;
   const ids = [...dirty];
   dirty.clear();
+  // `dirty` holds ids, not snapshots, so the written value is always the latest in `memory`.
   await writeRecords(ids);
   flushing = false;
   if (flushAgain || dirty.size > 0) {

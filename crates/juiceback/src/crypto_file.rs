@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 
 pub const PLAINTEXT_CHUNK_LEN: usize = 64 * 1024;
 
+/// log2 of `PLAINTEXT_CHUNK_LEN`, stored so readers reject other formats.
 pub const CHUNK_SHIFT: u8 = 16;
 
 pub const NONCE_LEN: usize = 12;
@@ -26,6 +27,7 @@ pub const DEK_SALT_LEN: usize = 16;
 
 pub const WRAPPED_DEK_LEN: usize = NONCE_LEN + DEK_LEN + TAG_LEN;
 
+/// Bump if the KDF or key wrapping changes.
 pub const KEY_VERSION_V1: i64 = 1;
 
 pub const KDF_MEM_KIB: u32 = 19456;
@@ -34,6 +36,7 @@ pub const KDF_TIME: u32 = 2;
 
 pub const KDF_LANES: u32 = 1;
 
+/// Zeroized on drop and redacted from `Debug`.
 #[derive(Clone)]
 pub struct FileKey(Zeroizing<[u8; 32]>);
 
@@ -79,6 +82,7 @@ pub fn random_salt() -> [u8; DEK_SALT_LEN] {
     salt
 }
 
+/// The salt must be random per file.
 pub fn derive_kek(password: &str, salt: &[u8]) -> Result<FileKey, CryptoError> {
     use argon2::{Algorithm, Argon2, Params, Version};
     let params = Params::new(KDF_MEM_KIB, KDF_TIME, KDF_LANES, Some(DEK_LEN))
@@ -104,6 +108,7 @@ pub fn wrap_dek(kek: &FileKey, dek: &FileKey) -> Result<Vec<u8>, CryptoError> {
     Ok(out)
 }
 
+/// `Decrypt` covers both a wrong key and tampered ciphertext.
 pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError> {
     if wrapped.len() != WRAPPED_DEK_LEN {
         return Err(CryptoError::Truncated);
@@ -117,6 +122,7 @@ pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError>
     FileKey::from_bytes(&plain)
 }
 
+/// Separates a wrong key (`Decrypt`) from a malformed or truncated container.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CryptoError {
     #[error("storage key must be 32 bytes")]
@@ -150,6 +156,7 @@ impl From<std::io::Error> for CryptoError {
     }
 }
 
+/// Empty files still occupy one empty chunk.
 #[must_use]
 pub const fn chunk_count(plain_len: u64) -> u64 {
     let chunks = plain_len.div_ceil(PLAINTEXT_CHUNK_LEN as u64);
@@ -165,6 +172,7 @@ const fn stored_chunk_len(plain_len: usize) -> usize {
     NONCE_LEN + plain_len + TAG_LEN
 }
 
+/// Rounds out to whole chunks so a range read only touches overlapping chunks.
 pub fn cipher_range_for_plain(
     start: u64,
     end: u64,
@@ -186,10 +194,6 @@ pub fn cipher_range_for_plain(
     let cipher_len =
         (last - first) * full_stored + (NONCE_LEN as u64 + last_plain + TAG_LEN as u64);
     Ok((cipher_start, cipher_len))
-}
-
-fn write_header(out: &mut Vec<u8>, plain_len: u64) {
-    out.extend_from_slice(&encode_header(plain_len));
 }
 
 #[must_use]
@@ -222,6 +226,7 @@ pub fn parse_header(data: &[u8]) -> Result<u64, CryptoError> {
     Ok(u64::from_le_bytes(size))
 }
 
+/// Rejects input over `PLAINTEXT_CHUNK_LEN`.
 pub fn encrypt_chunk(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if plaintext.len() > PLAINTEXT_CHUNK_LEN {
         return Err(CryptoError::LengthMismatch);
@@ -257,7 +262,7 @@ pub fn encrypt_reader(
     let capacity =
         usize::try_from(ciphertext_len(plain_len)).map_err(|_| CryptoError::LengthMismatch)?;
     let mut out = Vec::with_capacity(capacity);
-    write_header(&mut out, plain_len);
+    out.extend_from_slice(&encode_header(plain_len));
     let mut reader = reader;
     let mut remaining = plain_len;
     let mut buf = vec![0_u8; PLAINTEXT_CHUNK_LEN];
@@ -286,6 +291,7 @@ pub fn encrypt_reader(
     Ok(out)
 }
 
+/// Rejects bytes past the last expected chunk.
 pub fn decrypt_to_writer(
     key: &FileKey,
     data: &[u8],
@@ -317,6 +323,7 @@ pub fn decrypt_to_writer(
     Ok(plain_len)
 }
 
+/// `start..end` must lie within the plaintext.
 pub fn decrypt_range(
     key: &FileKey,
     data: &[u8],

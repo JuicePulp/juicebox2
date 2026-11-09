@@ -11,6 +11,7 @@ import {
   INITIAL_WORKERS,
   MAX_PART_RUNS,
   LAST_SPEED_KEY,
+  lastUploadBps,
   streamsForRate,
   detectNetTier,
   TIER_DEFAULT_BPS,
@@ -51,9 +52,11 @@ export function generateId() {
   }
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
+// 520-524 are Cloudflare origin failures and behave like 502-504 for retries.
 function isTransientStatus(status) {
   return status === 0 || status >= 520 && status <= 524 || status === 502 || status === 503 || status === 504;
 }
+/** `Retry-After` (or legacy `x-ratelimit-after`) in seconds, clamped to 60 s; `fallbackMs` when absent or unparsable. */
 function retryAfterMs(res, fallbackMs) {
   try {
     const raw = res.headers.get("Retry-After") || res.headers.get("x-ratelimit-after");
@@ -65,6 +68,7 @@ function retryAfterMs(res, fallbackMs) {
   } catch {}
   return fallbackMs;
 }
+/** Retries with exponential backoff and jitter, honouring `Retry-After` on 429; non-transient responses are returned so callers inspect status. */
 async function fetchWithRetry(input, init, maxRetries = 3, baseDelayMs = 1000, timeoutMs) {
   let lastErr;
   for (let attempt = 0;attempt <= maxRetries; attempt++) {
@@ -93,6 +97,7 @@ async function fetchWithRetry(input, init, maxRetries = 3, baseDelayMs = 1000, t
   throw lastErr;
 }
 const FETCH_TIMEOUT_MS = 30000;
+/** `fetch` bounded by `ms` and linked to the caller's signal; caller abort wins. */
 function fetchWithTimeout(input, init, ms) {
   const ctrl = new AbortController;
   const userSignal = init ? init.signal : undefined;
@@ -119,7 +124,9 @@ function fetchWithTimeout(input, init, ms) {
       userSignal.removeEventListener("abort", onAbort);
   });
 }
+// Safe mode polls TUS health on this cadence to notice session loss before the next PATCH.
 const SAFE_HEALTH_MS = 15000;
+/** `{ lost: true }` means the session is gone for good (404); `null` means unknown and must not be read as lost. */
 async function tusHealth(tusId, signal) {
   if (!tusId)
     return null;
@@ -174,6 +181,7 @@ async function directPartHealth(uploadUrl, id, expectedSize) {
   }
 }
 
+/** Normalises "already exists": a 409 carries the resume location, and a 400 mentioning it is retried once. */
 async function createTusSession(input, init) {
   const readText = async (r) => r.text().catch(() => "");
   const echo = (r, text) => new Response(text, { status: r.status, headers: r.headers });
@@ -220,6 +228,7 @@ async function createTusSession(input, init) {
   }
   return { res, alreadyExists: false, completing: false, existing: null };
 }
+/** Polls until the file is ready; `null` on timeout (60 s), abort, or 410 (reservation dropped). */
 async function waitForReservedFile(id, signal, timeoutMs = 60000) {
   const deadline = performance.now() + timeoutMs;
   while (!signal.aborted && performance.now() < deadline) {
@@ -241,6 +250,7 @@ async function waitForReservedFile(id, signal, timeoutMs = 60000) {
   return null;
 }
 
+/** Entry point for one upload; resume state on `item` wins over a fresh transport choice. Returns `{ abort }`. */
 export function startUpload(item, file, controls) {
   if (item.method === "direct-stream" && item.tusId)
     return startTusStreamUpload(item, file, controls);
@@ -271,20 +281,12 @@ export function startUpload(item, file, controls) {
   return file.size > TUS_THRESHOLD ? startTusUpload(item, file, controls) : startDirectUpload(item, file, controls);
 }
 
-function lastUploadBps() {
-  try {
-    const stored = Number(localStorage.getItem(LAST_SPEED_KEY));
-    return Number.isFinite(stored) && stored > 0 ? stored : 0;
-  } catch {
-    return 0;
-  }
-}
-
 function updateMethod(controls, item, method) {
   try {
     controls?.update?.({ id: item.id, method });
   } catch {}
 }
+// rAF is absent in workers and tests; fall back so LiveProgress stays usable there.
 const _raf = typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
 const _caf = typeof cancelAnimationFrame !== "undefined" ? cancelAnimationFrame : clearTimeout;
 
@@ -503,6 +505,7 @@ function startDirectUpload(item, file, controls) {
       return;
     }
     if (safe && result?.status === 409 && reserveId) {
+      // A 409 after a retry usually means the earlier attempt landed; let the reservation decide.
       const info = await waitForReservedFile(reserveId, waitCtrl.signal, 12000);
       if (info)
         result = { status: 200, body: JSON.stringify(info) };
@@ -572,6 +575,7 @@ function startDirectUpload(item, file, controls) {
 async function gzipBlob(blob) {
   return new Response(blob.stream().pipeThrough(new CompressionStream("gzip"))).blob();
 }
+/** Raw octet-stream POST with a one-shot ticket; an idle watchdog aborts after 30 s without progress. */
 function xhrSendBytes(uploadUrl, blob, ticket, onBytes, runState, xhrRef) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest;
@@ -619,6 +623,7 @@ function xhrSendBytes(uploadUrl, blob, ticket, onBytes, runState, xhrRef) {
     request.send(blob);
   });
 }
+/** Reserve, upload with a short-lived ticket, then complete; a 401/403 retries once with a fresh reservation. Returns `{ abort }`. */
 function startDirectTicketUpload(item, file, controls) {
   const { update } = controls;
   const runState = { cancelled: false };
@@ -800,6 +805,7 @@ function startDirectTicketUpload(item, file, controls) {
     }
   };
 }
+/** Splits the file into server-assigned parts sent by a growing and shrinking pool; a 413/422 falls back to TUS. Returns `{ abort }`. */
 function startDirectParallelUpload(item, file, controls) {
   const { update } = controls;
   const runState = { cancelled: false };
@@ -1089,6 +1095,7 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
   const partFile = file.slice(start, end);
   const knownText = gzipEligible(item.filename, item.mimeType);
   const knownCompressed = !knownText && isKnownCompressed(item.filename, item.mimeType);
+  // Gzip is decided once: text-like names start compressed, others follow the first chunk.
   let probeDone = knownText || knownCompressed || probeShared.done;
   let useGzip = knownText || probeShared.done && probeShared.use;
   const runSession = async () => {
@@ -1283,6 +1290,7 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
               return;
             }
             const transient = x.status === 0 || x.status === 408 || x.status >= 500;
+            // A 409 means the server offset moved under us; adopt it if it is ahead.
             if (x.status === 409 && !partSignal.aborted) {
               discoverOffset().then((serverOff) => {
                 if (partSignal.aborted) {
@@ -1451,6 +1459,7 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
   };
   let lastError;
   const maxSessionTries = safe ? 5 : 3;
+  // Each retry starts a fresh TUS session: a half-written session's offset cannot be trusted.
   for (let attemptNo = 0;attemptNo < maxSessionTries; attemptNo++) {
     try {
       return await runSession();
@@ -1466,6 +1475,7 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
   }
   throw lastError;
 }
+// Consecutive PATCH failures tolerated before a stream upload gives up; safe mode doubles it.
 const STREAM_MAX_FAILURES = 5;
 const STREAM_RETRY_DELAY_MS = 600;
 
@@ -1733,6 +1743,7 @@ function startTusStreamUpload(item, file, controls) {
       }
       return null;
     };
+    // Safe mode restarts a lost session; if the reserve file is already ready, nothing is left to send.
     const restartSession = async () => {
       const info = await readyFile();
       if (info) {
@@ -1799,6 +1810,7 @@ function startTusStreamUpload(item, file, controls) {
         return;
       }
       if (r.status === 204) {
+        // Trust the larger of the reported and sent offset; proxies sometimes drop the header.
         const next = r.offset > offset ? r.offset : end;
         const sent = Math.max(0, next - offset);
         const secs = (performance.now() - chunkStarted) / 1000;
@@ -1863,6 +1875,7 @@ function startTusStreamUpload(item, file, controls) {
     if (offset < file.size)
       throw new Error("Upload incomplete");
     update({ id: item.id, state: "finalizing" });
+    // Zero-length PATCH at the final offset asks the server to merge and complete.
     const fin = await patch(file.size, file.size, DIRECT_COMPLETE_TIMEOUT_MS);
     if (fin.status === 404) {
       const info = await waitForReservedFile(reserveId || tusId, signal, 60000);
@@ -1891,6 +1904,7 @@ function startTusStreamUpload(item, file, controls) {
       update({ id: item.id, state: "cancelled" });
       return;
     }
+    // A failed resume parks the item paused; `error` would drop it and lose the resume state.
     if (item.resumeAttempt) {
       update({
         id: item.id,
@@ -2155,6 +2169,7 @@ function startTusUpload(item, file, controls) {
       }
     });
     const spawnWorker = () => {
+      // `tryAcquireStream` enforces the global budget; the tuner probes again later.
       if (!tryAcquireStream())
         return false;
       workerPromises.push(runWorker().catch((err) => {
@@ -2187,6 +2202,7 @@ function startTusUpload(item, file, controls) {
     let rateEwma = 0;
     let baselineRate = 0;
     const recentRates = [];
+    // Add a worker every 10 steady ticks if throughput rises 5%; sustained drops back off.
     const tuner = setInterval(() => {
       const rate = windowBytes * 1000 / TUNER_INTERVAL_MS;
       windowBytes = 0;

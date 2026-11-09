@@ -6,6 +6,7 @@ use futures::StreamExt;
 use super::{client::StorageClient, target::require_juicehost_url};
 use crate::state::AppState;
 
+/// `range` is `(start, length)`; zero means no range, bool means honored.
 pub async fn download_ciphertext(
     state: &Arc<AppState>,
     id: &str,

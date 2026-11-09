@@ -1,3 +1,4 @@
+import { esc } from "./util.js";
     var PAGE = 50;
     var allBans = [];
     var displayedCount = 0;
@@ -5,12 +6,6 @@
 
     function formatTime(sec) {
         return new Date(sec * 1000).toLocaleString();
-    }
-
-    function esc(s) {
-        var d = document.createElement("div");
-        d.appendChild(document.createTextNode(s));
-        return d.innerHTML;
     }
 
     function buildParams() {
@@ -145,6 +140,7 @@
                 }
                 statusEl.textContent = "Banning...";
                 var payload = { reason: reasonVal };
+                // Hash wins when both fields are filled; the IP field is only the fallback.
                 if (hashVal) payload.hash = hashVal;
                 else payload.ip = ipVal;
                 try {
@@ -200,6 +196,7 @@
         try {
             var res = await fetch("/api/admin/ban/" + encodeURIComponent(ip), { method: "DELETE" });
             if (res.ok) {
+                // Dropped locally, so `currentTotal` stays stale until the next search.
                 allBans = allBans.filter(function (b) { return b.ip !== ip; });
                 displayedCount = Math.min(displayedCount, allBans.length);
                 renderTable();

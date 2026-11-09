@@ -1,9 +1,11 @@
 use crate::config::{ConfigError, R2File};
 
+/// Missing bucket or credentials disables the hot tier.
 #[derive(Debug)]
 pub struct R2Settings {
     bucket: Option<String>,
     endpoint: Option<String>,
+    /// R2 region; `auto` is the correct value for Cloudflare.
     region: String,
     access_key: Option<String>,
     secret_key: Option<String>,

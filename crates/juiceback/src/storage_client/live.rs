@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::client::StorageClient;
 use crate::state::AppState;
 
+/// Lets juicehost serve the file during upload; empty input is a no-op.
 pub async fn register_live_upload(
     state: &Arc<AppState>,
     target_id: &str,
