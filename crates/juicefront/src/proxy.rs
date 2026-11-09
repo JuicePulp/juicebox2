@@ -117,7 +117,9 @@ pub async fn proxy_handler(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     req: Request<Body>,
 ) -> Response<Body> {
+    let started = std::time::Instant::now();
     let path = req.uri().path().to_owned();
+    let method = req.method().clone();
     if proxy_target(&path).is_none() {
         let headers = req.headers().clone();
         return crate::handlers::not_found_page(state, headers, peer.ip(), path).await;
@@ -125,9 +127,18 @@ pub async fn proxy_handler(
     let upstream = proxy_target(&path).unwrap_or(Upstream::Juiceback);
 
     match proxy_request(&state, req, peer.ip(), upstream).await {
-        Ok(response) => response,
+        Ok(response) => {
+            tracing::debug!(
+                %method,
+                path = %path,
+                status = %response.status(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "proxied request"
+            );
+            response
+        }
         Err(err) => {
-            tracing::warn!(path = %path, error = %err, "proxy error: upstream unavailable");
+            tracing::warn!(%method, path = %path, error = %err, "proxy error: upstream unavailable");
             Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
                 .body(Body::from("Proxy error: upstream unavailable"))

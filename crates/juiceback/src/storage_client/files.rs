@@ -56,7 +56,7 @@ pub async fn rename_file_on_juicehost(
         .map_err(|e| format!("juicehost rename request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost rename: {old_id} -> {new_id} ok");
+        tracing::debug!("renamed {old_id} -> {new_id} on juicehost");
         Ok(())
     } else {
         let status = resp.status();
@@ -97,7 +97,7 @@ pub async fn demote_file_on_juicehost(
         .map_err(|e| format!("juicehost demote request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost demote: id={id} ok");
+        tracing::debug!("demoted {id} from hot tier");
         Ok(())
     } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
         tracing::warn!("juicehost demote: id={id} not found (already gone)");
@@ -134,7 +134,7 @@ pub async fn freeze_file_on_juicehost(
         .map_err(|e| format!("juicehost freeze request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost freeze: id={id} ok");
+        tracing::debug!("froze {id} on juicehost");
         Ok(())
     } else {
         let status = resp.status();
@@ -172,7 +172,7 @@ pub async fn unfreeze_file_on_juicehost(
         .map_err(|e| format!("juicehost unfreeze request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost unfreeze: id={id} ok");
+        tracing::debug!("unfroze {id} on juicehost");
         Ok(())
     } else {
         let status = resp.status();
@@ -264,7 +264,7 @@ pub async fn delete_file_on_juicehost(
         .map_err(|e| format!("juicehost delete request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost delete: id={id} ok");
+        tracing::debug!("deleted {id} on juicehost");
         Ok(())
     } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
         tracing::warn!("juicehost delete: id={id} not found (already gone)");
@@ -306,7 +306,7 @@ pub async fn concat_files(
         .map_err(|e| format!("juicehost concat request failed: {e}"))?;
 
     if resp.status().is_success() {
-        tracing::info!("juicehost concat: {} <- {:?} ok", target_id, part_ids);
+        tracing::debug!("concatenated {:?} into {target_id} on juicehost", part_ids);
         Ok(())
     } else {
         let status = resp.status();

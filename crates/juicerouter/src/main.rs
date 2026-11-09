@@ -8,6 +8,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
+    juiceutils::install_panic_handler("juicerouter");
     juiceutils::config::load_dotenv();
 
     tracing_subscriber::registry()
@@ -20,8 +21,11 @@ async fn main() {
     let path = std::env::var("JUICEROUTER_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("juicerouter.toml"));
+    tracing::info!("juicerouter v{} starting", env!("CARGO_PKG_VERSION"));
+    tracing::debug!("config: {}", path.display());
     let config = config::Config::load(&path).with_env();
     let listen = format!("{}:{}", config.server.host, config.server.port);
+    let probe_interval = config.router.probe_interval_secs.max(5);
 
     let state = state::AppState::new(config);
     let regions = state
@@ -32,7 +36,7 @@ async fn main() {
         .collect::<Vec<_>>()
         .join(", ");
     tracing::info!(
-        "juicerouter: {} node(s): {regions}",
+        "router: {} node(s) [{regions}], probing every {probe_interval}s",
         state.registry.nodes.len()
     );
 

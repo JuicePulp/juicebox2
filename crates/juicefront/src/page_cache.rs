@@ -224,8 +224,10 @@ pub fn spawn_refresh(state: Arc<AppState>) {
             .no_proxy()
             .build()
         else {
+            tracing::warn!("page cache refresh disabled: could not build HTTP client");
             return;
         };
+        tracing::debug!("page cache refresh started");
         let base = format!("http://127.0.0.1:{port}");
         let paths = [
             "/",
@@ -248,6 +250,7 @@ pub fn spawn_refresh(state: Arc<AppState>) {
             "gzip, deflate",
         ];
         loop {
+            let mut refreshed = 0usize;
             for path in paths {
                 for encoding in encodings {
                     let request = client
@@ -256,9 +259,20 @@ pub fn spawn_refresh(state: Arc<AppState>) {
                         .header("x-forwarded-proto", "https")
                         .header(reqwest::header::ACCEPT_ENCODING, encoding)
                         .header(reqwest::header::ACCEPT, "text/html");
-                    let _ = request.send().await;
+                    if request
+                        .send()
+                        .await
+                        .is_ok_and(|response| response.status().is_success())
+                    {
+                        refreshed += 1;
+                    }
                 }
             }
+            tracing::debug!(
+                pages = refreshed,
+                total = paths.len() * encodings.len(),
+                "page cache refreshed"
+            );
             tokio::time::sleep(REFRESH_INTERVAL).await;
         }
     });

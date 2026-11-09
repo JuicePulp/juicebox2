@@ -297,7 +297,7 @@ async fn handle_device_socket(
         }
     }
 
-    tracing::info!("Device {device_id} disconnected");
+    tracing::info!("device {device_id} disconnected");
 }
 
 #[utoipa::path(

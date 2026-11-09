@@ -331,7 +331,34 @@ impl AppState {
                 error: Some(error.to_string()),
             },
         };
+        let previous = node.health().state;
+        let current = health.state;
+        let latency = health.latency_ms;
+        let error = health.error.clone();
         node.set_health(health);
+        if previous == current {
+            return;
+        }
+        match current {
+            HealthState::Healthy => tracing::info!(
+                "node {} healthy at {} ({} ms)",
+                node.region,
+                node.url,
+                latency.unwrap_or_default()
+            ),
+            _ => tracing::warn!(
+                "node {} {} at {}: {}",
+                node.region,
+                match current {
+                    HealthState::AuthError => "auth error",
+                    HealthState::RouteMissing => "route missing",
+                    HealthState::Unreachable => "unreachable",
+                    HealthState::Unknown | HealthState::Healthy => "unknown",
+                },
+                node.url,
+                error.as_deref().unwrap_or("no details")
+            ),
+        }
     }
 
     pub async fn resolve(&self, id: &str) -> Result<Option<ResolveRecord>, ResolveError> {
@@ -354,18 +381,18 @@ impl AppState {
             request = request.header("x-juicehost-api-key", &self.api_key);
         }
         let response = request.send().await.map_err(|error| {
-            tracing::warn!("resolve {id}: {error}");
+            tracing::warn!("resolve {id} failed: {error}");
             ResolveError::Unavailable
         })?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
         if !response.status().is_success() {
-            tracing::warn!("resolve {id}: status {}", response.status());
+            tracing::warn!("resolve {id} failed: status {}", response.status());
             return Err(ResolveError::Unavailable);
         }
         let record = response.json::<ResolveRecord>().await.map_err(|error| {
-            tracing::warn!("resolve {id}: bad body: {error}");
+            tracing::warn!("resolve {id} returned an invalid body: {error}");
             ResolveError::Unavailable
         })?;
         if self.cache.len() > 20_000 {

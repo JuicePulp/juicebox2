@@ -29,6 +29,7 @@ h3-quinn = { workspace = true, optional = true }
 hex.workspace = true
 hmac.workspace = true
 http-body-util = { workspace = true, optional = true }
+human-panic.workspace = true
 quinn = { workspace = true, optional = true }
 quinn-proto = { workspace = true, optional = true }
 rand.workspace = true

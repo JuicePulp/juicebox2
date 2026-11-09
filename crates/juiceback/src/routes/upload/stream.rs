@@ -151,7 +151,7 @@ pub async fn stream_upload_to_juicehost(
         0.0
     };
     tracing::debug!(
-        "  stream: id={} bytes={} chunks={} read={:?} ({:.2} MB/s) \
+        "upload stream: id={} bytes={} chunks={} read={:?} ({:.2} MB/s) \
          backpressure={:?} push_wait={:?}",
         file_id,
         total_bytes,
@@ -315,7 +315,7 @@ pub async fn stream_gzip_upload_to_juicehost(
     let push_wait = stream_start.elapsed();
 
     tracing::debug!(
-        "  stream (gzip): id={} bytes={} read={:?} push_wait={:?}",
+        "upload stream (gzip): id={} bytes={} read={:?} push_wait={:?}",
         file_id,
         total_bytes,
         read_time,

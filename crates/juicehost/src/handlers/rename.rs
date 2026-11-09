@@ -50,7 +50,7 @@ pub async fn rename_file(
         .await
         .map_err(JuicehostError::from)?;
 
-    tracing::info!("renamed file: {id} -> {new_id}");
+    tracing::info!("renamed file {id} -> {new_id}");
 
     Ok(Json(
         serde_json::json!({"status": "ok", "old_id": id, "new_id": new_id}),

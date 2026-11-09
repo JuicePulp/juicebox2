@@ -15,9 +15,13 @@ use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::Subsc
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
+    juiceutils::install_panic_handler("juicehost");
     juiceutils::config::load_dotenv();
 
-    let config = Config::try_load().expect("Failed to load configuration");
+    let config = match Config::try_load() {
+        Ok(config) => config,
+        Err(error) => juiceutils::exit_on_config_error("juicehost", error),
+    };
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -44,6 +48,8 @@ fn main() {
         .with(sentry_tracing::layer())
         .init();
 
+    tracing::info!("juicehost v{} starting", env!("CARGO_PKG_VERSION"));
+
     if config.api_key.is_empty() && !config.allow_no_auth {
         tracing::error!(
             "JUICEHOST_API_KEY is not set - refusing to start with unauthenticated internal endpoints. Configure a key or set JUICEHOST_ALLOW_NO_AUTH=true to override."
@@ -68,7 +74,7 @@ fn main() {
             let access_key = config.s3_access_key.as_deref().unwrap_or("");
             let secret_key = config.s3_secret_key.as_deref().unwrap_or("");
 
-            tracing::info!("S3 storage mode: bucket={bucket}, region={region}");
+            tracing::debug!("initialising S3 storage: bucket={bucket}, region={region}");
 
             let backend = S3Backend::new(
                 bucket,
@@ -84,10 +90,7 @@ fn main() {
             if !config.files_dir.exists() {
                 std::fs::create_dir_all(&config.files_dir)
                     .expect("failed to create files directory");
-                tracing::info!(
-                    "created files directory at: {dir:?}",
-                    dir = config.files_dir
-                );
+                tracing::info!("created files directory {}", config.files_dir.display());
             }
 
             let backend = LocalBackend::new(config.files_dir.clone(), config.min_free_space_bytes)
@@ -163,7 +166,7 @@ fn main() {
                     start_server(app, addr, config.tcp_max_concurrent_requests).await;
                 } => {}
                 _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("shutting down...");
+                    tracing::info!("juicehost shutting down...");
                     shutdown.notify_one();
                 }
             }

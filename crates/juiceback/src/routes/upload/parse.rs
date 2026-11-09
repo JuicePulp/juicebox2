@@ -62,18 +62,15 @@ pub async fn parse_multipart(
         AppError::InvalidMultipart
     })? {
         let name = field.name().unwrap_or("").to_string();
-        let field_start = std::time::Instant::now();
 
         if name == "ttl_hours" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             if let Ok(val) = text.parse::<f64>() {
                 ttl_seconds = clamp_ttl_seconds(&allowed_ttl, default_ttl, Some(val));
             }
-            tracing::debug!("  field ttl_hours took {:?}", field_start.elapsed());
         } else if name == "upload_mode" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             selected_upload_mode = UploadMode::from(text.trim());
-            tracing::debug!("  field upload_mode took {:?}", field_start.elapsed());
         } else if name == "host" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().trim_end_matches('/').to_string();
@@ -86,7 +83,6 @@ pub async fn parse_multipart(
                 .map_err(|e| AppError::BadRequest(format!("invalid storage host: {e}")))?;
                 selected_host = Some(checked);
             }
-            tracing::debug!("  field host took {:?}", field_start.elapsed());
         } else if name == "reserve_id" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().to_string();
@@ -99,7 +95,6 @@ pub async fn parse_multipart(
                 file_capability.clone_from(&existing.delete_token);
                 reservation = Some(existing);
             }
-            tracing::debug!("  field reserve_id took {:?}", field_start.elapsed());
         } else if name == "password" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().to_string();
@@ -209,7 +204,7 @@ pub async fn parse_multipart(
                     0.0
                 };
                 tracing::debug!(
-                    "  field file (gzip): read={:?} bytes={} {:.2} MB/s push_wait={:?}",
+                    "upload (gzip): read={:?} bytes={} {:.2} MB/s push_wait={:?}",
                     read_time,
                     total_bytes,
                     gzip_bps / crate::constants::BYTES_PER_MIB,

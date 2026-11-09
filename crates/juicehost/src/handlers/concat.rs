@@ -77,7 +77,7 @@ pub async fn concat_files(
         .await
         .map_err(JuicehostError::from)?;
 
-    tracing::info!("concat: {target_id} <- {parts:?} ({filename})");
+    tracing::info!("concatenated {parts:?} into {target_id} ({filename})");
 
     Ok(Json(serde_json::json!({"status": "ok", "id": target_id})))
 }

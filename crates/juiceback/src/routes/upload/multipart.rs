@@ -123,7 +123,7 @@ pub async fn reserve_upload_handler(
 
     let (public_url, raw_url, download_url) = super::ticket::public_urls_for(&state, &record);
 
-    tracing::info!("reserve: id={} host={:?}", file_id, selected_host);
+    tracing::info!("reserved upload {file_id} (host={selected_host:?})");
 
     Ok((
         StatusCode::OK,

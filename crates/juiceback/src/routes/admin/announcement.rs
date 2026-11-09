@@ -129,7 +129,7 @@ pub async fn put_announcement_handler(
 
     let announcement_id = announcement.id;
     let announcement_active = announcement.is_active;
-    tracing::info!("admin updated announcement: id={announcement_id} active={announcement_active}");
+    tracing::info!("admin updated announcement {announcement_id} (active={announcement_active})");
 
     crate::cloudflare::purge_urls(
         Arc::clone(&state.config),

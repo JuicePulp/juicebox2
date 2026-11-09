@@ -158,7 +158,7 @@ impl Config {
     #[must_use]
     pub fn load(path: &Path) -> Self {
         let Ok(text) = std::fs::read_to_string(path) else {
-            tracing::warn!("config file {} not found, using defaults", path.display());
+            tracing::info!("config: {} not found, using defaults", path.display());
             return Self::default();
         };
         match toml::from_str(&text) {

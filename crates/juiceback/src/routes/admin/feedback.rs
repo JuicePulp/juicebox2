@@ -119,7 +119,7 @@ pub async fn delete_feedback_handler(
         return Err(AppError::NotFound);
     }
 
-    tracing::info!("admin delete feedback: id={id}");
+    tracing::info!("admin deleted feedback {id}");
 
     Ok(StatusCode::NO_CONTENT)
 }

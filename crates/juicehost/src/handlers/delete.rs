@@ -43,6 +43,6 @@ pub async fn delete_file(
         return Err(JuicehostError::NotFound);
     }
 
-    tracing::info!("deleted file: {id}");
+    tracing::info!("deleted file {id}");
     Ok(StatusCode::NO_CONTENT)
 }

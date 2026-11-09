@@ -57,7 +57,7 @@ pub async fn freeze_file(
         tracing::warn!("freeze: R2 demote failed for id={id}: {e}");
     }
 
-    tracing::info!("froze file: {id}");
+    tracing::info!("froze file {id}");
     Ok(Json(
         serde_json::json!({"status": "ok", "id": id, "frozen": true}),
     ))
@@ -94,7 +94,7 @@ pub async fn unfreeze_file(
         .await
         .map_err(JuicehostError::from)?;
 
-    tracing::info!("unfroze file: {id}");
+    tracing::info!("unfroze file {id}");
     Ok(Json(
         serde_json::json!({"status": "ok", "id": id, "frozen": false}),
     ))

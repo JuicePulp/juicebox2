@@ -99,7 +99,7 @@ pub async fn store_file(
         .await
         .map_err(JuicehostError::from)?;
 
-    tracing::info!("stored file: {file_id} ({filename})");
+    tracing::info!("stored file {file_id} ({filename})");
 
     Ok(Json(serde_json::json!({"status": "ok", "id": file_id})))
 }

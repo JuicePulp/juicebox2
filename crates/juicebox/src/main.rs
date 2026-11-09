@@ -72,7 +72,7 @@ async fn ensure_services_built() -> BuildOutcome {
         );
         return BuildOutcome::Skipped;
     };
-    tracing::info!("building services");
+    tracing::info!("building services (this can take a minute)");
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
 
@@ -86,7 +86,7 @@ async fn ensure_services_built() -> BuildOutcome {
         .stderr(Stdio::inherit());
     match cmd.status().await {
         Ok(status) if status.success() => {
-            tracing::info!("service build finished");
+            tracing::info!("services built");
             BuildOutcome::Built
         }
         Ok(status) => {
@@ -410,6 +410,7 @@ fn check_service_config(name: &str) -> Result<(), StartupError> {
 
 #[tokio::main]
 async fn main() {
+    juiceutils::install_panic_handler("juicebox");
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -417,6 +418,7 @@ async fn main() {
         .init();
 
     load_dotenv();
+    tracing::info!("juicebox v{} starting", env!("CARGO_PKG_VERSION"));
 
     let mut failed_config = false;
     for name in SERVICES {
@@ -426,7 +428,7 @@ async fn main() {
         }
     }
     if failed_config {
-        tracing::error!("missing required configuration, not starting services");
+        tracing::error!("cannot start: fix the configuration errors above");
         std::process::exit(1);
     }
 
@@ -443,7 +445,7 @@ async fn main() {
     for name in SERVICES {
         match spawn(name) {
             Ok(child) => {
-                tracing::info!("spawned {name}");
+                tracing::info!("started {name}");
                 children.insert((*name).to_string(), child);
                 spawned_at.insert((*name).to_string(), Instant::now());
             }
@@ -496,7 +498,7 @@ async fn main() {
                 for name in SERVICES {
                     match spawn(name) {
                         Ok(child) => {
-                            tracing::info!("spawned {name}");
+                            tracing::info!("started {name}");
                             children.insert((*name).to_string(), child);
                             spawned_at.insert((*name).to_string(), Instant::now());
                         }
@@ -536,7 +538,11 @@ async fn main() {
             let runtime_secs = spawned_at
                 .remove(*name)
                 .map_or(0, |t| t.elapsed().as_secs());
-            tracing::warn!("{name} exited with {status:?} after {runtime_secs}s");
+            if status.success() {
+                tracing::info!("{name} stopped after {runtime_secs}s");
+            } else {
+                tracing::warn!("{name} exited with {status:?} after {runtime_secs}s");
+            }
             if !restart_enabled(name) {
                 continue;
             }
@@ -577,7 +583,7 @@ async fn main() {
             }
             match spawn(&name) {
                 Ok(new_child) => {
-                    tracing::info!("spawned {name}");
+                    tracing::info!("started {name}");
                     children.insert(name.clone(), new_child);
                     spawned_at.insert(name, Instant::now());
                 }

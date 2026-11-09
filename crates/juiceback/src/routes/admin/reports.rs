@@ -128,7 +128,7 @@ pub async fn delete_report_handler(
         return Err(AppError::NotFound);
     }
 
-    tracing::info!("admin delete report: id={id}");
+    tracing::info!("admin deleted report {id}");
 
     Ok(StatusCode::NO_CONTENT)
 }

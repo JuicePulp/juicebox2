@@ -41,6 +41,7 @@ hmac = "0.13"
 http-body-util = { version = "0.1", features = ["channel"] }
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+human-panic = "2"
 infer = "0.22"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }

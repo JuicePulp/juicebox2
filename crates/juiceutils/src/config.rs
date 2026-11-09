@@ -99,7 +99,7 @@ where
             return load_toml_or_default(&path);
         }
     }
-    tracing::warn!("no {service_name} config file found, using defaults");
+    tracing::info!("config: no {service_name} config file found, using defaults");
     T::default()
 }
 

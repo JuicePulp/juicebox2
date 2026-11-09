@@ -30,7 +30,7 @@ pub async fn run_cleanup_loop(state: Arc<AppState>) {
 }
 
 async fn run_cleanup_once(state: &Arc<AppState>) {
-    tracing::info!("cleanup: starting");
+    tracing::debug!("cleanup: starting sweep");
 
     let now = Utc::now().timestamp();
     let report_cutoff =

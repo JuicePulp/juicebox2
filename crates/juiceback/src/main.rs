@@ -37,6 +37,7 @@ async fn shutdown_signal() {
 }
 
 fn main() {
+    juiceutils::install_panic_handler("juiceback");
     juiceutils::config::load_dotenv();
 
     let args: Vec<String> = std::env::args().collect();
@@ -54,7 +55,10 @@ fn main() {
         return;
     }
 
-    let config = Config::try_load().expect("Failed to load configuration");
+    let config = match Config::try_load() {
+        Ok(config) => config,
+        Err(error) => juiceutils::exit_on_config_error("juiceback", error),
+    };
     let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEBACK")
         .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
         .map(|dsn| {
@@ -83,13 +87,18 @@ fn main() {
         .init();
 
     tracing::info!("juiceback v{} starting", env!("CARGO_PKG_VERSION"));
-    tracing::info!("db: {}", config.database_path);
-    tracing::info!("juicehost_url: {}", config.juicehost_url);
-    tracing::info!("public_juicehost_url: {}", config.public_juicehost_url);
+    tracing::info!(
+        "storage: juicehost={} public={}",
+        config.juicehost_url,
+        config.public_juicehost_url
+    );
+    if config.r2_enabled {
+        tracing::info!("hot tier: R2 promotion enabled");
+    }
     if config.cobalt_enabled {
-        tracing::info!("cobalt fetching enabled ({})", config.cobalt_api_url);
+        tracing::info!("cobalt: enabled ({})", config.cobalt_api_url);
     } else {
-        tracing::info!("cobalt fetching disabled (enable it in [cobalt])");
+        tracing::debug!("cobalt: disabled");
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -115,7 +124,7 @@ fn main() {
                 &config.ip_pepper,
             ).expect("Failed to migrate raw IPs to encrypted form");
         }
-        tracing::info!("Database initialized");
+        tracing::info!("database ready at {}", config.database_path);
 
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(juiceback::constants::HTTP_CONNECT_TIMEOUT_SECS))
@@ -149,7 +158,11 @@ fn main() {
                     &juicehost_headers,
                 ).await {
                     Ok(cfg) => {
-                        tracing::info!("juicehost config fetched successfully on attempt {}", attempt + 1);
+                        if attempt == 0 {
+                            tracing::debug!("juicehost config loaded");
+                        } else {
+                            tracing::info!("juicehost config loaded after {} attempts", attempt + 1);
+                        }
                         jh_config = Some(cfg);
                         break;
                     }
@@ -219,14 +232,19 @@ fn main() {
         let host = &state.config.host;
         let port = state.config.port;
         let addr = format!("{host}:{port}");
-        let socket = TcpSocket::new_v4().expect("Failed to create TCP socket");
+        let socket = TcpSocket::new_v4().expect("could not create a TCP socket");
         socket
             .set_reuseaddr(true)
-            .expect("Failed to set SO_REUSEADDR");
+            .expect("could not set SO_REUSEADDR on the listener");
+        let bind_addr = addr
+            .parse()
+            .unwrap_or_else(|e| panic!("invalid bind address {addr}: {e}"));
         socket
-            .bind(addr.parse().expect("Invalid bind address"))
-            .expect("Failed to bind to address");
-        let listener = socket.listen(1024).expect("Failed to listen");
+            .bind(bind_addr)
+            .unwrap_or_else(|e| panic!("cannot bind juiceback to {addr}: {e}"));
+        let listener = socket
+            .listen(1024)
+            .unwrap_or_else(|e| panic!("cannot listen on {addr}: {e}"));
 
         #[cfg(feature = "quic")]
         {
@@ -246,14 +264,14 @@ fn main() {
                     juiceutils::start_quic_server(quic_router, quic_listen, quic_shutdown, "juiceback", quic_cert).await;
                 } => {}
                 () = async {
-                    tracing::info!("Listening on http://{addr}");
+                    tracing::info!("juiceback listening on http://{addr}");
                     axum::serve(
                         listener,
                         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
                     )
                     .with_graceful_shutdown(shutdown_signal())
                     .await
-                    .expect("Server failed");
+                    .expect("juiceback HTTP server failed");
                 } => {}
                 () = shutdown_signal() => {
                     tracing::info!("juiceback shutting down...");
@@ -264,14 +282,14 @@ fn main() {
 
         #[cfg(not(feature = "quic"))]
         {
-            tracing::info!("Listening on http://{addr}");
+            tracing::info!("juiceback listening on http://{addr}");
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
             .with_graceful_shutdown(shutdown_signal())
             .await
-            .expect("Server failed");
+            .expect("juiceback HTTP server failed");
         }
     });
 

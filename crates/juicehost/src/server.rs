@@ -311,13 +311,19 @@ pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests
     } else {
         tokio::net::TcpSocket::new_v6()
     }
-    .expect("Failed to create TCP socket");
+    .expect("could not create a TCP socket");
     socket
         .set_reuseaddr(true)
-        .expect("Failed to set SO_REUSEADDR");
-    socket.set_nodelay(true).expect("Failed to set TCP_NODELAY");
-    socket.bind(addr).expect("Failed to bind server");
-    let listener = socket.listen(1024).expect("Failed to listen");
+        .expect("could not set SO_REUSEADDR on the listener");
+    socket
+        .set_nodelay(true)
+        .expect("could not set TCP_NODELAY on the listener");
+    socket
+        .bind(addr)
+        .unwrap_or_else(|e| panic!("cannot bind juicehost to {addr}: {e}"));
+    let listener = socket
+        .listen(1024)
+        .unwrap_or_else(|e| panic!("cannot listen on {addr}: {e}"));
 
     tracing::info!("juicehost listening on {addr}");
 
@@ -330,12 +336,11 @@ pub async fn start_server(app: Router, addr: SocketAddr, max_concurrent_requests
     )
     .with_graceful_shutdown(shutdown_signal("juicehost"))
     .await
-    .expect("Server error");
+    .expect("juicehost HTTP server failed");
 }
 
 pub fn print_startup_banner(config: &Config) {
     println!("{BANNER_ART}");
-    tracing::info!("juicehost v{} starting", env!("CARGO_PKG_VERSION"));
     if config.api_key.is_empty() {
         tracing::warn!(
             "JUICEHOST_API_KEY is not set: internal API authentication is disabled; use per-file capabilities for destructive operations"
@@ -347,7 +352,7 @@ pub fn print_startup_banner(config: &Config) {
             config.s3_bucket.as_deref().unwrap_or("?")
         );
     } else {
-        tracing::info!("files: {:?}", config.files_dir);
+        tracing::info!("storage: local files at {}", config.files_dir.display());
     }
     if let Some(ref backend) = config.backend_url {
         tracing::info!("backend: {backend}");
@@ -356,8 +361,12 @@ pub fn print_startup_banner(config: &Config) {
             "backend: none (backendless mode) - password gates are DISABLED and protected files serve as-is"
         );
     }
-    let min_gb = config.min_free_space_bytes / (1024 * 1024 * 1024);
-    tracing::info!("min free space: {min_gb} GB");
+    if config.min_free_space_bytes == 0 {
+        tracing::info!("min free space: no minimum");
+    } else {
+        let min_gb = config.min_free_space_bytes / (1024 * 1024 * 1024);
+        tracing::info!("min free space: {min_gb} GB");
+    }
     if !config.allowed_origins.is_empty() {
         tracing::info!("allowed origins: {:?}", config.allowed_origins);
     }

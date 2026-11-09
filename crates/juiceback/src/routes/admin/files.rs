@@ -297,7 +297,7 @@ pub async fn warm_file_handler(
     crate::jobs::promo::force_promote(&state, &id)
         .await
         .map_err(AppError::Internal)?;
-    tracing::info!("admin warm: id={id}");
+    tracing::info!("admin pinned {id} to hot tier");
     Ok(Json(
         serde_json::json!({ "tier": "hot", "tier_pinned": true }),
     ))
@@ -325,7 +325,7 @@ pub async fn cool_file_handler(
     crate::jobs::promo::force_cool(&state, &id)
         .await
         .map_err(AppError::Internal)?;
-    tracing::info!("admin cool: id={id}");
+    tracing::info!("admin cooled {id}");
     Ok(Json(
         serde_json::json!({ "tier": "standard", "tier_pinned": false }),
     ))
@@ -363,7 +363,7 @@ pub async fn freeze_file_handler(
     crate::storage_client::freeze_file_on_juicehost(&state, &id, host, Some(&record.delete_token))
         .await
         .map_err(AppError::Internal)?;
-    tracing::info!("admin freeze: id={id}");
+    tracing::info!("admin froze {id}");
     Ok(Json(serde_json::json!({ "frozen": true })))
 }
 
@@ -404,6 +404,6 @@ pub async fn unfreeze_file_handler(
     )
     .await
     .map_err(AppError::Internal)?;
-    tracing::info!("admin unfreeze: id={id}");
+    tracing::info!("admin unfroze {id}");
     Ok(Json(serde_json::json!({ "frozen": false })))
 }

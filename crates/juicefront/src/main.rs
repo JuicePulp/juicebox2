@@ -90,6 +90,7 @@ async fn static_cache_policy(
 }
 
 fn main() {
+    juiceutils::install_panic_handler("juicefront");
     juiceutils::config::load_dotenv();
 
     let config = config::Config::load();
@@ -126,7 +127,23 @@ fn main() {
         .expect("Failed to create tokio runtime");
 
     runtime.block_on(async {
-        let rustdoc_exists = static_base().is_some_and(|base| base.join("public/rustdoc").is_dir());
+        let static_dir = static_base();
+        let rustdoc_exists = static_dir
+            .as_ref()
+            .is_some_and(|base| base.join("public/rustdoc").is_dir());
+        if let Some(base) = static_dir {
+            tracing::debug!("static assets: {}", base.display());
+        } else {
+            tracing::warn!("static assets: directory not found, pages will render unstyled");
+        }
+        tracing::debug!(
+            "rustdoc: {}",
+            if rustdoc_exists {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         let live_reload = live::live_reload_enabled();
         let shutdown = Arc::new(tokio::sync::Notify::new());
         let state = Arc::new(state::AppState {
@@ -144,7 +161,7 @@ fn main() {
             shutdown: Arc::clone(&shutdown),
         });
         tracing::info!(
-            "proxy: juiceback={} juicehost={}",
+            "upstreams: juiceback={} juicehost={}",
             state.config.juiceback_url,
             state.config.juicehost_url
         );
@@ -260,8 +277,6 @@ fn main() {
             if rustdoc_exists {
                 pages = pages.nest_service("/rustdoc", ServeDir::new(base.join("public/rustdoc")));
             }
-        } else {
-            tracing::warn!("static asset directory not found, pages will render without styling");
         }
 
         pages = pages.layer(compression);
@@ -299,15 +314,20 @@ fn main() {
             .with_state(state.clone());
 
         let addr = format!("{}:{}", state.config.ui_host, state.config.ui_port);
-        let socket = TcpSocket::new_v4().expect("Failed to create TCP socket");
+        let socket = TcpSocket::new_v4().expect("could not create a TCP socket");
         socket
             .set_reuseaddr(true)
-            .expect("Failed to set SO_REUSEADDR");
+            .expect("could not set SO_REUSEADDR on the listener");
+        let bind_addr = addr
+            .parse()
+            .unwrap_or_else(|e| panic!("invalid bind address {addr}: {e}"));
         socket
-            .bind(addr.parse().expect("Invalid bind address"))
-            .expect("Failed to bind to address");
-        let listener = socket.listen(1024).expect("Failed to listen");
-        tracing::info!("Listening on http://{addr}");
+            .bind(bind_addr)
+            .unwrap_or_else(|e| panic!("cannot bind juicefront to {addr}: {e}"));
+        let listener = socket
+            .listen(1024)
+            .unwrap_or_else(|e| panic!("cannot listen on {addr}: {e}"));
+        tracing::info!("juicefront listening on http://{addr}");
         page_cache::spawn_refresh(Arc::clone(&state));
         {
             let shutdown = Arc::clone(&shutdown);
@@ -322,7 +342,8 @@ fn main() {
         )
         .with_graceful_shutdown(async move { shutdown.notified().await })
         .await
-        .expect("Server failed");
+        .expect("juicefront server failed");
+        tracing::info!("juicefront stopped");
     });
 
     if let Some(client) = sentry::Hub::current().client() {

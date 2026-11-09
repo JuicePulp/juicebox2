@@ -8,6 +8,25 @@ pub mod proxy;
 pub mod urls;
 pub mod web;
 
+const ISSUES_URL: &str = "https://github.com/juiceboxdev/juicebox2/issues";
+
+pub fn install_panic_handler(service: &'static str) {
+    human_panic::setup_panic!(
+        human_panic::Metadata::new(service, env!("CARGO_PKG_VERSION"),)
+            .authors("Juicebox Developers")
+            .homepage("https://juicebox.dev")
+            .repository(ISSUES_URL)
+            .support("Open an issue and attach the generated crash report.")
+    );
+}
+
+pub fn exit_on_config_error(service: &str, error: impl std::fmt::Display) -> ! {
+    eprintln!("\n{service} cannot start: {error}\n");
+    eprintln!("Check your configuration and environment, then try again.");
+    eprintln!("Need help? {ISSUES_URL}");
+    std::process::exit(1);
+}
+
 #[must_use]
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(

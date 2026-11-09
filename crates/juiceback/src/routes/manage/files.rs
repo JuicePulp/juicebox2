@@ -400,7 +400,7 @@ pub async fn rename_file_form_handler(
     let cookie_hdr =
         noscript::rename_file_cookie_header(&headers, &id, &new_id, &record.delete_token);
 
-    tracing::info!("rename form: old_id={id} new_id={new_id}");
+    tracing::info!("renamed {id} -> {new_id} via rename form");
     let mut response = Redirect::to("/files?renamed=1").into_response();
     response
         .headers_mut()
