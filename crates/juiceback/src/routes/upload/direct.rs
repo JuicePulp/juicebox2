@@ -32,6 +32,7 @@ pub struct DirectUploadReserveResponse {
     pub raw_url: String,
     pub download_url: String,
     pub expires_at: i64,
+    pub delete_token: String,
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -57,6 +58,9 @@ pub struct DirectUploadCompleteRequest {
 
 /// Zero or over-limit `file_size` is rejected up front; protected uploads must
 /// use the relay path.
+///
+/// The response carries the caller's delete token so a native client can manage
+/// the link without a second round trip.
 #[utoipa::path(
     post,
     path = "/upload/direct/reserve",
@@ -204,6 +208,7 @@ pub async fn direct_upload_reserve_handler(
         raw_url,
         download_url,
         expires_at: record.expires_at,
+        delete_token,
     }))
 }
 
@@ -293,5 +298,5 @@ pub async fn direct_upload_complete_handler(
     )
     .await?;
 
-    Ok(upload_json_response(&state, &completed, false, &headers))
+    Ok(upload_json_response(&state, &completed, true, &headers))
 }

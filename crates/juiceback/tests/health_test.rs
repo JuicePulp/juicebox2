@@ -46,8 +46,20 @@ async fn config_returns_json_without_secrets() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["max_file_size_bytes"], 524_288_000);
+    assert_eq!(
+        json["tus_patch_max_bytes"],
+        juiceback::constants::TUS_PATCH_MAX_BYTES
+    );
+    assert_eq!(
+        json["max_tus_parallel_parts"],
+        juiceback::constants::MAX_TUS_PARALLEL_PARTS
+    );
+    // The direct constants are crate-private; pin the contract here.
+    assert_eq!(json["direct_parallel_max_parts"], 64);
+    assert_eq!(json["direct_parallel_max_part_bytes"], 96 * 1024 * 1024);
     assert!(json.get("juicehost_api_key").is_none());
     assert!(json.get("jwt_secret").is_none());
+    assert!(json.get("delete_token").is_none());
 }
 
 #[tokio::test]

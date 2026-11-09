@@ -67,6 +67,7 @@ pub struct DirectParallelReserveResponse {
     pub download_url: String,
     pub expires_at: i64,
     pub parts: Vec<DirectParallelPart>,
+    pub delete_token: String,
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -81,7 +82,7 @@ pub struct DirectParallelCompleteRequest {
     path = "/upload/direct/parallel/reserve",
     request_body = DirectParallelReserveRequest,
     responses(
-        (status = 200, description = "Parallel direct upload tickets issued", body = DirectParallelReserveResponse),
+        (status = 200, description = "Parallel direct upload tickets issued; the response carries the caller's delete token for the parent file", body = DirectParallelReserveResponse),
         (status = 400, description = "Invalid request"),
         (status = 413, description = "File or part size exceeds limits"),
     ),
@@ -240,6 +241,7 @@ pub async fn direct_parallel_reserve_handler(
         download_url,
         expires_at: record.expires_at,
         parts,
+        delete_token,
     }))
 }
 
@@ -306,7 +308,7 @@ pub async fn direct_parallel_complete_handler(
             crate::reservation::FinishPolicy::Idempotent,
         )
         .await?;
-        return Ok(upload_json_response(&state, &completed, false, &headers));
+        return Ok(upload_json_response(&state, &completed, true, &headers));
     }
 
     if body.part_ids.len() < 2
@@ -387,7 +389,7 @@ pub async fn direct_parallel_complete_handler(
     )
     .await?;
 
-    Ok(upload_json_response(&state, &completed, false, &headers))
+    Ok(upload_json_response(&state, &completed, true, &headers))
 }
 
 async fn stat_target_size(

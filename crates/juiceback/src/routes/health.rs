@@ -74,6 +74,12 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
                 "cobalt": state.config.cobalt_enabled,
                 "encrypted": state.config.storage_file_key().is_ok(),
                 "fetch_rate_limit_per_minute": crate::constants::COBALT_FETCH_RATE_LIMIT_PER_MINUTE,
+                // Native clients size chunks and parts from these instead of
+                // hardcoding server limits.
+                "tus_patch_max_bytes": crate::constants::TUS_PATCH_MAX_BYTES,
+                "max_tus_parallel_parts": crate::constants::MAX_TUS_PARALLEL_PARTS,
+                "direct_parallel_max_parts": crate::routes::upload::parallel::DIRECT_MAX_PARTS,
+                "direct_parallel_max_part_bytes": crate::routes::upload::parallel::DIRECT_MAX_PART_BYTES,
                 "public_base_url": state.config.public_base_url,
                 "rate_limit_per_minute": state.config.rate_limit_per_minute,
                 "quic": cfg!(feature = "quic"),
