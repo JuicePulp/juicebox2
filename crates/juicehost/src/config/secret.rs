@@ -19,7 +19,7 @@ impl SecretSettings {
 
     pub fn load(security: &SecuritySettings) -> Result<Self, ConfigError> {
         let ticket_jwt_secret = juiceutils::config::ticket_secret(security.api_key())
-            .map_err(ConfigError::InvalidSecret)?;
+            .map_err(|e| ConfigError::InvalidSecret(e.to_string()))?;
         let ip_pepper = juiceutils::config::optional_secret("IP_PEPPER").unwrap_or_default();
         Ok(Self {
             ticket_jwt_secret,

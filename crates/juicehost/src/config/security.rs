@@ -44,7 +44,7 @@ impl SecuritySettings {
         let api_key = juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
 
         let allow_no_auth = juiceutils::config::env_bool("JUICEHOST_ALLOW_NO_AUTH")
-            .map_err(ConfigError::InvalidEnvironment)?
+            .map_err(|e| ConfigError::InvalidEnvironment(e.to_string()))?
             .unwrap_or(file.allow_no_auth);
 
         let allowed_origins = file.allowed_origins.clone().unwrap_or_else(|| {

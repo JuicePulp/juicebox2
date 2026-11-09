@@ -117,7 +117,7 @@ pub async fn create_upload_handler(
                 .config
                 .check_upload_password(v)
                 .map(|()| v.to_string())
-                .map_err(AppError::BadRequest)
+                .map_err(|e| AppError::BadRequest(e.to_string()))
         })
         .transpose()?;
     if password.is_some() && parallel.is_some() {

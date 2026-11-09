@@ -1,6 +1,31 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("{name} is not set")]
+    Missing { name: String },
+    #[error("{name} is empty")]
+    Empty { name: String },
+    #[error("{name} must be a boolean (true/false/1/0)")]
+    InvalidBoolean { name: String },
+    #[error(
+        "TICKET_JWT_SECRET is not set. Set TICKET_JWT_SECRET (or JWT_SECRET) to a real secret."
+    )]
+    MissingTicketSecret,
+    #[error("{origin} is set to a placeholder value. Generate a real secret before starting.")]
+    PlaceholderSecret { origin: String },
+    #[error("JWT_SECRET is not set. Set a real secret.")]
+    MissingJwtSecret,
+    #[error("JWT_SECRET is set to a placeholder value. Generate a real secret before starting.")]
+    PlaceholderJwtSecret,
+    #[error("{name} must be a hexadecimal string")]
+    InvalidHex { name: String },
+    #[error("{name} must encode exactly 32 bytes")]
+    InvalidKeyLength { name: String },
+}
 
 pub mod ports {
     pub const FRONTEND: u16 = 6400;
@@ -117,13 +142,17 @@ pub fn load_dotenv() {
     }
 }
 
-pub fn required_secret(name: &str) -> anyhow::Result<String> {
+pub fn required_secret(name: &str) -> Result<String, ConfigError> {
     std::env::var(name)
-        .map_err(|_| anyhow::anyhow!("{name} is not set"))
+        .map_err(|_| ConfigError::Missing {
+            name: name.to_owned(),
+        })
         .and_then(|v| {
             let trimmed = v.trim().to_owned();
             if trimmed.is_empty() {
-                Err(anyhow::anyhow!("{name} is empty"))
+                Err(ConfigError::Empty {
+                    name: name.to_owned(),
+                })
             } else {
                 Ok(trimmed)
             }
@@ -144,58 +173,57 @@ pub fn is_placeholder_secret(value: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with("change_me") || trimmed.starts_with("change_this")
 }
 
-pub fn env_bool(name: &str) -> Result<Option<bool>, String> {
+pub fn env_bool(name: &str) -> Result<Option<bool>, ConfigError> {
     match std::env::var(name) {
         Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(Some(true)),
             "0" | "false" | "no" | "off" => Ok(Some(false)),
-            _ => Err(format!("{name} must be a boolean (true/false/1/0)")),
+            _ => Err(ConfigError::InvalidBoolean {
+                name: name.to_owned(),
+            }),
         },
         _ => Ok(None),
     }
 }
 
-pub fn ticket_secret(fallback: &str) -> Result<String, String> {
+pub fn ticket_secret(fallback: &str) -> Result<String, ConfigError> {
     let (secret, source) = optional_secret("TICKET_JWT_SECRET")
         .map(|secret| (secret, "TICKET_JWT_SECRET"))
         .or_else(|| optional_secret("JWT_SECRET").map(|secret| (secret, "JWT_SECRET")))
         .unwrap_or_else(|| (fallback.trim().to_owned(), "the service API key"));
     if secret.is_empty() {
-        return Err(
-            "TICKET_JWT_SECRET is not set. Set TICKET_JWT_SECRET (or JWT_SECRET) to a real secret."
-                .to_string(),
-        );
+        return Err(ConfigError::MissingTicketSecret);
     }
     if is_placeholder_secret(&secret) {
-        return Err(format!(
-            "{source} is set to a placeholder value. Generate a real secret before starting."
-        ));
+        return Err(ConfigError::PlaceholderSecret {
+            origin: source.to_owned(),
+        });
     }
     Ok(secret)
 }
 
-pub fn validate_jwt_secret(secret: &str) -> Result<(), String> {
+pub fn validate_jwt_secret(secret: &str) -> Result<(), ConfigError> {
     if secret.trim().is_empty() {
-        return Err("JWT_SECRET is not set. Set a real secret.".to_string());
+        return Err(ConfigError::MissingJwtSecret);
     }
     if is_placeholder_secret(secret) {
-        return Err(
-            "JWT_SECRET is set to a placeholder value. Generate a real secret before starting."
-                .to_string(),
-        );
+        return Err(ConfigError::PlaceholderJwtSecret);
     }
     Ok(())
 }
 
-pub fn validate_ip_encryption_key(key: &str) -> Result<(), String> {
+pub fn validate_ip_encryption_key(key: &str) -> Result<(), ConfigError> {
     validate_hex_key("IP_ENCRYPTION_KEY", key)
 }
 
-pub fn validate_hex_key(name: &str, key: &str) -> Result<(), String> {
-    let bytes =
-        hex::decode(key.trim()).map_err(|_| format!("{name} must be a hexadecimal string"))?;
+pub fn validate_hex_key(name: &str, key: &str) -> Result<(), ConfigError> {
+    let bytes = hex::decode(key.trim()).map_err(|_| ConfigError::InvalidHex {
+        name: name.to_owned(),
+    })?;
     if bytes.len() != 32 {
-        return Err(format!("{name} must encode exactly 32 bytes"));
+        return Err(ConfigError::InvalidKeyLength {
+            name: name.to_owned(),
+        });
     }
     Ok(())
 }
@@ -245,7 +273,10 @@ mod tests {
         assert!(validate_ip_encryption_key(&"ab".repeat(31)).is_err());
         assert!(validate_ip_encryption_key(&"zz".repeat(32)).is_err());
         let err = validate_ip_encryption_key("nope").unwrap_err();
-        assert!(!err.contains("nope"), "key material must not leak: {err}");
+        assert!(
+            !err.to_string().contains("nope"),
+            "key material must not leak: {err}"
+        );
     }
 
     #[test]

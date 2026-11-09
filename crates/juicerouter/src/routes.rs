@@ -9,6 +9,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tower_http::{
     cors::{Any, CorsLayer},
     set_header::SetResponseHeaderLayer,
@@ -262,11 +263,17 @@ async fn proxy_local(state: &AppState, request: Request<Body>) -> Result<Respons
         .map_err(|_| ApiError::Internal)
 }
 
+#[derive(Debug, Error)]
 enum ApiError {
+    #[error("not found")]
     NotFound,
+    #[error("{0}")]
     BadRequest(&'static str),
+    #[error("upload still in progress")]
     Uploading,
+    #[error("route unavailable")]
     Unavailable,
+    #[error("internal error")]
     Internal,
 }
 

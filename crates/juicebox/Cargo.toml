@@ -15,6 +15,7 @@ libc.workspace = true
 # `cargo build -p juicehost -p juiceback -p juicefront` unifies tokio with
 # `full` anyway, so requesting it here keeps both builds on one tokio
 # variant instead of recompiling the tokio subtree on every switch.
+thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

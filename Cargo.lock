@@ -250,12 +250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
-
-[[package]]
 name = "argon2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2104,6 +2098,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -2126,6 +2121,7 @@ version = "2.2.0"
 dependencies = [
  "juiceutils",
  "libc",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2135,7 +2131,6 @@ dependencies = [
 name = "juicefront"
 version = "2.2.0"
 dependencies = [
- "anyhow",
  "askama",
  "async-stream",
  "axum",
@@ -2155,6 +2150,7 @@ dependencies = [
  "sentry-tracing",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tokio",
  "toml",
  "tower",
@@ -2224,6 +2220,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tokio",
  "toml",
  "tower",
@@ -2238,7 +2235,6 @@ name = "juiceutils"
 version = "2.2.0"
 dependencies = [
  "aes-gcm",
- "anyhow",
  "axum",
  "bytes",
  "h3",
@@ -2257,6 +2253,7 @@ dependencies = [
  "sha2 0.11.0",
  "subtle",
  "tempfile",
+ "thiserror 2.0.20",
  "tokio",
  "toml",
  "tower",

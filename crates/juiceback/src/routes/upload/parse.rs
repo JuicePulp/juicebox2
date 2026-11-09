@@ -107,7 +107,7 @@ pub async fn parse_multipart(
                 state
                     .config
                     .check_upload_password(&text)
-                    .map_err(AppError::BadRequest)?;
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
                 password = Some(text);
             }
         } else if name == "file" {

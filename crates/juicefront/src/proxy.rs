@@ -1,6 +1,5 @@
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
-use anyhow::Context;
 use axum::{
     body::Body,
     extract::{ConnectInfo, Request, State},
@@ -12,8 +11,25 @@ use axum::{
 };
 use futures::StreamExt;
 use http_body_util::BodyStream;
+use thiserror::Error;
 
 use crate::state::AppState;
+
+#[derive(Debug, Error)]
+pub enum ProxyError {
+    #[error("request to {url} failed: {source}")]
+    Request {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[error("request body failed: {0}")]
+    Body(#[source] axum::Error),
+    #[error("upstream body failed: {0}")]
+    UpstreamBody(#[source] reqwest::Error),
+    #[error("failed to build proxy response: {0}")]
+    Response(#[source] axum::http::Error),
+}
 
 const HOP_BY_HOP: &[&str] = &[
     "connection",
@@ -111,7 +127,7 @@ pub async fn proxy_handler(
     match proxy_request(&state, req, peer.ip(), upstream).await {
         Ok(response) => response,
         Err(err) => {
-            tracing::warn!(path = %path, error = %format!("{err:#}"), "proxy error: upstream unavailable");
+            tracing::warn!(path = %path, error = %err, "proxy error: upstream unavailable");
             Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
                 .body(Body::from("Proxy error: upstream unavailable"))
@@ -125,7 +141,7 @@ async fn proxy_request(
     req: Request<Body>,
     peer: IpAddr,
     upstream: Upstream,
-) -> anyhow::Result<Response<Body>> {
+) -> Result<Response<Body>, ProxyError> {
     let base = match upstream {
         Upstream::Juiceback => &state.config.juiceback_url,
         Upstream::Juicehost => &state.config.juicehost_url,
@@ -172,8 +188,8 @@ async fn proxy_request(
 
     let stream = BodyStream::new(body).filter_map(|result| async move {
         match result {
-            Ok(frame) => frame.into_data().ok().map(Ok::<_, anyhow::Error>),
-            Err(err) => Some(Err(anyhow::Error::new(err))),
+            Ok(frame) => frame.into_data().ok().map(Ok::<_, ProxyError>),
+            Err(err) => Some(Err(ProxyError::Body(err))),
         }
     });
 
@@ -184,7 +200,10 @@ async fn proxy_request(
         .body(reqwest::Body::wrap_stream(stream))
         .send()
         .await
-        .with_context(|| format!("request to {url} failed"))?;
+        .map_err(|source| ProxyError::Request {
+            url: url.clone(),
+            source,
+        })?;
 
     let status = upstream_response.status();
     let cleaned = clean_headers(upstream_response.headers());
@@ -192,7 +211,7 @@ async fn proxy_request(
     let stop = async move { shutdown.notified().await };
     let body_stream = upstream_response
         .bytes_stream()
-        .map(|result| result.map_err(anyhow::Error::new))
+        .map(|result| result.map_err(ProxyError::UpstreamBody))
         .take_until(stop);
 
     let mut builder = Response::builder().status(status);
@@ -204,7 +223,7 @@ async fn proxy_request(
     }
     builder
         .body(Body::from_stream(body_stream))
-        .context("failed to build proxy response")
+        .map_err(ProxyError::Response)
 }
 
 pub fn build_client() -> reqwest::Client {

@@ -68,7 +68,7 @@ pub async fn fetch_start_handler(
             state
                 .config
                 .check_upload_password(password)
-                .map_err(AppError::BadRequest)?;
+                .map_err(|e| AppError::BadRequest(e.to_string()))?;
         }
     }
 

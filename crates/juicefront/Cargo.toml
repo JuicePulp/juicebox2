@@ -8,7 +8,6 @@ description = "Rust frontend server and reverse proxy for Juicebox"
 publish = false
 
 [dependencies]
-anyhow.workspace = true
 askama.workspace = true
 async-stream.workspace = true
 axum.workspace = true
@@ -28,6 +27,7 @@ sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "lo
 sentry-tracing = { workspace = true, features = ["logs"] }
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 # Full runtime: HTTP server, proxy streaming, timers, signals.
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true

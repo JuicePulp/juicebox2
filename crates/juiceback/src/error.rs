@@ -5,48 +5,74 @@ use axum::{
 };
 use serde_json::json;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("file not found")]
     NotFound,
+    #[error("file has expired")]
     Gone,
+    #[error("{0}")]
     Forbidden(String),
 
+    #[error("{0}")]
     Conflict(String),
 
+    #[error("gzip decompression failed")]
     GzipDecodeFailed,
 
+    #[error("missing or invalid Upload-Length header")]
     TusMissingLength,
 
+    #[error("missing or invalid Upload-Offset header")]
     TusMissingOffset,
 
+    #[error("upload offset does not match server state")]
     TusOffsetMismatch,
 
+    #[error("TUS upload session not found")]
     TusSessionNotFound,
 
+    #[error("file exceeds the maximum allowed size")]
     PayloadTooLarge,
+    #[error("too many uploads")]
     RateLimited,
 
+    #[error("{0}")]
     RangeNotSatisfiable(String),
 
+    #[error("{0}")]
     TooManyRequests(String),
 
+    #[error("{0}")]
     BlockedFileType(String),
 
+    #[error("{0}")]
     JuicehostUnreachable(String),
 
+    #[error("{0}")]
     JuicehostRejected(String),
 
+    #[error("{0}")]
     InsufficientStorage(String),
-    FilesystemError(std::io::Error),
-    DatabaseError(rusqlite::Error),
+    #[error("filesystem error: {0}")]
+    FilesystemError(#[from] std::io::Error),
+    #[error("database error: {0}")]
+    DatabaseError(#[from] rusqlite::Error),
 
+    #[error("{0}")]
     DbPoolError(String),
 
+    #[error("{0}")]
     TaskPanicked(String),
+    #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
     Unauthorized(String),
+    #[error("invalid multipart data")]
     InvalidMultipart,
+    #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
     ServiceUnavailable(String),
 }
 
@@ -198,18 +224,6 @@ fn extract_error_message(e: &str) -> &str {
         .and_then(|s| s.rsplit_once(" (status="))
         .map(|(msg, _)| msg)
         .unwrap_or(e)
-}
-
-impl From<std::io::Error> for AppError {
-    fn from(err: std::io::Error) -> Self {
-        Self::FilesystemError(err)
-    }
-}
-
-impl From<rusqlite::Error> for AppError {
-    fn from(err: rusqlite::Error) -> Self {
-        Self::DatabaseError(err)
-    }
 }
 
 impl AppError {

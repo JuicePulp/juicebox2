@@ -58,6 +58,7 @@ sentry-tracing = { workspace = true, features = ["logs"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+thiserror.workspace = true
 # Full runtime: HTTP servers, spawn_blocking DB pool, timers, signals, IPC.
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true

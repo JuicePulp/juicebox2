@@ -6,9 +6,22 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
+use thiserror::Error;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::{config::Config, proxy::clean_ws_headers, state::AppState};
+
+#[derive(Debug, Error)]
+enum WsError {
+    #[error("upgrade failed: {0}")]
+    Upgrade(#[source] hyper::Error),
+    #[error("dial upstream failed: {0}")]
+    Dial(#[source] std::io::Error),
+    #[error("upstream write failed: {0}")]
+    Write(#[source] std::io::Error),
+    #[error("proxy copy failed: {0}")]
+    Copy(#[source] std::io::Error),
+}
 
 pub async fn device_ws_proxy(
     State(state): State<Arc<AppState>>,
@@ -64,7 +77,7 @@ pub async fn device_ws_proxy(
         if let Err(err) =
             pipe_upgrade(req, &upstream_host, upstream_port, &raw_request, shutdown).await
         {
-            tracing::debug!(error = %format!("{err:#}"), "device ws proxy ended");
+            tracing::debug!(error = %err, "device ws proxy ended");
         }
     });
 
@@ -82,22 +95,22 @@ async fn pipe_upgrade(
     upstream_port: u16,
     raw_request: &[u8],
     shutdown: Arc<tokio::sync::Notify>,
-) -> anyhow::Result<()> {
+) -> Result<(), WsError> {
     let mut downstream = hyper_util::rt::TokioIo::new(
         hyper::upgrade::on(&mut req)
             .await
-            .map_err(|err| anyhow::anyhow!("upgrade failed: {err}"))?,
+            .map_err(WsError::Upgrade)?,
     );
     let mut upstream = TcpStream::connect((upstream_host, upstream_port))
         .await
-        .map_err(|err| anyhow::anyhow!("dial upstream failed: {err}"))?;
+        .map_err(WsError::Dial)?;
     upstream
         .write_all(raw_request)
         .await
-        .map_err(|err| anyhow::anyhow!("upstream write failed: {err}"))?;
+        .map_err(WsError::Write)?;
     tokio::select! {
         result = tokio::io::copy_bidirectional(&mut downstream, &mut upstream) => {
-            result.map_err(|err| anyhow::anyhow!("proxy copy failed: {err}"))?;
+            result.map_err(WsError::Copy)?;
         }
         () = shutdown.notified() => {}
     }

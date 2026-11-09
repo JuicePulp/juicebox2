@@ -1,10 +1,26 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use thiserror::Error;
+
 pub mod file;
 pub use file::FileConfig;
 use file::load_file_config;
 
 use crate::cobalt::CobaltEndpoint;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error(transparent)]
+    Secret(#[from] juiceutils::config::ConfigError),
+    #[error("{name} must be a non-negative integer")]
+    InvalidInteger { name: String },
+    #[error("{0}")]
+    Invalid(String),
+    #[error("password must be at least {min_len} characters")]
+    PasswordTooShort { min_len: usize },
+    #[error("password must be at most {max_len} characters")]
+    PasswordTooLong { max_len: usize },
+}
 
 #[derive(Clone)]
 pub struct Config {
@@ -223,11 +239,11 @@ impl std::fmt::Debug for Config {
 }
 
 impl Config {
-    pub fn try_load() -> Result<Self, String> {
+    pub fn try_load() -> Result<Self, ConfigError> {
         Self::try_load_from(&load_file_config())
     }
 
-    fn try_load_from(file: &FileConfig) -> Result<Self, String> {
+    fn try_load_from(file: &FileConfig) -> Result<Self, ConfigError> {
         let host = file.server.host.clone();
         let port = file.server.port;
         let quic_port = file
@@ -245,10 +261,8 @@ impl Config {
 
         let juicehost_api_key =
             juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
-        let jwt_secret =
-            juiceutils::config::required_secret("JWT_SECRET").map_err(|e| e.to_string())?;
-        let ip_encryption_key =
-            juiceutils::config::required_secret("IP_ENCRYPTION_KEY").map_err(|e| e.to_string())?;
+        let jwt_secret = juiceutils::config::required_secret("JWT_SECRET")?;
+        let ip_encryption_key = juiceutils::config::required_secret("IP_ENCRYPTION_KEY")?;
         let ip_pepper = juiceutils::config::optional_secret("IP_PEPPER").unwrap_or_default();
         let ticket_jwt_secret = juiceutils::config::ticket_secret(&jwt_secret)?;
         let smtp_password = juiceutils::config::optional_secret("SMTP_PASSWORD");
@@ -267,8 +281,7 @@ impl Config {
 
         juiceutils::config::validate_ip_encryption_key(&ip_encryption_key)?;
 
-        let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
-            .map_err(|e| e.to_string())?;
+        let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")?;
         juiceutils::config::validate_hex_key("STORAGE_ENCRYPTION_KEY", &storage_encryption_key)?;
 
         let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
@@ -336,7 +349,7 @@ impl Config {
         let trusted_proxy_cidrs = juiceutils::proxy::parse_trusted_proxy_cidrs(
             &file.server.trusted_proxy_cidrs.join(","),
         )
-        .map_err(|e| format!("invalid server.trusted_proxy_cidrs: {e}"))?;
+        .map_err(|e| ConfigError::Invalid(format!("invalid server.trusted_proxy_cidrs: {e}")))?;
 
         let report_retention_days = file.report.retention_days;
         let feedback_retention_days = file.report.feedback_retention_days;
@@ -380,9 +393,9 @@ impl Config {
             }
         }
         if !file.cobalt.session_api_urls.is_empty() && cobalt_session_api_key.is_none() {
-            return Err(
+            return Err(ConfigError::Invalid(
                 "cobalt session_api_urls requires COBALT_SESSION_API_KEY to be set".to_string(),
-            );
+            ));
         }
         let fetch_empty_retry_delay_secs = file.cobalt.fetch_empty_retry_delay_secs;
 
@@ -438,27 +451,28 @@ impl Config {
         if cobalt_session_api_url.is_some() != cobalt_session_api_key.is_some()
             && file.cobalt.session_api_urls.is_empty()
         {
-            return Err(
+            return Err(ConfigError::Invalid(
                 "cobalt session_api_url and COBALT_SESSION_API_KEY must be set together \
                  (or both left unset)."
                     .to_string(),
-            );
+            ));
         }
 
         if bun_fetch_url.is_some() != bun_fetch_key.is_some() {
-            return Err("BUN_FETCH_URL and BUN_FETCH_KEY must be set together \
-                 (or both left unset)."
-                .to_string());
+            return Err(ConfigError::Invalid(
+                "BUN_FETCH_URL and BUN_FETCH_KEY must be set together (or both left unset)."
+                    .to_string(),
+            ));
         }
 
         juiceutils::config::validate_jwt_secret(&jwt_secret)?;
 
         if cobalt_enabled && cobalt_api_key.is_empty() {
-            return Err(
+            return Err(ConfigError::Invalid(
                 "cobalt is enabled but COBALT_API_KEY is not set. Cobalt instances with \
                  auth enabled require an API key; set COBALT_API_KEY or disable cobalt in [cobalt]."
                     .to_string(),
-            );
+            ));
         }
 
         Ok(Self {
@@ -572,44 +586,47 @@ const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
 const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
 const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
 
-fn parse_env_usize(name: &str, default: usize) -> Result<usize, String> {
+fn parse_env_usize(name: &str, default: usize) -> Result<usize, ConfigError> {
     match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => raw
-            .trim()
-            .parse()
-            .map_err(|_| format!("{name} must be a non-negative integer")),
+        Ok(raw) if !raw.trim().is_empty() => {
+            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
+                name: name.to_owned(),
+            })
+        }
         _ => Ok(default),
     }
 }
 
-fn parse_env_u32(name: &str, default: u32) -> Result<u32, String> {
+fn parse_env_u32(name: &str, default: u32) -> Result<u32, ConfigError> {
     match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => raw
-            .trim()
-            .parse()
-            .map_err(|_| format!("{name} must be a non-negative integer")),
+        Ok(raw) if !raw.trim().is_empty() => {
+            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
+                name: name.to_owned(),
+            })
+        }
         _ => Ok(default),
     }
 }
 
-fn parse_env_u64(name: &str, default: u64) -> Result<u64, String> {
+fn parse_env_u64(name: &str, default: u64) -> Result<u64, ConfigError> {
     match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => raw
-            .trim()
-            .parse()
-            .map_err(|_| format!("{name} must be a non-negative integer")),
+        Ok(raw) if !raw.trim().is_empty() => {
+            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
+                name: name.to_owned(),
+            })
+        }
         _ => Ok(default),
     }
 }
 
-pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), String> {
+pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), ConfigError> {
     if password.len() < min_len {
-        return Err(format!("password must be at least {min_len} characters"));
+        return Err(ConfigError::PasswordTooShort { min_len });
     }
     if password.len() > PASSWORD_MAX_LEN {
-        return Err(format!(
-            "password must be at most {PASSWORD_MAX_LEN} characters"
-        ));
+        return Err(ConfigError::PasswordTooLong {
+            max_len: PASSWORD_MAX_LEN,
+        });
     }
     Ok(())
 }
@@ -621,7 +638,7 @@ impl Config {
         crate::crypto_file::FileKey::from_hex(&self.storage_encryption_key)
     }
 
-    pub fn check_upload_password(&self, password: &str) -> Result<(), String> {
+    pub fn check_upload_password(&self, password: &str) -> Result<(), ConfigError> {
         validate_upload_password(password, self.password_min_len)
     }
 }
@@ -647,6 +664,9 @@ mod tests {
         assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN), 8).is_ok());
         assert!(validate_upload_password(&"x".repeat(PASSWORD_MAX_LEN + 1), 8).is_err());
         let err = validate_upload_password("short", 8).unwrap_err();
-        assert!(!err.contains("short"), "password must not leak: {err}");
+        assert!(
+            !err.to_string().contains("short"),
+            "password must not leak: {err}"
+        );
     }
 }

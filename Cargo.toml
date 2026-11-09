@@ -19,7 +19,6 @@ nursery = "warn"
 
 [workspace.dependencies]
 aes-gcm = "0.11"
-anyhow = "1"
 argon2 = "0.6"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 async-stream = "0.3"

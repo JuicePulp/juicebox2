@@ -5,6 +5,7 @@ use std::{
 
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
+use thiserror::Error;
 use zeroize::Zeroizing;
 
 pub const PLAINTEXT_CHUNK_LEN: usize = 64 * 1024;
@@ -116,41 +117,32 @@ pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError>
     FileKey::from_bytes(&plain)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CryptoError {
+    #[error("storage key must be 32 bytes")]
     BadKey,
 
+    #[error("not a juicebox v1 encrypted file")]
     BadFormat,
 
+    #[error("ciphertext truncated")]
     Truncated,
 
+    #[error("plaintext length mismatch")]
     LengthMismatch,
 
+    #[error("range outside file bounds")]
     RangeOutOfBounds,
 
+    #[error("authentication failed")]
     Decrypt,
 
+    #[error("key derivation failed")]
     Kdf,
 
+    #[error("storage crypto i/o: {0}")]
     Io(String),
 }
-
-impl fmt::Display for CryptoError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BadKey => write!(f, "storage key must be 32 bytes"),
-            Self::BadFormat => write!(f, "not a juicebox v1 encrypted file"),
-            Self::Truncated => write!(f, "ciphertext truncated"),
-            Self::LengthMismatch => write!(f, "plaintext length mismatch"),
-            Self::RangeOutOfBounds => write!(f, "range outside file bounds"),
-            Self::Decrypt => write!(f, "authentication failed"),
-            Self::Kdf => write!(f, "key derivation failed"),
-            Self::Io(detail) => write!(f, "storage crypto i/o: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for CryptoError {}
 
 impl From<std::io::Error> for CryptoError {
     fn from(err: std::io::Error) -> Self {

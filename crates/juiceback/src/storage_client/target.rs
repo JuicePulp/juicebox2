@@ -1,46 +1,37 @@
 use std::sync::Arc;
 
+use thiserror::Error;
+
 use crate::state::AppState;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub(crate) enum HostError {
+    #[error("{0}")]
     Empty(&'static str),
+    #[error("{0}")]
     InvalidUrl(String),
+    #[error("{0}")]
     BadScheme(String),
+    #[error("{0}")]
     Credentials(&'static str),
+    #[error("{0}")]
     MissingHostname(&'static str),
+    #[error("host must not contain a trailing-dot hostname")]
     TrailingDotHostname,
+    #[error("host must not contain a path, query, or fragment")]
     UnexpectedPath,
+    #[error("{0}")]
     MissingPort(&'static str),
+    #[error("{0}")]
     ForbiddenHost(String),
+    #[error("{0}")]
     NonPublicAddress(String),
+    #[error("{0}")]
     Dns(String),
+    #[error("{0}")]
     Unresolved(String),
+    #[error("{0}")]
     ClientBuild(String),
-}
-
-impl std::fmt::Display for HostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty(msg)
-            | Self::Credentials(msg)
-            | Self::MissingHostname(msg)
-            | Self::MissingPort(msg) => write!(f, "{msg}"),
-            Self::InvalidUrl(msg)
-            | Self::BadScheme(msg)
-            | Self::ForbiddenHost(msg)
-            | Self::NonPublicAddress(msg)
-            | Self::Dns(msg)
-            | Self::Unresolved(msg)
-            | Self::ClientBuild(msg) => write!(f, "{msg}"),
-            Self::TrailingDotHostname => {
-                write!(f, "host must not contain a trailing-dot hostname")
-            }
-            Self::UnexpectedPath => {
-                write!(f, "host must not contain a path, query, or fragment")
-            }
-        }
-    }
 }
 
 pub(crate) fn require_juicehost_url(url: &str) -> Result<(), HostError> {

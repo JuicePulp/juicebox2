@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use thiserror::Error;
 use tokio::{
     process::{Child, Command},
     sync::watch,
@@ -354,37 +355,52 @@ async fn graceful_stop(child: &mut Child) {
     }
 }
 
-fn check_juiceback_config() -> Result<(), String> {
-    let jwt = juiceutils::config::optional_secret("JWT_SECRET")
-        .ok_or_else(|| "juiceback: JWT_SECRET is not set. Set a real secret.".to_string())?;
-    juiceutils::config::validate_jwt_secret(&jwt).map_err(|e| format!("juiceback: {e}"))?;
-    let key = juiceutils::config::optional_secret("IP_ENCRYPTION_KEY").ok_or_else(|| {
-        "juiceback: IP_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes).".to_string()
+#[derive(Debug, Error)]
+enum StartupError {
+    #[error("juiceback: {0}")]
+    Juiceback(String),
+    #[error("juicehost: {0}")]
+    Juicehost(String),
+}
+
+fn check_juiceback_config() -> Result<(), StartupError> {
+    let jwt = juiceutils::config::optional_secret("JWT_SECRET").ok_or_else(|| {
+        StartupError::Juiceback("JWT_SECRET is not set. Set a real secret.".to_string())
     })?;
-    juiceutils::config::validate_ip_encryption_key(&key).map_err(|e| format!("juiceback: {e}"))?;
+    juiceutils::config::validate_jwt_secret(&jwt)
+        .map_err(|e| StartupError::Juiceback(e.to_string()))?;
+    let key = juiceutils::config::optional_secret("IP_ENCRYPTION_KEY").ok_or_else(|| {
+        StartupError::Juiceback(
+            "IP_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes).".to_string(),
+        )
+    })?;
+    juiceutils::config::validate_ip_encryption_key(&key)
+        .map_err(|e| StartupError::Juiceback(e.to_string()))?;
     let storage_key =
         juiceutils::config::optional_secret("STORAGE_ENCRYPTION_KEY").ok_or_else(|| {
-            "juiceback: STORAGE_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes)."
-                .to_string()
+            StartupError::Juiceback(
+                "STORAGE_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes).".to_string(),
+            )
         })?;
     juiceutils::config::validate_hex_key("STORAGE_ENCRYPTION_KEY", &storage_key)
-        .map_err(|e| format!("juiceback: {e}"))?;
+        .map_err(|e| StartupError::Juiceback(e.to_string()))?;
     Ok(())
 }
 
-fn check_juicehost_config() -> Result<(), String> {
+fn check_juicehost_config() -> Result<(), StartupError> {
     if juiceutils::config::optional_secret("JUICEHOST_API_KEY").is_none()
-        && !juiceutils::config::env_bool("JUICEHOST_ALLOW_NO_AUTH")?.unwrap_or(false)
+        && !juiceutils::config::env_bool("JUICEHOST_ALLOW_NO_AUTH")
+            .map_err(|e| StartupError::Juicehost(e.to_string()))?
+            .unwrap_or(false)
     {
-        return Err(
-            "juicehost: JUICEHOST_API_KEY is not set. Set a key or JUICEHOST_ALLOW_NO_AUTH=true."
-                .to_string(),
-        );
+        return Err(StartupError::Juicehost(
+            "JUICEHOST_API_KEY is not set. Set a key or JUICEHOST_ALLOW_NO_AUTH=true.".to_string(),
+        ));
     }
     Ok(())
 }
 
-fn check_service_config(name: &str) -> Result<(), String> {
+fn check_service_config(name: &str) -> Result<(), StartupError> {
     match name {
         "juiceback" => check_juiceback_config(),
         "juicehost" => check_juicehost_config(),

@@ -5,6 +5,7 @@ use std::{
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::config::{Config, GeoSettings};
 
@@ -434,8 +435,9 @@ impl AppState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ResolveError {
+    #[error("route unavailable")]
     Unavailable,
 }
 

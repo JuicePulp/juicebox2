@@ -50,7 +50,7 @@ pub async fn prepare_protection(
     state
         .config
         .check_upload_password(password)
-        .map_err(AppError::BadRequest)?;
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let storage_key = state
         .config
         .storage_file_key()
