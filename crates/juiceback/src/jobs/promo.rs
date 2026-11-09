@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use tokio::sync::Semaphore;
@@ -50,7 +50,7 @@ pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
     {
         return;
     }
-    let official = official_hosts(state);
+    let official = state.official_hosts();
     let host = record.storage_host.as_deref().unwrap_or("").trim();
     let promote_host: Option<String> = if host.is_empty() {
         None
@@ -136,26 +136,6 @@ pub async fn run_promo_loop(state: Arc<AppState>) {
             tracing::error!("promo: sweep task failed: {e}");
         }
     }
-}
-
-pub(crate) fn official_hosts(state: &AppState) -> HashSet<String> {
-    let mut hosts = HashSet::new();
-    let mut push = |raw: &str| {
-        let trimmed = raw.trim().trim_end_matches('/');
-        if !trimmed.is_empty() {
-            hosts.insert(trimmed.to_string());
-        }
-    };
-    push(&state.config.juicehost_url);
-    push(&state.config.public_base_url);
-    push(&state.config.public_juicehost_url);
-    if let Some(router) = state.config.router_base_url.as_deref() {
-        push(router);
-    }
-    for url in state.config.region_public_juicehosts.values() {
-        push(url);
-    }
-    hosts
 }
 
 async fn cool_sweep_once(state: &Arc<AppState>) {
@@ -290,7 +270,7 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
         }
     };
 
-    let official = official_hosts(state);
+    let official = state.official_hosts();
     let mut reserved_bytes: u64 = hot_bytes.max(0) as u64;
     let mut reserved_count: u64 = hot_count.max(0) as u64;
     let mut state_rows: Vec<(String, i64, i64, i64)> = Vec::new();
@@ -413,7 +393,7 @@ pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<Str
         .await
         .map_err(|e| format!("database error: {e:?}"))?
         .ok_or_else(|| "file not found".to_string())?;
-    let official = official_hosts(state);
+    let official = state.official_hosts();
     let host = record.storage_host.as_deref().unwrap_or("").trim();
     let promote_host: Option<String> = if host.is_empty() {
         None

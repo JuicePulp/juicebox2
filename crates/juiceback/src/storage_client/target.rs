@@ -312,7 +312,16 @@ pub(crate) async fn resolve_juicehost_target(
     host: Option<&str>,
 ) -> Result<JuicehostTarget, HostError> {
     match host.map(str::trim).filter(|h| !h.is_empty()) {
-        Some(h) => custom_juicehost_target(h).await,
+        Some(h) => {
+            let mut target = custom_juicehost_target(h).await?;
+            let local_http = target.base_url.starts_with("http://127.0.0.1")
+                || target.base_url.starts_with("http://localhost");
+            let secure = target.base_url.starts_with("https://") || local_http;
+            if secure && state.is_official_host(h) {
+                target.headers = state.juicehost_headers.clone();
+            }
+            Ok(target)
+        }
         None => {
             require_juicehost_url(&state.config.juicehost_url)?;
             Ok(JuicehostTarget {

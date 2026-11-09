@@ -159,7 +159,7 @@ pub async fn list_files_handler(
             move |db| db::read_promo_state(db, &ids)
         })
         .await?;
-    let official = crate::jobs::promo::official_hosts(&state);
+    let official = state.official_hosts();
     let now = chrono::Utc::now().timestamp();
     let mut full_hash_by_id: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();

@@ -137,6 +137,47 @@ impl AppState {
         self.banned_ips.contains_key(ip)
     }
 
+    pub(crate) fn official_hosts(&self) -> std::collections::HashSet<String> {
+        let mut hosts = std::collections::HashSet::new();
+        let mut push = |raw: &str| {
+            let trimmed = raw.trim().trim_end_matches('/');
+            if !trimmed.is_empty() {
+                hosts.insert(trimmed.to_string());
+            }
+        };
+        push(&self.config.juicehost_url);
+        push(&self.config.public_base_url);
+        push(&self.config.public_juicehost_url);
+        if let Some(router) = self.config.router_base_url.as_deref() {
+            push(router);
+        }
+        for url in self.config.region_public_juicehosts.values() {
+            push(url);
+        }
+        hosts
+    }
+
+    pub(crate) fn is_official_host(&self, host: &str) -> bool {
+        let host = host.trim().trim_end_matches('/');
+        if host.is_empty() {
+            return false;
+        }
+        let matches = |raw: &str| raw.trim().trim_end_matches('/') == host;
+        matches(&self.config.juicehost_url)
+            || matches(&self.config.public_base_url)
+            || matches(&self.config.public_juicehost_url)
+            || self
+                .config
+                .router_base_url
+                .as_deref()
+                .is_some_and(matches)
+            || self
+                .config
+                .region_public_juicehosts
+                .values()
+                .any(|url| matches(url))
+    }
+
     pub fn juicehost_config(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         let cfg = self
             .jh_config
