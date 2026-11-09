@@ -1,4 +1,4 @@
-import { knock, LANDED } from "./recipes.js?v=2.2.0";
+import { knock, LANDED } from "./recipes.js?v=2.2.0-r2";
 const slide = (from, to, time, decay, peak, more = {}) => ({
     kind: "tone", waveform: "sine", frequency: from, glideTo: to, glideTime: time, attack: 0.002, decay, peak, ...more,
 });

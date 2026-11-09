@@ -1,4 +1,4 @@
-import { tusSession } from "./api.js";
+import { tusSession } from "./api.js?v=2.2.0-r2";
 /** Every distinct TUS id an item references, including one being added now. */
 export function uniqueTusIds(item, extra = []) {
   if (!item) return [];

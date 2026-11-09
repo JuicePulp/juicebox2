@@ -1,9 +1,9 @@
-import { iconHTML } from "./copy.js?v=2.2.0";
-import { announce } from "./util.js";
+import { iconHTML } from "./copy.js?v=2.2.0-r2";
+import { announce } from "./util.js?v=2.2.0-r2";
 
 // The qrcode module is loaded only when a QR is opened to keep first paint light.
 async function qrFactory() {
-  const mod = await import("./vendor/qrcode.mjs");
+  const mod = await import("./vendor/qrcode.mjs?v=2.2.0-r2");
   return mod.default ?? mod.qrcode ?? globalThis.qrcode;
 }
 

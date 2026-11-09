@@ -1,6 +1,6 @@
-import { t } from "./i18n.js";
-import { announce, formatSize } from "./util.js";
-import { playSound } from "./sounds.js?v=2.2.0";
+import { t } from "./i18n.js?v=2.2.0-r2";
+import { announce, formatSize } from "./util.js?v=2.2.0-r2";
+import { playSound } from "./sounds.js?v=2.2.0-r2";
 import {
   iconHTML,
   iconForMime,
@@ -11,27 +11,27 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js?v=2.2.0";
+} from "./copy.js?v=2.2.0-r2";
 import {
   UPLOAD_URL,
   readMaxFileSize,
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
-} from "./upload-config.js?v=2.2.0";
-import { apiFetch, apiFetchJob, publicFile } from "./api.js";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0";
+} from "./upload-config.js?v=2.2.0-r2";
+import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r2";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r2";
 import {
   enhanceHostSelector,
   readSelectedHost,
   readQuickLinkEnabled,
   readDangerLevel,
   initHostGlow,
-} from "./enhance-host.js?v=2.2.0";
-import { connectPresence } from "./presence.js";
-import { resolveUploadHost } from "./upload-router.js?v=2.2.0";
-import { validateFileClient } from "./file-validation.js";
-import { upsertLocalFile } from "./upload-storage.js";
+} from "./enhance-host.js?v=2.2.0-r2";
+import { connectPresence } from "./presence.js?v=2.2.0-r2";
+import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r2";
+import { validateFileClient } from "./file-validation.js?v=2.2.0-r2";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r2";
 import {
   enqueueUpload,
   cancelUpload,
@@ -42,9 +42,9 @@ import {
   connectUploads,
   findPausedUpload,
   resumeUpload,
-} from "./upload-client-loader.js";
-import { extractServerId } from "./upload-engine.js?v=2.2.0";
-import { initHostSelector } from "./host-selector.js?v=2.2.0";
+} from "./upload-client-loader.js?v=2.2.0-r2";
+import { extractServerId } from "./upload-engine.js?v=2.2.0-r2";
+import { initHostSelector } from "./host-selector.js?v=2.2.0-r2";
 
 var assetVersion = (() => {
   try {

@@ -1,4 +1,4 @@
-import { readCookie, writeCookie } from "./util.js";
+import { readCookie, writeCookie } from "./util.js?v=2.2.0-r2";
 const PING_TIMEOUT_MS = 6000;
 const PING_ROUNDS = 3;
 const PING_MAX_CONSECUTIVE_FAILURES = 2;

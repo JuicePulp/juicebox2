@@ -13,9 +13,9 @@ import {
   DIRECT_STREAM_THRESHOLD,
   DIRECT_PARALLEL_THRESHOLD,
   readUploadMode
-} from "./upload-config.js";
-import { tweakEngineEnabled } from "./upload-tweaks.js";
-import { apiHealth } from "./api.js";
+} from "./upload-config.js?v=2.2.0-r2";
+import { tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r2";
+import { apiHealth } from "./api.js?v=2.2.0-r2";
 const MB = 1024 * 1024;
 const fmtRate = (bps) => bps >= MB ? `${(bps / MB).toFixed(2)} MB/s` : `${(bps / 1024).toFixed(0)} KB/s`;
 const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + "..." : s;

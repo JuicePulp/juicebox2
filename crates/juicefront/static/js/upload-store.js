@@ -1,4 +1,4 @@
-import { isTerminal } from "./util.js";
+import { isTerminal } from "./util.js?v=2.2.0-r2";
 
 const DB_NAME = "juicebox_upload_queue";
 const DB_VERSION = 1;

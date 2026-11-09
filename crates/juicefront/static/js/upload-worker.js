@@ -1,13 +1,13 @@
 import {
   startUpload
-} from "./upload-engine.js?v=2.2.0";
-import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0";
-import { deleteTus, uniqueTusIds } from "./tus.js";
+} from "./upload-engine.js?v=2.2.0-r2";
+import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0-r2";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r2";
 import {
   queueItem,
   queueItemNow,
   removeQueueItem
-} from "./upload-store.js?v=2.2.0";
+} from "./upload-store.js?v=2.2.0-r2";
 const ctx = self;
 const entries = new Map;
 // A removed id must stay gone even if a late engine callback still reports it.

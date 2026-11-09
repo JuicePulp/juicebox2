@@ -1,7 +1,7 @@
-import { initRipple } from "./ripple.js";
-import { initHaptics } from "./haptics.js";
-import { connectPresence } from "./presence.js";
-import "./netdebug.js";
+import { initRipple } from "./ripple.js?v=2.2.0-r2";
+import { initHaptics } from "./haptics.js?v=2.2.0-r2";
+import { connectPresence } from "./presence.js?v=2.2.0-r2";
+import "./netdebug.js?v=2.2.0-r2";
 
 function setOffline(offline) {
   if (offline) {

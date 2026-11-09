@@ -1,6 +1,6 @@
-import { announce } from "./util.js";
-import { t } from "./i18n.js";
-import { playSound } from "./sounds.js?v=2.2.0";
+import { announce } from "./util.js?v=2.2.0-r2";
+import { t } from "./i18n.js?v=2.2.0-r2";
+import { playSound } from "./sounds.js?v=2.2.0-r2";
 
 var iconCache = null;
 var iconCounter = 0;

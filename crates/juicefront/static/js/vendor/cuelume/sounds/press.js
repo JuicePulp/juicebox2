@@ -1,4 +1,4 @@
-import { knock, LANDED } from "./recipes.js?v=2.2.0";
+import { knock, LANDED } from "./recipes.js?v=2.2.0-r2";
 const A2 = 110;
 const C3 = 130.81, G3 = 196, A3 = 220;
 const C4 = 261.63, E4 = 329.63, G4 = 392, A4 = 440;

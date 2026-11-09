@@ -74,11 +74,23 @@ async fn static_cache_policy(
         .next()
         .map(str::to_ascii_lowercase)
         .is_some_and(|ext| matches!(ext.as_str(), "woff2" | "woff" | "ttf" | "otf"));
+    let is_js = req
+        .uri()
+        .path()
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|ext| matches!(ext.as_str(), "js" | "mjs"));
     let live_reload = state.live_reload;
     let mut res = next.run(req).await;
     if res.status().is_success() {
         let policy = if live_reload {
             "no-store"
+        } else if is_js {
+            // Module imports inherit only the version of their own URL, and the
+            // browser keeps the graph for the life of the tab. Revalidate every
+            // module so a deploy cannot leave an old module mixed with a new one.
+            "no-cache"
         } else if is_font || versioned {
             "public, max-age=31536000, immutable"
         } else {

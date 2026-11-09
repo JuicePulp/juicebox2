@@ -1,5 +1,5 @@
-import { readStoredFiles } from "./upload-storage.js";
-export { upsertLocalFile } from "./upload-storage.js";
+import { readStoredFiles } from "./upload-storage.js?v=2.2.0-r2";
+export { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r2";
 const STORAGE_KEY = "juicebox_uploads";
 const listeners = new Set;
 

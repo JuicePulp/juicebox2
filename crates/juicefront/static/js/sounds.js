@@ -1,4 +1,4 @@
-import { bind, play, setEnabled } from "./vendor/cuelume/index.js?v=2.2.0";
+import { bind, play, setEnabled } from "./vendor/cuelume/index.js?v=2.2.0-r2";
 
 var STORE_KEY = "juicebox_sound";
 var lastBurst = Object.create(null);
