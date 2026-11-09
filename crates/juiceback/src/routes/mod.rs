@@ -146,11 +146,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    
-    
-    
-    
-    
     let mut tus_data_builder = GovernorConfigBuilder::default();
     tus_data_builder.period(std::time::Duration::from_secs_f64(
         60.0 / f64::from(crate::constants::TUS_DATA_RATE_LIMIT_PER_MINUTE),
@@ -165,9 +160,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .unwrap(),
     );
 
-    
-    
-    
     {
         let governors = [
             Arc::clone(&upload_governor_conf),
@@ -231,7 +223,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .unwrap()
         .as_ref()
         .map(|c| c.max_file_size_bytes as usize)
-        .unwrap_or(500 * 1024 * 1024);
+        .unwrap_or_else(|| {
+            usize::try_from(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES).unwrap_or(usize::MAX)
+        });
 
     let upload_router = Router::new()
         .route("/", post(upload::upload_handler))
@@ -333,20 +327,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/internal/file/{id}/status",
             get(upload::file_status_handler),
         )
-        .route(
-            "/internal/resolve/{id}",
-            get(upload::resolve_file_handler),
-        )
+        .route("/internal/resolve/{id}", get(upload::resolve_file_handler))
         .route(
             "/internal/alias/{old_id}",
             get(manage::resolve_alias_handler),
         )
         .route("/internal/ban-snapshot", get(ban_snapshot_handler))
         .route("/internal/stats/hit", post(stats::hit_handler))
-        .route(
-            "/internal/stats/hit-batch",
-            post(stats::hit_batch_handler),
-        )
+        .route("/internal/stats/hit-batch", post(stats::hit_batch_handler))
         .route("/internal/stats/visit", post(stats::visit_handler))
         .route("/file/{id}/delete", post(manage::delete_file_form_handler))
         .route("/file/{id}/rename", post(manage::rename_file_form_handler))

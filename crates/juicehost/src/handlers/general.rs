@@ -8,6 +8,7 @@ use axum::{
 };
 use serde_json::json;
 
+use super::common::{BackendStatus, RangeResult, parse_range};
 use crate::{
     error::{JuicehostError, StorageError, not_found_html},
     state::AppState,
@@ -50,7 +51,6 @@ pub async fn favicon() -> Response {
     tag = "General",
 )]
 pub async fn health() -> Response {
-    
     let body = serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
@@ -115,13 +115,10 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
         "danger_level": danger_level_str,
         "quick_link": state.quick_link,
         "custom_id": state.custom_id,
-        "ultrafast": !state.ticket_jwt_secret.is_empty(),
         "backend_url": state.backend_url,
         "frontend_url": state.frontend_url,
         "password_links": true,
         "at_rest_via_juiceback": true,
-        // Storage nodes hold ciphertext; the central juiceback owns the key,
-        // so every node can take part in encrypted uploads.
         "encrypted": true,
     }))
 }
@@ -153,8 +150,7 @@ pub async fn stat_file(
             "size_bytes": meta.size,
             "extension": meta.extension,
         }))),
-        
-        
+
         Err(StorageError::Frozen) => Ok(Json(serde_json::json!({
             "exists": true,
             "frozen": true,
@@ -218,24 +214,30 @@ pub(crate) async fn serve_stored_bytes(
     if !is_valid_id(id) {
         return Err(JuicehostError::BadRequest);
     }
-    if let super::shell::BackendStatus::Known(body) =
-        super::shell::backend_file_status(state, id).await
+    let status = super::common::backend_file_status(state, id).await;
+    let meta = state.storage.stat(id).await.map_err(|e| match e {
+        StorageError::NotFound => JuicehostError::NotFound,
+        StorageError::Frozen => JuicehostError::Frozen,
+        _ => JuicehostError::Internal,
+    })?;
+    let total_size = meta.size;
+    let permit = std::sync::Arc::new(
+        Arc::clone(&state.download_semaphore)
+            .try_acquire_owned()
+            .map_err(|_| JuicehostError::ServiceUnavailable)?,
+    );
+
+    if let BackendStatus::Known(body) = &status
         && body.get("tier").and_then(|v| v.as_str()) == Some("hot")
         && let Some(key) = body.get("r2_key").and_then(|v| v.as_str())
         && key.starts_with("hot/")
-        && let Some(ref r2) = state.r2
+        && let Some(r2) = state.r2.as_ref()
     {
-        let meta = state.storage.stat(id).await.map_err(|e| match e {
-            StorageError::NotFound => JuicehostError::NotFound,
-            StorageError::Frozen => JuicehostError::Frozen,
-            _ => JuicehostError::Internal,
-        })?;
-        let total_size = meta.size;
         if let Some(range_header) = headers.get(axum::http::header::RANGE)
             && let Ok(range_val) = range_header.to_str()
         {
-            match super::serve::parse_range(range_val, total_size, u64::MAX) {
-                super::serve::RangeResult::Satisfiable(start, end) => {
+            match parse_range(range_val, total_size, state.max_range_response_bytes) {
+                RangeResult::Satisfiable(start, end) => {
                     if let Ok(stream) = r2.get_range_stream(key, start, end).await {
                         return Response::builder()
                             .status(axum::http::StatusCode::PARTIAL_CONTENT)
@@ -247,7 +249,8 @@ pub(crate) async fn serve_stored_bytes(
                             )
                             .header(axum::http::header::ACCEPT_RANGES, "bytes")
                             .header(axum::http::header::CACHE_CONTROL, "no-store")
-                            .body(Body::from_stream(stream.map(|item| {
+                            .body(Body::from_stream(stream.map(move |item| {
+                                let _permit = std::sync::Arc::clone(&permit);
                                 item.map_err(|_| {
                                     axum::Error::new(std::io::Error::other(
                                         "ciphertext stream failed",
@@ -257,7 +260,7 @@ pub(crate) async fn serve_stored_bytes(
                             .map_err(|_| JuicehostError::Internal);
                     }
                 }
-                super::serve::RangeResult::Unsatisfiable => {
+                RangeResult::Unsatisfiable => {
                     return Response::builder()
                         .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
                         .header(
@@ -268,7 +271,7 @@ pub(crate) async fn serve_stored_bytes(
                         .body(Body::empty())
                         .map_err(|_| JuicehostError::Internal);
                 }
-                super::serve::RangeResult::Ignore => {}
+                RangeResult::Ignore => {}
             }
         }
         if let Ok(stream) = r2.get_stream(key).await {
@@ -278,7 +281,8 @@ pub(crate) async fn serve_stored_bytes(
                 .header(axum::http::header::CONTENT_LENGTH, total_size)
                 .header(axum::http::header::ACCEPT_RANGES, "bytes")
                 .header(axum::http::header::CACHE_CONTROL, "no-store")
-                .body(Body::from_stream(stream.map(|item| {
+                .body(Body::from_stream(stream.map(move |item| {
+                    let _permit = std::sync::Arc::clone(&permit);
                     item.map_err(|_| {
                         axum::Error::new(std::io::Error::other("ciphertext stream failed"))
                     })
@@ -286,18 +290,11 @@ pub(crate) async fn serve_stored_bytes(
                 .map_err(|_| JuicehostError::Internal);
         }
     }
-    let meta = state.storage.stat(id).await.map_err(|e| match e {
-        StorageError::NotFound => JuicehostError::NotFound,
-        StorageError::Frozen => JuicehostError::Frozen,
-        _ => JuicehostError::Internal,
-    })?;
-    let total_size = meta.size;
-
     if let Some(range_header) = headers.get(axum::http::header::RANGE)
         && let Ok(range_val) = range_header.to_str()
     {
-        match super::serve::parse_range(range_val, total_size, u64::MAX) {
-            super::serve::RangeResult::Satisfiable(start, end) => {
+        match parse_range(range_val, total_size, state.max_range_response_bytes) {
+            RangeResult::Satisfiable(start, end) => {
                 let stream = state
                     .storage
                     .get_range_stream(id, start, end)
@@ -316,14 +313,15 @@ pub(crate) async fn serve_stored_bytes(
                     )
                     .header(axum::http::header::ACCEPT_RANGES, "bytes")
                     .header(axum::http::header::CACHE_CONTROL, "no-store")
-                    .body(Body::from_stream(stream.map(|item| {
+                    .body(Body::from_stream(stream.map(move |item| {
+                        let _permit = std::sync::Arc::clone(&permit);
                         item.map_err(|_| {
                             axum::Error::new(std::io::Error::other("ciphertext stream failed"))
                         })
                     })))
                     .map_err(|_| JuicehostError::Internal);
             }
-            super::serve::RangeResult::Unsatisfiable => {
+            RangeResult::Unsatisfiable => {
                 return Response::builder()
                     .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
                     .header(
@@ -334,7 +332,7 @@ pub(crate) async fn serve_stored_bytes(
                     .body(Body::empty())
                     .map_err(|_| JuicehostError::Internal);
             }
-            super::serve::RangeResult::Ignore => {}
+            RangeResult::Ignore => {}
         }
     }
 
@@ -348,7 +346,8 @@ pub(crate) async fn serve_stored_bytes(
         .header(axum::http::header::CONTENT_LENGTH, total_size)
         .header(axum::http::header::ACCEPT_RANGES, "bytes")
         .header(axum::http::header::CACHE_CONTROL, "no-store")
-        .body(Body::from_stream(stream.map(|item| {
+        .body(Body::from_stream(stream.map(move |item| {
+            let _permit = std::sync::Arc::clone(&permit);
             item.map_err(|_| axum::Error::new(std::io::Error::other("ciphertext stream failed")))
         })))
         .map_err(|_| JuicehostError::Internal)

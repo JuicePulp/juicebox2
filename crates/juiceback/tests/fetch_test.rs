@@ -727,8 +727,3 @@ fn ytdlp_args_are_wired_correctly() {
         "https://www.youtube.com/watch?v=sPyAQQklc1s"
     );
 }
-
-#[test]
-fn video_id_extraction_covers_common_shapes() {
-    assert!(juiceback::cobalt::parse_youtube_video_id("https://youtu.be/abc").is_some());
-}

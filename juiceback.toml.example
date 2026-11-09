@@ -13,6 +13,7 @@ cleanup_interval_minutes = 30
 
 [urls]
 public_base_url = "http://localhost:6402"
+# Env override: JUICEHOST_URL
 juicehost_url = "http://127.0.0.1:6402"
 
 # Storage node used when a client does not pick one. Set this in a

@@ -4,29 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigError;
 
-/// Settings for dynamically generated video previews of audio files.
-///
-/// Discord does not render audio attachments in link embeds. For audio files
-/// we generate a static video card that contains the original audio and
-/// metadata, which Discord can render with its normal video player.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AudioEmbedFile {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Maximum length of the generated clip, in seconds. Zero means the full track.
     #[serde(default = "default_max_seconds")]
     pub max_seconds: u64,
 
-    /// Audio files larger than this are left to the normal audio embed.
     #[serde(default = "default_max_source_mb")]
     pub max_source_mb: u64,
 
-    /// Directory for generated MP4/JPG/JSON cache entries.
     #[serde(default = "default_cache_dir")]
     pub cache_dir: PathBuf,
 
-    /// Soft cap for the generated embed cache.
     #[serde(default = "default_cache_max_mb")]
     pub cache_max_mb: u64,
 
@@ -36,11 +27,9 @@ pub struct AudioEmbedFile {
     #[serde(default = "default_height")]
     pub height: u32,
 
-    /// Number of ffmpeg jobs that may run at once.
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: usize,
 
-    /// Hard timeout for a single generation job.
     #[serde(default = "default_timeout_seconds")]
     pub timeout_seconds: u64,
 

@@ -1,5 +1,4 @@
-{% extends "admin.html" %}
-{% block content %}
+
 <h1>Admin Login</h1>
 <form id="admin-login-form" method="POST" action="/api/admin/login">
 <p><label for="username">Username</label><br><input id="username" name="username" type="text" required autocomplete="username"></p>
@@ -8,4 +7,3 @@
 <p><button type="submit">Login</button></p>
 </form>
 <p><a href="/">Back to upload</a></p>
-{% endblock %}

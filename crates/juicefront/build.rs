@@ -42,8 +42,6 @@ fn hash_static_tree(dir: &Path) -> u64 {
     collect(dir, &mut files);
     files.sort();
 
-    // FNV-1a over sorted relative paths and contents. This only needs to
-    // change whenever the served assets change, not to be cryptographic.
     let mut hash: u64 = 0xcbf29ce484222325;
     for path in files {
         let rel = path
@@ -122,8 +120,6 @@ fn main() {
         git(&["rev-parse", "HEAD"])
     );
 
-    // Asset URLs use `?v=<version>`, so any static change must produce a new
-    // version or browsers (and Cloudflare) keep the old immutable copy.
     let static_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
     println!("cargo:rerun-if-changed={}", static_dir.display());
     let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned());

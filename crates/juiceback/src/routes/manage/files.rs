@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
+    auth::InternalApiKey,
     db,
     db::FileRecord,
     error::AppError,
@@ -47,7 +48,11 @@ pub struct FileInfoResponse {
 
 impl FileInfoResponse {
     #[must_use]
-    pub fn from_record(record: FileRecord, config: &crate::config::Config) -> Self {
+    pub fn from_record(
+        record: FileRecord,
+        config: &crate::config::Config,
+        include_token: bool,
+    ) -> Self {
         let (url, raw_url, download_url) = crate::utils::share_links(
             config,
             record.storage_host.as_deref(),
@@ -56,6 +61,11 @@ impl FileInfoResponse {
         );
         let protected = record.is_protected();
         let is_encrypted = record.is_encrypted;
+        let delete_token = if include_token {
+            record.delete_token.clone()
+        } else {
+            String::new()
+        };
         Self {
             id: record.id,
             filename: record.filename,
@@ -66,7 +76,7 @@ impl FileInfoResponse {
             url,
             raw_url,
             download_url,
-            delete_token: String::new(),
+            delete_token,
             storage_host: record.storage_host,
             status: record.status,
             protected,
@@ -130,10 +140,7 @@ pub async fn file_info_handler(
     );
     Ok((
         headers,
-        Json(FileInfoResponse::from_record(
-            record,
-            &state.config,
-        )),
+        Json(FileInfoResponse::from_record(record, &state.config, false)),
     ))
 }
 
@@ -195,34 +202,10 @@ async fn delete_file_inner(
         ));
     }
 
-    let host_opt = record.storage_host.as_deref();
-    crate::storage_client::delete_file_on_juicehost(
-        state,
-        id,
-        host_opt,
-        Some(&record.delete_token),
-    )
-    .await
-    .map_err(AppError::from_juicehost_error)?;
+    if !super::lifecycle::delete_file_everywhere(state, &record, "manage").await? {
+        return Err(AppError::NotFound);
+    }
 
-    let id3 = id.to_string();
-    state
-        .db_call("delete_file", move |db| db::delete_file(db, &id3))
-        .await?;
-    let owner = user_id.to_string();
-    let owned_id = id.to_string();
-    state
-        .db_call("remove_client_file", move |db| {
-            db::remove_client_file(db, &owner, &owned_id)
-        })
-        .await?;
-
-    crate::cloudflare::purge_file(
-        &state.config,
-        &record,
-    );
-
-    tracing::info!("delete: id={id}");
     Ok(())
 }
 
@@ -337,10 +320,7 @@ pub async fn renew_file_id_handler(
         &record.filename,
     );
 
-    crate::cloudflare::purge_file(
-        &state.config,
-        &record,
-    );
+    crate::cloudflare::purge_file(&state.config, &record);
 
     tracing::info!(
         "renew: old_id={} new_id={} custom={}",
@@ -430,19 +410,9 @@ pub async fn rename_file_form_handler(
 
 pub async fn resolve_alias_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Path(old_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if state.config.juicehost_api_key.is_empty() {
-        return Err(AppError::Unauthorized("API key not configured".into()));
-    }
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !constant_time_eq(provided, &state.config.juicehost_api_key) {
-        return Err(AppError::Unauthorized("invalid API key".into()));
-    }
     let old_id2 = old_id.clone();
     let resolved = state
         .db_call("resolve_alias", move |db| db::resolve_alias(db, &old_id2))

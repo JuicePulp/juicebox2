@@ -7,7 +7,6 @@ use axum::{
 use super::common::backend_request;
 use crate::state::AppState;
 
-/// What the backend knows about a file that is not stored on this node.
 pub(crate) struct RemoteLocation {
     pub(crate) status: String,
     pub(crate) storage_host: Option<String>,
@@ -47,11 +46,6 @@ pub(crate) async fn backend_location(state: &AppState, id: &str) -> Option<Remot
     })
 }
 
-/// Use the extension juicebox recorded for the file, not the extension in the
-/// shared URL. A link copied before an audio file was correctly re-labelled
-/// can say `.mp4`; forwarding that extension would make the storage node
-/// render a video preview around MP3 bytes. The `/e/` route is generated
-/// media (`.mp4` visualiser, `.jpg` poster), so it keeps its own extension.
 fn canonical_route_path(route: &str, path: &str, filename: Option<&str>) -> String {
     if route == "e" {
         return path.to_string();
@@ -96,16 +90,6 @@ pub(crate) fn is_http_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
 }
 
-/// Redirect a request for a file this node does not have to the node that
-/// does (or to R2 when it has been promoted).
-///
-/// `route` is `f`, `d`, `v`, or `e`; `path` is the part after the route
-/// (usually `<id>` or `<id>.<ext>`). For raw/preview routes the extension is
-/// replaced with the one juicebox recorded, so stale links keep working.
-///
-/// Returns `None` when the file is still uploading here, when the backend has
-/// no record, when the storage host is this same node (no redirect loop), or
-/// when the stored URL is not http(s).
 pub(crate) async fn remote_redirect(
     state: &AppState,
     headers: &HeaderMap,
@@ -117,17 +101,12 @@ pub(crate) async fn remote_redirect(
     remote_redirect_with(headers, route, path, &location)
 }
 
-/// Build the redirect for an already-fetched backend location. Callers that
-/// need to inspect the location (for example to render a preview locally)
-/// use this so the backend is only queried once.
 pub(crate) fn remote_redirect_with(
     headers: &HeaderMap,
     route: &str,
     path: &str,
     location: &RemoteLocation,
 ) -> Option<Response<Body>> {
-    // The upload is still in flight on this node; the caller should render
-    // the live progress page instead of bouncing the viewer.
     if location.status == "uploading" {
         return None;
     }

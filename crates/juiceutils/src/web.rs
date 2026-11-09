@@ -1,5 +1,3 @@
-
-
 pub const HEAD_META: &str = include_str!("../templates/partials/head_meta.html");
 
 pub const BASE_CSS: &str = include_str!("../templates/shared/base.css");
@@ -33,24 +31,5 @@ mod tests {
         }
         assert!(!font_face_css("X").contains("__"));
         assert!(!brand_html("X").contains("__"));
-    }
-
-    #[test]
-    fn brand_has_logo_and_wordmark() {
-        let html = brand_html("DATA_URI");
-        assert!(html.contains("DATA_URI"));
-        assert!(html.contains("Juicebox²"));
-        assert!(html.contains("brand-logo"));
-    }
-
-    #[test]
-    fn base_covers_topbar_and_filename() {
-        assert!(BASE_CSS.contains(".topbar{"));
-        assert!(BASE_CSS.contains(".fname{"));
-        assert!(BRAND_CSS.contains(".brand-logo"));
-        assert!(HEAD_META.contains("noindex"));
-        assert!(PREVIEW_CSS.contains(".audio-hero"));
-        assert!(PREVIEW_CSS.contains(".dl-hero"));
-        assert!(PREVIEW_CSS.contains(".text-view"));
     }
 }

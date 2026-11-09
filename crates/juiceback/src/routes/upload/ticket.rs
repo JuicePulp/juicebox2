@@ -1,9 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::http::HeaderMap;
-use jsonwebtoken::{EncodingKey, Header, encode};
 
-use super::common::{dte_ticket_ttl_secs, enforce_mint_limit, region_host};
+use super::common::dte_ticket_ttl_secs;
 use crate::{
     db::{self, FileRecord},
     error::AppError,
@@ -61,24 +60,11 @@ pub fn mint_ticket(
     now: i64,
     ttl_secs: i64,
 ) -> Result<String, AppError> {
-    let claims = serde_json::json!({
-        "sub": sub,
-        "user_id": user_id,
-        "iss": "juiceback-ticket",
-        "file_id": file_id,
-        "filename": filename,
-        "mime_type": mime_type,
-        "file_size": file_size,
-        "file_capability": capability,
-        "iat": now as usize,
-        "exp": (now + ttl_secs) as usize,
-    });
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(state.config.ticket_jwt_secret.as_bytes()),
-    )
-    .map_err(|e| AppError::Internal(format!("JWT encoding failed: {e}")))
+    let claims = juiceproto::ticket::TicketClaims::new(
+        sub, user_id, file_id, filename, mime_type, file_size, capability, now, ttl_secs,
+    );
+    juiceproto::ticket::mint(&claims, &state.config.ticket_jwt_secret)
+        .map_err(|e| AppError::Internal(format!("JWT encoding failed: {e}")))
 }
 
 pub async fn insert_owned_pending(
@@ -94,15 +80,6 @@ pub async fn insert_owned_pending(
         .db_call(op, move |db| db::add_client_file(db, &owner, &owned_record))
         .await?;
     Ok(record)
-}
-
-pub fn public_url_for(state: &Arc<AppState>, record: &FileRecord) -> String {
-    crate::utils::share_link(
-        &state.config,
-        record.storage_host.as_deref(),
-        &record.id,
-        &record.filename,
-    )
 }
 
 pub fn public_urls_for(state: &Arc<AppState>, record: &FileRecord) -> (String, String, String) {
@@ -121,22 +98,6 @@ pub fn encrypted_client_ip(
 ) -> Option<String> {
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), state).to_string();
     crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key)
-}
-
-pub fn check_mint_limit(
-    state: &Arc<AppState>,
-    headers: &HeaderMap,
-    addr: SocketAddr,
-) -> Result<(), AppError> {
-    enforce_mint_limit(state, headers, addr)
-}
-
-pub fn pinned_region_host(
-    state: &Arc<AppState>,
-    headers: &HeaderMap,
-    addr: SocketAddr,
-) -> Option<String> {
-    region_host(state, headers, addr)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -208,8 +169,8 @@ mod tests {
 
     #[test]
     fn ttl_clamps_request_to_nearest_allowed() {
-        let ttl = clamp_ttl_seconds(&allowed(), 24.0, Some(2.0));
-        assert!(ttl == 3600 || ttl == 21600, "ttl={ttl}");
+        assert_eq!(clamp_ttl_seconds(&allowed(), 24.0, Some(2.0)), 3600);
+        assert_eq!(clamp_ttl_seconds(&allowed(), 24.0, Some(5.0)), 21600);
     }
 
     #[test]

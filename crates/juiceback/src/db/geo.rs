@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, Result, params};
@@ -22,12 +21,11 @@ pub struct QueuedIp {
     pub id: i64,
     pub enc_ip: String,
     pub ip_hash: String,
-    pub attempts: i64,
 }
 
 pub fn dequeue_geo_batch(conn: &Connection, limit: i64) -> Result<Vec<QueuedIp>> {
     let mut stmt = conn.prepare(
-        "SELECT id, enc_ip, ip_hash, attempts FROM geo_queue
+        "SELECT id, enc_ip, ip_hash FROM geo_queue
          ORDER BY enqueued_at ASC, id ASC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
@@ -35,7 +33,6 @@ pub fn dequeue_geo_batch(conn: &Connection, limit: i64) -> Result<Vec<QueuedIp>>
             id: row.get(0)?,
             enc_ip: row.get(1)?,
             ip_hash: row.get(2)?,
-            attempts: row.get(3)?,
         })
     })?;
     rows.collect()

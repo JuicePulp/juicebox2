@@ -43,6 +43,7 @@ pub fn test_config() -> Config {
         juicehost_api_key: "test-key".into(),
         juicehost_url: "http://127.0.0.1:6402".into(),
         public_juicehost_url: "http://localhost:6402".into(),
+        default_storage_host: None,
         juiceback_origin: "http://127.0.0.1:6401".into(),
         router_base_url: None,
         jwt_secret: "test-secret".into(),
@@ -170,6 +171,7 @@ pub fn fetch_config_with_delay(
 
         juicehost_url: cobalt_api_url.clone(),
         public_juicehost_url: "http://localhost:6402".into(),
+        default_storage_host: None,
         juiceback_origin: "http://127.0.0.1:6401".into(),
         router_base_url: None,
         jwt_secret: "test-secret".into(),
@@ -251,7 +253,6 @@ pub fn test_jh_config() -> JuicehostConfig {
         danger_level: juiceback::file_validation::ProtectionLevel::High,
         quick_link: false,
         custom_id_enabled: true,
-        ultrafast: false,
     }
 }
 

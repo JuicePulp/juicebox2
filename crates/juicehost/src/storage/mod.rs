@@ -8,11 +8,7 @@ mod s3;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    path::PathBuf,
-    pin::Pin,
-    sync::atomic::AtomicU64,
-};
+use std::{path::PathBuf, pin::Pin, sync::atomic::AtomicU64};
 
 use bytes::Bytes;
 pub(crate) use common::valid_component;
@@ -81,15 +77,10 @@ pub trait StorageBackend: FreezeStore + Send + Sync + 'static {
 
     async fn stat(&self, id: &str) -> Result<FileMetadata, StorageError>;
 
-    /// Returns a local filesystem path for backends that store bytes on this
-    /// machine. Used by the audio-embed generator to let ffmpeg read directly
-    /// from disk instead of copying the source into a temporary file.
     fn local_path(&self, _id: &str) -> Option<PathBuf> {
         None
     }
 
-    /// Path of an in-progress local upload. This is deliberately separate
-    /// from `local_path`: the latter only resolves finalized objects.
     fn live_path(&self, _id: &str) -> Option<PathBuf> {
         None
     }

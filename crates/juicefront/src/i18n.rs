@@ -155,8 +155,9 @@ mod tests {
 
     #[test]
     fn locales_resolve_and_prefix() {
-        assert_eq!(split_locale("/fr/files").0, "fr");
-        assert_eq!(split_locale("/files").0, "en");
+        assert_eq!(split_locale("/fr/files"), ("fr", "/files".to_owned()));
+        assert_eq!(split_locale("/files"), ("en", "/files".to_owned()));
+        assert_eq!(split_locale("/ru"), ("ru", "/".to_owned()));
         assert!(is_valid_locale("ru"));
         assert!(!is_valid_locale("xx"));
         assert_eq!(locale_prefix("en"), "");
@@ -168,8 +169,6 @@ mod tests {
 
     #[test]
     fn translations_fall_back_to_english() {
-        assert!(!t("en", "site.title").is_empty());
-        assert!(!t("fr", "site.title").is_empty());
         assert_eq!(t("xx", "site.title"), t("en", "site.title"));
         assert_eq!(t("en", "no.such.key"), "no.such.key");
     }
@@ -186,12 +185,5 @@ mod tests {
                 .collect();
             assert!(missing.is_empty(), "{code} missing keys: {missing:?}");
         }
-    }
-
-    #[test]
-    fn strip_locale_prefix_routes() {
-        assert_eq!(split_locale("/fr/files"), ("fr", "/files".to_owned()));
-        assert_eq!(split_locale("/files"), ("en", "/files".to_owned()));
-        assert_eq!(split_locale("/ru"), ("ru", "/".to_owned()));
     }
 }

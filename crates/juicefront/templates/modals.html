@@ -1,4 +1,4 @@
-<div id="server-config" hidden data-version="{{ asset_version }}" data-quick-link="{% if flags.quick_link %}true{% else %}false{% endif %}" data-quic="{% if flags.quic %}true{% else %}false{% endif %}" data-custom-id="{% if flags.custom_id %}true{% else %}false{% endif %}" data-ultrafast="{% if flags.ultrafast %}true{% else %}false{% endif %}" data-cobalt="{% if flags.cobalt %}true{% else %}false{% endif %}" data-upload-mode="{{ upload_mode }}" data-danger-level="{{ danger_level }}" data-max-file-size-bytes="{{ max_bytes }}" data-allowed-ttl-hours="{{ allowed_ttl }}" data-default-ttl-hours="{{ default_ttl }}" data-public-base-url="{{ public_base_url }}"></div>
+<div id="server-config" hidden data-version="{{ asset_version }}" data-quick-link="{% if flags.quick_link %}true{% else %}false{% endif %}" data-quic="{% if flags.quic %}true{% else %}false{% endif %}" data-custom-id="{% if flags.custom_id %}true{% else %}false{% endif %}" data-cobalt="{% if flags.cobalt %}true{% else %}false{% endif %}" data-upload-mode="{{ upload_mode }}" data-danger-level="{{ danger_level }}" data-max-file-size-bytes="{{ max_bytes }}" data-allowed-ttl-hours="{{ allowed_ttl }}" data-default-ttl-hours="{{ default_ttl }}" data-public-base-url="{{ public_base_url }}"></div>
 
 <div id="share-modal" class="mdloverlay mdl-target" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
 <a href="#!" data-cuelume-close data-cuelume-emphasis="subtle" class="mdl-target__backdrop" aria-label="Close modal"></a>
@@ -150,13 +150,6 @@
 <input type="checkbox" data-safe-upload-toggle="" aria-label="{{ cx.t("host.safe_upload") }}">
 <span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
 <span class="select-option__text"><span class="select-option__label">{{ cx.t("host.safe_upload") }}</span><span class="select-option__desc">{{ cx.t("host.safe_upload_desc") }}</span></span>
-</label>
-</div>
-<div class="form-field">
-<label class="select-option select-option--toggle" data-cuelume-toggle>
-<input type="checkbox" data-ultrafast-toggle="" aria-label="UltraFast">
-<span class="select-option__icon select-option__check" aria-hidden="true"><span class="check-off">{{ cx.icon("checkbox", 24)|safe }}</span><span class="check-on">{{ cx.icon("checkbox-on", 24)|safe }}</span></span>
-<span class="select-option__text"><span class="select-option__label">UltraFast</span><span class="select-option__desc">Upload directly from your device (requires paired device)</span></span>
 </label>
 </div>
 </div>

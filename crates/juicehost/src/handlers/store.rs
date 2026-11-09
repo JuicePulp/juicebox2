@@ -251,7 +251,9 @@ pub async fn store_file_streaming(
             .live_uploads
             .ensure_single(&id, &storage_filename, &mime, live_total);
     }
-    let live_writer = should_track.then(|| state.live_uploads.track(&id)).flatten();
+    let live_writer = should_track
+        .then(|| state.live_uploads.track(&id))
+        .flatten();
     let stream = stream.map(move |item| {
         if let Ok(ref bytes) = item
             && let Some(ref writer) = live_writer
@@ -317,36 +319,20 @@ pub async fn store_file_ticket(
 
     let token = juiceutils::extract_bearer_token(&headers).ok_or(JuicehostError::Unauthorized)?;
 
-    #[derive(serde::Deserialize)]
-    struct TicketClaims {
-        sub: String,
-        file_id: String,
-        filename: String,
-        file_size: u64,
-        file_capability: Option<String>,
-    }
-
-    use jsonwebtoken::{DecodingKey, decode};
-
-    let ticket = decode::<TicketClaims>(
-        token,
-        &DecodingKey::from_secret(state.ticket_jwt_secret.as_bytes()),
-        &crate::ticket::ticket_validation(),
-    )
-    .map_err(|e| {
+    let ticket = juiceproto::ticket::verify(token, &state.ticket_jwt_secret).map_err(|e| {
         tracing::warn!("ticket JWT validation failed: {e}");
         JuicehostError::Unauthorized
     })?;
 
-    if ticket.claims.file_id != id {
+    if ticket.file_id != id {
         tracing::warn!(
             "ticket file_id mismatch: ticket={} path={}",
-            ticket.claims.file_id,
+            ticket.file_id,
             id
         );
         return Err(JuicehostError::Forbidden);
     }
-    if ticket.claims.file_size > state.max_file_size_bytes {
+    if ticket.file_size > state.max_file_size_bytes {
         return Err(JuicehostError::PayloadTooLarge);
     }
     if let Some(content_length) = headers.get(header::CONTENT_LENGTH) {
@@ -355,34 +341,27 @@ pub async fn store_file_ticket(
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .ok_or(JuicehostError::BadRequest)?;
-        if declared != ticket.claims.file_size {
+        if declared != ticket.file_size {
             return Err(JuicehostError::SizeMismatch);
         }
     }
-    let real_filename = ticket.claims.filename.clone();
+    let real_filename = ticket.filename.clone();
     let _permit = Arc::clone(&state.upload_semaphore)
         .try_acquire_owned()
         .map_err(|_| JuicehostError::ServiceUnavailable)?;
 
     let handler_start = std::time::Instant::now();
 
-    let capability = ticket
-        .claims
-        .file_capability
-        .clone()
-        .or_else(|| optional_file_capability(&headers));
+    let capability = Some(ticket.file_capability.clone());
 
     let (body, detected) = sniff_and_validate(body, &real_filename, state.danger_level).await?;
-    let stream = sized_stream(body, ticket.claims.file_size, Some(ticket.claims.file_size));
+    let stream = sized_stream(body, ticket.file_size, Some(ticket.file_size));
     let storage_filename = content_filename(&real_filename, detected.as_ref());
     let mime = storage::guess_mime(storage::extract_extension(&storage_filename));
     if !state.live_uploads.is_part(&id) {
-        state.live_uploads.ensure_single(
-            &id,
-            &storage_filename,
-            &mime,
-            ticket.claims.file_size,
-        );
+        state
+            .live_uploads
+            .ensure_single(&id, &storage_filename, &mime, ticket.file_size);
     }
     let live_writer = state.live_uploads.track(&id);
     let stream = stream.map(move |item| {
@@ -415,7 +394,7 @@ pub async fn store_file_ticket(
     tracing::info!(
         "stored file (ticket): {id} ({real_filename}) bytes={total} {:.2} MB/s device={sub}",
         bytes_per_sec / (1024.0 * 1024.0),
-        sub = ticket.claims.sub,
+        sub = ticket.sub,
     );
 
     Ok(Json(serde_json::json!({"status": "ok", "id": id})))

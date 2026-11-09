@@ -2,45 +2,7 @@ use axum::body::Body;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use super::{
-    common::deadline_body,
-    serve::{RangeResult, parse_range},
-};
-use crate::storage::valid_component as is_valid_id;
-
-#[test]
-fn is_valid_id_valid() {
-    assert!(is_valid_id("abc-123"));
-    assert!(is_valid_id("test_file"));
-    assert!(is_valid_id("ABC123"));
-}
-
-#[test]
-fn is_valid_id_empty() {
-    assert!(!is_valid_id(""));
-}
-
-#[test]
-fn is_valid_id_with_spaces() {
-    assert!(!is_valid_id("has space"));
-}
-
-#[test]
-fn is_valid_id_with_special_chars() {
-    assert!(!is_valid_id("file@name"));
-    assert!(!is_valid_id("file.txt"));
-    assert!(!is_valid_id("file/here"));
-}
-
-#[test]
-fn is_valid_id_with_underscores_and_dashes() {
-    assert!(is_valid_id("my_file-123"));
-}
-
-#[test]
-fn is_valid_id_rejects_non_ascii_alphanumeric() {
-    assert!(!is_valid_id("cafe-é"));
-}
+use super::common::{RangeResult, deadline_body, parse_range};
 
 #[test]
 fn parse_range_basic() {

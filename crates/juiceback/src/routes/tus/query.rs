@@ -45,10 +45,6 @@ pub async fn get_upload_handler(
         .map_err(|_| AppError::Internal("response build failed".into()))?)
 }
 
-/// Safe upload health probe. It combines the backend offset with the bytes the
-/// storage host reports for the exact TUS resource, so the browser can tell
-/// whether a retry should resume from the server offset or start that part
-/// again.
 #[utoipa::path(
     get,
     path = "/api/tus/{id}/health",

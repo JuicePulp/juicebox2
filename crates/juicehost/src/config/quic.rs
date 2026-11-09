@@ -63,7 +63,7 @@ impl QuicSettings {
         let port = file.port.unwrap_or(
             public
                 .port()
-                .checked_add(1)
+                .checked_add(juiceutils::config::ports::QUIC_OFFSET)
                 .ok_or(ConfigError::MissingQuicPort)?,
         );
         let cert_path = file.cert_path.clone();

@@ -19,7 +19,11 @@ fn bun_max_height(video_quality: &str) -> u32 {
     if video_quality == "max" {
         return 0;
     }
-    video_quality.parse::<u32>().ok().filter(|h| *h > 0).unwrap_or(0)
+    video_quality
+        .parse::<u32>()
+        .ok()
+        .filter(|h| *h > 0)
+        .unwrap_or(0)
 }
 
 #[expect(
@@ -37,10 +41,9 @@ pub(crate) async fn run_bun_tier(
     encrypted_ip: Option<String>,
     password: Option<String>,
 ) -> FetchResult {
-    let (Some(fetch_url), Some(api_key)) = (
-        &state.config.bun_fetch_url,
-        &state.config.bun_fetch_key,
-    ) else {
+    let (Some(fetch_url), Some(api_key)) =
+        (&state.config.bun_fetch_url, &state.config.bun_fetch_key)
+    else {
         return Err("bun-fetch tier not configured".into());
     };
 
@@ -51,7 +54,11 @@ pub(crate) async fn run_bun_tier(
         })
         .await;
 
-    tracing::info!("tier via bun-fetch ({}): fetching {}", fetch_url, source_url);
+    tracing::info!(
+        "tier via bun-fetch ({}): fetching {}",
+        fetch_url,
+        source_url
+    );
 
     let resp = state
         .http

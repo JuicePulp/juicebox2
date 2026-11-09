@@ -76,7 +76,8 @@ mod tests {
 
     #[test]
     fn matches_trims_stored_bytes() {
-        assert_eq!(matches("abc123\n", "tok"), hash("tok") == "abc123\n".trim());
+        let stored_with_newline = format!("{}\n", hash("tok"));
+        assert!(matches(&stored_with_newline, "tok"));
         assert!(matches(&hash("tok"), "tok"));
         assert!(!matches(&hash("tok"), "other"));
         assert!(!matches("", "tok"));

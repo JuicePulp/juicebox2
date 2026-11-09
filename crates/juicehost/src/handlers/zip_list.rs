@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -26,7 +18,6 @@ pub struct ZipEntry {
 
     pub header_offset: u32,
 }
-
 
 const MAX_CD_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -67,8 +58,6 @@ pub(crate) async fn read_range_capped(
     Some(Bytes::from(out))
 }
 
-
-
 fn find_eocd(tail: &[u8], file_size: u64) -> Option<(u64, u64, usize)> {
     if tail.len() < 22 {
         return None;
@@ -84,8 +73,7 @@ fn find_eocd(tail: &[u8], file_size: u64) -> Option<(u64, u64, usize)> {
                 let total_entries = u16le(&tail[pos + 10..pos + 12]);
                 let cd_size = u32le(&tail[pos + 12..pos + 16]) as u64;
                 let cd_offset = u32le(&tail[pos + 16..pos + 20]) as u64;
-           
-           
+
                 if disk_no == 0
                     && cd_disk == 0
                     && disk_entries == total_entries
@@ -112,15 +100,13 @@ fn decode_name(raw: &[u8]) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    
+
     let text = String::from_utf8_lossy(raw);
     if text.chars().any(|c| c.is_control() && c != '\t') {
         return None;
     }
     Some(text.into_owned())
 }
-
-
 
 fn dos_datetime(time: u16, date: u16) -> Option<String> {
     let secs = u32::from(time & 0x1F) * 2;
@@ -129,13 +115,13 @@ fn dos_datetime(time: u16, date: u16) -> Option<String> {
     let day = u32::from(date & 0x1F);
     let month = u32::from((date >> 5) & 0x0F);
     let year = u32::from((date >> 9) & 0x7F) + 1980;
-    if day == 0 || day > 31 || month == 0 || month > 12 || hours > 23 || mins > 59 || secs > 59
-    {
+    if day == 0 || day > 31 || month == 0 || month > 12 || hours > 23 || mins > 59 || secs > 59 {
         return None;
     }
-    Some(format!("{year:04}-{month:02}-{day:02} {hours:02}:{mins:02}"))
+    Some(format!(
+        "{year:04}-{month:02}-{day:02} {hours:02}:{mins:02}"
+    ))
 }
-
 
 fn parse_entries(cd: &[u8], count: usize) -> Option<Vec<ZipEntry>> {
     let mut out = Vec::with_capacity(count.min(512));
@@ -163,7 +149,7 @@ fn parse_entries(cd: &[u8], count: usize) -> Option<Vec<ZipEntry>> {
         }
         if let Some(name) = decode_name(&cd[pos + 46..pos + 46 + name_len]) {
             let is_dir = name.ends_with('/');
-            
+
             let size = if is_dir || comp_size == 0xFFFF_FFFF || uncomp_size == 0xFFFF_FFFF {
                 None
             } else {
@@ -185,8 +171,6 @@ fn parse_entries(cd: &[u8], count: usize) -> Option<Vec<ZipEntry>> {
     if out.is_empty() { None } else { Some(out) }
 }
 
-
-
 pub async fn load_zip_entries(
     storage: &Arc<dyn StorageBackend>,
     id: &str,
@@ -196,11 +180,23 @@ pub async fn load_zip_entries(
         return None;
     }
     let tail_len = TAIL_WINDOW.min(file_size);
-    let tail =
-        read_range_capped(storage, id, file_size - tail_len, file_size - 1, TAIL_WINDOW).await?;
+    let tail = read_range_capped(
+        storage,
+        id,
+        file_size - tail_len,
+        file_size - 1,
+        TAIL_WINDOW,
+    )
+    .await?;
     let (cd_offset, cd_size, count) = find_eocd(&tail, file_size)?;
-    let cd =
-        read_range_capped(storage, id, cd_offset, cd_offset + cd_size - 1, MAX_CD_BYTES).await?;
+    let cd = read_range_capped(
+        storage,
+        id,
+        cd_offset,
+        cd_offset + cd_size - 1,
+        MAX_CD_BYTES,
+    )
+    .await?;
     parse_entries(&cd, count)
 }
 
@@ -326,23 +322,34 @@ async fn load_tar_entries(
     let mut out: Vec<ZipEntry> = Vec::new();
     let mut zero_streak: u8 = 0;
     loop {
-        while data.len() - off < 512 && fetched < file_size && fetched < MAX_TAR_SCAN_BYTES {
-            let end = (fetched + TAR_CHUNK).min(file_size) - 1;
+        while data.len().saturating_sub(off) < 512
+            && fetched < file_size
+            && fetched < MAX_TAR_SCAN_BYTES
+        {
+            let end = fetched
+                .saturating_add(TAR_CHUNK)
+                .min(file_size)
+                .saturating_sub(1);
             let chunk = read_range_capped(storage, id, fetched, end, TAR_CHUNK).await?;
             fetched += chunk.len() as u64;
             data.extend_from_slice(&chunk);
         }
-        if data.len() - off < 512 {
+        if data.len().saturating_sub(off) < 512 {
             break;
         }
         if off > 1_048_576 {
             data.drain(..off);
             off = 0;
         }
-        let hdr = &data[off..off + 512];
+        let Some(hdr_end) = off.checked_add(512) else {
+            break;
+        };
+        let Some(hdr) = data.get(off..hdr_end) else {
+            break;
+        };
         if hdr.iter().all(|&b| b == 0) {
             zero_streak += 1;
-            off += 512;
+            off = hdr_end;
             if zero_streak >= 2 {
                 break;
             }
@@ -364,8 +371,12 @@ async fn load_tar_entries(
         }
         let size = size.unwrap_or(0);
         let is_dir = typeflag == '5' || name.ends_with('/');
+        let Some(padded) = pad512(size) else { break };
         if matches!(typeflag, 'x' | 'g') {
-            off += 512 + pad512(size);
+            let Some(next) = hdr_end.checked_add(padded) else {
+                break;
+            };
+            off = next;
             continue;
         }
         out.push(ZipEntry {
@@ -381,7 +392,10 @@ async fn load_tar_entries(
         if out.len() >= MAX_TAR_ENTRIES {
             break;
         }
-        off += 512 + pad512(size);
+        let Some(next) = hdr_end.checked_add(padded) else {
+            break;
+        };
+        off = next;
         if off as u64 > fetched && fetched >= file_size {
             break;
         }
@@ -404,8 +418,9 @@ fn split_blank(field: &[u8]) -> &[u8] {
     &field[..end]
 }
 
-fn pad512(size: u64) -> usize {
-    (size as usize).div_ceil(512) * 512
+fn pad512(size: u64) -> Option<usize> {
+    let size = usize::try_from(size).ok()?;
+    size.checked_add(511)?.checked_div(512)?.checked_mul(512)
 }
 
 async fn load_gz_entry(
@@ -447,7 +462,10 @@ async fn load_gz_entry(
     let display = match name {
         Some(n) if !n.trim().is_empty() => n,
         _ => {
-            let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
+            let stem = filename
+                .rsplit_once('.')
+                .map(|(s, _)| s)
+                .unwrap_or(filename);
             if stem.trim().is_empty() {
                 "archive contents".to_string()
             } else {
@@ -471,53 +489,52 @@ async fn load_gz_entry(
 mod tests {
     use super::*;
 
-    
     fn sample_zip() -> Vec<u8> {
         let mut v = Vec::new();
-        
+
         v.extend_from_slice(b"PK\x03\x04");
-        v.extend_from_slice(&20u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u32.to_le_bytes()); 
-        v.extend_from_slice(&5u32.to_le_bytes()); 
-        v.extend_from_slice(&5u32.to_le_bytes()); 
-        v.extend_from_slice(&6u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
+        v.extend_from_slice(&20u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&5u32.to_le_bytes());
+        v.extend_from_slice(&5u32.to_le_bytes());
+        v.extend_from_slice(&6u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
         v.extend_from_slice(b"hi.txt");
         v.extend_from_slice(b"hello");
         let cd_offset = v.len() as u32;
-        
+
         v.extend_from_slice(b"PK\x01\x02");
-        v.extend_from_slice(&20u16.to_le_bytes()); 
-        v.extend_from_slice(&20u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u32.to_le_bytes()); 
-        v.extend_from_slice(&5u32.to_le_bytes()); 
-        v.extend_from_slice(&5u32.to_le_bytes()); 
-        v.extend_from_slice(&6u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u32.to_le_bytes()); 
-        v.extend_from_slice(&0u32.to_le_bytes()); 
+        v.extend_from_slice(&20u16.to_le_bytes());
+        v.extend_from_slice(&20u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&5u32.to_le_bytes());
+        v.extend_from_slice(&5u32.to_le_bytes());
+        v.extend_from_slice(&6u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
         v.extend_from_slice(b"hi.txt");
         let cd_size = v.len() as u32 - cd_offset;
-        
+
         v.extend_from_slice(b"PK\x05\x06");
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&0u16.to_le_bytes()); 
-        v.extend_from_slice(&1u16.to_le_bytes()); 
-        v.extend_from_slice(&1u16.to_le_bytes()); 
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&0u16.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
         v.extend_from_slice(&cd_size.to_le_bytes());
         v.extend_from_slice(&cd_offset.to_le_bytes());
-        v.extend_from_slice(&0u16.to_le_bytes()); 
+        v.extend_from_slice(&0u16.to_le_bytes());
         v
     }
 
@@ -530,14 +547,16 @@ mod tests {
         assert_eq!(entries[0].name, "hi.txt");
         assert_eq!(entries[0].size, Some(5));
         assert!(!entries[0].is_dir);
-        
+
         assert_eq!(entries[0].modified, None);
     }
 
     #[test]
     fn dos_stamps_format() {
-        
-        assert_eq!(dos_datetime((13u16 << 11) | (5u16 << 5), (44u16 << 9) | (1u16 << 5) | 15).as_deref(), Some("2024-01-15 13:05"));
+        assert_eq!(
+            dos_datetime((13u16 << 11) | (5u16 << 5), (44u16 << 9) | (1u16 << 5) | 15).as_deref(),
+            Some("2024-01-15 13:05")
+        );
         assert_eq!(dos_datetime(0, 0), None);
         assert_eq!(dos_datetime(0xFFFF, 0xFFFF), None);
     }

@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 #[derive(Debug, Clone)]
 pub enum FinishReservationResult {
-    Completed(Box<FileRecord>),
+    Completed(FileRecord),
     NotFound,
     NotUploading,
     InvalidToken,
@@ -124,6 +124,11 @@ pub struct FileRecord {
 }
 
 impl FileRecord {
+    pub const STATUS_UPLOADING: &str = "uploading";
+    pub const STATUS_READY: &str = "ready";
+    pub const TIER_STANDARD: &str = "standard";
+    pub const TIER_HOT: &str = "hot";
+
     #[expect(
         clippy::too_many_arguments,
         reason = "pipeline fns thread established context (state, ids, tokens); bundling params churns callers for no behavior gain"
@@ -153,8 +158,8 @@ impl FileRecord {
             expires_at,
             uploader_ip,
             storage_host,
-            status: "ready".to_string(),
-            tier: "standard".to_string(),
+            status: Self::STATUS_READY.to_string(),
+            tier: Self::TIER_STANDARD.to_string(),
             r2_key: String::new(),
             tier_pinned: false,
             password_hash: None,
@@ -223,16 +228,26 @@ pub struct ProtectionMaterial {
 
 impl ProtectionMaterial {
     #[must_use]
-    pub fn legacy(password_hash: Option<String>, enc_header: Option<String>) -> Self {
+    pub fn from_record(record: &FileRecord) -> Self {
         Self {
-            password_hash,
+            password_hash: record.password_hash.clone(),
             is_encrypted: true,
-            enc_header,
-            dek_wrapped: None,
-            dek_salt: None,
-            dek_escrow: None,
-            key_version: 0,
+            enc_header: None,
+            dek_wrapped: record.dek_wrapped.clone(),
+            dek_salt: record.dek_salt.clone(),
+            dek_escrow: record.dek_escrow.clone(),
+            key_version: record.key_version,
         }
+    }
+
+    pub fn apply_to(&self, record: &mut FileRecord) {
+        record.password_hash.clone_from(&self.password_hash);
+        record.is_encrypted = self.is_encrypted;
+        record.enc_header.clone_from(&self.enc_header);
+        record.dek_wrapped.clone_from(&self.dek_wrapped);
+        record.dek_salt.clone_from(&self.dek_salt);
+        record.dek_escrow.clone_from(&self.dek_escrow);
+        record.key_version = self.key_version;
     }
 }
 

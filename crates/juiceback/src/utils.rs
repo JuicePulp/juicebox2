@@ -28,21 +28,36 @@ pub fn is_valid_id(id: &str) -> bool {
     )
 }
 
-pub use juiceutils::{ids::normalize_custom_id, urls::public_url, urls::public_url_for_route};
+pub use juiceutils::{
+    ids::{is_valid_id_component, normalize_custom_id},
+    urls::{public_url, public_url_for_route},
+};
+
+#[must_use]
+pub fn official_hosts(config: &crate::config::Config) -> std::collections::HashSet<String> {
+    let mut hosts = std::collections::HashSet::new();
+    let mut push = |raw: &str| {
+        let trimmed = raw.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            hosts.insert(trimmed.to_string());
+        }
+    };
+    push(&config.juicehost_url);
+    push(&config.public_base_url);
+    push(&config.public_juicehost_url);
+    if let Some(router) = config.router_base_url.as_deref() {
+        push(router);
+    }
+    for url in config.region_public_juicehosts.values() {
+        push(url);
+    }
+    hosts
+}
 
 #[must_use]
 pub fn is_official_host(config: &crate::config::Config, host: &str) -> bool {
     let host = host.trim().trim_end_matches('/');
-    if host.is_empty() {
-        return true;
-    }
-    if host == config.juicehost_url.trim_end_matches('/') {
-        return true;
-    }
-    config
-        .region_public_juicehosts
-        .values()
-        .any(|u| u.trim().trim_end_matches('/') == host)
+    host.is_empty() || official_hosts(config).contains(host)
 }
 
 #[must_use]
@@ -164,44 +179,5 @@ impl tower_governor::key_extractor::KeyExtractor for TrustedClientIpKeyExtractor
             peer,
             &self.trusted_proxy_cidrs,
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn public_url_with_storage_host() {
-        let url = public_url(
-            "http://localhost:6402",
-            Some("https://files.example.com"),
-            "abc123",
-            "cute.gif",
-        );
-        assert_eq!(url, "https://files.example.com/v/abc123.gif");
-    }
-
-    #[test]
-    fn public_url_without_storage_host() {
-        let url = public_url("http://localhost:6402", None, "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
-    }
-
-    #[test]
-    fn public_url_empty_storage_host() {
-        let url = public_url("http://localhost:6402", Some(""), "abc123", "cute.gif");
-        assert_eq!(url, "http://localhost:6402/v/abc123.gif");
-    }
-
-    #[test]
-    fn public_url_bare_storage_host() {
-        let url = public_url(
-            "https://f.juicey.dev",
-            Some("fx.juicey.dev"),
-            "abc123",
-            "cute.gif",
-        );
-        assert_eq!(url, "https://fx.juicey.dev/v/abc123.gif");
     }
 }

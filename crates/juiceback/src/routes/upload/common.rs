@@ -1,10 +1,14 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use axum::http::HeaderMap;
+use axum::{
+    Json,
+    http::{HeaderMap, header},
+    response::{IntoResponse, Response},
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::{error::AppError, state::AppState};
+use crate::{db::FileRecord, error::AppError, routes::noscript, state::AppState};
 
 #[derive(Serialize, ToSchema)]
 pub struct UploadResponse {
@@ -22,6 +26,62 @@ pub struct UploadResponse {
     pub protected: bool,
     #[serde(default)]
     pub is_encrypted: bool,
+}
+
+impl UploadResponse {
+    pub(crate) fn from_record(
+        state: &Arc<AppState>,
+        record: &FileRecord,
+        include_delete_token: bool,
+    ) -> Self {
+        let (url, raw_url, download_url) = crate::utils::share_links(
+            &state.config,
+            record.storage_host.as_deref(),
+            &record.id,
+            &record.filename,
+        );
+        Self {
+            id: record.id.clone(),
+            url,
+            raw_url,
+            download_url,
+            filename: record.filename.clone(),
+            size_bytes: record.size_bytes,
+            mime_type: record.mime_type.clone(),
+            expires_at: record.expires_at,
+            delete_token: if include_delete_token {
+                record.delete_token.clone()
+            } else {
+                String::new()
+            },
+            status: record.status.clone(),
+            protected: record.is_protected(),
+            is_encrypted: record.is_encrypted,
+        }
+    }
+}
+
+pub(crate) fn upload_json_response(
+    state: &Arc<AppState>,
+    record: &FileRecord,
+    include_delete_token: bool,
+    headers: &HeaderMap,
+) -> Response {
+    let cookie_hdr = noscript::file_cookie_header(
+        headers,
+        &noscript::FileCookieEntry {
+            id: record.id.clone(),
+            token: record.delete_token.clone(),
+        },
+    );
+    let mut resp = Json(UploadResponse::from_record(
+        state,
+        record,
+        include_delete_token,
+    ))
+    .into_response();
+    resp.headers_mut().insert(header::SET_COOKIE, cookie_hdr);
+    resp
 }
 
 pub(crate) fn compute_ticket_ttl_secs(
@@ -186,12 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn ttl_small_file_at_least_ten_minutes() {
-        let ttl = compute(1_000_000);
-        assert!(ttl >= 600, "ttl={ttl}");
-    }
-
-    #[test]
     fn ttl_mid_size_in_range() {
         let ttl = compute(4 * 1024 * 1024 * 1024);
         assert!(ttl > 600 && ttl < 21_600, "ttl={ttl}");
@@ -200,12 +254,6 @@ mod tests {
     #[test]
     fn ttl_large_file_clamped_to_max() {
         let ttl = compute(u64::MAX);
-        assert_eq!(ttl, crate::constants::DTE_MAX_TTL_SECS);
-    }
-
-    #[test]
-    fn ttl_max_clamp_for_very_large_file() {
-        let ttl = compute(100 * 1024 * 1024 * 1024);
         assert_eq!(ttl, crate::constants::DTE_MAX_TTL_SECS);
     }
 

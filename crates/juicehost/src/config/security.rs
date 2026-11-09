@@ -43,7 +43,9 @@ impl SecuritySettings {
     pub fn load(file: &SecurityFile, directories: &DirectorySettings) -> Result<Self, ConfigError> {
         let api_key = juiceutils::config::optional_secret("JUICEHOST_API_KEY").unwrap_or_default();
 
-        let allow_no_auth = file.allow_no_auth;
+        let allow_no_auth = juiceutils::config::env_bool("JUICEHOST_ALLOW_NO_AUTH")
+            .map_err(ConfigError::InvalidEnvironment)?
+            .unwrap_or(file.allow_no_auth);
 
         let allowed_origins = file.allowed_origins.clone().unwrap_or_else(|| {
             directories

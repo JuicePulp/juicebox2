@@ -2,28 +2,10 @@ use crate::error::StorageError;
 
 #[async_trait::async_trait]
 pub trait FreezeStore: Send + Sync {
-    
-    
-    
-    async fn freeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError>;
+    async fn freeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError>;
 
-    
-    
-    
-    async fn unfreeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError>;
+    async fn unfreeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError>;
 
-    
-    
-    
-    
     async fn is_frozen(&self, id: &str) -> Result<bool, StorageError>;
 }
 

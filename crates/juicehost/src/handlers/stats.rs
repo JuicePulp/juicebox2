@@ -60,7 +60,6 @@ pub(crate) fn report_file_hit(
     *state.hit_buffer.entry(key).or_insert(0) += 1;
 }
 
-/// Flush buffered hit counters to the backend once per second.
 pub fn start_flusher(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(FLUSH_INTERVAL);
@@ -119,7 +118,6 @@ async fn flush_once(state: &AppState) {
     match request.send().await {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => {
-            // A rejected batch will not become valid on retry.
             tracing::debug!(status = %resp.status(), "stats hit batch not recorded");
         }
         Err(error) => {

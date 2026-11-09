@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use super::metadata::{
     find_meta, parse_parallel_number, parse_tus_metadata, validate_parallel_metadata,
 };
-use crate::{db, error::AppError, state::AppState, tus::TusUpload, upload_mode::UploadMode};
+use crate::{error::AppError, state::AppState, tus::TusUpload, upload_mode::UploadMode};
 
 #[utoipa::path(
     post,
@@ -110,8 +110,6 @@ pub async fn create_upload_handler(
     let total_parts = parse_parallel_number(find_meta(&metadata, "total_parts"))?;
     let parallel = validate_parallel_metadata(session_id.as_deref(), part_index, total_parts)?;
 
-    
-    
     let password = find_meta(&metadata, "password")
         .filter(|v| !v.is_empty())
         .map(|v| {
@@ -128,42 +126,18 @@ pub async fn create_upload_handler(
 
     let reserve_id = find_meta(&metadata, "reserve_id")
         .filter(|v| !v.is_empty())
-        .map(|value| {
-            if crate::utils::is_valid_id(value) {
-                Ok(value.to_string())
-            } else {
-                Err(AppError::BadRequest("invalid reserve_id".into()))
-            }
-        })
-        .transpose()?;
+        .map(ToString::to_string);
     let reservation_token = find_meta(&metadata, "delete_token")
         .filter(|v| !v.is_empty())
         .map(ToString::to_string);
     let mut reservation_hash: Option<String> = None;
-    let mut reservation_size = declared_file_size;
+    let reservation_size = declared_file_size;
     if let Some(ref reserve_id) = reserve_id {
         let token = reservation_token
             .as_deref()
             .ok_or_else(|| AppError::Forbidden("reservation delete token required".into()))?;
-        let lookup_id = reserve_id.clone();
-        let reservation = state
-            .db_call("get_tus_reservation", move |db| {
-                db::get_file(db, &lookup_id)
-            })
-            .await?
-            .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
-        if reservation.status != "uploading" {
-            return Err(AppError::BadRequest("reservation is not uploading".into()));
-        }
-        reservation_size = reservation_size.max(reservation.size_bytes.max(0) as u64);
-        if !crate::utils::constant_time_eq(&reservation.delete_token, token) {
-            return Err(AppError::Forbidden(
-                "invalid reservation delete token".into(),
-            ));
-        }
+        let reservation = crate::reservation::verify_by_id(&state, reserve_id, token).await?;
         if reservation.is_protected() {
-            
-            
             if password.is_some() || parallel.is_some() {
                 return Err(crate::routes::upload::protected::relay_required());
             }
@@ -182,6 +156,16 @@ pub async fn create_upload_handler(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    let protection_setup = match reservation_hash {
+        Some(_) => None,
+        None => match password {
+            Some(password) => {
+                Some(crate::routes::upload::protected::prepare_protection(&state, &password).await?)
+            }
+            None => None,
+        },
+    };
+
     if let Some((sid, pi, tp)) = parallel {
         let session = state
             .part_sessions
@@ -192,7 +176,6 @@ pub async fn create_upload_handler(
                     total_parts: tp,
                     filename: filename.clone(),
                     mime_type: mime_type.clone(),
-                    hashed_ip: hashed_ip.clone(),
                     storage_host: storage_host.clone(),
                     ttl_hours,
                     reserve_id: reserve_id.clone(),
@@ -222,16 +205,10 @@ pub async fn create_upload_handler(
             ));
         }
         file_capability = session.capability.clone();
-        // A part can outlive its TUS resource after a backend restart. Treating
-        // that stale id as complete would silently drop the part, so clear it
-        // and let this request create a replacement that starts from zero.
-        let stale_part = session
-            .part_ids
-            .get(&pi)
-            .is_some_and(|existing_id| {
-                !state.tus.contains_key(existing_id.value())
-                    && !session.finalized_parts.contains_key(&pi)
-            });
+        let stale_part = session.part_ids.get(&pi).is_some_and(|existing_id| {
+            !state.tus.contains_key(existing_id.value())
+                && !session.finalized_parts.contains_key(&pi)
+        });
         if stale_part {
             let old_length = session.part_ids.remove(&pi).and_then(|(_, old_id)| {
                 tracing::warn!(
@@ -239,10 +216,7 @@ pub async fn create_upload_handler(
                     pi + 1,
                     tp
                 );
-                session
-                    .part_lengths
-                    .remove(&pi)
-                    .map(|(_, length)| length)
+                session.part_lengths.remove(&pi).map(|(_, length)| length)
             });
             if let Some(old_length) = old_length {
                 let _ = session.declared_size.fetch_update(
@@ -303,18 +277,6 @@ pub async fn create_upload_handler(
     let (tx, rx) =
         mpsc::channel::<Result<Bytes, String>>(crate::constants::STREAM_CHANNEL_CAPACITY);
 
-    
-    
-    
-    let protection_setup = match reservation_hash {
-        Some(_) => None,
-        None => match password {
-            Some(password) => {
-                Some(crate::routes::upload::protected::prepare_protection(&state, &password).await?)
-            }
-            None => None,
-        },
-    };
     let password_hash = match reservation_hash {
         Some(hash) => Some(hash),
         None => protection_setup
@@ -322,8 +284,6 @@ pub async fn create_upload_handler(
             .map(|setup| setup.password_hash.clone()),
     };
 
-    
-    
     let storage_upload_mode = if password_hash.is_some() && state.config.encrypted_force_relay {
         crate::upload_mode::UploadMode::Standard
     } else {
@@ -377,7 +337,6 @@ pub async fn create_upload_handler(
         dek_escrow: protection_setup
             .as_ref()
             .map(|setup| setup.escrow_hex.clone()),
-        spool_path: None,
     };
 
     state.tus.insert(id.clone(), upload);

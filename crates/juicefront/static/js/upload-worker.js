@@ -44,9 +44,6 @@ function upsert(patch) {
     const existing = entries.get(patch.id);
     const safe = patch.safeUpload ?? existing?.item?.safeUpload;
     if (safe) {
-      // Safe upload is meant to survive a dropped connection. If its
-      // internal retries run out, keep the row resumable instead of leaving
-      // a terminal network error with no action.
       patch = {
         ...patch,
         state: "paused",
@@ -64,9 +61,6 @@ function upsert(patch) {
   Object.assign(entry.item, patch);
   const state = entry.item.state;
   if (state === "done") {
-    // The page may not be attached when the worker finishes. Leave the
-    // completed record in IndexedDB so the next page load can add it to the
-    // local file history instead of silently losing the result.
     queueItemNow(entry.item);
   } else if (state === "error" || state === "cancelled") {
     void removeQueueItem(entry.item.id);
@@ -75,9 +69,6 @@ function upsert(patch) {
   }
   entryItem(entry.item);
   if (!ACTIVE_STATES.has(state)) {
-    // Release the file/transfer references. The item itself stays so late
-    // events and removals still merge into a complete row, but snapshots only
-    // send live work (see onconnect below).
     entry.handle = null;
     entry.tusIds = [];
   }
@@ -96,25 +87,16 @@ function handleEnqueue(msg, _port) {
   if (entries.has(msg.id)) {
     const existing = entries.get(msg.id);
     if (existing && existing.item.state === "paused") {
-      // The worker paused this transfer after a transient resume failure.
-      // The user reselected the file, so drop the parked entry and start the
-      // resume from the item snapshot the page just sent.
       try {
         existing.handle?.abort();
       } catch {}
       entries.delete(msg.id);
     } else {
-      // A resume for an id the worker already owns means the page saw a stale
-      // row. Re-emit the live entry so the page cancels its ack timer instead
-      // of falling back to a duplicate local upload.
       if (existing)
         entryItem(existing.item);
       return;
     }
   }
-  // This worker has no DOM: the page hands us the server-advertised upload
-  // mode with every enqueue. Without it readUploadMode() falls back to
-  // "standard" and every large upload silently takes the slow TUS path.
   if (msg.clientMode)
     setUploadModeHint(msg.clientMode);
   const base = msg.item && typeof msg.item === "object" ? { ...msg.item } : {};

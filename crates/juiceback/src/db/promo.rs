@@ -158,8 +158,6 @@ pub fn record_embed_attempt(conn: &Connection, file_id: &str, now: i64) -> Resul
     Ok(())
 }
 
-/// Apply an automatic tier change. A manual pin is cleared so a cooled file
-/// returns to the auto-promoter instead of staying pinned to standard.
 pub fn set_file_tier(conn: &Connection, id: &str, tier: &str, r2_key: &str) -> Result<usize> {
     Ok(conn.execute(
         "UPDATE files SET tier = ?1, r2_key = ?2, tier_pinned = 0 WHERE id = ?3",

@@ -1,5 +1,3 @@
-
-
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
@@ -117,12 +115,21 @@ pub fn pct_remaining(expires_at: i64, uploaded_at: i64, now_ms: i64) -> u64 {
     ((left.max(0) as f64 / total as f64) * 100.0).round() as u64
 }
 
-const DEFAULT_HOSTS: &[&str] = &[
-    "localhost:6402",
-    "127.0.0.1:6402",
-    "localhost:6400",
-    "127.0.0.1:6400",
-];
+fn default_hosts() -> &'static [String] {
+    static HOSTS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    HOSTS.get_or_init(|| {
+        let mut hosts = Vec::with_capacity(4);
+        for name in ["localhost", "127.0.0.1"] {
+            for port in [
+                juiceutils::config::ports::HOST,
+                juiceutils::config::ports::FRONTEND,
+            ] {
+                hosts.push(format!("{name}:{port}"));
+            }
+        }
+        hosts
+    })
+}
 
 fn strip_host(host: &str) -> String {
     host.trim_start_matches("http://")
@@ -136,7 +143,7 @@ pub fn is_default_host(host: &str, default_host: Option<&str>) -> bool {
         return true;
     }
     let stripped = strip_host(host);
-    if DEFAULT_HOSTS.contains(&stripped.as_str()) {
+    if default_hosts().iter().any(|host| host == &stripped) {
         return true;
     }
     default_host.is_some_and(|default_host| stripped == strip_host(default_host))
@@ -147,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sizes_format_like_typescript() {
+    fn sizes_format_with_binary_units() {
         assert_eq!(format_size(0), "0 B");
         assert_eq!(format_size(512), "512 B");
         assert_eq!(format_size(1536), "1.5 KB");

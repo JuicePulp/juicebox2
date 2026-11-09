@@ -33,6 +33,6 @@
 </details>{% else %}<a class="action-btn" data-cuelume-navigate href="{{ a.href }}" aria-label="{{ a.aria }}" title="{{ a.aria }}" data-action-id="{{ a.id }}"><span class="action-btn__icon">{{ cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></a>{% endif %}
 {% endfor %}</nav>{% endif %}
 <footer class="footr footr--divd" data-footr="">
-<div class="footr__primary">{% if footer_message != "" %}<p class="footr__message">{{ footer_message }}</p>{% endif %}<a class="footr__commit footr__link" href="{{ footer_repo }}" target="_blank" rel="noopener noreferrer">{{ footer_commit }}</a></div>
+<div class="footr__primary"><a class="footr__commit footr__link" href="{{ footer_repo }}" target="_blank" rel="noopener noreferrer">{{ footer_commit }}</a></div>
 </footer>
 </div>

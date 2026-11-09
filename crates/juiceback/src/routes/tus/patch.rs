@@ -17,7 +17,7 @@ use super::{
     state::{await_storage_push, spawn_push_task},
     types::TusUploadMeta,
 };
-use crate::{db, error::AppError, state::AppState};
+use crate::{error::AppError, state::AppState};
 
 #[utoipa::path(
     patch,
@@ -140,23 +140,13 @@ async fn patch_upload_handler_impl(
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok());
-    let gzip = headers
-        .get("x-file-encoding")
-        .and_then(|v| v.to_str().ok())
-        == Some("gzip");
+    let gzip = headers.get("x-file-encoding").and_then(|v| v.to_str().ok()) == Some("gzip");
 
     let reserve_override = headers
         .get("x-reserve-id")
         .and_then(|v| v.to_str().ok())
         .filter(|v| !v.is_empty())
-        .map(|value| {
-            if crate::utils::is_valid_id(value) {
-                Ok(value.to_string())
-            } else {
-                Err(AppError::BadRequest("invalid reserve_id".into()))
-            }
-        })
-        .transpose()?;
+        .map(ToString::to_string);
     let reservation_token_override = headers
         .get("x-delete-token")
         .and_then(|v| v.to_str().ok())
@@ -181,9 +171,6 @@ async fn patch_upload_handler_impl(
         if upload_offset != upload.offset {
             return Err(AppError::TusOffsetMismatch);
         }
-        // Reject an oversized chunk before reading a single byte of it. When
-        // the length is not known up front (chunked body) the stream is capped
-        // against total_length as it arrives instead.
         if let Some(len) = content_length {
             let _ = checked_upload_offset(upload_offset, len, upload.total_length)?;
         }
@@ -198,21 +185,7 @@ async fn patch_upload_handler_impl(
 
     if let Some(ref reserve_id) = reserve_override {
         let token = reservation_token_override.as_deref().unwrap_or_default();
-        let lookup_id = reserve_id.clone();
-        let reservation = state
-            .db_call("get_tus_override_reservation", move |db| {
-                db::get_file(db, &lookup_id)
-            })
-            .await?
-            .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
-        if reservation.status != "uploading" {
-            return Err(AppError::BadRequest("reservation is not uploading".into()));
-        }
-        if !crate::utils::constant_time_eq(&reservation.delete_token, token) {
-            return Err(AppError::Forbidden(
-                "invalid reservation delete token".into(),
-            ));
-        }
+        let reservation = crate::reservation::verify_by_id(&state, reserve_id, token).await?;
         let upload_host = state
             .tus
             .get(&id)
@@ -224,9 +197,6 @@ async fn patch_upload_handler_impl(
                 "reservation storage host does not match TUS session".into(),
             ));
         }
-        // Remember the reservation on the session so the cleanup job keeps
-        // its DB row alive while the upload is still running, even when the
-        // reservation was only supplied via the per-PATCH header.
         if let Some(mut upload) = state.tus.get_mut(&id)
             && upload.reserve_id.is_none()
         {
@@ -234,9 +204,6 @@ async fn patch_upload_handler_impl(
         }
     }
 
-    // The finalize-only PATCH (`Content-Length: 0` at offset == total) is how
-    // a client retries a completion that failed after the bytes were accepted.
-    // Nothing to read, so go straight to completion.
     if content_length == Some(0) && upload_offset >= total_length {
         return advance_and_maybe_complete(
             &state,
@@ -251,8 +218,6 @@ async fn patch_upload_handler_impl(
         .await;
     }
 
-    // gzip bodies need the whole chunk to inflate, and protected uploads spool
-    // to disk for encryption: both keep the bounded-buffer path.
     if gzip || protected {
         let raw = collect_bounded_body(body, crate::constants::TUS_PATCH_MAX_BYTES).await?;
         let body_bytes = if gzip && !raw.is_empty() {
@@ -288,8 +253,6 @@ async fn patch_upload_handler_impl(
                 .write_all(&body_bytes)
                 .await
                 .map_err(|e| AppError::Internal(format!("spool failed: {e}")))?;
-            let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
-            upload.spool_path = Some(spool);
         } else {
             {
                 let mut upload = state.tus.get_mut(&id).ok_or(AppError::TusSessionNotFound)?;
@@ -329,11 +292,6 @@ async fn patch_upload_handler_impl(
         .await;
     }
 
-    // Streaming path: forward each frame to the storage push as it arrives, so
-    // a chunk of any size costs channel-depth memory instead of chunk-size
-    // memory. This is what makes 10 concurrent 16 MB chunks safe on 2 vCPU,
-    // and it lets a single PATCH carry a whole file on browsers that support
-    // streaming request bodies.
     let received = stream_patch_body(
         &state,
         &id,
@@ -375,9 +333,6 @@ fn validate_first_chunk(
     .map_or(Ok(()), Err)
 }
 
-/// Streams the PATCH body into the storage push, returning the number of bytes
-/// accepted. On any error the hosting push is aborted and the session dropped,
-/// because partially written bytes cannot be rewound.
 async fn stream_patch_body(
     state: &Arc<AppState>,
     id: &str,
@@ -391,11 +346,10 @@ async fn stream_patch_body(
     let mut received: u64 = 0;
     let mut pending: Option<Bytes> = None;
 
-    // Sniff and validate the first bytes before opening a storage upload, so a
-    // blocked file never claims a juicehost upload slot.
     if upload_offset == 0 {
         while let Some(frame) = stream.next().await {
-            let chunk = frame.map_err(|_| AppError::BadRequest("patch body stream error".into()))?;
+            let chunk =
+                frame.map_err(|_| AppError::BadRequest("patch body stream error".into()))?;
             if chunk.is_empty() {
                 continue;
             }
@@ -428,9 +382,6 @@ async fn stream_patch_body(
             None => match stream.next().await {
                 Some(Ok(chunk)) => chunk,
                 Some(Err(_)) => {
-                    // The client went away mid-body. Everything already queued
-                    // is counted in `upload.offset`, so a resumed PATCH picks
-                    // up exactly where the push left off.
                     tracing::info!(
                         upload_id = %id,
                         received,
@@ -449,9 +400,7 @@ async fn stream_patch_body(
         let new_offset = upload_offset
             .checked_add(received)
             .ok_or(AppError::PayloadTooLarge)?;
-        if new_offset > total_length
-            || content_length.is_some_and(|declared| received > declared)
-        {
+        if new_offset > total_length || content_length.is_some_and(|declared| received > declared) {
             drop(sender);
             abort_session(state, id).await;
             return Err(AppError::PayloadTooLarge);
@@ -462,8 +411,6 @@ async fn stream_patch_body(
             abort_session(state, id).await;
             return Err(AppError::TusSessionNotFound);
         }
-        // Publish the offset as bytes are accepted, not at the end: a resumed
-        // request must continue from exactly what the push has taken.
         if let Some(mut upload) = state.tus.get_mut(id) {
             upload.offset = new_offset;
             upload.last_activity = chrono::Utc::now().timestamp();
@@ -572,9 +519,6 @@ async fn advance_and_maybe_complete(
             Ok(resp)
         }
         Err(err) => {
-            // Keep the session at offset == total so the client's retry (a
-            // zero-length finalize PATCH) re-runs completion instead of
-            // restarting the upload from scratch.
             tracing::warn!(
                 id = %id,
                 error = ?err,

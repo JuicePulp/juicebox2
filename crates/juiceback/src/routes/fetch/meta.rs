@@ -58,7 +58,10 @@ pub(crate) async fn youtube_oembed_metadata(
     let body: serde_json::Value = match client
         .get(url)
         .timeout(Duration::from_secs(OEMBED_TIMEOUT_SECS))
-        .header(reqwest::header::USER_AGENT, "juicebox/2.1 (metadata lookup)")
+        .header(
+            reqwest::header::USER_AGENT,
+            "juicebox/2.1 (metadata lookup)",
+        )
         .send()
         .await
     {
@@ -91,7 +94,8 @@ mod tests {
             Some("olmac20")
         );
         assert_eq!(
-            author_from_cobalt_filename("tiktok_swift.orfevacle_7697665408748309782.mp4").as_deref(),
+            author_from_cobalt_filename("tiktok_swift.orfevacle_7697665408748309782.mp4")
+                .as_deref(),
             Some("swift.orfevacle")
         );
     }
@@ -106,11 +110,8 @@ mod tests {
     #[test]
     fn bun_filename_strips_video_id_suffix() {
         assert_eq!(
-            title_from_bun_filename(
-                "Me at the zoo-jNQXAC9IVRw.mp4",
-                Some("jNQXAC9IVRw")
-            )
-            .as_deref(),
+            title_from_bun_filename("Me at the zoo-jNQXAC9IVRw.mp4", Some("jNQXAC9IVRw"))
+                .as_deref(),
             Some("Me at the zoo")
         );
         assert_eq!(
@@ -127,6 +128,9 @@ mod tests {
     fn clean_meta_value_trims_and_drops_empties() {
         assert_eq!(clean_meta_value("  jawed  ").as_deref(), Some("jawed"));
         assert_eq!(clean_meta_value("   "), None);
-        assert_eq!(clean_meta_value("bad\u{0}value").as_deref(), Some("badvalue"));
+        assert_eq!(
+            clean_meta_value("bad\u{0}value").as_deref(),
+            Some("badvalue")
+        );
     }
 }

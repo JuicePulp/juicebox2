@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-
 use juiceutils::{
-    config::{SentrySettings, load_toml_or_default, optional_secret},
+    config::{SentrySettings, optional_secret},
     proxy::{IpCidr, parse_trusted_proxy_cidrs},
 };
 use serde::{Deserialize, Serialize};
@@ -38,7 +36,7 @@ fn default_ui_host() -> String {
 }
 
 const fn default_ui_port() -> u16 {
-    6400
+    juiceutils::config::ports::FRONTEND
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -51,7 +49,6 @@ pub struct ProxyFile {
     pub api_internal_url: String,
     #[serde(default)]
     pub trusted_proxy_cidrs: String,
-    /// Optional juicerouter base URL for upload target selection.
     #[serde(default)]
     pub router_url: String,
 }
@@ -69,11 +66,11 @@ impl Default for ProxyFile {
 }
 
 fn default_juiceback_url() -> String {
-    "http://127.0.0.1:6401".into()
+    format!("http://127.0.0.1:{}", juiceutils::config::ports::BACKEND)
 }
 
 fn default_juicehost_url() -> String {
-    "http://127.0.0.1:6402".into()
+    format!("http://127.0.0.1:{}", juiceutils::config::ports::HOST)
 }
 
 fn default_api_internal_url() -> String {
@@ -94,7 +91,11 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Self {
-        let file = load_file_config();
+        let file: FileConfig = juiceutils::config::load_service_config(
+            "juicefront",
+            "JUICEFRONT_CONFIG",
+            &["juicefront.toml", "config.toml"],
+        );
         let proxy = &file.proxy;
 
         let juiceback_url = optional_secret("JUICEBACK_URL")
@@ -127,42 +128,49 @@ impl Config {
             api_internal_url,
             router_url,
             trusted_proxies,
-            sentry_environment: file.sentry.environment,
+            sentry_environment: SentrySettings::from_env_or(&file.sentry).environment,
         }
     }
 
     pub fn upstream_host_port(base_url: &str) -> Option<(String, u16)> {
-        let without_scheme = base_url.split("://").nth(1).unwrap_or(base_url);
-        let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
-        let (host, port) = match authority.rsplit_once(':') {
-            Some((host, port)) => (host, port.parse::<u16>().ok()?),
-            None => (authority, 80),
+        let candidate = if base_url.contains("://") {
+            base_url.to_string()
+        } else {
+            format!("http://{base_url}")
         };
-        if host.is_empty() {
-            return None;
-        }
-        Some((host.to_owned(), port))
+        let parsed = url::Url::parse(&candidate).ok()?;
+        let host = match parsed.host()? {
+            url::Host::Domain(domain) => domain.to_owned(),
+            url::Host::Ipv4(v4) => v4.to_string(),
+            url::Host::Ipv6(v6) => v6.to_string(),
+        };
+        let port = parsed.port_or_known_default()?;
+        Some((host, port))
     }
 }
 
-fn candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(path) = optional_secret("JUICEFRONT_CONFIG") {
-        paths.push(PathBuf::from(path));
-    }
-    for name in ["juicefront.toml", "config.toml"] {
-        paths.push(PathBuf::from(name));
-        paths.push(PathBuf::from("/etc/juicebox").join(name));
-    }
-    paths
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn load_file_config() -> FileConfig {
-    for path in candidate_paths() {
-        if path.exists() {
-            return load_toml_or_default(&path);
-        }
+    #[test]
+    fn upstream_host_port_uses_scheme_default_and_ipv6() {
+        assert_eq!(
+            Config::upstream_host_port("https://box.juicey.dev"),
+            Some(("box.juicey.dev".to_owned(), 443))
+        );
+        assert_eq!(
+            Config::upstream_host_port("http://juiceback:6401"),
+            Some(("juiceback".to_owned(), 6401))
+        );
+        assert_eq!(
+            Config::upstream_host_port("juiceback:6401"),
+            Some(("juiceback".to_owned(), 6401))
+        );
+        assert_eq!(
+            Config::upstream_host_port("https://[::1]:6401"),
+            Some(("::1".to_owned(), 6401))
+        );
+        assert_eq!(Config::upstream_host_port("not a url"), None);
     }
-    tracing::warn!("no juicefront config file found, using defaults");
-    FileConfig::default()
 }

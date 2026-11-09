@@ -7,4 +7,3 @@ pub mod live;
 pub mod server;
 pub mod state;
 pub mod storage;
-pub mod ticket;

@@ -77,10 +77,8 @@ async fn static_cache_policy(
         let policy = if live_reload {
             "no-store"
         } else if is_font || versioned {
-            // Versioned by ?v=<release> or a content hash: safe to pin forever.
             "public, max-age=31536000, immutable"
         } else {
-            // Unversioned (mostly admin) assets: short TTL, then revalidate.
             "public, max-age=300"
         };
         res.headers_mut().insert(
@@ -237,11 +235,10 @@ fn main() {
 
         if let Some(base) = static_base() {
             let static_cache = || {
-                tower::ServiceBuilder::new()
-                    .layer(middleware::from_fn_with_state(
-                        Arc::clone(&state),
-                        static_cache_policy,
-                    ))
+                tower::ServiceBuilder::new().layer(middleware::from_fn_with_state(
+                    Arc::clone(&state),
+                    static_cache_policy,
+                ))
             };
             pages = pages
                 .nest_service(
@@ -268,7 +265,6 @@ fn main() {
         }
 
         pages = pages.layer(compression);
-        // Outside the compression layer: entries hold already-compressed bytes.
         pages = pages.layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             page_cache::middleware,

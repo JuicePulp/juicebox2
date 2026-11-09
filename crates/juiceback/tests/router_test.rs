@@ -72,8 +72,7 @@ async fn resolve_returns_host_and_tier() {
     let state = common::test_state();
     insert_ready_file(&state, "reg00001", Some("https://f-eu1.juicey.dev")).await;
     let app = common::mock_router(state);
-    let (status, json) =
-        resolve_body(app, resolve_req("reg00001", Some("test-key"))).await;
+    let (status, json) = resolve_body(app, resolve_req("reg00001", Some("test-key"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["storage_host"], "https://f-eu1.juicey.dev");
     assert_eq!(json["tier"], "standard");
@@ -87,12 +86,13 @@ async fn resolve_hot_file_reports_r2_url() {
     let state = common::state_from_config(config);
     insert_ready_file(&state, "hot00001", Some("https://f-eu1.juicey.dev")).await;
     state
-        .db_call("promote", |db| set_file_tier(db, "hot00001", "hot", "hot/hot00001.mp4"))
+        .db_call("promote", |db| {
+            set_file_tier(db, "hot00001", "hot", "hot/hot00001.mp4")
+        })
         .await
         .unwrap();
     let app = common::mock_router(state);
-    let (status, json) =
-        resolve_body(app, resolve_req("hot00001", Some("test-key"))).await;
+    let (status, json) = resolve_body(app, resolve_req("hot00001", Some("test-key"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["tier"], "hot");
     assert_eq!(json["r2_url"], "https://r.juicey.dev/hot/hot00001.mp4");
@@ -104,9 +104,10 @@ async fn share_link_uses_router_for_official_hosts() {
     let mut config = common::test_config();
     config.router_base_url = Some("https://f.juicey.dev".to_string());
     config.juicehost_url = "http://127.0.0.1:6402".to_string();
-    config.region_public_juicehosts = std::collections::HashMap::from([
-        ("eu".to_string(), "https://f-eu1.juicey.dev".to_string()),
-    ]);
+    config.region_public_juicehosts = std::collections::HashMap::from([(
+        "eu".to_string(),
+        "https://f-eu1.juicey.dev".to_string(),
+    )]);
 
     assert_eq!(
         juiceback::utils::share_link(

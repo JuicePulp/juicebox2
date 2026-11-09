@@ -70,14 +70,17 @@ pub(crate) async fn download_and_store(
         encrypted_ip,
         state.config.default_storage_host.clone(),
     );
-    record.title = meta.title.as_deref().and_then(clean_meta_value).unwrap_or_default();
+    record.title = meta
+        .title
+        .as_deref()
+        .and_then(clean_meta_value)
+        .unwrap_or_default();
     record.author = meta
         .author
         .as_deref()
         .and_then(clean_meta_value)
         .unwrap_or_default();
-    
-    
+
     let setup = match password.filter(|p| !p.is_empty()) {
         Some(password) => Some(
             crate::routes::upload::protected::prepare_protection(state, &password)
@@ -114,14 +117,7 @@ pub(crate) async fn download_and_store(
             .db_call("update_fetch_job_progress", {
                 let job_id = job_id.to_string();
                 move |db| {
-                    db::update_fetch_job_progress(
-                        db,
-                        &job_id,
-                        "converting",
-                        "processing",
-                        0,
-                        0,
-                    )
+                    db::update_fetch_job_progress(db, &job_id, "converting", "processing", 0, 0)
                 }
             })
             .await;
@@ -151,6 +147,10 @@ pub(crate) async fn download_and_store(
     let (size_bytes, enc_header, detected) = result?;
     cleanup.active = false;
     let (filename, mime_type) = reconcile_media(filename, mime_type, detected);
+    let protection = setup
+        .as_ref()
+        .zip(enc_header.as_deref())
+        .map(|(setup, header)| setup.material(Some(header.to_string())));
     finalize_stored_file(
         state,
         user_id,
@@ -159,15 +159,7 @@ pub(crate) async fn download_and_store(
         mime_type,
         size_bytes,
         delete_token,
-        setup.as_ref().map(|setup| {
-            (
-                setup.password_hash.clone(),
-                setup.wrapped_b64.clone(),
-                setup.salt_b64.clone(),
-                setup.escrow_hex.clone(),
-            )
-        }),
-        enc_header.as_deref(),
+        protection,
     )
     .await
 }
@@ -321,10 +313,6 @@ fn sniff_media(prefix: &[u8]) -> Option<DetectedMedia> {
     })
 }
 
-/// The requested `audio_only` flag is only a hint: cobalt can answer a video
-/// request with an audio-only stream (and vice versa). When the bytes say the
-/// media is audio or video, the stored metadata must follow the bytes,
-/// otherwise the preview advertises a video player for an MP3 and embeds break.
 fn reconcile_media(
     filename: String,
     mime_type: String,
@@ -354,13 +342,9 @@ async fn spool_for_transcode(
     match byte_source {
         ByteSource::LocalFile(path) => Ok(SpoolInput::Existing(path)),
         ByteSource::Tunnel(url) => {
-            let resp = fetch_tunnel_response(
-                &state.http,
-                state,
-                &url,
-                state.config.allow_private_fetch,
-            )
-            .await?;
+            let resp =
+                fetch_tunnel_response(&state.http, state, &url, state.config.allow_private_fetch)
+                    .await?;
             spool_response(state, job_id, source_url, resp, max_size).await
         }
         ByteSource::BunResponse(resp) => {
@@ -803,11 +787,7 @@ async fn transfer_protected_to_juicehost(
     )
     .await
     .map_err(|e| format!("encrypted push failed: {e:?}"))?;
-    Ok((
-        total,
-        Some(hex::encode(header)),
-        sniff_media(&prefix),
-    ))
+    Ok((total, Some(hex::encode(header)), sniff_media(&prefix)))
 }
 
 async fn finalize_stored_file(
@@ -818,60 +798,45 @@ async fn finalize_stored_file(
     mime_type: String,
     size_bytes: u64,
     delete_token: String,
-    key_material: Option<(String, String, String, String)>,
-    enc_header: Option<&str>,
+    protection: Option<db::ProtectionMaterial>,
 ) -> FetchResult {
-    let completed = state
-        .db_call("complete_fetch_reservation", move |db| {
-            db::finish_reservation(
-                db,
-                &filename,
-                &mime_type,
-                size_bytes as i64,
-                &file_id,
-                &delete_token,
-                None,
-            )
+    let record = crate::reservation::finish(
+        state,
+        crate::reservation::FinishRequest {
+            id: file_id,
+            delete_token,
+            filename,
+            mime_type,
+            size_bytes: size_bytes as i64,
+            uploader_ip: None,
+        },
+        crate::reservation::FinishPolicy::Strict,
+    )
+    .await
+    .map_err(|e| format!("failed to finalize fetched file: {e:?}"))?;
+
+    if let Some(material) = protection {
+        let rid = record.id.clone();
+        if let Err(e) = state
+            .db_call("set_fetch_protection", move |db| {
+                db::set_protection(db, &rid, &material).map(|_| ())
+            })
+            .await
+        {
+            tracing::warn!("fetch: could not set protection: {e:?}");
+        }
+    }
+    let owned = record.clone();
+    let owner = user_id.to_string();
+    if let Err(e) = state
+        .db_call("own_fetched_file", move |db| {
+            db::add_client_file(db, &owner, &owned)
         })
         .await
-        .map_err(|e| format!("failed to finalize fetched file: {e:?}"))?;
-
-    match completed {
-        db::FinishReservationResult::Completed(record) => {
-            let owned = record.clone();
-            let owner = user_id.to_string();
-            if let Some((hash, wrapped, salt, escrow)) = key_material {
-                let rid = record.id.clone();
-                let material = db::ProtectionMaterial {
-                    password_hash: Some(hash),
-                    is_encrypted: true,
-                    enc_header: enc_header.map(str::to_string),
-                    dek_wrapped: Some(wrapped),
-                    dek_salt: Some(salt),
-                    dek_escrow: Some(escrow),
-                    key_version: crate::crypto_file::KEY_VERSION_V1,
-                };
-                if let Err(e) = state
-                    .db_call("set_fetch_protection", move |db| {
-                        db::set_protection(db, &rid, &material).map(|_| ())
-                    })
-                    .await
-                {
-                    tracing::warn!("fetch: could not set protection: {e:?}");
-                }
-            }
-            if let Err(e) = state
-                .db_call("own_fetched_file", move |db| {
-                    db::add_client_file(db, &owner, &owned)
-                })
-                .await
-            {
-                tracing::warn!("fetch: could not register ownership: {e:?}");
-            }
-            Ok(record.id)
-        }
-        _ => Err("reservation vanished during finalization".into()),
+    {
+        tracing::warn!("fetch: could not register ownership: {e:?}");
     }
+    Ok(record.id)
 }
 
 #[cfg(test)]
@@ -880,7 +845,6 @@ mod tunnel_host_tests {
 
     #[test]
     fn audio_bytes_override_a_video_fetch_label() {
-        // ID3v2 header: cobalt answered a video request with an MP3 stream.
         let detected = sniff_media(b"ID3\x03\x00\x00\x00\x00\x00\x00").expect("mp3");
         assert_eq!(detected.mime_type, "audio/mpeg");
         let (filename, mime) = reconcile_media(
@@ -907,11 +871,8 @@ mod tunnel_host_tests {
 
     #[test]
     fn unknown_bytes_do_not_change_metadata() {
-        let (filename, mime) = reconcile_media(
-            "notes.txt".to_string(),
-            "text/plain".to_string(),
-            None,
-        );
+        let (filename, mime) =
+            reconcile_media("notes.txt".to_string(), "text/plain".to_string(), None);
         assert_eq!(filename, "notes.txt");
         assert_eq!(mime, "text/plain");
     }

@@ -14,8 +14,6 @@ export function readStoredFiles() {
   }
 }
 
-/// Insert or update one file entry. Doing this by id stops the upload card and
-/// files card from appending duplicate rows for the same server file.
 export function upsertLocalFile(entry) {
   if (!entry || !entry.id || typeof localStorage === "undefined")
     return;

@@ -17,11 +17,7 @@ fn ban_targets(state: &AppState) -> Vec<String> {
     hosts.into_iter().collect()
 }
 
-async fn post_to_hosts(
-    state: &Arc<AppState>,
-    path: &str,
-    body: serde_json::Value,
-) {
+async fn post_to_hosts(state: &Arc<AppState>, path: &str, body: serde_json::Value) {
     if state.config.juicehost_api_key.is_empty() {
         return;
     }

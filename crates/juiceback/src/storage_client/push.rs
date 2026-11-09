@@ -18,10 +18,6 @@ fn normalized_origin(value: &str) -> Option<String> {
         .map(|url| url.origin().ascii_serialization())
 }
 
-/// The default storage host is this node's public Cloudflare hostname. Pushing
-/// a whole TUS stream to it goes back through Cloudflare, whose request body
-/// cap is 100 MB. Use the loopback juicehost URL for that node instead, while
-/// keeping the public origin in the file record and share links.
 fn local_push_host<'a>(state: &Arc<AppState>, host: Option<&'a str>) -> Option<&'a str> {
     let host = host.map(str::trim).filter(|host| !host.is_empty())?;
     let Some(default_host) = state.config.default_storage_host.as_deref() else {
@@ -85,10 +81,11 @@ impl QuicFallbackBuffer {
         Ok(())
     }
 
-    pub fn materialize(mut self) -> Result<Vec<bytes::Bytes>, String> {
+    pub async fn materialize(mut self) -> Result<Vec<bytes::Bytes>, String> {
         if let Some(spill) = self.spill.take() {
-            let data =
-                std::fs::read(spill.path()).map_err(|e| format!("fallback replay failed: {e}"))?;
+            let data = tokio::fs::read(spill.path())
+                .await
+                .map_err(|e| format!("fallback replay failed: {e}"))?;
             return Ok(vec![bytes::Bytes::from(data)]);
         }
         Ok(std::mem::take(&mut self.ram))
@@ -116,14 +113,6 @@ pub async fn push_file_streaming(
         super::client::StorageClient::resolve(state, local_push_host(state, custom_host)).await?;
     let target_base = client.base_url().to_string();
 
-    // The QUIC push path is disabled. juicehost's HTTP/3 request-body idle
-    // timeout aborts a push when the client pauses between chunks, and the
-    // HTTP fallback only replays chunks that arrive *after* the failure: the
-    // bytes already consumed by the QUIC attempt are lost, so a truncated
-    // file could be published under the final ID (and the retried store then
-    // fails with 409 "Target file already exists"). juiceback and juicehost
-    // share a host, so the loopback HTTP stream is just as fast and is
-    // resumable. Keep the code below for reference, but never select it.
     const ENABLE_QUIC_PUSH: bool = false;
     if ENABLE_QUIC_PUSH
         && *mode == UploadMode::Quic
@@ -172,7 +161,7 @@ pub async fn push_file_streaming(
             id,
             filename,
             mime_type,
-            fallback.materialize()?,
+            fallback.materialize().await?,
             None,
             capability,
         )
@@ -324,21 +313,21 @@ pub async fn push_file_to_juicehost(
 mod tests {
     use super::*;
 
-    #[test]
-    fn fallback_buffer_ram_roundtrip() {
+    #[tokio::test]
+    async fn fallback_buffer_ram_roundtrip() {
         let mut buf = QuicFallbackBuffer::new();
         assert!(buf.is_empty());
         buf.push(&bytes::Bytes::from_static(b"hello ")).unwrap();
         buf.push(&bytes::Bytes::from_static(b"world")).unwrap();
         assert!(!buf.is_empty());
         assert!(buf.spill.is_none());
-        let parts = buf.materialize().unwrap();
+        let parts = buf.materialize().await.unwrap();
         let total: Vec<u8> = parts.concat();
         assert_eq!(total, b"hello world");
     }
 
-    #[test]
-    fn fallback_buffer_spills_and_replays() {
+    #[tokio::test]
+    async fn fallback_buffer_spills_and_replays() {
         let mut buf = QuicFallbackBuffer::new();
 
         let piece = bytes::Bytes::from(vec![0xABu8; 64 * 1024]);
@@ -347,15 +336,15 @@ mod tests {
         }
         assert!(buf.spill.is_some());
         assert!(buf.ram.is_empty());
-        let parts = buf.materialize().unwrap();
+        let parts = buf.materialize().await.unwrap();
         let total: Vec<u8> = parts.concat();
         assert_eq!(total.len(), 10 * 1024 * 1024);
         assert!(total.iter().all(|&b| b == 0xAB));
     }
 
-    #[test]
-    fn fallback_buffer_empty_materializes_empty() {
+    #[tokio::test]
+    async fn fallback_buffer_empty_materializes_empty() {
         let buf = QuicFallbackBuffer::new();
-        assert!(buf.materialize().unwrap().is_empty());
+        assert!(buf.materialize().await.unwrap().is_empty());
     }
 }

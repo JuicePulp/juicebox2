@@ -52,20 +52,14 @@ fn default_port() -> u16 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RouterSettings {
-    /// Central juiceback used for `/internal/resolve/{id}`.
     #[serde(default = "default_juiceback_url")]
     pub juiceback_url: String,
-    /// Public URL of this router, used only for display/links.
     #[serde(default = "default_public_base_url")]
     pub public_base_url: String,
-    /// Node that owns files with no `storage_host` (the local juicehost).
     #[serde(default = "default_home_url")]
     pub home_url: String,
-    /// Sent as `x-juiceback-origin`; storage nodes reject requests without a
-    /// matching origin when they have `[security] allowed_origins` set.
     #[serde(default = "default_juiceback_origin")]
     pub juiceback_origin: String,
-    /// API key for `/internal/*`. Prefer the JUICEHOST_API_KEY env var.
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default = "default_backend_timeout_ms")]
@@ -76,12 +70,8 @@ pub struct RouterSettings {
     pub probe_interval_secs: u64,
     #[serde(default = "default_probe_timeout_ms")]
     pub probe_timeout_ms: u64,
-    /// What to do with files that have no `storage_host` (stored on the home
-    /// node). `redirect` is correct when the router has its own hostname;
-    /// `proxy` is correct when the router fronts `home_url` directly.
     #[serde(default)]
     pub local_mode: LocalMode,
-    /// Internal juicehost address used by `local_mode = "proxy"`.
     #[serde(default = "default_local_upstream")]
     pub local_upstream: String,
 }
@@ -150,26 +140,21 @@ fn default_probe_timeout_ms() -> u64 {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RegionSettings {
-    /// Same shape as juiceback's `[regions.public_juicehosts]`.
     #[serde(default)]
     pub public_juicehosts: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct GeoSettings {
-    /// Used when the country/colo is unknown or maps to no configured node.
     #[serde(default)]
     pub default_region: Option<String>,
-    /// Cloudflare `CF-IPCountry` → region key (ISO-3166 alpha-2, uppercase).
     #[serde(default)]
     pub countries: HashMap<String, String>,
-    /// Cloudflare `CF-Ray` colo code (first three letters) → region key.
     #[serde(default)]
     pub colos: HashMap<String, String>,
 }
 
 impl Config {
-    /// Load the TOML file, falling back to defaults on any error.
     #[must_use]
     pub fn load(path: &Path) -> Self {
         let Ok(text) = std::fs::read_to_string(path) else {
@@ -185,7 +170,6 @@ impl Config {
         }
     }
 
-    /// Environment overrides for secrets only.
     #[must_use]
     pub fn with_env(mut self) -> Self {
         if let Ok(value) = std::env::var("JUICEROUTER_API_KEY")

@@ -58,9 +58,7 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               rustToolchain
-              # openssl
               pkg-config
-              # rust-analyzer
 
               taplo
 
@@ -72,7 +70,6 @@
             ];
 
             env = {
-              # Required by rust-analyzer
               RUST_SRC_PATH = "${pkgs.rustToolchain}/lib/rustlib/src/rust/library";
               RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
             };

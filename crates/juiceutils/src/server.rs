@@ -27,23 +27,28 @@ pub fn generate_self_signed_cert() -> (CertificateDer<'static>, PrivateKeyDer<'s
 
 pub fn get_or_generate_cert(
     cert_path: &std::path::Path,
-) -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
+) -> Result<(CertificateDer<'static>, PrivateKeyDer<'static>), String> {
     if let Ok(der_bytes) = std::fs::read(cert_path)
         && let Ok(key_bytes) = std::fs::read(cert_path.with_extension("key"))
     {
         let cert_der = CertificateDer::from(der_bytes);
-        let key_der =
-            PrivateKeyDer::try_from(key_bytes).expect("failed to parse saved QUIC private key");
+        let key_path = cert_path.with_extension("key");
+        let key_der = PrivateKeyDer::try_from(key_bytes).map_err(|_| {
+            format!(
+                "failed to parse saved QUIC private key at {}",
+                key_path.display()
+            )
+        })?;
         tracing::info!("loaded QUIC cert from {}", cert_path.display());
-        return (cert_der, key_der);
+        return Ok((cert_der, key_der));
     }
 
-    let certified_key =
-        generate_simple_self_signed(vec!["juicebox.local".into()]).expect("rcgen self-sign failed");
+    let certified_key = generate_simple_self_signed(vec!["juicebox.local".into()])
+        .map_err(|e| format!("rcgen self-sign failed: {e}"))?;
     let cert_der = certified_key.cert.der().clone();
     let key_der_bytes = certified_key.signing_key.serialize_der();
-    let key_der =
-        PrivateKeyDer::try_from(key_der_bytes.clone()).expect("failed to create PrivateKeyDer");
+    let key_der = PrivateKeyDer::try_from(key_der_bytes.clone())
+        .map_err(|_| "failed to create PrivateKeyDer from generated key".to_string())?;
     if let Some(parent) = cert_path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
@@ -59,7 +64,7 @@ pub fn get_or_generate_cert(
         );
     }
     tracing::info!("generated and saved QUIC cert to {}", cert_path.display());
-    (cert_der, key_der)
+    Ok((cert_der, key_der))
 }
 
 fn write_private_key(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -132,9 +137,16 @@ pub async fn start_quic_server_with_limits(
     cert_path: Option<std::path::PathBuf>,
     limits: QuicServerLimits,
 ) {
-    let (cert_der, key_der) = cert_path
-        .as_deref()
-        .map_or_else(generate_self_signed_cert, get_or_generate_cert);
+    let (cert_der, key_der) = match cert_path.as_deref() {
+        Some(path) => match get_or_generate_cert(path) {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::error!("QUIC certificate unavailable at {}: {e}", path.display());
+                return;
+            }
+        },
+        None => generate_self_signed_cert(),
+    };
 
     let tls_config = {
         static INSTALL_CRYPTO_PROVIDER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -143,10 +155,16 @@ pub async fn start_quic_server_with_limits(
                 .install_default()
                 .expect("failed to install default crypto provider");
         });
-        let mut tls = rustls::ServerConfig::builder()
+        let mut tls = match rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert_der], key_der)
-            .expect("generated cert/key pair is valid TLS material");
+        {
+            Ok(tls) => tls,
+            Err(e) => {
+                tracing::error!("invalid QUIC cert/key pair: {e}");
+                return;
+            }
+        };
         tls.alpn_protocols = vec![b"h3".to_vec()];
         tls
     };
@@ -445,12 +463,28 @@ mod tests {
     fn cert_roundtrip_saves_and_reloads_same_cert() {
         let dir = tempfile::tempdir().unwrap();
         let cert_path = dir.path().join("quic.der");
-        let (cert_a, _) = get_or_generate_cert(&cert_path);
+        let (cert_a, key_a) = get_or_generate_cert(&cert_path).unwrap();
+        assert!(!cert_a.as_ref().is_empty());
+        let key_bytes: &[u8] = match &key_a {
+            rustls_pki_types::PrivateKeyDer::Pkcs8(k) => k.secret_pkcs8_der(),
+            rustls_pki_types::PrivateKeyDer::Sec1(k) => k.secret_sec1_der(),
+            _ => panic!("unexpected key type"),
+        };
+        assert!(!key_bytes.is_empty());
         assert!(cert_path.exists());
-        let (cert_b, _) = get_or_generate_cert(&cert_path);
+        let (cert_b, _) = get_or_generate_cert(&cert_path).unwrap();
         assert_eq!(cert_a.as_ref(), cert_b.as_ref());
         let loaded = load_cert_for_pinning(&cert_path).unwrap();
         assert_eq!(loaded.as_ref(), cert_a.as_ref());
+    }
+
+    #[test]
+    fn corrupt_private_key_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let cert_path = dir.path().join("quic.der");
+        std::fs::write(&cert_path, b"not a certificate").unwrap();
+        std::fs::write(cert_path.with_extension("key"), b"not a private key").unwrap();
+        assert!(get_or_generate_cert(&cert_path).is_err());
     }
 
     #[test]

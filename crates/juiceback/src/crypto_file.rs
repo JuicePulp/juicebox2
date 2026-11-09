@@ -1,5 +1,3 @@
-
-
 use std::{
     fmt,
     io::{Read, Write},
@@ -45,21 +43,11 @@ impl fmt::Debug for FileKey {
 }
 
 impl FileKey {
-    
-    
-    
-    
-    
     pub fn from_hex(hex_str: &str) -> Result<Self, CryptoError> {
         let bytes = hex::decode(hex_str.trim()).map_err(|_| CryptoError::BadKey)?;
         Self::from_bytes(&bytes)
     }
 
-    
-    
-    
-    
-    
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
         let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::BadKey)?;
         Ok(Self(Zeroizing::new(arr)))
@@ -70,14 +58,11 @@ impl FileKey {
         Aes256Gcm::new(&key)
     }
 
-    
-    
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
-    
     #[must_use]
     pub fn generate() -> Self {
         let mut bytes = [0_u8; 32];
@@ -133,21 +118,20 @@ pub fn unwrap_dek(kek: &FileKey, wrapped: &[u8]) -> Result<FileKey, CryptoError>
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CryptoError {
-    
     BadKey,
-    
+
     BadFormat,
-    
+
     Truncated,
-    
+
     LengthMismatch,
-    
+
     RangeOutOfBounds,
-    
+
     Decrypt,
-    
+
     Kdf,
-    
+
     Io(String),
 }
 
@@ -204,8 +188,7 @@ pub fn cipher_range_for_plain(
     let full_stored = NONCE_LEN as u64 + chunk + TAG_LEN as u64;
     let first = start / chunk;
     let last = (end - 1) / chunk;
-    
-    
+
     let cipher_start = HEADER_LEN as u64 + first * full_stored;
     let last_plain = (plain_len - last * chunk).min(chunk);
     let cipher_len =
@@ -303,7 +286,7 @@ pub fn encrypt_reader(
     if plain_len == 0 {
         out.extend_from_slice(&encrypt_chunk(key, &[])?);
     }
-    
+
     let mut extra = [0_u8; 1];
     if reader.read(&mut extra)? != 0 {
         return Err(CryptoError::LengthMismatch);
@@ -356,8 +339,7 @@ pub fn decrypt_range(
         return Ok(Vec::new());
     }
     let body = &data[HEADER_LEN..];
-    
-    
+
     let mut out = Vec::with_capacity(
         usize::try_from(end - start).map_err(|_| CryptoError::RangeOutOfBounds)?,
     );
@@ -396,6 +378,42 @@ mod tests {
     fn test_key() -> FileKey {
         FileKey::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
             .unwrap()
+    }
+
+    #[test]
+    fn range_decrypt() {
+        let key = test_key();
+        let plain = pattern(200_000);
+        let data = encrypt_reader(&key, 200_000, &plain[..]).unwrap();
+
+        for (start, end) in [
+            (0, 200_000),
+            (0, 10),
+            (199_990, 200_000),
+            (65_530, 65_545),
+            (1_000, 150_000),
+            (7, 8),
+            (5, 5),
+        ] {
+            assert_eq!(
+                decrypt_range(&key, &data, start, end).unwrap(),
+                plain[start as usize..end as usize],
+                "range {start}..{end}"
+            );
+        }
+
+        for (start, end) in [(0, 200_001), (200_001, 200_001), (10, 5)] {
+            assert_eq!(
+                decrypt_range(&key, &data, start, end).unwrap_err(),
+                CryptoError::RangeOutOfBounds,
+                "range {start}..{end}"
+            );
+        }
+
+        assert_eq!(
+            decrypt_range(&other_key(), &data, 0, 10).unwrap_err(),
+            CryptoError::Decrypt
+        );
     }
 
     fn other_key() -> FileKey {
@@ -498,61 +516,24 @@ mod tests {
     }
 
     #[test]
-    fn range_decrypt() {
-        let key = test_key();
-        let plain = pattern(200_000);
-        let data = encrypt_reader(&key, 200_000, &plain[..]).unwrap();
-        
-        for (start, end) in [
-            (0, 200_000),
-            (0, 10),
-            (199_990, 200_000),
-            (65_530, 65_545),
-            (1_000, 150_000),
-            (7, 8),
-            (5, 5),
-        ] {
-            assert_eq!(
-                decrypt_range(&key, &data, start, end).unwrap(),
-                plain[start as usize..end as usize],
-                "range {start}..{end}"
-            );
-        }
-        
-        for (start, end) in [(0, 200_001), (200_001, 200_001), (10, 5)] {
-            assert_eq!(
-                decrypt_range(&key, &data, start, end).unwrap_err(),
-                CryptoError::RangeOutOfBounds,
-                "range {start}..{end}"
-            );
-        }
-        
-        assert_eq!(
-            decrypt_range(&other_key(), &data, 0, 10).unwrap_err(),
-            CryptoError::Decrypt
-        );
-    }
-
-    #[test]
     fn cipher_range_covers_exact_chunks() {
-        
         assert_eq!(
             cipher_range_for_plain(0, 100, 100).unwrap(),
             (13, 12 + 100 + 16)
         );
-        
+
         assert_eq!(cipher_range_for_plain(5, 5, 100).unwrap(), (13, 0));
-        
+
         let len = 65_536 * 2 + 7;
         let (off, n) = cipher_range_for_plain(65_536, 65_540, len).unwrap();
         assert_eq!(off, 13 + (12 + 65_536 + 16));
         assert_eq!(n, 12 + 65_536 + 16);
-        
+
         let (off, n) = cipher_range_for_plain(0, len, len).unwrap();
         assert_eq!(off, 13);
         assert_eq!(n, 2 * (12 + 65_536 + 16) + (12 + 7 + 16));
         assert_eq!(off + n, ciphertext_len(len));
-        
+
         assert_eq!(
             cipher_range_for_plain(0, len + 1, len).unwrap_err(),
             CryptoError::RangeOutOfBounds

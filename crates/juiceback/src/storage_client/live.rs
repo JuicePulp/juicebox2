@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
+use super::client::StorageClient;
 use crate::state::AppState;
 
-use super::client::StorageClient;
-
-/// Tell a content host about a quick-link upload before its bytes arrive.
-/// This is best-effort: if the host is older or unavailable the upload still
-/// proceeds and the preview falls back to the normal uploading notice.
 pub async fn register_live_upload(
     state: &Arc<AppState>,
     target_id: &str,
@@ -63,9 +59,6 @@ pub async fn register_live_upload(
     Ok(())
 }
 
-/// Ask juicehost how many bytes it has accepted for one TUS resource. This is
-/// intentionally best-effort: a missing live record does not mean the upload
-/// is broken, so callers can keep transferring while they wait for a result.
 pub async fn live_part_status(
     state: &Arc<AppState>,
     id: &str,

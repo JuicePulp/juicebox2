@@ -10,8 +10,6 @@ pub(crate) async fn await_storage_push(
     upload_id: &str,
 ) -> Result<(), AppError> {
     let Some((_, handle)) = state.push_handles.remove(upload_id) else {
-        // A retried finalize arrives after the push was already awaited. If
-        // every byte has been accepted there is nothing left to flush.
         let already_complete = state
             .tus
             .get(upload_id)

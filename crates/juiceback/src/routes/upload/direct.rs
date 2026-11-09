@@ -4,24 +4,22 @@ use axum::{
     Json,
     extract::{ConnectInfo, State},
     http::HeaderMap,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::{
-    common::UploadResponse,
+    common::{UploadResponse, enforce_mint_limit, region_host, upload_json_response},
     ticket::{
-        check_mint_limit, clamp_ttl_seconds, device_connected, encrypted_client_ip,
-        insert_owned_pending, mint_ticket, notify_device, pinned_region_host, public_url_for,
-        public_urls_for,
-        reject_blocked_filename, ticket_ttl_secs,
+        clamp_ttl_seconds, device_connected, encrypted_client_ip, insert_owned_pending,
+        mint_ticket, notify_device, public_urls_for, reject_blocked_filename, ticket_ttl_secs,
     },
 };
 use crate::{
     db::{self, FileRecord},
     error::AppError,
-    routes::{UserId, noscript},
+    routes::UserId,
     state::AppState,
 };
 
@@ -47,8 +45,6 @@ pub struct DirectUploadReserveRequest {
     #[serde(default)]
     pub device_id: Option<String>,
 
-    
-    
     #[serde(default)]
     pub password: Option<String>,
 }
@@ -133,7 +129,7 @@ pub async fn direct_upload_reserve_handler(
         None => None,
     };
 
-    check_mint_limit(&state, &headers, addr)?;
+    enforce_mint_limit(&state, &headers, addr)?;
 
     let now = chrono::Utc::now().timestamp();
     let ttl_secs = ticket_ttl_secs(&state, body.file_size, 900);
@@ -142,7 +138,7 @@ pub async fn direct_upload_reserve_handler(
     let delete_token = uuid::Uuid::new_v4().to_string();
     let encrypted_ip = encrypted_client_ip(&state, &headers, addr);
 
-    let region_juicehost = pinned_region_host(&state, &headers, addr);
+    let region_juicehost = region_host(&state, &headers, addr);
     let storage_host = selected_host
         .clone()
         .or(region_juicehost.clone())
@@ -176,8 +172,9 @@ pub async fn direct_upload_reserve_handler(
         ttl_secs,
     )?;
 
+    let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
+
     if let Some(ref wanted) = requested_device_id {
-        let download_url = public_url_for(&state, &record);
         notify_device(
             &state,
             &user_id,
@@ -187,12 +184,11 @@ pub async fn direct_upload_reserve_handler(
             &body.mime_type,
             body.file_size,
             &ticket,
-            &download_url,
+            &public_url,
         )
         .await;
     }
 
-    let (public_url, raw_url, download_url) = public_urls_for(&state, &record);
     let upload_base = storage_host
         .as_deref()
         .unwrap_or_else(|| public_juicehost_url.trim_end_matches('/'));
@@ -227,20 +223,9 @@ pub async fn direct_upload_complete_handler(
     headers: HeaderMap,
     Json(body): Json<DirectUploadCompleteRequest>,
 ) -> Result<Response, AppError> {
-    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode as jwt_decode};
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.set_required_spec_claims(&["exp"]);
-    validation.set_issuer(&["juiceback-ticket"]);
-    let ticket = jwt_decode::<serde_json::Value>(
-        &body.ticket,
-        &DecodingKey::from_secret(state.config.ticket_jwt_secret.as_bytes()),
-        &validation,
-    )
-    .map_err(|_| AppError::Unauthorized("Invalid upload ticket".into()))?
-    .claims;
-    let ticket_file_id = ticket.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
-    let ticket_user_id = ticket.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-    if ticket_file_id != body.file_id || ticket_user_id != user_id {
+    let claims = juiceproto::ticket::verify(&body.ticket, &state.config.ticket_jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid upload ticket".into()))?;
+    if claims.file_id != body.file_id || claims.user_id != user_id {
         return Err(AppError::Unauthorized(
             "Upload ticket does not match session".into(),
         ));
@@ -264,11 +249,10 @@ pub async fn direct_upload_complete_handler(
             "Upload is not owned by this session".into(),
         ));
     }
-    if file.status != "uploading" {
+    if file.status != FileRecord::STATUS_UPLOADING {
         return Err(AppError::Conflict("upload is already complete".into()));
     }
-    
-    
+
     if file.is_protected() {
         return Err(super::protected::relay_required());
     }
@@ -291,63 +275,19 @@ pub async fn direct_upload_complete_handler(
         )));
     }
 
-    let filename = file.filename.clone();
-    let mime_type = file.mime_type.clone();
-    let size_bytes = file.size_bytes;
-    let reservation_token = file.delete_token.clone();
-    let update_id = file_id.clone();
-    match state
-        .db_call("complete_direct_upload", move |db| {
-            db::finish_reservation(
-                db,
-                &filename,
-                &mime_type,
-                size_bytes,
-                &update_id,
-                &reservation_token,
-                None,
-            )
-        })
-        .await?
-    {
-        db::FinishReservationResult::Completed(_) => {}
-        db::FinishReservationResult::NotFound => return Err(AppError::NotFound),
-        db::FinishReservationResult::NotUploading => {
-            return Err(AppError::Conflict("upload is already complete".into()));
-        }
-        db::FinishReservationResult::InvalidToken => {
-            return Err(AppError::Unauthorized("invalid upload ownership".into()));
-        }
-    }
-
-    let (public_url, raw_url, download_url) = public_urls_for(&state, &file);
-    let protected = file.is_protected();
-    let is_encrypted = file.is_encrypted;
-    let cookie_hdr = noscript::file_cookie_header(
-        &headers,
-        &noscript::FileCookieEntry {
-            id: file_id.clone(),
-            token: file.delete_token.clone(),
+    let completed = crate::reservation::finish(
+        &state,
+        crate::reservation::FinishRequest {
+            id: file_id,
+            delete_token: file.delete_token.clone(),
+            filename: file.filename.clone(),
+            mime_type: file.mime_type.clone(),
+            size_bytes: file.size_bytes,
+            uploader_ip: None,
         },
-    );
-    let mut resp = Json(UploadResponse {
-        id: file_id,
-        url: public_url,
-        raw_url,
-        download_url,
-        filename: file.filename,
-        size_bytes,
-        mime_type: file.mime_type,
-        expires_at: file.expires_at,
-        delete_token: String::new(),
-        status: "ready".into(),
-        protected,
-        is_encrypted,
-    })
-    .into_response();
-    resp.headers_mut().insert(
-        axum::http::header::SET_COOKIE,
-        cookie_hdr,
-    );
-    Ok(resp)
+        crate::reservation::FinishPolicy::Strict,
+    )
+    .await?;
+
+    Ok(upload_json_response(&state, &completed, false, &headers))
 }

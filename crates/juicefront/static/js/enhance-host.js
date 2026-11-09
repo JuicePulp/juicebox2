@@ -46,12 +46,6 @@ export function readQuickLinkEnabled() {
 export function readDangerLevel() {
   return localStorage.getItem("juicebox_danger_level") || "high";
 }
-export function readUltraFastEnabled() {
-  return localStorage.getItem("juicebox_ultrafast_enabled") === "true";
-}
-export function readUltraFastSupported() {
-  return localStorage.getItem("juicebox_ultrafast_supported") === "true";
-}
 export function initHostGlow() {
   const btn = document.querySelector("[data-host-btn]");
   if (!btn)
@@ -217,19 +211,6 @@ export function enhanceHostSelector(locale) {
   input.addEventListener("change", saveHost);
   input.addEventListener("blur", saveHost);
   const quicToggle = document.querySelector("[data-quic-toggle]");
-  const syncQuicFromUltrafast = () => {
-    if (!quicToggle)
-      return;
-    const ufEnabled = localStorage.getItem("juicebox_ultrafast_enabled") === "true";
-    const quicServerOk = document.getElementById("server-config")?.getAttribute("data-quic") !== "false";
-    if (ufEnabled) {
-      quicToggle.checked = false;
-      quicToggle.disabled = true;
-      localStorage.setItem("juicebox_upload_mode", "standard");
-    } else {
-      quicToggle.disabled = !quicServerOk;
-    }
-  };
   if (quicToggle) {
     const savedMode = localStorage.getItem("juicebox_upload_mode") || "standard";
     quicToggle.checked = savedMode === "quic";
@@ -255,10 +236,6 @@ export function enhanceHostSelector(locale) {
       } catch {}
     });
   }
-  
-  
-  
-  
   const pwInput = document.querySelector("[data-upload-password]");
   const pwHint = document.querySelector("[data-upload-password-hint]");
   var syncPwState = null;
@@ -303,32 +280,6 @@ export function enhanceHostSelector(locale) {
     };
     pwInput.addEventListener("input", syncPwState);
     syncPwState();
-  }
-  const ultrafastToggle = document.querySelector("[data-ultrafast-toggle]");
-  if (ultrafastToggle) {
-    ultrafastToggle.checked = localStorage.getItem("juicebox_ultrafast_enabled") === "true";
-    ultrafastToggle.addEventListener("change", () => {
-      localStorage.setItem("juicebox_ultrafast_enabled", ultrafastToggle.checked ? "true" : "false");
-      syncQuicFromUltrafast();
-    });
-    const updateUltrafastState = () => {
-      const deviceConnected = !!window.__juiceboxAppMode;
-      const serverSupported = readUltraFastSupported();
-      const canUse = deviceConnected && serverSupported;
-      ultrafastToggle.disabled = !canUse;
-      if (!canUse && ultrafastToggle.dataset.initialized === "true") {
-        ultrafastToggle.checked = false;
-        syncQuicFromUltrafast();
-      }
-      ultrafastToggle.dataset.initialized = "true";
-    };
-    window.addEventListener("juicebox-app-mode", updateUltrafastState);
-    syncQuicFromUltrafast();
-    const serverSupported = readUltraFastSupported();
-    ultrafastToggle.disabled = !serverSupported;
-    setTimeout(() => {
-      updateUltrafastState();
-    }, 2000);
   }
   const soundToggle = document.querySelector("[data-sound-toggle]");
   if (soundToggle) {
@@ -386,10 +337,6 @@ export function enhanceHostSelector(locale) {
       quicToggle.checked = false;
       localStorage.setItem("juicebox_upload_mode", "standard");
     }
-    const uf = serverCfg.getAttribute("data-ultrafast");
-    if (uf !== null) {
-      localStorage.setItem("juicebox_ultrafast_supported", String(uf === "true"));
-    }
     if (dl) {
       localStorage.setItem("juicebox_danger_level", dl);
       updateDangerLevelDisplay(dl, locale);
@@ -405,9 +352,6 @@ export function enhanceHostSelector(locale) {
         quickLinkToggle.disabled = true;
         quickLinkToggle.checked = false;
         localStorage.setItem("juicebox_quick_link", "false");
-      }
-      if (typeof cfg.ultrafast === "boolean") {
-        localStorage.setItem("juicebox_ultrafast_supported", String(cfg.ultrafast));
       }
       if (cfg.password_links === false) {
         var pwWrap = document.querySelector("[data-upload-password-wrap]");
@@ -464,17 +408,6 @@ export function enhanceHostSelector(locale) {
       localStorage.setItem("juicebox_upload_mode", "standard");
     } else if (cfg.quic && quicToggle) {
       quicToggle.disabled = false;
-    }
-    if (typeof cfg.ultrafast === "boolean") {
-      localStorage.setItem("juicebox_ultrafast_supported", String(cfg.ultrafast));
-      if (ultrafastToggle) {
-        const deviceConnected = !!window.__juiceboxAppMode;
-        const canUse = deviceConnected && cfg.ultrafast;
-        ultrafastToggle.disabled = !canUse;
-        if (!canUse)
-          ultrafastToggle.checked = false;
-        syncQuicFromUltrafast();
-      }
     }
     window.dispatchEvent(new CustomEvent("juicehost-config-updated", { detail: cfg }));
   };

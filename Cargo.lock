@@ -2083,6 +2083,7 @@ dependencies = [
  "hex",
  "infer",
  "jsonwebtoken",
+ "juiceproto",
  "juiceutils",
  "lettre",
  "mimalloc",
@@ -2179,6 +2180,7 @@ dependencies = [
  "hex",
  "infer",
  "jsonwebtoken",
+ "juiceproto",
  "juiceutils",
  "libc",
  "mimalloc",
@@ -2201,6 +2203,15 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "utoipa",
+]
+
+[[package]]
+name = "juiceproto"
+version = "2.2.0"
+dependencies = [
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -164,9 +164,7 @@ fn title_for_video(raw: &str, extension: &str) -> String {
 }
 
 fn title_needs_wide_font(title: &str) -> bool {
-    title
-        .chars()
-        .any(|c| !c.is_ascii() && c != '\u{2026}')
+    title.chars().any(|c| !c.is_ascii() && c != '\u{2026}')
 }
 
 fn is_emoji_supplement(c: char) -> bool {
@@ -285,9 +283,7 @@ fn wrap_text(value: &str, max_units: usize, max_lines: usize) -> Vec<String> {
 }
 
 fn youtube_video_id_from_filename(filename: &str) -> Option<String> {
-    let stem = filename
-        .rsplit_once('.')
-        .map_or(filename, |(stem, _)| stem);
+    let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
     let (_, id) = stem.rsplit_once('-')?;
     if id.len() == 11
         && id
@@ -359,13 +355,6 @@ async fn read_cache(
     })
 }
 
-/// Wait briefly for an audio video so the first Discord crawl can include it.
-///
-/// Generation usually takes a few seconds. If it takes longer than
-/// `PREVIEW_WAIT`, the page still advertises the media and the generation task
-/// is left running; Discord fetches `/e/...` separately and that route waits
-/// for the same job. This keeps the preview response inside Discord's crawl
-/// budget instead of falling back to a non-playable audio card.
 pub async fn prepare_for_discord(
     state: &Arc<AppState>,
     id: &str,
@@ -510,14 +499,7 @@ enum Input {
     Temp(PathBuf),
 }
 
-async fn resolve_input(
-    state: &AppState,
-    id: &str,
-    temp: &PathBuf,
-) -> Result<Input, String> {
-    // Always re-check the gate here. This keeps the generated media behind the
-    // same protection rules as the preview page, even if a future caller
-    // forgets to gate first.
+async fn resolve_input(state: &AppState, id: &str, temp: &PathBuf) -> Result<Input, String> {
     let gate = gate_decision(state, id, ShellMode::Preview, None, false).await;
     let (local, r2_key) = match gate {
         GateDecision::Respond(_) | GateDecision::Ciphertext => {
@@ -778,9 +760,7 @@ fn metadata_rows(
         if value.is_empty() {
             continue;
         }
-        if key == "title"
-            && (value == display_title || value.eq_ignore_ascii_case(display_title))
-        {
+        if key == "title" && (value == display_title || value.eq_ignore_ascii_case(display_title)) {
             continue;
         }
         if (key == "artist" || key == "album_artist")
@@ -843,7 +823,9 @@ fn parse_youtube_metadata(value: &serde_json::Value) -> Vec<(String, String)> {
     add_metadata_tag(
         &mut tags,
         "artist",
-        pick("artist").or_else(|| pick("uploader")).or_else(|| pick("channel")),
+        pick("artist")
+            .or_else(|| pick("uploader"))
+            .or_else(|| pick("channel")),
     );
     add_metadata_tag(&mut tags, "album", pick("album"));
     add_metadata_tag(&mut tags, "track", pick("track"));
@@ -851,14 +833,12 @@ fn parse_youtube_metadata(value: &serde_json::Value) -> Vec<(String, String)> {
     add_metadata_tag(&mut tags, "comment", pick("comment"));
     add_metadata_tag(&mut tags, "copyright", pick("copyright"));
 
-    let date = pick("release_date")
-        .map(format_metadata_date)
-        .or_else(|| {
-            value
-                .get("release_year")
-                .and_then(|item| item.as_u64())
-                .map(|year| year.to_string())
-        });
+    let date = pick("release_date").map(format_metadata_date).or_else(|| {
+        value
+            .get("release_year")
+            .and_then(|item| item.as_u64())
+            .map(|year| year.to_string())
+    });
     add_metadata_tag(&mut tags, "date", date.as_deref());
 
     if let Some(description) = pick("description") {
@@ -1386,9 +1366,7 @@ async fn generate(
     for (index, _) in meta_rows.iter().enumerate() {
         let label_slot = 3 + index * 2;
         let value_slot = label_slot + 1;
-        if value_slot >= text_temps.len()
-            || y + META_VALUE_SIZE > height.saturating_sub(8)
-        {
+        if value_slot >= text_temps.len() || y + META_VALUE_SIZE > height.saturating_sub(8) {
             break;
         }
         text_entries.push((
@@ -1547,7 +1525,10 @@ fn strip_media_version(path: &str) -> &str {
     let Some((prefix, rest)) = path.split_once('/') else {
         return path;
     };
-    let Some(version) = prefix.strip_prefix('v').and_then(|part| part.split_once('-')) else {
+    let Some(version) = prefix
+        .strip_prefix('v')
+        .and_then(|part| part.split_once('-'))
+    else {
         return path;
     };
     if !version.0.is_empty() && version.0.chars().all(|c| c.is_ascii_digit()) {
@@ -1608,16 +1589,15 @@ pub async fn audio_embed_media(
         GateDecision::HotServe { .. } | GateDecision::ServeLocal { .. } => {}
     }
 
-    let Some(generated) =
-        ensure_video(
-            Arc::clone(&state),
-            id.clone(),
-            meta.clone(),
-            None,
-            None,
-            None,
-        )
-        .await
+    let Some(generated) = ensure_video(
+        Arc::clone(&state),
+        id.clone(),
+        meta.clone(),
+        None,
+        None,
+        None,
+    )
+    .await
     else {
         return Ok(media_not_found());
     };
@@ -1925,10 +1905,7 @@ mod tests {
 
     #[test]
     fn video_title_drops_supplementary_emoji() {
-        assert_eq!(
-            title_for_video("A 🎵 B 🇲🇽 C", "mp3"),
-            "A B C"
-        );
+        assert_eq!(title_for_video("A 🎵 B 🇲🇽 C", "mp3"), "A B C");
         assert_eq!(
             title_for_video("goops! ：D 🇲🇽 - https", "mp3"),
             "goops! ：D - https"

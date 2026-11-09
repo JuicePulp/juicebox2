@@ -78,9 +78,6 @@ pub async fn remove_live_upload(
     StatusCode::NO_CONTENT
 }
 
-/// Internal health probe for one upload resource. It reports the part when the
-/// resource is registered as part of a parallel upload, the single stream when
-/// it stands alone, and the final stored file once it is published.
 pub async fn live_part_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

@@ -23,10 +23,6 @@ pub(crate) async fn finish_tus_upload(
     state: &Arc<AppState>,
     meta: TusUploadMeta,
 ) -> Result<serde_json::Value, AppError> {
-    
-    
-    
-    
     let protected: Option<(ProtectionMaterial, crate::crypto_file::FileKey)> =
         if meta.password_hash.is_some() {
             let target_id = meta.reserve_id.as_deref().unwrap_or(&meta.id);
@@ -62,15 +58,7 @@ pub(crate) async fn finish_tus_upload(
                     })
                     .await?
                     .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
-                let material = ProtectionMaterial {
-                    password_hash: reservation.password_hash.clone(),
-                    is_encrypted: true,
-                    enc_header: None,
-                    dek_wrapped: reservation.dek_wrapped.clone(),
-                    dek_salt: reservation.dek_salt.clone(),
-                    dek_escrow: reservation.dek_escrow.clone(),
-                    key_version: reservation.key_version,
-                };
+                let material = ProtectionMaterial::from_record(&reservation);
                 let dek = match material.dek_escrow.as_deref() {
                     Some(escrow) => crate::routes::upload::protected::unwrap_escrow(state, escrow)?,
                     None => state
@@ -122,52 +110,26 @@ pub(crate) async fn finish_tus_upload(
             .reservation_token
             .clone()
             .ok_or_else(|| AppError::Forbidden("reservation delete token required".into()))?;
-        let update_id = reserve_id.to_string();
-        let fname = meta.filename.clone();
-        let mtype = meta.mime_type.clone();
-        let size = meta.total_length as i64;
-        let enc_ip = meta.encrypted_ip.clone();
-        let completed = match state
-            .db_call("finish_file", move |db| {
-                crate::db::finish_reservation(
-                    db,
-                    &fname,
-                    &mtype,
-                    size,
-                    &update_id,
-                    &reservation_token,
-                    Some(enc_ip.as_str()),
-                )
-            })
-            .await?
-        {
-            db::FinishReservationResult::Completed(record) => record,
-            db::FinishReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reserve_id".into()));
-            }
-            db::FinishReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()));
-            }
-            db::FinishReservationResult::InvalidToken => {
-                return Err(AppError::Forbidden(
-                    "invalid reservation delete token".into(),
-                ));
-            }
-        };
+        let mut completed = crate::reservation::finish(
+            state,
+            crate::reservation::FinishRequest {
+                id: reserve_id.to_string(),
+                delete_token: reservation_token,
+                filename: meta.filename.clone(),
+                mime_type: meta.mime_type.clone(),
+                size_bytes: meta.total_length as i64,
+                uploader_ip: Some(meta.encrypted_ip.clone()),
+            },
+            crate::reservation::FinishPolicy::Strict,
+        )
+        .await?;
         let completed_id = &completed.id;
         let completed_size = completed.size_bytes;
         tracing::info!("reserved TUS upload completed: id={completed_id} size={completed_size}");
-        let mut completed = completed;
         if let Some((ref material, _)) = protected {
             crate::routes::upload::protected::mark_protected(state, &completed.id, material)
                 .await?;
-            completed.password_hash = material.password_hash.clone();
-            completed.is_encrypted = material.is_encrypted;
-            completed.enc_header = material.enc_header.clone();
-            completed.dek_wrapped = material.dek_wrapped.clone();
-            completed.dek_salt = material.dek_salt.clone();
-            completed.dek_escrow = material.dek_escrow.clone();
-            completed.key_version = material.key_version;
+            material.apply_to(&mut completed);
         }
         completed
     } else {
@@ -182,15 +144,9 @@ pub(crate) async fn finish_tus_upload(
             meta.storage_host.clone(),
         );
         if let Some((ref material, _)) = protected {
-            record.password_hash = material.password_hash.clone();
-            record.is_encrypted = material.is_encrypted;
-            record.enc_header = material.enc_header.clone();
-            record.dek_wrapped = material.dek_wrapped.clone();
-            record.dek_salt = material.dek_salt.clone();
-            record.dek_escrow = material.dek_escrow.clone();
-            record.key_version = material.key_version;
+            material.apply_to(&mut record);
         }
-        Box::new(db::insert_new_file(state, record).await?)
+        db::insert_new_file(state, record).await?
     };
 
     let owned_record = record.clone();
@@ -201,28 +157,10 @@ pub(crate) async fn finish_tus_upload(
         })
         .await?;
 
-    let (public_url, raw_url, download_url) = crate::utils::share_links(
-        &state.config,
-        record.storage_host.as_deref(),
-        &record.id,
-        &record.filename,
-    );
-    let protected = record.is_protected();
-    let is_encrypted = record.is_encrypted;
-
-    Ok(serde_json::to_value(crate::routes::upload::UploadResponse {
-        id: record.id,
-        url: public_url,
-        raw_url,
-        download_url,
-        filename: record.filename,
-        size_bytes: record.size_bytes,
-        mime_type: record.mime_type,
-        expires_at: record.expires_at,
-        delete_token: record.delete_token,
-        status: record.status,
-        protected,
-        is_encrypted,
-    })
-    .unwrap_or_default())
+    Ok(
+        serde_json::to_value(crate::routes::upload::UploadResponse::from_record(
+            state, &record, true,
+        ))
+        .unwrap_or_default(),
+    )
 }

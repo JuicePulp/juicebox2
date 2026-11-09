@@ -163,14 +163,18 @@ fn m06_pairing_codes_ip_hash(conn: &Connection) -> Result<()> {
 }
 
 fn m07_fetch_jobs_progress(conn: &Connection) -> Result<()> {
-    let _ = conn.execute(
-        "ALTER TABLE fetch_jobs ADD COLUMN stage TEXT NOT NULL DEFAULT ''",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE fetch_jobs ADD COLUMN bytes_received INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
+    if !has_column(conn, "fetch_jobs", "stage")? {
+        conn.execute(
+            "ALTER TABLE fetch_jobs ADD COLUMN stage TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !has_column(conn, "fetch_jobs", "bytes_received")? {
+        conn.execute(
+            "ALTER TABLE fetch_jobs ADD COLUMN bytes_received INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -279,9 +283,7 @@ fn m15_files_tier_pinned(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_files_tier_pinned ON files(tier_pinned);",
-    )?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_files_tier_pinned ON files(tier_pinned);")?;
     Ok(())
 }
 

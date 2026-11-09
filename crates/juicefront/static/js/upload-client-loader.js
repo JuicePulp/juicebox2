@@ -1,6 +1,3 @@
-// Load the upload client through a versioned URL. The entry module is already
-// cache-busted, but its unversioned imports are not; without this indirection a
-// reload can run stale worker code from the browser's module cache.
 const version = (() => {
   try {
     return document.getElementById("server-config")?.getAttribute("data-version") || "";

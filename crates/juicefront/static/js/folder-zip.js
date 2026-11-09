@@ -1,7 +1,3 @@
-// Turns dropped folders into a single ZIP File so the normal upload pipeline
-// can handle them. Everything happens in the browser: we walk the dropped
-// directory entries, stream each file into a ZIP (deflating text-like files
-// when the browser supports `CompressionStream`), and hand back a `File`.
 
 const ZIP_LOCAL_SIG = 0x04034b50;
 const ZIP_CENTRAL_SIG = 0x02014b50;
@@ -41,8 +37,6 @@ export function crc32(bytes) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-// Media and archives are already compressed; deflating them wastes CPU and
-// barely shrinks the result.
 const STORE_EXT_RE =
   /\.(jpe?g|jfif|png|gif|webp|heic|heif|avif|bmp|tiff?|mp4|m4v|mkv|mov|webm|avi|wmv|flv|m4a|mp3|aac|oga|ogg|opus|wav|flac|zip|7z|rar|gz|bz2|xz|zst|tgz|pdf|woff2?|ttf|otf|eot)$/i;
 
@@ -101,10 +95,6 @@ function tooLarge() {
   return err;
 }
 
-/**
- * Builds a ZIP Blob from `{ path, file }` and `{ path, dir: true }` entries.
- * The archive uses the UTF-8 filename flag, store or deflate per entry.
- */
 export async function createZip(entries, { compress = true, onProgress } = {}) {
   const localParts = [];
   const centralParts = [];
@@ -253,7 +243,6 @@ async function walk(entry, prefix, out, onBytes) {
   }
 }
 
-/** Resolves a top-level dropped item that may be a File or a file entry. */
 export async function resolveDroppedFile(item) {
   if (!item) return null;
   if (typeof File !== "undefined" && item instanceof File) return item;
@@ -261,10 +250,6 @@ export async function resolveDroppedFile(item) {
   return null;
 }
 
-/**
- * Splits a DataTransfer into directory entries and loose files. Must be called
- * synchronously from the drop handler, before `webkitGetAsEntry` data expires.
- */
 export function collectDropEntries(dataTransfer) {
   const dirs = [];
   const files = [];
@@ -296,14 +281,6 @@ export function zipName(name) {
   return /\.zip$/i.test(base) ? base : `${base}.zip`;
 }
 
-/**
- * Zips every dropped directory. Returns `null` when the folders contain no
- * files at all.
- *
- * @param {FileSystemDirectoryEntry[]} dirs
- * @param {{ compress?: boolean, onProgress?: Function, onBytes?: Function }} options
- * @returns {Promise<File|null>}
- */
 export async function buildFolderZip(
   dirs,
   { compress = true, onProgress, onBytes } = {},
@@ -312,8 +289,6 @@ export async function buildFolderZip(
   for (const dir of dirs) {
     await walk(dir, "", entries, onBytes);
   }
-  // Empty directories still get entries so they survive in the archive, but a
-  // folder with no files at all is not worth uploading.
   if (!entries.some((entry) => !entry.dir)) return null;
   const blob = await createZip(entries, { compress, onProgress });
   const name = dirs.length === 1 ? zipName(dirs[0].name) : "folders.zip";

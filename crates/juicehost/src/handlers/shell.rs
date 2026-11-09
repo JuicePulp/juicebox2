@@ -1,5 +1,3 @@
-
-
 use std::time::{Duration, Instant};
 
 use axum::{
@@ -17,11 +15,10 @@ const LOGO_DATA_URI: &str = include_str!("../templates/logo_b64.txt");
 const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 
 pub(crate) enum BackendStatus {
-    
     Known(serde_json::Value),
-    
+
     Unknown,
-    
+
     Unavailable,
 }
 
@@ -196,9 +193,7 @@ pub(crate) async fn gate_decision(
                 .get("is_encrypted")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            if raw_ciphertext
-                && encrypted
-                && matches!(mode, ShellMode::View | ShellMode::Download)
+            if raw_ciphertext && encrypted && matches!(mode, ShellMode::View | ShellMode::Download)
             {
                 return GateDecision::Ciphertext;
             }
@@ -294,15 +289,12 @@ fn render_shell(
     page_url: Option<&str>,
     show_anyways: bool,
 ) -> Response<Body> {
-    
-    
     let content_url = format!(
         "{}/file/{}/content",
         gateway_origin.trim_end_matches('/'),
         id
     );
-    
-    
+
     let enc_meta = format!("Encrypted file - {size_label}");
     let mut og_tags = format!(
         "<meta property=\"og:title\" content=\"{}\">\n<meta property=\"og:description\" content=\"{}\">\n<meta name=\"twitter:card\" content=\"summary\">",
@@ -328,8 +320,9 @@ fn render_shell(
                     ],
                 },
             });
-            let serialized =
-                serde_json::to_string(&payload).unwrap_or_default().replace("</", "<\\/");
+            let serialized = serde_json::to_string(&payload)
+                .unwrap_or_default()
+                .replace("</", "<\\/");
             if !serialized.is_empty() {
                 discord_embed = format!(
                     "<script id=\"discord:component-embed\" type=\"application/json\">\n{serialized}\n</script>"
@@ -368,11 +361,7 @@ fn render_shell(
         .replace("__MODE__", mode.as_str())
         .replace("__KEY_VERSION__", &escape_html(key_version))
         .replace("__MIME__", "application/octet-stream");
-    
-    
-    
-    
-    
+
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")

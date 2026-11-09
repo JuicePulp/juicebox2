@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
+    auth::InternalApiKey,
     db::{self, FileRecord},
     error::AppError,
     routes::upload::sanitize_filename,
@@ -54,28 +55,10 @@ pub struct RegisterResponse {
 )]
 pub async fn register_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
-    {
-        if state.config.juicehost_api_key.is_empty() {
-            return Err(AppError::Unauthorized("API key not configured".into()));
-        }
-        let provided = headers
-            .get("x-juicehost-api-key")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-            return Err(AppError::Unauthorized("invalid API key".into()));
-        }
-    }
-
-    if payload.id.is_empty()
-        || !payload
-            .id
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    {
+    if !crate::utils::is_valid_id_component(&payload.id) {
         return Err(AppError::BadRequest("invalid file ID format".into()));
     }
 
@@ -121,47 +104,27 @@ pub async fn register_handler(
         })
         .await?;
     let (delete_token, response_expires_at) = if let Some(existing) = existing {
-        if existing.status != "uploading" {
+        if existing.status != FileRecord::STATUS_UPLOADING {
             return Err(AppError::Conflict("file ID already exists".into()));
         }
         let reservation_token = payload
             .delete_token
             .clone()
             .ok_or_else(|| AppError::Unauthorized("reservation delete token required".into()))?;
-        let update_id = existing.id.clone();
-        let filename = record.filename.clone();
-        let mime_type = record.mime_type.clone();
-        let size_bytes = record.size_bytes;
-        let uploader_ip = record.uploader_ip.clone();
-        match state
-            .db_call("complete_registered_reservation", move |db| {
-                db::finish_reservation(
-                    db,
-                    &filename,
-                    &mime_type,
-                    size_bytes,
-                    &update_id,
-                    &reservation_token,
-                    uploader_ip.as_deref(),
-                )
-            })
-            .await?
-        {
-            db::FinishReservationResult::Completed(record) => {
-                (record.delete_token, record.expires_at)
-            }
-            db::FinishReservationResult::NotFound => {
-                return Err(AppError::NotFound);
-            }
-            db::FinishReservationResult::NotUploading => {
-                return Err(AppError::Conflict("reservation is not uploading".into()));
-            }
-            db::FinishReservationResult::InvalidToken => {
-                return Err(AppError::Forbidden(
-                    "invalid reservation delete token".into(),
-                ));
-            }
-        }
+        let completed = crate::reservation::finish(
+            &state,
+            crate::reservation::FinishRequest {
+                id: existing.id,
+                delete_token: reservation_token,
+                filename: record.filename.clone(),
+                mime_type: record.mime_type.clone(),
+                size_bytes: record.size_bytes,
+                uploader_ip: record.uploader_ip.clone(),
+            },
+            crate::reservation::FinishPolicy::Strict,
+        )
+        .await?;
+        (completed.delete_token, completed.expires_at)
     } else {
         db::insert_new_file(&state, record).await?;
         (new_delete_token, expires_at)

@@ -31,8 +31,6 @@ pub struct ReportRequest {
     #[serde(default)]
     pub email: String,
 
-    
-    
     #[serde(default)]
     pub password: String,
 }
@@ -375,6 +373,11 @@ pub fn wants_html(headers: &axum::http::HeaderMap) -> bool {
 mod tests {
     use super::*;
 
+    fn read_cookie_value(value: &str) -> Vec<FileCookieEntry> {
+        let header = HeaderValue::from_str(&format!("jb_files={value}")).unwrap();
+        parse_file_cookie(&header)
+    }
+
     #[test]
     fn wants_html_with_text_html() {
         let mut headers = HeaderMap::new();
@@ -411,12 +414,8 @@ mod tests {
             id: "abc123".into(),
             token: "tok456".into(),
         };
-        let headers = HeaderMap::new();
-        let value = build_file_cookie_value(&headers, &entry);
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&value)
-            .unwrap();
-        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        let value = build_file_cookie_value(&HeaderMap::new(), &entry);
+        let entries = read_cookie_value(&value);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "abc123");
         assert_eq!(entries[0].token, "tok456");
@@ -440,10 +439,7 @@ mod tests {
             token: "new".into(),
         };
         let val2 = build_file_cookie_value(&headers, &entry2);
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&val2)
-            .unwrap();
-        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        let entries = read_cookie_value(&val2);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].token, "new");
     }
@@ -497,13 +493,13 @@ mod tests {
                 HeaderValue::from_str(&format!("jb_files={val}")).unwrap(),
             );
         }
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&val)
-            .unwrap();
-        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        let entries = read_cookie_value(&val);
         assert_eq!(entries.len(), MAX_FILE_COOKIE_ENTRIES);
         assert_eq!(entries.first().unwrap().id, "id010");
-        assert_eq!(entries.last().unwrap().id, format!("id{:03}", MAX_FILE_COOKIE_ENTRIES + 9));
+        assert_eq!(
+            entries.last().unwrap().id,
+            format!("id{:03}", MAX_FILE_COOKIE_ENTRIES + 9)
+        );
     }
 
     #[test]
@@ -521,18 +517,7 @@ mod tests {
             );
         }
         let hdr = remove_file_cookie_header(&headers, "aaa");
-        let val = hdr
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .trim_start_matches("jb_files=")
-            .to_string();
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&val)
-            .unwrap();
-        let entries: Vec<FileCookieEntry> = serde_json::from_slice(&decoded).unwrap();
+        let entries = parse_file_cookie(&hdr);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "bbb");
     }

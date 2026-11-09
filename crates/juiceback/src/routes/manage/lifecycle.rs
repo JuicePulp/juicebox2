@@ -1,6 +1,132 @@
 use std::sync::Arc;
 
+use futures::{StreamExt, stream::FuturesUnordered};
+use tokio::sync::Semaphore;
+
 use crate::{db, error::AppError, state::AppState};
+
+const DELETE_PARALLELISM: usize = 20;
+
+pub async fn delete_file_everywhere(
+    state: &Arc<AppState>,
+    record: &db::FileRecord,
+    reason: &str,
+) -> Result<bool, AppError> {
+    let id = record.id.clone();
+    crate::storage_client::delete_file_on_juicehost(
+        state,
+        &id,
+        record.storage_host.as_deref(),
+        Some(&record.delete_token),
+    )
+    .await
+    .map_err(AppError::from_juicehost_error)?;
+
+    let id_for_db = id.clone();
+    let deleted = state
+        .db_call("delete_file", move |db| db::delete_file(db, &id_for_db))
+        .await?;
+
+    if let Err(e) = remove_client_files(state, std::slice::from_ref(&id)).await {
+        tracing::error!("{reason}: failed to remove client file mappings for id={id}: {e:?}");
+    }
+
+    crate::cloudflare::purge_file(&state.config, record);
+
+    tracing::info!("{reason}: delete id={id} db_deleted={deleted}");
+    Ok(deleted)
+}
+
+pub async fn delete_files_everywhere(
+    state: &Arc<AppState>,
+    records: Vec<db::FileRecord>,
+    reason: &str,
+) -> usize {
+    let sem = Arc::new(Semaphore::new(DELETE_PARALLELISM));
+    let mut pending = FuturesUnordered::new();
+    for record in records {
+        let permit = match Arc::clone(&sem).acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::error!("{reason}: semaphore closed, aborting deletion loop");
+                break;
+            }
+        };
+        let state = Arc::clone(state);
+        let id = record.id.clone();
+        let host = record.storage_host.clone();
+        let capability = record.delete_token.clone();
+        let reason = reason.to_string();
+        pending.push(tokio::spawn(async move {
+            let _permit = permit;
+            match crate::storage_client::delete_file_on_juicehost(
+                &state,
+                &id,
+                host.as_deref(),
+                Some(&capability),
+            )
+            .await
+            {
+                Ok(()) => Some(record),
+                Err(e) => {
+                    tracing::warn!("{reason}: failed to delete id={id} from juicehost: {e}");
+                    None
+                }
+            }
+        }));
+    }
+
+    let mut deleted = Vec::new();
+    while let Some(result) = pending.next().await {
+        match result {
+            Ok(Some(record)) => deleted.push(record),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("{reason}: juicehost delete task failed: {e}"),
+        }
+    }
+    if deleted.is_empty() {
+        return 0;
+    }
+
+    let ids: Vec<String> = deleted.iter().map(|record| record.id.clone()).collect();
+    if let Err(e) = remove_client_files(state, &ids).await {
+        tracing::error!("{reason}: failed to remove client file mappings: {e:?}");
+    }
+    crate::cloudflare::purge_files(&state.config, &deleted);
+
+    let ids_for_db = ids;
+    match state
+        .db_call("delete_files_by_ids", move |db| {
+            db::delete_files_by_ids(db, &ids_for_db)
+        })
+        .await
+    {
+        Ok(count) => {
+            tracing::info!("{reason}: purged {count} rows from db");
+            count
+        }
+        Err(e) => {
+            tracing::error!("{reason}: failed to purge db rows: {e:?}");
+            0
+        }
+    }
+}
+
+async fn remove_client_files(state: &Arc<AppState>, ids: &[String]) -> Result<usize, AppError> {
+    let ids = ids.to_vec();
+    state
+        .db_call("remove_client_files", move |db| {
+            let mut removed = 0;
+            for id in &ids {
+                removed += db.execute(
+                    "DELETE FROM client_files WHERE file_id = ?1",
+                    rusqlite::params![id],
+                )?;
+            }
+            Ok(removed)
+        })
+        .await
+}
 
 pub async fn pick_new_id(
     state: &Arc<AppState>,

@@ -1,4 +1,3 @@
-
 pub const DIR: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M20 20H4v-2h16v2ZM4 18H2V6h2v12Zm18 0h-2V8h2v10ZM20 8H10V6H4V4h8v2h8v2Z\"/></svg>";
 pub const FILE: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M18 22H6v-2h12v2ZM6 20H4V4h2v16ZM16 4h-2v4h4V6h2v14h-2V10h-6V4H6V2h10v2Zm2 2h-2V4h2v2Z\"/></svg>";
 pub const TEXT: &str = "<svg viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M18 22H6v-2h12v2ZM6 20H4V4h2v16ZM16 4h-2v4h4V6h2v14h-2V10h-6V4H6V2h10v2Zm0 14H8v-2h8v2Zm0-4H8v-2h8v2Zm-6-4H8V8h2v2Zm8-4h-2V4h2v2Z\"/></svg>";
@@ -13,7 +12,13 @@ pub fn file_icon(name: &str, is_dir: bool) -> &'static str {
     if is_dir {
         return DIR;
     }
-    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => IMAGE,
         "mp4" | "webm" | "mov" | "mkv" | "avi" | "m4v" => VIDEO,
         "mp3" | "wav" | "ogg" | "oga" | "flac" | "m4a" | "opus" => AUDIO,

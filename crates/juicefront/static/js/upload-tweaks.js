@@ -1,5 +1,3 @@
-// Toggled by the g g g g chord. When off, uploads use a fixed default stream
-// count and the adaptive tuner leaves it alone.
 export const TWEAK_ENGINE_KEY = "juicebox_tweak_engine";
 
 export function tweakEngineEnabled() {

@@ -49,11 +49,6 @@ function syncConfigBits(cfg) {
       localStorage.setItem("juicebox_danger_level", String(cfg.danger_level));
     } catch {}
   }
-  if (typeof cfg.ultrafast === "boolean") {
-    try {
-      localStorage.setItem("juicebox_ultrafast_supported", String(cfg.ultrafast));
-    } catch {}
-  }
 }
 function versionOf(cfg) {
   return typeof cfg.version === "string" ? cfg.version.trim().replace(/^v/i, "") : "";

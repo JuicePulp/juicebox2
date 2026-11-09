@@ -46,13 +46,17 @@ pub async fn promote_file(
     })?;
     let key = R2Store::hot_key(&id, &data.meta.extension);
     let content_type = crate::storage::guess_mime(&data.meta.extension);
-    r2.put_bytes(&key, data.data, &content_type).await.map_err(|e| {
-        tracing::warn!("promote: R2 put failed for id={id}: {e}");
-        JuicehostError::from(e)
-    })?;
+    r2.put_bytes(&key, data.data, &content_type)
+        .await
+        .map_err(|e| {
+            tracing::warn!("promote: R2 put failed for id={id}: {e}");
+            JuicehostError::from(e)
+        })?;
 
     tracing::info!("promoted id={id} to R2 ({key}, {} bytes)", data.meta.size);
-    Ok(Json(serde_json::json!({"status": "ok", "id": id, "key": key, "size": data.meta.size})))
+    Ok(Json(
+        serde_json::json!({"status": "ok", "id": id, "key": key, "size": data.meta.size}),
+    ))
 }
 
 #[utoipa::path(
@@ -85,5 +89,7 @@ pub async fn demote_file(
     } else {
         0
     };
-    Ok(Json(serde_json::json!({"status": "ok", "id": id, "removed": removed})))
+    Ok(Json(
+        serde_json::json!({"status": "ok", "id": id, "removed": removed}),
+    ))
 }

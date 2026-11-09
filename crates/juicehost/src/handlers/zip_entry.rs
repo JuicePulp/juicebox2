@@ -1,5 +1,3 @@
-
-
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
@@ -14,7 +12,11 @@ use super::{
     shell::{GateDecision, ShellMode, gate_decision},
     zip_list,
 };
-use crate::{error::JuicehostError, state::AppState, storage::{self, valid_component}};
+use crate::{
+    error::JuicehostError,
+    state::AppState,
+    storage::{self, valid_component},
+};
 
 const MAX_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -22,7 +24,10 @@ fn valid_entry_path(path: &str) -> bool {
     if path.is_empty() || path.len() > 1024 || path.starts_with('/') || path.contains('\\') {
         return false;
     }
-    if path.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+    if path
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
         return false;
     }
     !path.chars().any(|c| c.is_control())
@@ -32,7 +37,7 @@ fn inflate_deflated(data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
     let decoder = flate2::read::DeflateDecoder::new(data);
     let mut out = Vec::new();
-    
+
     decoder
         .take(MAX_ENTRY_BYTES + 1)
         .read_to_end(&mut out)
@@ -53,7 +58,7 @@ pub async fn zip_entry_file(
     if !valid_component(&id) || !valid_entry_path(entry_path) {
         return Err(JuicehostError::BadRequest);
     }
-    
+
     match gate_decision(&state, &id, ShellMode::View, None, false).await {
         GateDecision::Respond(_) | GateDecision::Ciphertext => {
             return Err(JuicehostError::Forbidden);
@@ -76,7 +81,7 @@ pub async fn zip_entry_file(
     if uncomp_size > MAX_ENTRY_BYTES {
         return Err(JuicehostError::PayloadTooLarge);
     }
-    
+
     let header = zip_list::read_range_capped(
         &state.storage,
         &id,
@@ -99,7 +104,7 @@ pub async fn zip_entry_file(
         if uncomp_size != 0 {
             return Err(JuicehostError::NotFound);
         }
-        
+
         return file_response(entry_path, Bytes::new());
     }
     let data = zip_list::read_range_capped(
@@ -116,7 +121,7 @@ pub async fn zip_entry_file(
         8 => inflate_deflated(&data)
             .map(Bytes::from)
             .ok_or(JuicehostError::NotFound)?,
-        
+
         _ => return Err(JuicehostError::NotFound),
     };
     file_response(entry_path, bytes)
@@ -129,17 +134,13 @@ fn file_response(entry_path: &str, bytes: Bytes) -> Result<Response<Body>, Juice
         .unwrap_or("")
         .to_ascii_lowercase();
     let mime = storage::guess_mime(&ext);
-    let content_type =
-        HeaderValue::from_str(&mime).map_err(|_| JuicehostError::Internal)?;
+    let content_type = HeaderValue::from_str(&mime).map_err(|_| JuicehostError::Internal)?;
     Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, bytes.len())
         .header(header::CACHE_CONTROL, "no-store")
-        .header(
-            header::CONTENT_SECURITY_POLICY,
-            "sandbox allow-downloads",
-        )
+        .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads")
         .body(Body::from(bytes))
         .map_err(|_| JuicehostError::Internal)
 }

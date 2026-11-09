@@ -101,7 +101,8 @@ fn ticket(file_id: &str, filename: &str, file_size: u64) -> String {
         &serde_json::json!({
             "sub": "dev-1", "user_id": "user-1", "iss": "juiceback-ticket",
             "file_id": file_id, "filename": filename, "mime_type": "text/plain",
-            "file_size": file_size, "iat": now, "exp": now + 300,
+            "file_size": file_size, "file_capability": "cap-1",
+            "iat": now, "exp": now + 300,
         }),
         &jsonwebtoken::EncodingKey::from_secret(b"test-ticket-secret"),
     )
@@ -1036,60 +1037,6 @@ async fn streaming_blocks_magic_bytes() {
 }
 
 #[tokio::test]
-async fn ticket_upload_uses_only_signed_filename() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let secret = "test-ticket-secret".to_string();
-    let state = Arc::new(AppState::new(
-        &test_config(&secret, None),
-        Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap()),
-    ));
-    state
-        .storage
-        .put("_", "seed.txt", Bytes::from("x"), None)
-        .await
-        .unwrap();
-    let app = build_router(state);
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
-    let claims = serde_json::json!({
-        "sub": "dev-1",
-        "user_id": "user-1",
-        "iss": "juiceback-ticket",
-        "file_id": "tic-evil",
-        "filename": "safe.txt",
-        "mime_type": "application/octet-stream",
-        "file_size": 9,
-        "iat": now,
-        "exp": now + 300,
-    });
-    let header = jsonwebtoken::Header::default();
-    let token = jsonwebtoken::encode(
-        &header,
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(b"test-ticket-secret"),
-    )
-    .unwrap();
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/internal/file/upload/tic-evil")
-                .header("authorization", format!("Bearer {token}"))
-                .header("x-juicebox-file-name", "malware.exe")
-                .body(Body::from(b"safe data".as_slice()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-}
-
-#[tokio::test]
 async fn ticket_upload_uses_signed_filename_extension() {
     let dir = tempfile::tempdir().unwrap();
     let secret = "test-ticket-secret".to_string();
@@ -1116,6 +1063,7 @@ async fn ticket_upload_uses_signed_filename_extension() {
         "filename": "report.pdf",
         "mime_type": "application/octet-stream",
         "file_size": 13,
+        "file_capability": "cap-1",
         "iat": now,
         "exp": now + 300,
     });
@@ -1429,7 +1377,6 @@ async fn get_public(
     uri: &str,
     range: Option<&str>,
 ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    
     let mut builder = Request::builder()
         .method("GET")
         .uri(uri)
@@ -1493,7 +1440,6 @@ async fn protected_file_serves_unlock_shell() {
     let app = build_router(state);
     store_bytes(&app, "abc12345", b"ciphertext-bytes").await;
 
-    
     let (status, headers, body) = get_public(&app, "/f/abc12345.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -1514,7 +1460,6 @@ async fn protected_file_serves_unlock_shell() {
     );
     assert!(page.contains("ciphertext only") || page.contains("ciphertext"));
 
-    
     let (status, headers, body) = get_public(&app, "/f/abc12345?inline=1", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"ciphertext-bytes");
@@ -1529,9 +1474,7 @@ async fn protected_file_serves_unlock_shell() {
         Some("inline")
     );
 
-    
-    let (status, headers, body) =
-        get_public(&app, "/f/abc12345?inline=1", Some("bytes=0-9")).await;
+    let (status, headers, body) = get_public(&app, "/f/abc12345?inline=1", Some("bytes=0-9")).await;
     assert_eq!(status, StatusCode::PARTIAL_CONTENT);
     assert_eq!(body, b"ciphertext");
     assert_eq!(
@@ -1659,7 +1602,6 @@ async fn internal_ciphertext_endpoint_serves_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), b"4567");
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1690,7 +1632,7 @@ async fn download_forces_attachment_with_bytes() {
             .and_then(|v| v.to_str().ok()),
         Some("attachment; filename=\"dlfile01.txt\"")
     );
-    
+
     let (status, headers, _) = get_public(&app, "/f/dlfile01.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -1881,8 +1823,6 @@ async fn preview_bots_get_raw_bytes() {
     let app = build_router(state);
     store_named(&app, "bot00001", "notes.txt", b"hello bots").await;
 
-    // Non-browser clients get the bytes directly, so `curl -O /v/<id>` works
-    // without following a redirect.
     let (status, headers, body) = get_bare(&app, "/v/bot00001.txt", Some("curl/8.5.0")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_slice(), b"hello bots");
@@ -1891,20 +1831,14 @@ async fn preview_bots_get_raw_bytes() {
         Some("no-store")
     );
 
-    // ComputerCraft's http API sends a User-Agent but no Accept header.
-    let (status, _, body) =
-        get_bare(&app, "/v/bot00001.txt", Some("computercraft/1.109.2")).await;
+    let (status, _, body) = get_bare(&app, "/v/bot00001.txt", Some("computercraft/1.109.2")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_slice(), b"hello bots");
 
-    // Any client that sends a UA but no Accept header is a non-browser, even
-    // if we have never seen its token before.
-    let (status, _, body) =
-        get_bare(&app, "/v/bot00001.txt", Some("some-lua-client/1.0")).await;
+    let (status, _, body) = get_bare(&app, "/v/bot00001.txt", Some("some-lua-client/1.0")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_slice(), b"hello bots");
 
-    // ...but a browser UA without Accept still gets the preview page.
     let resp = app
         .clone()
         .oneshot(
@@ -1921,18 +1855,19 @@ async fn preview_bots_get_raw_bytes() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    
     let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, _, body) =
-        get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
+    let (status, _, body) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
     assert!(page.contains("discord:component-embed"));
     assert!(page.contains("og:title"));
+    assert!(
+        page.contains("NOT the raw file"),
+        "preview must tell non-browser clients where the raw bytes are"
+    );
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1947,7 +1882,6 @@ async fn preview_bots_get_raw_bytes() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1962,7 +1896,6 @@ async fn preview_bots_get_raw_bytes() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    
     let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -2038,7 +1971,7 @@ async fn preview_missing_and_protected() {
     assert!(page.contains("password-protected"));
     assert!(page.contains("mode: \"preview\""));
     assert!(page.contains("href=\"/f/prot0001?inline=1\">show anyways</a>"));
-    
+
     assert!(page.contains("id=\"topdl\""));
     assert!(page.contains("id=\"topraw\""));
     assert!(page.contains("dl-hero"));

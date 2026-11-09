@@ -1,5 +1,3 @@
-
-
 use std::{path::PathBuf, sync::Arc};
 
 use base64::Engine as _;
@@ -31,13 +29,12 @@ pub struct ProtectionSetup {
 }
 
 impl ProtectionSetup {
-    
     #[must_use]
-    pub fn material(&self, header_hex: String) -> ProtectionMaterial {
+    pub fn material(&self, enc_header: Option<String>) -> ProtectionMaterial {
         ProtectionMaterial {
             password_hash: Some(self.password_hash.clone()),
             is_encrypted: true,
-            enc_header: Some(header_hex),
+            enc_header,
             dek_wrapped: Some(self.wrapped_b64.clone()),
             dek_salt: Some(self.salt_b64.clone()),
             dek_escrow: Some(self.escrow_hex.clone()),
@@ -99,7 +96,6 @@ pub enum UploadProtection {
 }
 
 impl UploadProtection {
-    
     pub fn dek(&self, state: &Arc<AppState>) -> Result<FileKey, AppError> {
         let global = || {
             state
@@ -116,25 +112,15 @@ impl UploadProtection {
         }
     }
 
-    
     #[must_use]
-    pub fn material(&self, header_hex: String) -> ProtectionMaterial {
+    pub fn material(&self, enc_header: Option<String>) -> ProtectionMaterial {
         match self {
-            Self::Fresh(setup) => setup.material(header_hex),
+            Self::Fresh(setup) => setup.material(enc_header),
             Self::Reserved(material) => {
                 let mut material = material.clone();
-                material.enc_header = Some(header_hex);
+                material.enc_header = enc_header;
                 material
             }
-        }
-    }
-
-    
-    #[must_use]
-    pub fn password_hash(&self) -> Option<String> {
-        match self {
-            Self::Fresh(setup) => Some(setup.password_hash.clone()),
-            Self::Reserved(material) => material.password_hash.clone(),
         }
     }
 }
@@ -145,15 +131,9 @@ pub async fn resolve_multipart_protection(
     reservation: Option<&db::FileRecord>,
 ) -> Result<Option<UploadProtection>, AppError> {
     if let Some(record) = reservation.filter(|r| r.is_protected()) {
-        return Ok(Some(UploadProtection::Reserved(ProtectionMaterial {
-            password_hash: record.password_hash.clone(),
-            is_encrypted: true,
-            enc_header: None,
-            dek_wrapped: record.dek_wrapped.clone(),
-            dek_salt: record.dek_salt.clone(),
-            dek_escrow: record.dek_escrow.clone(),
-            key_version: record.key_version,
-        })));
+        return Ok(Some(UploadProtection::Reserved(
+            ProtectionMaterial::from_record(record),
+        )));
     }
     let Some(password) = password.filter(|p| !p.is_empty()) else {
         return Ok(None);

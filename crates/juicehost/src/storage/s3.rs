@@ -86,10 +86,6 @@ impl S3Backend {
         object_store::path::Path::from(format!("files/.frozen/{id}"))
     }
 
-    
-    
-    
-    
     async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Ok(false);
@@ -104,11 +100,7 @@ impl S3Backend {
 
 #[async_trait::async_trait]
 impl FreezeStore for S3Backend {
-    async fn freeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError> {
+    async fn freeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
@@ -126,11 +118,7 @@ impl FreezeStore for S3Backend {
             .map_err(Into::into)
     }
 
-    async fn unfreeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError> {
+    async fn unfreeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }

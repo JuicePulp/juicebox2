@@ -20,7 +20,6 @@ pub struct HostConfig {
     pub danger_level: Option<String>,
     pub quick_link: Option<bool>,
     pub custom_id: Option<bool>,
-    pub ultrafast: Option<bool>,
     pub quic: Option<bool>,
     pub cobalt: Option<bool>,
     pub upload_mode: Option<String>,
@@ -65,25 +64,18 @@ fn is_blocked_host(base: &str) -> bool {
     let host = parsed.host_str().unwrap_or("").to_lowercase();
     let host = host.strip_prefix('[').unwrap_or(&host);
     let host = host.strip_suffix(']').unwrap_or(host);
-    
-    
+
     #[allow(clippy::case_sensitive_file_extension_comparisons)]
     if host == "localhost" || host.ends_with(".local") || host.ends_with(".internal") {
         return true;
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         return match ip {
-            std::net::IpAddr::V4(v4) => {
-                let octets = v4.octets();
-                octets[0] == 10
-                    || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-                    || (octets[0] == 192 && octets[1] == 168)
-                    || (octets[0] == 169 && octets[1] == 254)
-                    || octets[0] == 127
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback() || v6.is_unspecified() || is_v6_private(&v6)
-            }
+            std::net::IpAddr::V4(v4) => is_blocked_v4(v4),
+            std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => is_blocked_v4(v4),
+                None => v6.is_loopback() || v6.is_unspecified() || is_v6_private(&v6),
+            },
         };
     }
     let dotted: Vec<&str> = host.split('.').collect();
@@ -92,13 +84,20 @@ fn is_blocked_host(base: &str) -> bool {
             .iter()
             .map(|part| part.parse().unwrap_or(0))
             .collect();
-        return octets[0] == 10
-            || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-            || (octets[0] == 192 && octets[1] == 168)
-            || (octets[0] == 169 && octets[1] == 254)
-            || octets[0] == 127;
+        return is_blocked_v4(std::net::Ipv4Addr::new(
+            octets[0], octets[1], octets[2], octets[3],
+        ));
     }
     false
+}
+
+fn is_blocked_v4(v4: std::net::Ipv4Addr) -> bool {
+    let octets = v4.octets();
+    octets[0] == 10
+        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+        || (octets[0] == 192 && octets[1] == 168)
+        || (octets[0] == 169 && octets[1] == 254)
+        || octets[0] == 127
 }
 
 const fn is_v6_private(ip: &std::net::Ipv6Addr) -> bool {
@@ -197,7 +196,9 @@ pub async fn fetch_cobalt_services(state: &AppState) -> Vec<String> {
 pub fn read_cookie_host(cookie_header: Option<&str>) -> Option<String> {
     let header = cookie_header?;
     for part in header.split(';') {
-        let (name, value) = part.split_once('=')?;
+        let Some((name, value)) = part.split_once('=') else {
+            continue;
+        };
         if name.trim() != "juicebox_host" {
             continue;
         }
@@ -316,6 +317,9 @@ mod tests {
         assert!(is_blocked_host("http://localhost:6401"));
         assert!(is_blocked_host("http://192.168.1.10"));
         assert!(is_blocked_host("http://10.0.0.5"));
+        assert!(is_blocked_host("http://[::1]:6401"));
+        assert!(is_blocked_host("http://[::ffff:127.0.0.1]:6401"));
+        assert!(is_blocked_host("http://[::ffff:192.168.1.10]"));
         assert!(!is_blocked_host("https://box.juicey.dev"));
     }
 
@@ -326,6 +330,10 @@ mod tests {
             Some("https://f.juicey.dev".to_owned())
         );
         assert_eq!(read_cookie_host(Some("a=1")), None);
+        assert_eq!(
+            read_cookie_host(Some("flag; juicebox_host=https%3A%2F%2Ff.juicey.dev")),
+            Some("https://f.juicey.dev".to_owned())
+        );
         assert_eq!(read_cookie_host(None), None);
     }
 }

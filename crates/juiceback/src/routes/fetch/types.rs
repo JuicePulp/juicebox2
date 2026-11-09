@@ -25,8 +25,6 @@ pub struct FetchStartRequest {
     #[serde(default)]
     pub youtube_video_codec: Option<String>,
 
-    
-    
     #[serde(default)]
     pub password: Option<String>,
 }

@@ -70,16 +70,6 @@ impl R2Store {
             })
     }
 
-    pub async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
-        let data = self
-            .get_path(key)
-            .await?
-            .bytes()
-            .await
-            .map_err(|e| StorageError::Io(format!("R2 read failed: {e}")))?;
-        Ok(data)
-    }
-
     pub async fn get_stream(&self, key: &str) -> Result<crate::storage::ByteStream, StorageError> {
         let stream = self
             .get_path(key)
@@ -118,7 +108,12 @@ impl R2Store {
         Ok(Box::pin(stream))
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Bytes, content_type: &str) -> Result<(), StorageError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Bytes,
+        content_type: &str,
+    ) -> Result<(), StorageError> {
         let mut attributes = object_store::Attributes::new();
         if !content_type.is_empty() {
             attributes.insert(

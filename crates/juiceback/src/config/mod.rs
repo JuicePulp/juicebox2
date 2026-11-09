@@ -230,7 +230,10 @@ impl Config {
     fn try_load_from(file: &FileConfig) -> Result<Self, String> {
         let host = file.server.host.clone();
         let port = file.server.port;
-        let quic_port = file.server.quic_port.unwrap_or(port + 1);
+        let quic_port = file
+            .server
+            .quic_port
+            .unwrap_or(port + juiceutils::config::ports::QUIC_OFFSET);
 
         let database_path = file.server.database_path.clone();
         let rate_limit_per_minute = file.server.rate_limit_per_minute;
@@ -247,8 +250,7 @@ impl Config {
         let ip_encryption_key =
             juiceutils::config::required_secret("IP_ENCRYPTION_KEY").map_err(|e| e.to_string())?;
         let ip_pepper = juiceutils::config::optional_secret("IP_PEPPER").unwrap_or_default();
-        let ticket_jwt_secret = juiceutils::config::optional_secret("TICKET_JWT_SECRET")
-            .unwrap_or_else(|| jwt_secret.clone());
+        let ticket_jwt_secret = juiceutils::config::ticket_secret(&jwt_secret)?;
         let smtp_password = juiceutils::config::optional_secret("SMTP_PASSWORD");
         let cobalt_api_key =
             juiceutils::config::optional_secret("COBALT_API_KEY").unwrap_or_default();
@@ -263,24 +265,23 @@ impl Config {
             .filter(|v| !v.is_empty());
         let cf_api_token = juiceutils::config::optional_secret("CF_API_TOKEN");
 
-        let encryption_key_bytes = hex::decode(&ip_encryption_key)
-            .map_err(|_| "IP_ENCRYPTION_KEY must be a hexadecimal string".to_string())?;
-        if encryption_key_bytes.len() != 32 {
-            return Err("IP_ENCRYPTION_KEY must encode exactly 32 bytes".to_string());
-        }
+        juiceutils::config::validate_ip_encryption_key(&ip_encryption_key)?;
 
         let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")
             .map_err(|e| e.to_string())?;
-        validate_storage_key_hex(&storage_encryption_key)?;
+        juiceutils::config::validate_hex_key("STORAGE_ENCRYPTION_KEY", &storage_encryption_key)?;
 
         let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
         let password_try_limit = parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
         let password_try_window_secs =
             parse_env_u64("PASSWORD_TRY_WINDOW_SECS", DEFAULT_PASSWORD_TRY_WINDOW_SECS)?;
-        let encrypted_force_relay =
-            parse_env_bool("ENCRYPTED_FORCE_RELAY", DEFAULT_ENCRYPTED_FORCE_RELAY)?;
+        let encrypted_force_relay = juiceutils::config::env_bool("ENCRYPTED_FORCE_RELAY")?
+            .unwrap_or(DEFAULT_ENCRYPTED_FORCE_RELAY);
 
-        let juicehost_url = file.urls.juicehost_url.trim_end_matches('/').to_string();
+        let juicehost_url = juiceutils::config::optional_secret("JUICEHOST_URL")
+            .unwrap_or_else(|| file.urls.juicehost_url.clone())
+            .trim_end_matches('/')
+            .to_string();
         let public_juicehost_url = file
             .urls
             .public_juicehost_url
@@ -427,10 +428,8 @@ impl Config {
         let promo_min_views = file.promo.min_views;
         let promo_min_views_per_min = file.promo.min_views_per_min;
         let promo_min_ttl_remaining_secs = file.promo.min_ttl_remaining_secs.max(0);
-        let promo_dry_run = std::env::var("PROMO_DRY_RUN")
-            .ok()
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(file.promo.dry_run);
+        let promo_dry_run =
+            juiceutils::config::env_bool("PROMO_DRY_RUN")?.unwrap_or(file.promo.dry_run);
         let embed_promote_enabled = file.promo.embed_enabled;
         let embed_promote_max_bytes = file.promo.embed_max_bytes;
         let embed_promote_cooldown_secs = file.promo.embed_cooldown_secs.max(60);
@@ -452,12 +451,7 @@ impl Config {
                 .to_string());
         }
 
-        if juiceutils::config::is_placeholder_secret(&jwt_secret) {
-            return Err(
-                "JWT_SECRET is set to a placeholder value. Generate a real secret before starting."
-                    .to_string(),
-            );
-        }
+        juiceutils::config::validate_jwt_secret(&jwt_secret)?;
 
         if cobalt_enabled && cobalt_api_key.is_empty() {
             return Err(
@@ -508,7 +502,8 @@ impl Config {
             cf_zone_id,
             ticket_jwt_secret,
             secure_cookies,
-            sentry_environment: file.sentry.environment.clone(),
+            sentry_environment: juiceutils::config::SentrySettings::from_env_or(&file.sentry)
+                .environment,
             direct_upload_enabled,
             cobalt_enabled,
             cobalt_api_url,
@@ -577,18 +572,6 @@ const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
 const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
 const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
 
-fn validate_storage_key_hex(hex_str: &str) -> Result<(), String> {
-    let bytes = hex::decode(hex_str.trim()).map_err(|_| storage_key_error())?;
-    if bytes.len() != 32 {
-        return Err(storage_key_error());
-    }
-    Ok(())
-}
-
-fn storage_key_error() -> String {
-    "STORAGE_ENCRYPTION_KEY must be 64 hex chars encoding exactly 32 bytes".to_string()
-}
-
 fn parse_env_usize(name: &str, default: usize) -> Result<usize, String> {
     match std::env::var(name) {
         Ok(raw) if !raw.trim().is_empty() => raw
@@ -615,17 +598,6 @@ fn parse_env_u64(name: &str, default: u64) -> Result<u64, String> {
             .trim()
             .parse()
             .map_err(|_| format!("{name} must be a non-negative integer")),
-        _ => Ok(default),
-    }
-}
-
-fn parse_env_bool(name: &str, default: bool) -> Result<bool, String> {
-    match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err(format!("{name} must be a boolean (true/false/1/0)")),
-        },
         _ => Ok(default),
     }
 }
@@ -659,14 +631,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn storage_key_hex_validation() {
-        assert!(validate_storage_key_hex(&"ab".repeat(32)).is_ok());
-        assert!(validate_storage_key_hex(&format!("  {}  ", "ab".repeat(32))).is_ok());
-        assert!(validate_storage_key_hex("abc").is_err());
-        assert!(validate_storage_key_hex(&"ab".repeat(31)).is_err());
-        assert!(validate_storage_key_hex(&"zz".repeat(32)).is_err());
-        let err = validate_storage_key_hex("nope").unwrap_err();
-        assert!(!err.contains("nope"), "key material must not leak: {err}");
+    fn shipped_example_parses() {
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../juiceback.toml.example"
+        ));
+        let file: FileConfig = toml::from_str(text).expect("juiceback.toml.example must parse");
+        assert_eq!(file.server.port, juiceutils::config::ports::BACKEND);
     }
 
     #[test]

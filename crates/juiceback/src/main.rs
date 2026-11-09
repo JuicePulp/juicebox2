@@ -179,11 +179,6 @@ fn main() {
 
         let state = AppState::new(pool, config.clone(), http.clone(), juicehost_headers.clone(), jh_config);
 
-        
-        
-        
-        
-
         state.reload_banned_ips();
 
         let state_cleanup = Arc::clone(&state);

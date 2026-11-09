@@ -161,7 +161,11 @@ pub async fn unfreeze_file_on_juicehost(
 
     let resp = client
         .http()
-        .post(format!("{}/internal/file/{}/unfreeze", client.base_url(), id))
+        .post(format!(
+            "{}/internal/file/{}/unfreeze",
+            client.base_url(),
+            id
+        ))
         .headers(headers)
         .send()
         .await
@@ -242,7 +246,7 @@ pub async fn delete_file_on_juicehost(
         .await
         .ok()
         .flatten()
-        .is_some_and(|record| record.tier == "hot");
+        .is_some_and(|record| record.tier == db::FileRecord::TIER_HOT);
     if hot && let Err(e) = demote_file_on_juicehost(state, id, host, capability).await {
         tracing::warn!("juicehost delete: R2 demote failed for id={id}: {e}");
     }

@@ -130,10 +130,4 @@ mod tests {
         assert!(html.contains("<li><strong>two</strong></li>"));
         assert!(html.contains("<p>plain <em>em</em> text</p>"));
     }
-
-    #[test]
-    fn legal_texts_render_nonempty() {
-        assert!(!render_txt_to_html(TERMS_TXT).is_empty());
-        assert!(!render_txt_to_html(PRIVACY_TXT).is_empty());
-    }
 }

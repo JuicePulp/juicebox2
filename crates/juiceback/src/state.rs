@@ -91,7 +91,6 @@ impl AppState {
             config.dte_mint_burst,
         ));
 
-        
         let unlock_limiter = Arc::new(crate::mint_limiter::MintLimiter::new(
             config.password_try_limit,
             config.password_try_window_secs,
@@ -137,26 +136,6 @@ impl AppState {
         self.banned_ips.contains_key(ip)
     }
 
-    pub(crate) fn official_hosts(&self) -> std::collections::HashSet<String> {
-        let mut hosts = std::collections::HashSet::new();
-        let mut push = |raw: &str| {
-            let trimmed = raw.trim().trim_end_matches('/');
-            if !trimmed.is_empty() {
-                hosts.insert(trimmed.to_string());
-            }
-        };
-        push(&self.config.juicehost_url);
-        push(&self.config.public_base_url);
-        push(&self.config.public_juicehost_url);
-        if let Some(router) = self.config.router_base_url.as_deref() {
-            push(router);
-        }
-        for url in self.config.region_public_juicehosts.values() {
-            push(url);
-        }
-        hosts
-    }
-
     pub(crate) fn is_official_host(&self, host: &str) -> bool {
         let host = host.trim().trim_end_matches('/');
         if host.is_empty() {
@@ -166,11 +145,7 @@ impl AppState {
         matches(&self.config.juicehost_url)
             || matches(&self.config.public_base_url)
             || matches(&self.config.public_juicehost_url)
-            || self
-                .config
-                .router_base_url
-                .as_deref()
-                .is_some_and(matches)
+            || self.config.router_base_url.as_deref().is_some_and(matches)
             || self
                 .config
                 .region_public_juicehosts
@@ -189,9 +164,6 @@ impl AppState {
         })
     }
 
-    
-    
-    
     pub async fn refresh_juicehost_config(&self) -> Result<Arc<JuicehostConfig>, String> {
         let cfg = crate::storage_client::fetch_juicehost_config(
             &self.http,
@@ -209,8 +181,6 @@ impl AppState {
         Ok(fresh)
     }
 
-    
-    
     pub async fn juicehost_config_or_refresh(&self) -> Result<Arc<JuicehostConfig>, AppError> {
         if let Ok(cfg) = self.juicehost_config() {
             return Ok(cfg);
@@ -220,9 +190,6 @@ impl AppState {
             .map_err(AppError::ServiceUnavailable)
     }
 
-    
-    
-    
     pub fn juicehost_config_stale(&self) -> bool {
         let at = self
             .jh_config_updated_at

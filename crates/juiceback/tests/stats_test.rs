@@ -71,7 +71,6 @@ async fn stats_hit_requires_api_key() {
     let app = build_router(state);
     let (key, val) = api_key_header();
 
-    
     let resp = app
         .clone()
         .oneshot(json_post(
@@ -83,7 +82,6 @@ async fn stats_hit_requires_api_key() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    
     let resp = app
         .clone()
         .oneshot(json_post(
@@ -95,7 +93,6 @@ async fn stats_hit_requires_api_key() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    
     let resp = app
         .clone()
         .oneshot(json_post(
@@ -114,7 +111,6 @@ async fn stats_hits_count_unique_people_not_range_chunks() {
     let app = build_router(state.clone());
     let (key, val) = api_key_header();
 
-    
     for _ in 0..3 {
         let resp = app
             .clone()
@@ -127,7 +123,7 @@ async fn stats_hits_count_unique_people_not_range_chunks() {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
-    
+
     let resp = app
         .clone()
         .oneshot(json_post(
@@ -174,7 +170,6 @@ async fn stats_overview_counts_visitors_uploaders_and_file_views() {
     let app = build_router(state.clone());
     let (key, val) = api_key_header();
 
-    
     let resp = app
         .clone()
         .oneshot(common::with_connect_info(
@@ -187,7 +182,6 @@ async fn stats_overview_counts_visitors_uploaders_and_file_views() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    
     for (ip, times) in [("192.0.2.1", 2), ("192.0.2.2", 1)] {
         for _ in 0..times {
             let resp = app
@@ -215,7 +209,6 @@ async fn stats_overview_counts_visitors_uploaders_and_file_views() {
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
 
-    
     {
         let conn = state.db.get().unwrap();
         conn.execute(
@@ -252,7 +245,6 @@ async fn stats_overview_counts_visitors_uploaders_and_file_views() {
     assert_eq!(body["file_views"], 2);
     assert_eq!(body["file_downloads"], 0);
 
-    
     let resp = app
         .clone()
         .oneshot(common::with_connect_info(

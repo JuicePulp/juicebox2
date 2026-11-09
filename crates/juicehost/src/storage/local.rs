@@ -54,10 +54,7 @@ impl LocalBackend {
                 }
                 continue;
             }
-            
-            
-            
-            
+
             if name.starts_with(".frz.") {
                 continue;
             }
@@ -169,9 +166,6 @@ impl LocalBackend {
         valid_component(id).then(|| self.files_dir.join(format!(".frz.{id}")))
     }
 
-    
-    
-    
     async fn frozen_marker_exists(&self, id: &str) -> Result<bool, StorageError> {
         let Some(path) = self.frozen_path(id) else {
             return Ok(false);
@@ -186,11 +180,7 @@ impl LocalBackend {
 
 #[async_trait::async_trait]
 impl super::freeze::FreezeStore for LocalBackend {
-    async fn freeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError> {
+    async fn freeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
@@ -203,8 +193,7 @@ impl super::freeze::FreezeStore for LocalBackend {
         let path = self
             .frozen_path(id)
             .ok_or_else(|| StorageError::Io("invalid logical ID".into()))?;
-        
-        
+
         match tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -224,11 +213,7 @@ impl super::freeze::FreezeStore for LocalBackend {
         }
     }
 
-    async fn unfreeze(
-        &self,
-        id: &str,
-        capability: Option<&str>,
-    ) -> Result<bool, StorageError> {
+    async fn unfreeze(&self, id: &str, capability: Option<&str>) -> Result<bool, StorageError> {
         if !valid_component(id) {
             return Err(StorageError::Io("invalid logical ID".into()));
         }
@@ -344,8 +329,6 @@ impl LocalBackend {
                         StorageError::Io(format!("create temp failed: {e}"))
                     }
                 })?;
-            // Coalesce the small chunks produced by HTTP uploads into fewer
-            // disk writes. 512 KiB per active upload is cheap at 16 uploads.
             let mut file = BufWriter::with_capacity(512 * 1024, file);
             let mut total = 0u64;
             let mut visible = 0u64;
@@ -355,9 +338,6 @@ impl LocalBackend {
                 file.write_all(&chunk)
                     .await
                     .map_err(|e| StorageError::Io(format!("write failed: {e}")))?;
-                // Make the bytes visible to the progressive-download path
-                // while the upload is still running. Without this, BufWriter
-                // could hide the whole beginning of a stalled upload.
                 if total.saturating_sub(visible) >= 256 * 1024 {
                     file.flush()
                         .await
@@ -423,9 +403,8 @@ impl LocalBackend {
                         "part {part_id} is not a regular file"
                     )));
                 }
-                dst_off =
-                    copy_part_fast(&mut part, &mut target_file, meta.len(), dst_off, part_id)
-                        .await?;
+                dst_off = copy_part_fast(&mut part, &mut target_file, meta.len(), dst_off, part_id)
+                    .await?;
             }
 
             target_file
@@ -525,13 +504,6 @@ struct FileCloneRange {
     dest_offset: u64,
 }
 
-/// Reflink `part` into `target_file` at `dst_off`.
-///
-/// Returns `Ok(true)` when the whole part was cloned, `Ok(false)` when the
-/// kernel or filesystem refuses to clone (tmpfs, overlayfs, cross-device) and
-/// the caller must copy instead. A clone is metadata-only, so merging a 1 GiB
-/// upload costs microseconds instead of ~26 s at disk speed, and the parts and
-/// the merged file share blocks until one of them is unlinked.
 #[cfg(target_os = "linux")]
 fn try_reflink_range(
     part: &tokio::fs::File,
@@ -546,21 +518,14 @@ fn try_reflink_range(
         src_length: part_len,
         dest_offset: dst_off,
     };
-    // SAFETY: both descriptors stay open for the duration of the call and
-    // `range` matches the layout the kernel expects for FICLONERANGE.
-    let rc = unsafe {
-        libc::ioctl(
-            target_file.as_raw_fd(),
-            FICLONERANGE,
-            &raw const range,
-        )
-    };
+    let rc = unsafe { libc::ioctl(target_file.as_raw_fd(), FICLONERANGE, &raw const range) };
     if rc == 0 {
         return Ok(true);
     }
-    // A reflink the filesystem declines must never fail the merge: the caller
-    // falls back to a real copy, which surfaces genuine I/O errors.
-    tracing::debug!("reflink declined, copying: {}", std::io::Error::last_os_error());
+    tracing::debug!(
+        "reflink declined, copying: {}",
+        std::io::Error::last_os_error()
+    );
     Ok(false)
 }
 
@@ -571,18 +536,12 @@ async fn copy_part_fast(
     dst_off: u64,
     part_id: &str,
 ) -> Result<u64, StorageError> {
-    // Reflink first. This is the difference between a 20 s and a 0 ms merge
-    // for a 1 GiB upload, and it is the only path that does not double the
-    // file's disk footprint while parts and target coexist.
     #[cfg(target_os = "linux")]
     {
         if try_reflink_range(part, target_file, part_len, dst_off)? {
             return Ok(dst_off + part_len);
         }
     }
-    // Everything past this point moves bytes: at disk speed a part is seconds
-    // of syscalls, so it must not run on a reactor thread. Hand duplicated
-    // handles to the blocking pool; the originals stay open for the caller.
     let part_std = part
         .try_clone()
         .await
@@ -603,11 +562,6 @@ async fn copy_part_fast(
     .map_err(|e| StorageError::Io(format!("copy part {part_id} task failed: {e}")))?
 }
 
-/// Blocking half of [`copy_part_fast`], run on the blocking pool.
-///
-/// `copy_file_range` keeps the bytes in the kernel; when the filesystem does not
-/// support it the loop falls back to positional reads and writes, which must not
-/// disturb the shared file offsets of the handles it was given.
 fn copy_part_blocking(
     part: &std::fs::File,
     target: &std::fs::File,
@@ -669,8 +623,6 @@ fn copy_part_blocking(
             remaining -= n;
         }
     }
-    // Whatever copy_file_range did not take (or that it could not start) is
-    // moved in userspace, from where the kernel loop stopped.
     let mut buf = vec![0u8; 1 << 20];
     while remaining > 0 {
         let want = remaining.min(buf.len() as u64) as usize;
@@ -829,8 +781,7 @@ impl StorageBackend for LocalBackend {
         if let Some(capability) = capability {
             capability::verify(self, id, capability).await?;
         }
-        
-        
+
         ensure_not_frozen(self, id).await?;
         let path = self.files_dir.join(format!("{id}.{ext}"));
         match tokio::fs::remove_file(&path).await {
@@ -927,8 +878,6 @@ impl StorageBackend for LocalBackend {
         ensure_not_frozen(self, id).await?;
         let file = self.open_regular(&path).await?;
         let stream = futures::stream::unfold(file, |mut file| async move {
-            // read_buf fills uninitialised BytesMut capacity, avoiding a
-            // zeroed 64 KiB allocation for every chunk of a download.
             let mut buf = BytesMut::with_capacity(256 * 1024);
             match tokio::io::AsyncReadExt::read_buf(&mut file, &mut buf).await {
                 Ok(0) => None,
@@ -942,9 +891,6 @@ impl StorageBackend for LocalBackend {
 
 impl LocalBackend {
     fn temp_path(&self, id: &str) -> PathBuf {
-        // A deterministic temp name lets the public host stream bytes while
-        // they are still being written. The per-ID reservation file makes
-        // concurrent writers for the same logical ID impossible.
         self.files_dir.join(format!(".live.{id}.tmp"))
     }
 

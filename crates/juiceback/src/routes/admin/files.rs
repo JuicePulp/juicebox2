@@ -45,19 +45,14 @@ pub struct AdminFileEntry {
 
     pub protected: bool,
 
-    
     pub viewers: i64,
 
-    
     pub views: i64,
 
-    
     pub downloaders: i64,
 
-    
     pub downloads: i64,
 
-    
     pub last_viewed_at: Option<i64>,
 }
 
@@ -70,7 +65,6 @@ pub struct AdminFilesResponse {
 
 fn promo_eligible(
     config: &crate::config::Config,
-    official: &std::collections::HashSet<String>,
     record: &db::FileRecord,
     stats: Option<&&db::FileStatsAggregate>,
     seen: Option<&(i64, i64, i64)>,
@@ -79,7 +73,7 @@ fn promo_eligible(
     if record.tier_pinned {
         return false;
     }
-    if record.status != "ready" {
+    if record.status != db::FileRecord::STATUS_READY {
         return false;
     }
     if record.expires_at <= now + config.promo_min_ttl_remaining_secs {
@@ -99,15 +93,7 @@ fn promo_eligible(
     if record.size_bytes <= 0 || record.size_bytes > config.r2_max_promote_bytes as i64 {
         return false;
     }
-    let host = record.storage_host.as_deref().unwrap_or("").trim();
-    if host.is_empty() {
-        if config.juicehost_url.trim().is_empty() {
-            return false;
-        }
-    } else if !official.contains(host) {
-        return false;
-    }
-    true
+    crate::jobs::promo::promotion_target(config, record.storage_host.as_deref()).is_some()
 }
 
 #[utoipa::path(
@@ -159,7 +145,6 @@ pub async fn list_files_handler(
             move |db| db::read_promo_state(db, &ids)
         })
         .await?;
-    let official = state.official_hosts();
     let now = chrono::Utc::now().timestamp();
     let mut full_hash_by_id: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -189,14 +174,9 @@ pub async fn list_files_handler(
                 &r.filename,
             );
 
-            let ip_hash = r
-                .uploader_ip
-                .as_ref()
-                .and_then(|enc| crate::utils::decrypt_ip(enc, &state.config.ip_encryption_key))
-                .map(|ip| {
-                    let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
-                    crate::utils::truncate_hash(&h).to_string()
-                });
+            let ip_hash = full_hash_by_id
+                .get(r.id.as_str())
+                .map(|h| crate::utils::truncate_hash(h).to_string());
             let uploader_geo = full_hash_by_id
                 .get(r.id.as_str())
                 .and_then(|h| geo_by_hash.get(h.as_str()))
@@ -218,7 +198,6 @@ pub async fn list_files_handler(
                     r.tier.as_str(),
                     promo_eligible(
                         &state.config,
-                        &official,
                         &r,
                         stats_by_id.get(r.id.as_str()),
                         promo_seen.get(r.id.as_str()),
@@ -244,7 +223,7 @@ pub async fn list_files_handler(
                 url,
                 storage_host: r.storage_host,
                 tier: r.tier.clone(),
-                hot: r.tier == "hot",
+                hot: r.tier == db::FileRecord::TIER_HOT,
                 tier_state,
                 tier_pinned: r.tier_pinned,
                 encrypted: r.is_encrypted,
@@ -289,27 +268,9 @@ pub async fn delete_file_handler(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let host_opt = record.storage_host.as_deref();
-    crate::storage_client::delete_file_on_juicehost(
-        &state,
-        &id,
-        host_opt,
-        Some(&record.delete_token),
-    )
-    .await
-    .map_err(AppError::from_juicehost_error)?;
-
-    let id_for_delete = id.clone();
-    state
-        .db_call("delete_file", move |db| db::delete_file(db, &id_for_delete))
-        .await?;
-
-    crate::cloudflare::purge_file(
-        &state.config,
-        &record,
-    );
-
-    tracing::info!("admin delete: id={id}");
+    if !crate::routes::manage::lifecycle::delete_file_everywhere(&state, &record, "admin").await? {
+        return Err(AppError::NotFound);
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -337,7 +298,9 @@ pub async fn warm_file_handler(
         .await
         .map_err(AppError::Internal)?;
     tracing::info!("admin warm: id={id}");
-    Ok(Json(serde_json::json!({ "tier": "hot", "tier_pinned": true })))
+    Ok(Json(
+        serde_json::json!({ "tier": "hot", "tier_pinned": true }),
+    ))
 }
 
 #[utoipa::path(
@@ -363,7 +326,9 @@ pub async fn cool_file_handler(
         .await
         .map_err(AppError::Internal)?;
     tracing::info!("admin cool: id={id}");
-    Ok(Json(serde_json::json!({ "tier": "standard", "tier_pinned": false })))
+    Ok(Json(
+        serde_json::json!({ "tier": "standard", "tier_pinned": false }),
+    ))
 }
 
 #[utoipa::path(
@@ -395,14 +360,9 @@ pub async fn freeze_file_handler(
         .as_deref()
         .map(str::trim)
         .filter(|h| !h.is_empty());
-    crate::storage_client::freeze_file_on_juicehost(
-        &state,
-        &id,
-        host,
-        Some(&record.delete_token),
-    )
-    .await
-    .map_err(AppError::Internal)?;
+    crate::storage_client::freeze_file_on_juicehost(&state, &id, host, Some(&record.delete_token))
+        .await
+        .map_err(AppError::Internal)?;
     tracing::info!("admin freeze: id={id}");
     Ok(Json(serde_json::json!({ "frozen": true })))
 }

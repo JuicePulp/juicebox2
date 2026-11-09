@@ -258,8 +258,6 @@ import { announce } from "./util.js";
               dropzone.classList.remove("drop-zone--shake");
             };
             dropzone.addEventListener("animationend", clearShake, { once: true });
-            // Reduced motion turns the animation off, so animationend never
-            // fires. Keep the error state from sticking around forever.
             setTimeout(clearShake, 600);
           }
           return;

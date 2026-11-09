@@ -9,7 +9,7 @@ use argon2::{
 };
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::request::Parts,
+    http::{HeaderMap, request::Parts},
 };
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::Rng;
@@ -18,6 +18,45 @@ use serde::{Deserialize, Serialize};
 pub const ISS_ADMIN: &str = "juiceback-admin";
 
 pub const ISS_DEVICE: &str = "juiceback-device";
+
+pub const INTERNAL_API_KEY_HEADER: &str = "x-juicehost-api-key";
+
+pub fn verify_internal_api_key(
+    state: &crate::state::AppState,
+    headers: &HeaderMap,
+) -> Result<(), crate::error::AppError> {
+    if state.config.juicehost_api_key.is_empty() {
+        return Err(crate::error::AppError::Unauthorized(
+            "API key not configured".into(),
+        ));
+    }
+    let provided = headers
+        .get(INTERNAL_API_KEY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
+        return Err(crate::error::AppError::Unauthorized(
+            "invalid API key".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct InternalApiKey;
+
+impl<S: Send + Sync> FromRequestParts<S> for InternalApiKey
+where
+    Arc<crate::state::AppState>: FromRef<S>,
+{
+    type Rejection = crate::error::AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let app_state = Arc::<crate::state::AppState>::from_ref(state);
+        verify_internal_api_key(&app_state, &parts.headers)?;
+        Ok(Self)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminClaims {

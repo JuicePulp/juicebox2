@@ -164,7 +164,6 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     assert_eq!(json["is_encrypted"], true);
     let id = json["id"].as_str().unwrap().to_string();
 
-    
     let pushes = captured.lock().unwrap();
     assert_eq!(pushes.len(), 1);
     let stored: Vec<u8> = pushes.concat();
@@ -175,8 +174,7 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
         "plaintext must not appear in stored bytes"
     );
     let key = juiceback::crypto_file::FileKey::from_hex(TEST_KEY_HEX).unwrap();
-    
-    
+
     let record = db_record(&state, &id).await;
     let escrow = record.dek_escrow.clone().expect("v1 escrow material");
     let escrow_raw = hex::decode(&escrow).unwrap();
@@ -186,7 +184,6 @@ async fn protected_relay_roundtrip_stores_ciphertext_only() {
     juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
     assert_eq!(plain, PLAINTEXT);
 
-    
     let record = db_record(&state, &id).await;
     assert!(record.is_protected());
     assert!(record.is_encrypted);
@@ -439,7 +436,6 @@ async fn tus_protected_roundtrip_spools_then_encrypts() {
     assert_eq!(status, StatusCode::CREATED);
     let location = location.unwrap();
 
-    
     let mid = PLAINTEXT.len() / 2;
     let (status, _) = tus_patch(&app, &location, 0, &PLAINTEXT[..mid]).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -515,7 +511,6 @@ async fn tus_adopts_protected_reservation() {
     let id = reserve["id"].as_str().unwrap();
     let token = reserve["delete_token"].as_str().unwrap();
 
-    
     let meta = tus_meta(&[
         ("filename", "secret.txt"),
         ("mimetype", "text/plain"),
@@ -704,7 +699,6 @@ async fn unlock_page_and_cookie_flow() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "unlockpage1").await;
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -728,7 +722,6 @@ async fn unlock_page_and_cookie_flow() {
         "unexpected redirect: {location}"
     );
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -745,17 +738,14 @@ async fn unlock_page_and_cookie_flow() {
         .await
         .unwrap();
 
-    
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    
     let (status, headers, json) = post_unlock_json(&app, &id, PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let cookie = unlock_cookie(&headers, &id).expect("unlock cookie");
     assert!(cookie.starts_with(&format!("jb_unlock_{id}=")));
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -786,7 +776,6 @@ async fn unlock_page_and_cookie_flow() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let _ = no_auth_body;
@@ -804,7 +793,6 @@ async fn content_password_transports_and_ranges() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "unlockrange1").await;
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -825,7 +813,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -840,7 +827,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -867,7 +853,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), &PLAINTEXT[..10]);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -887,7 +872,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(bytes.as_ref(), &PLAINTEXT[total - 5..]);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -903,7 +887,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -928,7 +911,6 @@ async fn content_password_transports_and_ranges() {
         .unwrap();
     assert!(bytes.is_empty());
 
-    
     let boundary = "plainunlock1";
     let body = multipart_body(boundary, &[], ("a.txt", PLAINTEXT));
     let (status, json) = post_upload(&app, body, boundary, None).await;
@@ -1013,7 +995,6 @@ async fn report_password_enables_admin_preview() {
     let id = upload_protected(&app, &state, "reportpreview1").await;
     let file_url = format!("http://localhost:6402/v/{id}.txt");
 
-    
     let body = format!(
         "file_url={}&reason=spam&details=test&password={}",
         urlencode(&file_url),
@@ -1040,7 +1021,6 @@ async fn report_password_enables_admin_preview() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].password.as_deref(), Some(PASSWORD));
 
-    
     let token = seed_admin(&state).await;
     let resp = app
         .clone()
@@ -1062,7 +1042,6 @@ async fn report_password_enables_admin_preview() {
     assert_eq!(list["items"][0]["has_password"], true);
     assert!(list["items"][0].get("password").is_none());
 
-    
     let report_id = reports[0].id;
     let resp = app
         .clone()
@@ -1082,7 +1061,6 @@ async fn report_password_enables_admin_preview() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1122,11 +1100,9 @@ async fn deleting_protected_file_removes_ciphertext_and_row() {
     let app = common::mock_router(Arc::clone(&state));
     let id = upload_protected(&app, &state, "deletecleanup1").await;
 
-    
     let record = db_record(&state, &id).await;
     assert!(record.is_protected());
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1258,13 +1234,12 @@ async fn gateway_params_and_unlock_release_working_dek() {
     assert!(filename.chars().all(|c| c.is_ascii_hexdigit()));
     assert_ne!(filename, "secret.txt");
 
-    
     let (status, _, _) = post_gateway_unlock(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    
     let (status, headers, json) = post_gateway_unlock(&app, &id, PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["filename"], "secret.txt");
     assert_eq!(
         headers.get("cache-control").and_then(|v| v.to_str().ok()),
         Some("no-store")
@@ -1283,7 +1258,6 @@ async fn gateway_params_and_unlock_release_working_dek() {
     juiceback::crypto_file::decrypt_to_writer(&dek, &stored, &mut plain).unwrap();
     assert_eq!(plain, PLAINTEXT);
 
-    
     let (status, _) = get_gateway_params(&app, "nope1234").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = post_gateway_unlock(&app, "nope1234", PASSWORD).await;
@@ -1356,11 +1330,14 @@ async fn legacy_files_stay_readable_without_key_release() {
     assert_eq!(status, StatusCode::OK, "{params}");
     assert_eq!(params["key_version"], "0");
 
-    
-    let (status, _, _) = post_gateway_unlock(&app, &id, PASSWORD).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, json) = post_gateway_unlock(&app, &id, PASSWORD).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["dek"], "",
+        "legacy files have no per-file key to release"
+    );
+    assert_eq!(json["filename"], "secret.txt");
 
-    
     let resp = app
         .clone()
         .oneshot(
@@ -1379,7 +1356,6 @@ async fn legacy_files_stay_readable_without_key_release() {
         .unwrap();
     assert_eq!(bytes.as_ref(), PLAINTEXT);
 
-    
     let resp = app
         .clone()
         .oneshot(

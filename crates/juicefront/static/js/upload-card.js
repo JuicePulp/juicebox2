@@ -18,9 +18,8 @@ import {
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
-  ULTRAFAST_RESERVE_URL,
 } from "./upload-config.js?v=2.2.0";
-import { apiFetch, apiFetchJob, publicFileInfo } from "./api.js";
+import { apiFetch, apiFetchJob, publicFile } from "./api.js";
 import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0";
 import {
   enhanceHostSelector,
@@ -28,11 +27,9 @@ import {
   readSelectedUploadMode,
   readQuickLinkEnabled,
   readDangerLevel,
-  readUltraFastEnabled,
-  readUltraFastSupported,
   initHostGlow,
 } from "./enhance-host.js?v=2.2.0";
-import { connectPresence, isAppMode } from "./presence.js";
+import { connectPresence } from "./presence.js";
 import { resolveUploadHost } from "./upload-router.js?v=2.2.0";
 import { validateFileClient } from "./file-validation.js";
 import { upsertLocalFile } from "./upload-storage.js";
@@ -366,7 +363,7 @@ function wipeFailedReservation(item) {
       } catch (e) {}
     }
     if (fid && token) {
-      fetch("/file/" + encodeURIComponent(fid), {
+      fetch(publicFile(fid), {
         method: "DELETE",
         headers: { "X-Delete-Token": token },
       }).catch(function () {});
@@ -510,7 +507,6 @@ function completeRow(item, row) {
       createDeleteButton({
         fileId: fileId,
         deleteToken: item.deleteToken,
-        apiBase: UPLOAD_URL,
         onDeleted: onDeleted,
         immediate: true,
       }),
@@ -590,263 +586,6 @@ function syncRow(item) {
       }
       break;
   }
-}
-
-async function ultrafastReserve(file, item, fill, status, pill) {
-  status.textContent = t(LOCALE, "upload.delegating_to_app");
-  try {
-    var ttl = String(ttlHours());
-    var reserveRes = await fetch(ULTRAFAST_RESERVE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: file.name,
-        mime_type: file.type || "application/octet-stream",
-        file_size: file.size,
-        ttl_hours: Number(ttl),
-      }),
-    });
-    if (!reserveRes.ok) {
-      var code;
-      var msg;
-      try {
-        var err = await reserveRes.json();
-        if (err.error) code = err.error;
-        if (err.message) msg = err.message;
-      } catch {}
-      failItem(item, pill, fill, status, code, msg);
-      return;
-    }
-    var reserve = await reserveRes.json();
-    var reserveUrl = reserve.url || "";
-    var reserveRawUrl = reserve.raw_url || "";
-    var reserveDownloadUrl = reserve.download_url || "";
-    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
-    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
-    upsertLocalFile({
-      id: reserve.file_id || "",
-      filename: file.name,
-      mime_type: file.type || "application/octet-stream",
-      size_bytes: file.size,
-      uploaded_at: Math.floor(Date.now() / 1000),
-      url: reserveUrl,
-      raw_url: reserveRawUrl,
-      download_url: reserveDownloadUrl,
-      expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
-      delete_token: reserve.delete_token || "",
-    });
-    if (reserveUrl) {
-      item.setAttribute("data-quick-link", "");
-      var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
-      pill.after(reserveBar);
-      attachUrlVariantsAfter(
-        reserveBar,
-        { preview: reserveUrl, raw: reserveRawUrl, download: reserveDownloadUrl },
-        urlVariantLabels(LOCALE),
-      );
-    }
-    fill.style.setProperty("--progress", "0%");
-    status.textContent = t(LOCALE, "upload.waiting_for_app");
-    item.classList.add("delegated");
-  } catch {
-    failItem(item, pill, fill, status, "NETWORK_ERROR");
-  }
-}
-
-function startUltraFastFromDropzone() {
-  setEmpty(false);
-  var item = document.createElement("div");
-  item.className = "file-item";
-  item.setAttribute("role", "listitem");
-  item.innerHTML =
-    '<div class="file-item-header">' +
-    '<div class="file-card-icon">' + iconHTML("upload", 24) + "</div>" +
-    '<div class="file-info-left">' +
-    '<span class="file-name">Picking file on device...</span>' +
-    '<span class="file-size"></span>' +
-    "</div>" +
-    '<button type="button" class="delete-btn" aria-label="' + t(LOCALE, "upload.remove_from_queue") + '">' + iconHTML("trash", 24) + "</button>" +
-    "</div>" +
-    '<div class="file-action-area">' +
-    '<div class="progress-divider" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="' + t(LOCALE, "upload.progress_aria") + '">' +
-    '<div class="progress-fill" style="--progress:0%"></div>' +
-    "</div>" +
-    '<div class="status-pill" role="status">' +
-    '<div class="status-content">' +
-    '<img src="/static/assets/loading.webp" alt="" class="spinner" aria-hidden="true" width="16" height="16" />' +
-    '<span class="status-text">' + t(LOCALE, "upload.delegating_to_app") + "</span>" +
-    "</div></div></div>";
-  item.querySelector(".delete-btn").addEventListener("click", function () {
-    dismissRow(item);
-  });
-  listContentRef.prepend(item);
-  var fill = item.querySelector(".progress-fill");
-  var status = item.querySelector(".status-text");
-  var pill = item.querySelector(".status-pill");
-  ultrafastReservePlaceholder(item, fill, status, pill);
-}
-
-async function ultrafastReservePlaceholder(item, fill, status, pill) {
-  status.textContent = t(LOCALE, "upload.delegating_to_app");
-  try {
-    var ttl = String(ttlHours());
-    var reserveRes = await fetch(ULTRAFAST_RESERVE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: "upload",
-        mime_type: "application/octet-stream",
-        file_size: 0,
-        ttl_hours: Number(ttl),
-      }),
-    });
-    if (!reserveRes.ok) {
-      var code;
-      var msg;
-      try {
-        var err = await reserveRes.json();
-        if (err.error) code = err.error;
-        if (err.message) msg = err.message;
-      } catch {}
-      failItem(item, pill, fill, status, code, msg);
-      return;
-    }
-    var reserve = await reserveRes.json();
-    var reserveUrl = reserve.url || "";
-    var reserveRawUrl = reserve.raw_url || "";
-    var reserveDownloadUrl = reserve.download_url || "";
-    if (reserve.file_id) item.setAttribute("data-file-id", reserve.file_id);
-    if (reserve.delete_token) item.setAttribute("data-delete-token", reserve.delete_token);
-    upsertLocalFile({
-      id: reserve.file_id || "",
-      filename: "upload",
-      mime_type: "application/octet-stream",
-      size_bytes: 0,
-      uploaded_at: Math.floor(Date.now() / 1000),
-      url: reserveUrl,
-      raw_url: reserveRawUrl,
-      download_url: reserveDownloadUrl,
-      expires_at: Math.floor(Date.now() / 1000) + Number(ttlHours()) * 3600,
-      delete_token: reserve.delete_token || "",
-    });
-    if (reserveUrl) {
-      item.setAttribute("data-quick-link", "");
-      var reserveBar = makeCopyBar(reserveUrl, copyBarStrings(LOCALE));
-      pill.after(reserveBar);
-      attachUrlVariantsAfter(
-        reserveBar,
-        { preview: reserveUrl, raw: reserveRawUrl, download: reserveDownloadUrl },
-        urlVariantLabels(LOCALE),
-      );
-    }
-    fill.style.setProperty("--progress", "0%");
-    status.textContent = t(LOCALE, "upload.waiting_for_app");
-    item.classList.add("delegated");
-    if (reserve.file_id) {
-      pollUltrafastStatus(reserve.file_id, item, fill, status, pill, reserve.delete_token || "");
-    }
-  } catch {
-    failItem(item, pill, fill, status, "NETWORK_ERROR");
-  }
-}
-
-function pollUltrafastStatus(fileId, item, fill, status, pill, deleteToken) {
-  var INTERVAL = 1000;
-  var HIDDEN_INTERVAL = 5000;
-  var MAX_ATTEMPTS = 150;
-  var attempts = 0;
-  function nextDelay() {
-    return typeof document !== "undefined" && document.hidden ? HIDDEN_INTERVAL : INTERVAL;
-  }
-  function poll() {
-    if (attempts++ >= MAX_ATTEMPTS || !item.isConnected) return;
-    fetch(UPLOAD_URL + publicFileInfo(fileId) + "?t=" + Date.now())
-      .then(function (res) {
-        if (!res.ok) {
-          setTimeout(poll, nextDelay());
-          return null;
-        }
-        return res.json();
-      })
-      .then(function (data) {
-        if (!data) return;
-        if (data.status === "ready") {
-          var realName = data.filename || "upload";
-          var realSize = data.size_bytes || 0;
-          var realUrl = data.url || "";
-          var realRawUrl = data.raw_url || "";
-          var realDownloadUrl = data.download_url || "";
-          var realMime = data.mime_type || "";
-          var nameEl = item.querySelector(".file-name");
-          if (nameEl) nameEl.textContent = realName;
-          var sizeEl = item.querySelector(".file-size");
-          if (sizeEl) sizeEl.textContent = formatSize(realSize);
-          var iconContainer = item.querySelector(".file-card-icon");
-          if (iconContainer && realMime) {
-            iconContainer.innerHTML = iconHTML(iconForMime(realMime), 24);
-          }
-          fill.classList.remove("finalizing");
-          fill.style.setProperty("--progress", "100%");
-          var progressDivider = fill.closest('[role="progressbar"]');
-          if (progressDivider) progressDivider.setAttribute("aria-valuenow", "100");
-          item.classList.add("complete");
-          var actionArea = item.querySelector(".file-action-area");
-          if (actionArea) actionArea.classList.add("complete");
-          status.textContent = t(LOCALE, "upload.complete");
-          var spinner = pill.querySelector(".spinner");
-          if (spinner) spinner.remove();
-          var existingCopyBar = pill.nextElementSibling;
-          if (existingCopyBar && existingCopyBar.classList.contains("copy-bar")) {
-            existingCopyBar.replaceWith(makeCopyBar(realUrl, copyBarStrings(LOCALE)));
-          } else {
-            pill.after(makeCopyBar(realUrl, copyBarStrings(LOCALE)));
-          }
-          pill.style.display = "none";
-          var copyBar = pill.nextElementSibling;
-          if (copyBar && copyBar.classList.contains("copy-bar")) {
-            copyBar.style.marginTop = "0.75rem";
-            attachUrlVariantsAfter(
-              copyBar,
-              { preview: realUrl, raw: realRawUrl, download: realDownloadUrl },
-              urlVariantLabels(LOCALE),
-            );
-          }
-          var delBtn = item.querySelector(".delete-btn");
-          if (delBtn && fileId && deleteToken) {
-            delBtn.replaceWith(
-              createDeleteButton({
-                fileId: fileId,
-                deleteToken: deleteToken,
-                apiBase: UPLOAD_URL,
-                onDeleted: onDeleted,
-                immediate: true,
-              }),
-            );
-          }
-          upsertLocalFile({
-            id: fileId,
-            filename: realName,
-            mime_type: realMime,
-            size_bytes: realSize,
-            uploaded_at: Math.floor(Date.now() / 1000),
-            url: realUrl,
-            raw_url: realRawUrl,
-            download_url: realDownloadUrl,
-            expires_at: data.expires_at || Math.floor(Date.now() / 1000) + ttlHours() * 3600,
-            delete_token: deleteToken,
-          });
-          announce(t(LOCALE, "upload.announce_complete", { filename: realName }));
-          playSound("success");
-          autoCopyUrl(realUrl, copyBar);
-          return;
-        }
-        setTimeout(poll, nextDelay());
-      })
-      .catch(function () {
-        setTimeout(poll, nextDelay());
-      });
-  }
-  setTimeout(poll, nextDelay());
 }
 
 function setCobaltBarProgress(fill, percent) {
@@ -1060,7 +799,6 @@ function completeCobaltRow(file, item, fill, status, pill) {
       createDeleteButton({
         fileId: file.id,
         deleteToken: file.delete_token,
-        apiBase: UPLOAD_URL,
         onDeleted: onDeleted,
         immediate: true,
       }),
@@ -1173,10 +911,6 @@ async function uploadItem(file, item, fingerprint) {
     );
     return;
   }
-  if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported() && !readUploadPassword()) {
-    ultrafastReserve(file, item, fill, status, pill);
-    return;
-  }
   suppressAdopt++;
   var id;
   try {
@@ -1253,9 +987,6 @@ function startFolderZip(dirs, looseEntries) {
       );
     });
 
-  // Keep the row that was shown while zipping and turn it into the upload row.
-  // Rebuilding it would replay the entry animation and make the upload look
-  // like it restarted.
   function uploadFolderZip(item, zip) {
     item.querySelector(".file-name").textContent = zip.name;
     item.querySelector(".file-size").textContent = formatSize(zip.size);
@@ -1334,7 +1065,6 @@ function addUploadedItem(data) {
       createDeleteButton({
         fileId: data.id,
         deleteToken: data.delete_token,
-        apiBase: UPLOAD_URL,
         onDeleted: onDeleted,
         immediate: true,
       }),
@@ -1369,7 +1099,6 @@ function enhanceServerFiles() {
         createDeleteButton({
           fileId: id,
           deleteToken: token,
-          apiBase: UPLOAD_URL,
           onDeleted: onDeleted,
         }),
       );
@@ -1548,19 +1277,6 @@ export function initUploadCard() {
   }
   if (dropZone) dropZone.removeAttribute("for");
 
-  if (input) {
-    input.addEventListener(
-      "click",
-      function (e) {
-        if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
-          e.preventDefault();
-          e.stopPropagation();
-          startUltraFastFromDropzone();
-        }
-      },
-      true,
-    );
-  }
   if (dropZone) {
     dropZone.addEventListener(
       "click",
@@ -1569,29 +1285,15 @@ export function initUploadCard() {
         if (target.tagName === "INPUT" || (target.closest && target.closest("input"))) return;
         e.preventDefault();
         e.stopPropagation();
-        if (isAppMode() && readUltraFastEnabled() && readUltraFastSupported()) {
-          startUltraFastFromDropzone();
-        } else {
-          var inp = getInputRef();
-          if (inp) {
-            inp.value = "";
-            inp.click();
-          }
+        var inp = getInputRef();
+        if (inp) {
+          inp.value = "";
+          inp.click();
         }
       },
       true,
     );
   }
-
-  function syncDropzoneAppMode() {
-    var full = isAppMode() && readUltraFastEnabled() && readUltraFastSupported();
-    if (dropZone) dropZone.classList.toggle("drop-zone--app-mode", full);
-  }
-  syncDropzoneAppMode();
-  window.addEventListener("juicebox-app-mode", syncDropzoneAppMode);
-  window.addEventListener("juicehost-config-updated", syncDropzoneAppMode);
-  var ufToggle = document.querySelector("[data-ultrafast-toggle]");
-  if (ufToggle) ufToggle.addEventListener("change", syncDropzoneAppMode);
 
   if (dropZone) {
     ["dragenter", "dragover"].forEach(function (n) {

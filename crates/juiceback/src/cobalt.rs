@@ -87,7 +87,6 @@ impl FetchOptions {
 
 #[must_use]
 pub fn build_request_body(url: &str, opts: &FetchOptions) -> serde_json::Value {
-    // Cobalt has no FLAC output; use lossless WAV and transcode after download.
     let audio_format = if opts.audio_format == "flac" {
         "wav"
     } else {
@@ -261,9 +260,6 @@ impl CobaltResponse {
     }
 }
 
-/// Errors that describe one cobalt instance rather than the requested media.
-/// Another instance, or another fetch tier, may still be able to serve the
-/// same link, so these must not end the whole fetch.
 #[must_use]
 pub fn is_instance_error_code(code: &str) -> bool {
     matches!(
@@ -340,10 +336,6 @@ pub async fn process(
     Ok(CobaltResponse::from_json(value))
 }
 
-/// Ask every configured cobalt instance at once and return the first usable
-/// response. Instances that return an error (or a non-media response) are
-/// ignored until all of them have answered, so a slow instance can never
-/// delay a healthy one.
 pub async fn process_race(
     client: &reqwest::Client,
     endpoints: &[CobaltEndpoint],
@@ -441,9 +433,6 @@ pub async fn process_race(
         }
     }
 
-    // Prefer a response about the media itself over one that only describes a
-    // broken instance. If every instance failed, keep a login/token error so
-    // the caller can move on to the next fetch tier.
     if let Some((idx, response)) = first_non_media {
         return Ok((response, idx));
     }

@@ -1,9 +1,3 @@
-// Ask juicerouter which storage node an upload should use.
-//
-// The browser talks to juicefront's same-origin proxy (`/router/upload-target`),
-// which forwards Cloudflare's country/colo headers to juicerouter. When the
-// router is unavailable or not configured, callers fall back to the server's
-// configured default storage node by leaving the `host` field out of the upload.
 
 const ENDPOINT = "/router/upload-target";
 const HOME_HOST = "https://f.juicey.dev";
@@ -44,15 +38,12 @@ export async function resolveUploadHost() {
       if (response.ok) {
         const data = await response.json();
         const url = typeof data.url === "string" ? data.url.replace(/\/+$/, "") : "";
-        // Never send the canonical host. Omitting `host` makes the backend
-        // use its configured default storage node instead.
         if (url && url !== HOME_HOST) {
           host = url;
         }
         ttl = SUCCESS_TTL_MS;
       }
     } catch {
-      // Router down or blocked: keep the default node.
     }
     cache = { host, at: Date.now(), ttl };
     pending = null;

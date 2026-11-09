@@ -9,17 +9,16 @@ use crate::{db, error::AppError, state::AppState};
 
 #[derive(Serialize, ToSchema)]
 pub struct AdminStatsOverview {
-    
     pub site_visitors: i64,
-    
+
     pub site_visits: i64,
-    
+
     pub uploaders: i64,
-    
+
     pub file_viewers: i64,
-    
+
     pub file_views: i64,
-    
+
     pub file_downloads: i64,
 }
 

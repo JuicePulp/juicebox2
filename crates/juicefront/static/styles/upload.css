@@ -246,40 +246,6 @@ body {
   background-color: rgba(239, 68, 68, 0.08) !important;
 }
 
-.drop-zone--app-mode {
-  border-color: #7c5eb5;
-  background-color: rgba(124, 94, 181, 0.06);
-}
-.drop-zone--app-mode:hover {
-  border-color: #8b6fc0;
-  background-color: rgba(124, 94, 181, 0.09);
-}
-.drop-zone--app-mode:focus-within {
-  border-color: #8b6fc0;
-  border-style: solid;
-  background-color: rgba(124, 94, 181, 0.1);
-  box-shadow:
-    0 0 0 3px rgba(124, 94, 181, 0.1),
-    0 0 20px rgba(124, 94, 181, 0.06);
-}
-
-.drop-zone--app-mode .drop-icon {
-  color: #a855f7;
-}
-
-.drop-zone--app-mode .animated-grid {
-  background-image: linear-gradient(
-    45deg,
-    #5b3d8a 25%,
-    #4c3375 25%,
-    #4c3375 50%,
-    #5b3d8a 50%,
-    #5b3d8a 75%,
-    #4c3375 75%,
-    #4c3375 100%
-  );
-}
-
 .drop-zone-offline {
   position: absolute;
   inset: 0;
@@ -1124,15 +1090,6 @@ html[data-banned] .upload-tabs {
   pointer-events: none;
 }
 
-.file-item.delegated .status-pill {
-  background: var(--blue-900);
-  border-color: var(--blue-700);
-}
-
-.file-item.delegated .progress-fill {
-  background: var(--blue-500);
-}
-
 .file-item-header {
   display: flex;
   gap: 0.75rem;
@@ -1353,8 +1310,6 @@ html[data-banned] .upload-tabs {
   box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.22);
 }
 
-/* Restored paused rows already existed before this page load. Keep their
-   exit animation available when the row is removed. */
 .file-item.paused:not(.exiting) {
   animation: none;
 }
@@ -2105,8 +2060,6 @@ html[data-banned] .upload-tabs {
   50% { opacity: 0.3; transform: scale(1.1); }
 }
 
-/* Reduced motion: both the in-app preference and the OS setting should
-   present changes immediately, without fades, slides, or a page crossfade. */
 html[data-motion-reduce] *,
 html[data-motion-reduce] *::before,
 html[data-motion-reduce] *::after {

@@ -37,6 +37,7 @@ h3-quinn = { workspace = true, optional = true }
 hex.workspace = true
 infer.workspace = true
 jsonwebtoken.workspace = true
+juiceproto = { path = "../juiceproto" }
 juiceutils = { path = "../juiceutils" }
 lettre.workspace = true
 mimalloc.workspace = true

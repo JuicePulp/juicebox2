@@ -1,16 +1,7 @@
-//! Tiny in-memory micro-cache for the public, cookie-free HTML pages.
-//!
-//! The layer sits *outside* the compression layer, so a cache entry stores the
-//! already-compressed bytes and a hit costs one hash-map lookup plus a body
-//! memcpy. A background task keeps the hottest pages (home page and friends)
-//! warm for the exact `Accept-Encoding` variants browsers and Cloudflare send,
-//! so even the very first visitor after a deploy gets a pre-rendered page.
-//!
-//! Only allowlisted, non-personalised pages are cached. Anything that depends on
-//! per-IP state (`/banned`, `/files`) or carries a query string bypasses the
-//! cache entirely.
-
-use std::{sync::Arc, time::Duration, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     body::Body,
@@ -25,12 +16,8 @@ use http_body_util::BodyExt;
 
 use crate::{i18n, state::AppState};
 
-/// How long an entry may be served. The refresher re-populates every
-/// [`REFRESH_INTERVAL`], so steady-state hits never see an expired entry.
 const TTL: Duration = Duration::from_secs(10);
-/// Backstop against unbounded growth (12 pages x 4 encodings x hosts).
 const MAX_ENTRIES: usize = 256;
-/// How often the background task re-renders the hot pages.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(4);
 
 const PUBLIC_HOST: &str = "box.juicey.dev";
@@ -59,9 +46,6 @@ fn set_content_length(headers: &mut HeaderMap, len: usize) {
     }
 }
 
-/// Paths whose body only depends on the language (and the global caches the
-/// SSR code already keeps fresh). `/banned` is per-IP and `/files` is
-/// per-cookie, so both are deliberately absent.
 fn is_cacheable_path(path: &str) -> bool {
     let (_, stripped) = i18n::split_locale(path);
     matches!(
@@ -97,14 +81,13 @@ fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     None
 }
 
-/// Exact `Accept-Encoding` variant, so the cached body always matches what the
-/// client asked for. Cloudflare sends a stable `gzip, br`, browsers a stable
-/// `gzip, deflate, br, zstd`, so the variant count stays tiny.
 fn encoding_variant(headers: &HeaderMap) -> String {
     match headers.get(header::ACCEPT_ENCODING) {
-        Some(value) if !value.is_empty() => {
-            value.to_str().unwrap_or_default().trim().to_ascii_lowercase()
-        }
+        Some(value) if !value.is_empty() => value
+            .to_str()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase(),
         _ => "identity".to_owned(),
     }
 }
@@ -157,8 +140,7 @@ impl PageCache {
 
     fn insert(&self, key: String, page: Arc<CachedPage>) {
         if self.entries.len() >= MAX_ENTRIES {
-            self.entries
-                .retain(|_, entry| entry.stored.elapsed() < TTL);
+            self.entries.retain(|_, entry| entry.stored.elapsed() < TTL);
             if self.entries.len() >= MAX_ENTRIES {
                 self.entries.clear();
             }
@@ -175,8 +157,6 @@ pub async fn middleware(
     if !is_cacheable_request(&req) {
         return next.run(req).await;
     }
-    // The page embeds a per-IP ban flag, so it has to be part of the key.
-    // This also warms the ban cache the renderer will read moments later.
     let Some(peer) = req
         .extensions()
         .get::<ConnectInfo<std::net::SocketAddr>>()
@@ -187,9 +167,6 @@ pub async fn middleware(
     let banned = crate::handlers::cached_ban(&state, req.headers(), peer.ip())
         .await
         .banned;
-    // Only fully anonymous, non-banned visitors get an edge-cacheable header.
-    // Everyone else keeps `private`, so a poisoned/edge-cached page can never
-    // reach them (Cloudflare's rule also bypasses any request with cookies).
     let anonymous = !req.headers().contains_key(header::COOKIE) && !banned;
     let Some(key) = cache_key(&req, banned) else {
         return next.run(req).await;
@@ -239,9 +216,6 @@ pub async fn middleware(
     page.to_response()
 }
 
-/// Keep the hot pages warm so the first request after a deploy is served from
-/// memory. Requests go through the loopback listener with the public `Host`
-/// header, so cache keys and canonical URLs match real traffic.
 pub fn spawn_refresh(state: Arc<AppState>) {
     let port = state.config.ui_port;
     tokio::spawn(async move {

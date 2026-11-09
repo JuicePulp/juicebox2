@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -69,8 +66,6 @@ pub struct UrlsFile {
     pub juicehost_url: String,
     #[serde(default)]
     pub public_juicehost_url: Option<String>,
-    /// Storage node used when a client does not pick a host. When set, uploads
-    /// are pushed to this node instead of being stored on this server.
     #[serde(default)]
     pub default_storage_host: Option<String>,
     #[serde(default)]
@@ -141,13 +136,11 @@ pub struct CobaltFile {
     #[serde(default = "default_cobalt_api_url")]
     pub api_url: String,
 
-    /// Extra instances that share the primary cobalt API key.
     #[serde(default)]
     pub api_urls: Vec<String>,
     #[serde(default)]
     pub session_api_url: Option<String>,
 
-    /// Extra instances that share `COBALT_SESSION_API_KEY`.
     #[serde(default)]
     pub session_api_urls: Vec<String>,
     #[serde(default = "default_fetch_empty_retry_delay")]
@@ -240,7 +233,7 @@ fn default_host() -> String {
 }
 
 const fn default_port() -> u16 {
-    6401
+    juiceutils::config::ports::BACKEND
 }
 
 fn default_database_path() -> String {
@@ -268,18 +261,20 @@ const fn default_cleanup_interval_minutes() -> u64 {
 }
 
 fn default_public_base_url() -> String {
-    String::from("http://localhost:6402")
+    format!("http://localhost:{}", juiceutils::config::ports::HOST)
 }
 
 fn default_juicehost_url() -> String {
-    String::from("http://127.0.0.1:6402")
+    format!("http://127.0.0.1:{}", juiceutils::config::ports::HOST)
 }
 
 fn default_cors_origins() -> Vec<String> {
+    let frontend = juiceutils::config::ports::FRONTEND;
+    let host = juiceutils::config::ports::HOST;
     vec![
-        String::from("http://localhost:6400"),
-        String::from("http://localhost:6402"),
-        String::from("http://127.0.0.1:6402"),
+        format!("http://localhost:{frontend}"),
+        format!("http://localhost:{host}"),
+        format!("http://127.0.0.1:{host}"),
     ]
 }
 
@@ -515,44 +510,10 @@ impl Default for PromoFile {
     }
 }
 
-fn candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(dir) = std::env::var("JUICEBACK_CONFIG") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            paths.push(PathBuf::from(trimmed));
-        }
-    }
-    for name in ["juiceback.toml", "config.toml"] {
-        paths.push(PathBuf::from(name));
-        paths.push(PathBuf::from("/etc/juicebox").join(name));
-    }
-    paths
-}
-
 pub(crate) fn load_file_config() -> FileConfig {
-    for path in candidate_paths() {
-        if path.exists() {
-            return load_one_file(&path);
-        }
-    }
-    tracing::warn!("no juiceback config file found, using defaults");
-    FileConfig::default()
-}
-
-fn load_one_file(path: &Path) -> FileConfig {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        tracing::warn!("config file {} unreadable, using defaults", path.display());
-        return FileConfig::default();
-    };
-    match toml::from_str::<FileConfig>(&text) {
-        Ok(cfg) => cfg,
-        Err(err) => {
-            tracing::warn!(
-                "config file {} invalid ({err}), using defaults",
-                path.display()
-            );
-            FileConfig::default()
-        }
-    }
+    juiceutils::config::load_service_config(
+        "juiceback",
+        "JUICEBACK_CONFIG",
+        &["juiceback.toml", "config.toml"],
+    )
 }

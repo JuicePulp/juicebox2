@@ -30,9 +30,6 @@ export function readDefaultTtlHours() {
   return Number.isFinite(n) && n > 0 ? n : 24;
 }
 let uploadModeHint = "";
-// Uploads run inside a SharedWorker, where `document` does not exist. The page
-// passes the server-advertised mode along with each enqueue so the worker can
-// make the same routing decision the page would.
 export function setUploadModeHint(mode) {
   if (typeof mode === "string" && mode)
     uploadModeHint = mode;
@@ -54,9 +51,6 @@ export function uploadMethodFor(mode, size, lastBps) {
   }
   return size > TUS_THRESHOLD ? "tus" : "direct";
 }
-// A single resumed stream beats N parallel TUS parts on a slow uplink: no
-// concat step, no 409 storms, no per-part session setup. Keep the parallel
-// path for links fast enough to benefit from it.
 export function preferStream(mode, size, lastBps) {
   if (mode !== "direct-prefer" || size < DIRECT_STREAM_THRESHOLD)
     return false;
@@ -132,16 +126,12 @@ export const TIER_CHUNK = {
   ethernet: { start: 32 * 1024 * 1024, max: 64 * 1024 * 1024 }
 };
 export const RESERVE_URL = `${UPLOAD_URL}/upload/reserve`;
-export const ULTRAFAST_RESERVE_URL = `${UPLOAD_URL}/upload/ultrafast/reserve`;
 export const DIRECT_RESERVE_URL = `${UPLOAD_URL}/upload/direct/reserve`;
 export const DIRECT_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/complete`;
 export const DIRECT_PARALLEL_RESERVE_URL = `${UPLOAD_URL}/upload/direct/parallel/reserve`;
 export const DIRECT_PARALLEL_COMPLETE_URL = `${UPLOAD_URL}/upload/direct/parallel/complete`;
 export const DIRECT_PARALLEL_THRESHOLD = 16 * 1024 * 1024;
 export const DIRECT_STREAM_THRESHOLD = 64 * 1024 * 1024;
-// One PATCH per ~8s of data. Small enough that a collapsed uplink still
-// finishes a request well inside Cloudflare's 100s window, large enough that
-// per-request overhead stays negligible.
 export const STREAM_START_CHUNK = 4 * 1024 * 1024;
 export const STREAM_MIN_CHUNK = 1024 * 1024;
 export const STREAM_MAX_CHUNK = 16 * 1024 * 1024;

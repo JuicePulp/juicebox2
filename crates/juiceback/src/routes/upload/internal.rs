@@ -3,10 +3,9 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 
-use crate::{db, error::AppError, state::AppState};
+use crate::{auth::InternalApiKey, db, error::AppError, state::AppState};
 
 #[utoipa::path(
     get,
@@ -24,20 +23,9 @@ use crate::{db, error::AppError, state::AppState};
 #[tracing::instrument(skip_all)]
 pub async fn file_status_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if state.config.juicehost_api_key.is_empty() {
-        return Err(AppError::Unauthorized("API key not configured".into()));
-    }
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-        return Err(AppError::Unauthorized("invalid API key".into()));
-    }
-
     let id_clone = id.clone();
     let file = state
         .db_call("get_file", move |db| db::get_file(db, &id_clone))
@@ -78,7 +66,7 @@ pub async fn file_status_handler(
 }
 
 fn r2_url_for(config: &crate::config::Config, record: &db::FileRecord) -> Option<String> {
-    if record.tier != "hot" || record.r2_key.is_empty() {
+    if record.tier != db::FileRecord::TIER_HOT || record.r2_key.is_empty() {
         return None;
     }
     Some(format!(
@@ -103,20 +91,9 @@ fn r2_url_for(config: &crate::config::Config, record: &db::FileRecord) -> Option
 )]
 pub async fn resolve_file_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if state.config.juicehost_api_key.is_empty() {
-        return Err(AppError::Unauthorized("API key not configured".into()));
-    }
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-        return Err(AppError::Unauthorized("invalid API key".into()));
-    }
-
     let id_clone = id.clone();
     let file = state
         .db_call("get_file", move |db| db::get_file(db, &id_clone))

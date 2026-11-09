@@ -27,18 +27,21 @@ pub fn finish_reservation(
         )?
     };
     if affected == 1 {
-        return Ok(FinishReservationResult::Completed(Box::new(
+        return Ok(FinishReservationResult::Completed(
             get_file(db, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?,
-        )));
+        ));
     }
 
     let Some(record) = get_file(db, id)? else {
         return Ok(FinishReservationResult::NotFound);
     };
-    if record.status != "uploading" {
+    if !juiceutils::constant_time_eq(&record.delete_token, delete_token) {
+        return Ok(FinishReservationResult::InvalidToken);
+    }
+    if record.status != FileRecord::STATUS_UPLOADING {
         return Ok(FinishReservationResult::NotUploading);
     }
-    Ok(FinishReservationResult::InvalidToken)
+    Ok(FinishReservationResult::NotUploading)
 }
 
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
@@ -48,7 +51,9 @@ pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, stor
 
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
     let raw_host: String = row.get(9)?;
-    let status: String = row.get(10).unwrap_or_else(|_| "ready".to_string());
+    let status: String = row
+        .get(10)
+        .unwrap_or_else(|_| FileRecord::STATUS_READY.to_string());
     Ok(FileRecord {
         id: row.get(0)?,
         filename: row.get(1)?,
@@ -72,7 +77,9 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
         dek_salt: row.get(15).unwrap_or(None),
         dek_escrow: row.get(16).unwrap_or(None),
         key_version: row.get(17).unwrap_or(0),
-        tier: row.get(18).unwrap_or_else(|_| "standard".to_string()),
+        tier: row
+            .get(18)
+            .unwrap_or_else(|_| FileRecord::TIER_STANDARD.to_string()),
         r2_key: row.get(19).unwrap_or_default(),
         tier_pinned: row.get::<_, i64>(20).unwrap_or(0) != 0,
         title: row.get(21).unwrap_or_default(),
@@ -129,7 +136,7 @@ pub async fn insert_pending_file(
     state: &std::sync::Arc<crate::state::AppState>,
     mut record: FileRecord,
 ) -> Result<FileRecord, crate::error::AppError> {
-    record.status = "uploading".to_string();
+    record.status = FileRecord::STATUS_UPLOADING.to_string();
     let r2 = record.clone();
     state
         .db_call("insert_pending_file", move |db| insert_file(db, &r2))

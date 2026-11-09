@@ -1,4 +1,3 @@
-
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{db, state::AppState};
@@ -68,7 +67,8 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
         let mut hashes: Vec<String> = Vec::new();
         let mut decoded: Vec<(String, String)> = Vec::new();
         for enc in enc_ips {
-            if let Some(ip) = juiceutils::ip_crypt::decrypt_ip(&enc, &state.config.ip_encryption_key)
+            if let Some(ip) =
+                juiceutils::ip_crypt::decrypt_ip(&enc, &state.config.ip_encryption_key)
             {
                 if !is_routable(&ip) {
                     continue;
@@ -79,7 +79,9 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
             }
         }
         let known = state
-            .db_call("geo_known", move |db| db::geo::known_geo_hashes(db, &hashes))
+            .db_call("geo_known", move |db| {
+                db::geo::known_geo_hashes(db, &hashes)
+            })
             .await
             .unwrap_or_default();
         for (ip, hash) in decoded {
@@ -187,7 +189,9 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
     }
     if !retry_ids.is_empty() {
         let _ = state
-            .db_call("geo_bump", move |db| db::geo::bump_geo_attempts(db, &retry_ids))
+            .db_call("geo_bump", move |db| {
+                db::geo::bump_geo_attempts(db, &retry_ids)
+            })
             .await;
     }
 }

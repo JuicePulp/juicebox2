@@ -12,8 +12,6 @@ use tokio::{
 
 const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
-const DEFAULT_LOCAL_BACKEND_URL: &str = "http://127.0.0.1:6401";
-
 const MIN_HEALTHY_SECS: u64 = 10;
 
 const MAX_CONSECUTIVE_CRASHES: u32 = 5;
@@ -48,24 +46,35 @@ fn workspace_dir() -> Option<PathBuf> {
     Some(root.to_path_buf())
 }
 
-fn ensure_services_built() -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildOutcome {
+    Built,
+    Skipped,
+    Failed,
+}
+
+impl BuildOutcome {
+    const fn ok(self) -> bool {
+        !matches!(self, Self::Failed)
+    }
+}
+
+async fn ensure_services_built() -> BuildOutcome {
     if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
     {
-        return true;
+        return BuildOutcome::Skipped;
     }
     let Some(root) = workspace_dir() else {
         tracing::warn!(
             "no workspace checkout found; run `cargo build` first so all services are compiled"
         );
-        return false;
+        return BuildOutcome::Skipped;
     };
     tracing::info!("building services");
-    let mut cmd = std::process::Command::new("cargo");
+    let mut cmd = Command::new("cargo");
     cmd.arg("build");
-    
-    
-    
+
     if !cfg!(debug_assertions) {
         cmd.arg("--release");
     }
@@ -74,20 +83,20 @@ fn ensure_services_built() -> bool {
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    match cmd.status() {
+    match cmd.status().await {
         Ok(status) if status.success() => {
             tracing::info!("service build finished");
-            true
+            BuildOutcome::Built
         }
         Ok(status) => {
             tracing::error!("service build failed with {status}; run `cargo build` manually");
-            false
+            BuildOutcome::Failed
         }
         Err(e) => {
             tracing::error!(
                 "could not run `cargo build`: {e}; run `cargo build` manually so all services are compiled"
             );
-            false
+            BuildOutcome::Failed
         }
     }
 }
@@ -192,6 +201,21 @@ fn scan_dir(dir: &Path, out: &mut HashMap<PathBuf, SystemTime>) {
     }
 }
 
+fn snapshot_roots(roots: &[PathBuf]) -> HashMap<PathBuf, SystemTime> {
+    let mut next = HashMap::new();
+    for root in roots {
+        if root.is_dir() {
+            scan_dir(root, &mut next);
+        } else if watchable_file(root)
+            && let Ok(meta) = std::fs::metadata(root)
+            && let Ok(mtime) = meta.modified()
+        {
+            next.insert(root.clone(), mtime);
+        }
+    }
+    next
+}
+
 struct FsWatcher {
     roots: Vec<PathBuf>,
     last: HashMap<PathBuf, SystemTime>,
@@ -218,18 +242,7 @@ impl FsWatcher {
     }
 
     fn snapshot(&self) -> HashMap<PathBuf, SystemTime> {
-        let mut next = HashMap::new();
-        for root in &self.roots {
-            if root.is_dir() {
-                scan_dir(root, &mut next);
-            } else if watchable_file(root)
-                && let Ok(meta) = std::fs::metadata(root)
-                && let Ok(mtime) = meta.modified()
-            {
-                next.insert(root.clone(), mtime);
-            }
-        }
-        next
+        snapshot_roots(&self.roots)
     }
 
     fn resnapshot(&mut self) {
@@ -237,12 +250,18 @@ impl FsWatcher {
         self.last_scan = Instant::now();
     }
 
-    
-    fn poll(&mut self) -> bool {
+    async fn poll(&mut self) -> bool {
         if self.last_scan.elapsed() < Duration::from_millis(500) {
             return false;
         }
-        let next = self.snapshot();
+        let roots = self.roots.clone();
+        let next = match tokio::task::spawn_blocking(move || snapshot_roots(&roots)).await {
+            Ok(next) => next,
+            Err(e) => {
+                tracing::warn!("source scan failed: {e}");
+                return false;
+            }
+        };
         self.last_scan = Instant::now();
         if next == self.last {
             return false;
@@ -256,23 +275,25 @@ fn load_dotenv() {
     juiceutils::config::load_dotenv();
 }
 
-fn host_backend_default() -> Option<&'static str> {
+fn default_local_backend_url() -> String {
+    format!("http://127.0.0.1:{}", juiceutils::config::ports::BACKEND)
+}
+
+fn host_backend_default() -> Option<String> {
     if std::env::var("BACKEND_URL").is_ok_and(|v| !v.trim().is_empty()) {
         None
     } else {
-        Some(DEFAULT_LOCAL_BACKEND_URL)
+        Some(default_local_backend_url())
     }
 }
 
 fn spawn(name: &str) -> std::io::Result<Child> {
     let mut cmd = Command::new(sibling_dir().join(name));
-    
-    
-    
+
     if name == "juicehost"
         && let Some(default) = host_backend_default()
     {
-        cmd.env("BACKEND_URL", default);
+        cmd.env("BACKEND_URL", &default);
         tracing::info!("juicehost: BACKEND_URL unset, defaulting to {default}");
     }
     let child = cmd
@@ -302,50 +323,58 @@ fn restart_enabled(name: &str) -> bool {
 
 async fn graceful_stop(child: &mut Child) {
     #[cfg(unix)]
-    unsafe {
+    {
         if let Some(pid) = child.id() {
-            libc::kill(pid.cast_signed(), libc::SIGTERM);
+            let rc = unsafe { libc::kill(pid.cast_signed(), libc::SIGTERM) };
+            if rc != 0 {
+                tracing::warn!("failed to send SIGTERM to {pid}");
+            }
         }
     }
     #[cfg(not(unix))]
-    let _ = child.start_kill();
-    let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
+    if let Err(e) = child.start_kill() {
+        tracing::warn!("failed to ask child to stop: {e}");
+    }
+    match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
+        Ok(Ok(_)) => return,
+        Ok(Err(e)) => {
+            tracing::warn!("failed to wait for child: {e}");
+            return;
+        }
+        Err(_) => {
+            tracing::warn!("child ignored SIGTERM for 10s, killing it");
+        }
+    }
+    if let Err(e) = child.start_kill() {
+        tracing::warn!("failed to kill child: {e}");
+        return;
+    }
+    if let Err(e) = child.wait().await {
+        tracing::warn!("failed to reap killed child: {e}");
+    }
 }
 
 fn check_juiceback_config() -> Result<(), String> {
     let jwt = juiceutils::config::optional_secret("JWT_SECRET")
-        .filter(|v| !juiceutils::config::is_placeholder_secret(v));
-    if jwt.is_none() {
-        return Err(
-            "juiceback: JWT_SECRET is not set (or is a placeholder). Set a real secret."
-                .to_string(),
-        );
-    }
-    match juiceutils::config::optional_secret("IP_ENCRYPTION_KEY") {
-        Some(key) if key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()) => {}
-        _ => {
-            return Err(
-                "juiceback: IP_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes)."
-                    .to_string(),
-            );
-        }
-    }
-    if juiceutils::config::optional_secret("COBALT_ENABLED")
-        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        && juiceutils::config::optional_secret("COBALT_API_KEY").is_none()
-    {
-        return Err(
-            "juiceback: COBALT_ENABLED is set but COBALT_API_KEY is not. Set it or disable COBALT_ENABLED."
-                .to_string(),
-        );
-    }
+        .ok_or_else(|| "juiceback: JWT_SECRET is not set. Set a real secret.".to_string())?;
+    juiceutils::config::validate_jwt_secret(&jwt).map_err(|e| format!("juiceback: {e}"))?;
+    let key = juiceutils::config::optional_secret("IP_ENCRYPTION_KEY").ok_or_else(|| {
+        "juiceback: IP_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes).".to_string()
+    })?;
+    juiceutils::config::validate_ip_encryption_key(&key).map_err(|e| format!("juiceback: {e}"))?;
+    let storage_key =
+        juiceutils::config::optional_secret("STORAGE_ENCRYPTION_KEY").ok_or_else(|| {
+            "juiceback: STORAGE_ENCRYPTION_KEY is not set (must be 64 hex chars / 32 bytes)."
+                .to_string()
+        })?;
+    juiceutils::config::validate_hex_key("STORAGE_ENCRYPTION_KEY", &storage_key)
+        .map_err(|e| format!("juiceback: {e}"))?;
     Ok(())
 }
 
 fn check_juicehost_config() -> Result<(), String> {
     if juiceutils::config::optional_secret("JUICEHOST_API_KEY").is_none()
-        && !juiceutils::config::optional_secret("JUICEHOST_ALLOW_NO_AUTH")
-            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        && !juiceutils::config::env_bool("JUICEHOST_ALLOW_NO_AUTH")?.unwrap_or(false)
     {
         return Err(
             "juicehost: JUICEHOST_API_KEY is not set. Set a key or JUICEHOST_ALLOW_NO_AUTH=true."
@@ -385,7 +414,10 @@ async fn main() {
         std::process::exit(1);
     }
 
-    ensure_services_built();
+    if ensure_services_built().await == BuildOutcome::Failed {
+        tracing::error!("service build failed, not starting services");
+        std::process::exit(1);
+    }
 
     let mut children: HashMap<String, Child> = HashMap::new();
     let mut spawned_at: HashMap<String, Instant> = HashMap::new();
@@ -410,10 +442,6 @@ async fn main() {
         std::process::exit(1);
     }
 
-    
-    
-    
-    
     let mut watcher = if watch_enabled() {
         workspace_dir().and_then(|root| FsWatcher::new(&root))
     } else {
@@ -433,16 +461,14 @@ async fn main() {
     });
 
     loop {
-        
-        
-        
-        
-        
-        if watcher.as_mut().is_some_and(FsWatcher::poll) {
+        let sources_changed = match watcher.as_mut() {
+            Some(watcher) => watcher.poll().await,
+            None => false,
+        };
+        if sources_changed {
             tracing::info!("sources changed, rebuilding services for live reload");
             if *shutdown_rx.borrow() {
-                
-            } else if ensure_services_built() {
+            } else if ensure_services_built().await.ok() {
                 for (name, child) in &mut children {
                     tracing::info!("stopping {name} for live reload");
                     graceful_stop(child).await;
@@ -484,10 +510,7 @@ async fn main() {
             let status = tokio::select! {
                 _ = shutdown_rx.changed() => None,
                 status = child.wait() => status.ok(),
-                
-                
-                
-                
+
                 () = tokio::time::sleep(Duration::from_millis(250)) => None,
             };
             let Some(status) = status else {
@@ -616,6 +639,7 @@ mod tests {
     const VARS: &[&str] = &[
         "JWT_SECRET",
         "IP_ENCRYPTION_KEY",
+        "STORAGE_ENCRYPTION_KEY",
         "COBALT_ENABLED",
         "COBALT_API_KEY",
         "JUICEHOST_API_KEY",
@@ -639,8 +663,8 @@ mod tests {
         assert!(!watchable_file(Path::new(".hidden.rs")));
     }
 
-    #[test]
-    fn watcher_detects_add_modify_delete() {
+    #[tokio::test]
+    async fn watcher_detects_add_modify_delete() {
         fn aged() -> Instant {
             Instant::now()
                 .checked_sub(Duration::from_secs(2))
@@ -658,20 +682,20 @@ mod tests {
         std::fs::write(&file, "fn main() {}").unwrap();
 
         let mut watcher = FsWatcher::new(&root).expect("watch roots");
-        
+
         watcher.last_scan = Instant::now();
-        assert!(!watcher.poll());
+        assert!(!watcher.poll().await);
 
         std::fs::write(&file, "fn main() { /* edited */ }").unwrap();
         watcher.last_scan = aged();
-        assert!(watcher.poll());
-        
+        assert!(watcher.poll().await);
+
         watcher.last_scan = aged();
-        assert!(!watcher.poll());
+        assert!(!watcher.poll().await);
 
         std::fs::remove_file(&file).unwrap();
         watcher.last_scan = aged();
-        assert!(watcher.poll());
+        assert!(watcher.poll().await);
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -704,16 +728,20 @@ mod tests {
         unsafe {
             std::env::remove_var("JWT_SECRET");
             std::env::remove_var("IP_ENCRYPTION_KEY");
+            std::env::remove_var("STORAGE_ENCRYPTION_KEY");
             std::env::remove_var("COBALT_ENABLED");
         }
         assert!(check_juiceback_config().is_err());
 
+        let hex_key = "0000000000000000000000000000000000000000000000000000000000000001";
         unsafe {
             std::env::set_var("JWT_SECRET", "test-secret");
-            std::env::set_var(
-                "IP_ENCRYPTION_KEY",
-                "0000000000000000000000000000000000000000000000000000000000000001",
-            );
+            std::env::set_var("IP_ENCRYPTION_KEY", hex_key);
+        }
+        assert!(check_juiceback_config().is_err());
+
+        unsafe {
+            std::env::set_var("STORAGE_ENCRYPTION_KEY", hex_key);
         }
         assert!(check_juiceback_config().is_ok());
 
@@ -730,6 +758,10 @@ mod tests {
         unsafe {
             std::env::set_var("JWT_SECRET", "test-secret");
             std::env::set_var("IP_ENCRYPTION_KEY", "not-hex");
+            std::env::set_var(
+                "STORAGE_ENCRYPTION_KEY",
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            );
             std::env::remove_var("COBALT_ENABLED");
         }
         assert!(check_juiceback_config().is_err());
@@ -742,12 +774,24 @@ mod tests {
         unsafe {
             std::env::remove_var("BACKEND_URL");
         }
-        assert_eq!(host_backend_default(), Some("http://127.0.0.1:6401"));
+        assert_eq!(
+            host_backend_default(),
+            Some(format!(
+                "http://127.0.0.1:{}",
+                juiceutils::config::ports::BACKEND
+            ))
+        );
 
         unsafe {
             std::env::set_var("BACKEND_URL", "   ");
         }
-        assert_eq!(host_backend_default(), Some("http://127.0.0.1:6401"));
+        assert_eq!(
+            host_backend_default(),
+            Some(format!(
+                "http://127.0.0.1:{}",
+                juiceutils::config::ports::BACKEND
+            ))
+        );
 
         unsafe {
             std::env::set_var("BACKEND_URL", "https://back.example");

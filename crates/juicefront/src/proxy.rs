@@ -35,9 +35,7 @@ pub fn proxy_target(path: &str) -> Option<Upstream> {
         || path.starts_with("/file/")
     {
         Some(Upstream::Juiceback)
-    } else if path.starts_with("/f/")
-        || path.starts_with("/v/")
-        || path.starts_with("/d/") {
+    } else if path.starts_with("/f/") || path.starts_with("/v/") || path.starts_with("/d/") {
         Some(Upstream::Juicehost)
     } else {
         None
@@ -65,6 +63,24 @@ pub fn clean_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
         }
     }
     out
+}
+
+pub fn clean_ws_headers(input: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
+    const WS_STRIPPED: &[&str] = &[
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "host",
+        "content-length",
+    ];
+    input
+        .iter()
+        .filter(|(name, _)| !WS_STRIPPED.contains(&name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
 }
 
 pub fn outgoing_forwarded_for(
@@ -259,6 +275,22 @@ mod tests {
         assert!(!names.contains(&"content-length".to_owned()));
         assert!(names.contains(&"authorization".to_owned()));
         assert_eq!(cleaned.iter().filter(|(n, _)| n == "set-cookie").count(), 2);
+    }
+
+    #[test]
+    fn clean_ws_headers_keeps_upgrade_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("connection", "Upgrade".parse().unwrap());
+        headers.insert("upgrade", "websocket".parse().unwrap());
+        headers.insert("sec-websocket-key", "abc".parse().unwrap());
+        headers.insert("content-length", "0".parse().unwrap());
+
+        let cleaned = clean_ws_headers(&headers);
+        let names: Vec<String> = cleaned.iter().map(|(n, _)| n.to_string()).collect();
+        assert!(names.contains(&"connection".to_owned()));
+        assert!(names.contains(&"upgrade".to_owned()));
+        assert!(names.contains(&"sec-websocket-key".to_owned()));
+        assert!(!names.contains(&"content-length".to_owned()));
     }
 
     #[test]

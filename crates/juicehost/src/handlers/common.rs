@@ -1,4 +1,7 @@
-use axum::{body::Body, http::HeaderMap};
+use axum::{
+    body::Body,
+    http::{HeaderMap, StatusCode},
+};
 use futures::StreamExt;
 
 use crate::{error::JuicehostError, state::AppState};
@@ -70,4 +73,94 @@ pub(crate) fn deadline_body(
     })
     .fuse();
     Body::from_stream(stream)
+}
+
+pub(crate) enum BackendStatus {
+    Known(serde_json::Value),
+
+    Unknown,
+
+    Unavailable,
+}
+
+pub(crate) async fn backend_file_status(state: &AppState, id: &str) -> BackendStatus {
+    let Some(backend_url) = state.backend_url.as_ref() else {
+        return BackendStatus::Unavailable;
+    };
+    let status_url = format!("{backend_url}/internal/file/{id}/status");
+    let Ok(resp) = backend_request(state, status_url).send().await else {
+        return BackendStatus::Unavailable;
+    };
+    if resp.status() == StatusCode::NOT_FOUND {
+        return BackendStatus::Unknown;
+    }
+    if !resp.status().is_success() {
+        return BackendStatus::Unavailable;
+    }
+    match resp.json::<serde_json::Value>().await {
+        Ok(body) => BackendStatus::Known(body),
+        Err(_) => BackendStatus::Unavailable,
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum RangeResult {
+    Satisfiable(u64, u64),
+
+    Unsatisfiable,
+
+    Ignore,
+}
+
+#[must_use]
+pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> RangeResult {
+    let range_val = range_val.trim();
+    let Some(range_val) = range_val.strip_prefix("bytes=") else {
+        return RangeResult::Ignore;
+    };
+    let range_val = range_val.trim();
+    if range_val.contains(',') {
+        return RangeResult::Ignore;
+    }
+    if total_size == 0 {
+        return RangeResult::Unsatisfiable;
+    }
+
+    if let Some((start_str, end_str)) = range_val.split_once('-') {
+        let start_str = start_str.trim();
+        let end_str = end_str.trim();
+
+        if start_str.is_empty() {
+            let Ok(suffix_len) = end_str.parse::<u64>() else {
+                return RangeResult::Ignore;
+            };
+            if suffix_len == 0 {
+                return RangeResult::Unsatisfiable;
+            }
+            let suffix_len = suffix_len.min(total_size).min(max_len);
+            RangeResult::Satisfiable(total_size - suffix_len, total_size - 1)
+        } else {
+            let Ok(start) = start_str.parse::<u64>() else {
+                return RangeResult::Ignore;
+            };
+            if start >= total_size {
+                return RangeResult::Unsatisfiable;
+            }
+            let requested_end = if end_str.is_empty() {
+                total_size - 1
+            } else {
+                let Ok(end) = end_str.parse::<u64>() else {
+                    return RangeResult::Ignore;
+                };
+                if end < start {
+                    return RangeResult::Ignore;
+                }
+                end.min(total_size - 1)
+            };
+            let end = requested_end.min(start.saturating_add(max_len - 1));
+            RangeResult::Satisfiable(start, end)
+        }
+    } else {
+        RangeResult::Ignore
+    }
 }

@@ -1,38 +1,17 @@
 use std::{collections::HashSet, sync::Arc};
 
-use axum::{
-    Json,
-    extract::State,
-    http::{HeaderMap, StatusCode},
-};
+use axum::{Json, extract::State, http::StatusCode};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
-use crate::{db, error::AppError, state::AppState};
-
-fn check_internal_key(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    if state.config.juicehost_api_key.is_empty() {
-        return Err(AppError::Unauthorized("API key not configured".into()));
-    }
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-        return Err(AppError::Unauthorized("invalid API key".into()));
-    }
-    Ok(())
-}
+use crate::{auth::InternalApiKey, db, error::AppError, state::AppState};
 
 #[derive(Deserialize, ToSchema)]
 pub struct HitRequest {
-    
     pub file_id: String,
-    
-    
+
     pub kind: String,
-    
-    
+
     pub ip: String,
     #[serde(default)]
     pub surface: Option<String>,
@@ -73,10 +52,9 @@ fn validate_hit(body: &HitRequest) -> Result<db::HitKind, AppError> {
 )]
 pub async fn hit_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Json(body): Json<HitRequest>,
 ) -> Result<StatusCode, AppError> {
-    check_internal_key(&state, &headers)?;
     let kind = validate_hit(&body)?;
     let ip_hash = crate::utils::hash_ip_for_ban(&body.ip, &state.config.ip_pepper);
     let now = chrono::Utc::now().timestamp();
@@ -107,8 +85,7 @@ pub async fn hit_handler(
             if !crate::storage_client::is_public_ip(addr) {
                 return;
             }
-            let Some(enc) =
-                crate::utils::encrypt_ip(&geo_ip, &geo_state.config.ip_encryption_key)
+            let Some(enc) = crate::utils::encrypt_ip(&geo_ip, &geo_state.config.ip_encryption_key)
             else {
                 return;
             };
@@ -153,10 +130,9 @@ pub struct HitBatchRequest {
 )]
 pub async fn hit_batch_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Json(body): Json<HitBatchRequest>,
 ) -> Result<StatusCode, AppError> {
-    check_internal_key(&state, &headers)?;
     if body.hits.is_empty() || body.hits.len() > MAX_HIT_BATCH {
         return Err(AppError::BadRequest("invalid hit batch size".into()));
     }
@@ -220,8 +196,7 @@ pub async fn hit_batch_handler(
                 else {
                     return;
                 };
-                let hash =
-                    juiceutils::ban::hash_ip_for_ban(&geo_ip, &geo_state.config.ip_pepper);
+                let hash = juiceutils::ban::hash_ip_for_ban(&geo_ip, &geo_state.config.ip_pepper);
                 let now = chrono::Utc::now().timestamp();
                 let _ = geo_state
                     .db_call("geo_enqueue", move |db| {
@@ -236,7 +211,6 @@ pub async fn hit_batch_handler(
 
 #[derive(Deserialize, ToSchema)]
 pub struct VisitRequest {
-    
     pub ip: String,
 }
 
@@ -254,10 +228,9 @@ pub struct VisitRequest {
 )]
 pub async fn visit_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
     Json(body): Json<VisitRequest>,
 ) -> Result<StatusCode, AppError> {
-    check_internal_key(&state, &headers)?;
     if body.ip.is_empty() {
         return Err(AppError::BadRequest("invalid visit payload".into()));
     }

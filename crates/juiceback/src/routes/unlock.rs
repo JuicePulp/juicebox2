@@ -1,5 +1,3 @@
-
-
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
@@ -128,9 +126,6 @@ pub async fn unlock_page_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    
-    
-    
     let lookup = id.clone();
     let record = state
         .db_call("get_unlock_page", move |db| db::get_file(db, &lookup))
@@ -206,7 +201,7 @@ pub async fn unlock_submit_handler(
     body: axum::body::Bytes,
 ) -> Result<Response, AppError> {
     let record = protected_record(&state, &id).await?;
-    
+
     let mut password = query.password.clone().filter(|p| !p.is_empty());
     if password.is_none() && !body.is_empty() {
         let ctype = headers
@@ -420,8 +415,7 @@ pub async fn content_handler(
         .unwrap_or((0, plain_len));
 
     let response = serve_protected_bytes(&state, &record, start, end, &method).await?;
-    
-    
+
     if method == Method::GET && response.status().is_success() {
         let viewer_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
         let ip_hash = crate::utils::hash_ip_for_ban(&viewer_ip, &state.config.ip_pepper);
@@ -455,10 +449,8 @@ pub(crate) async fn serve_protected_bytes(
     let partial = start != 0 || end != plain_len;
 
     let key = match record.dek_escrow.as_deref() {
-        
-        
         Some(escrow) => crate::routes::upload::protected::unwrap_escrow(state, escrow)?,
-        
+
         None => state
             .config
             .storage_file_key()

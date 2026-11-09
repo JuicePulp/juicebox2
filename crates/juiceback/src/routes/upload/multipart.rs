@@ -3,13 +3,16 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     Json,
     extract::{ConnectInfo, Multipart, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::Response,
 };
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::{common::UploadResponse, parse::parse_multipart};
+use super::{
+    common::{UploadResponse, upload_json_response},
+    parse::parse_multipart,
+};
 use crate::{
     db::{self, FileRecord},
     error::AppError,
@@ -25,8 +28,7 @@ pub struct ReserveUploadRequest {
     pub host: Option<String>,
     #[serde(default)]
     pub file_size: Option<u64>,
-    
-    
+
     pub password: Option<String>,
 }
 
@@ -96,9 +98,6 @@ pub async fn reserve_upload_handler(
 
     let encrypted_ip = super::ticket::encrypted_client_ip(&state, &headers, addr);
 
-    
-    
-    
     let setup = match body.password.filter(|p| !p.is_empty()) {
         Some(password) => Some(super::protected::prepare_protection(&state, &password).await?),
         None => None,
@@ -116,12 +115,7 @@ pub async fn reserve_upload_handler(
         selected_host.clone(),
     );
     if let Some(ref setup) = setup {
-        record.password_hash = Some(setup.password_hash.clone());
-        record.is_encrypted = true;
-        record.dek_wrapped = Some(setup.wrapped_b64.clone());
-        record.dek_salt = Some(setup.salt_b64.clone());
-        record.dek_escrow = Some(setup.escrow_hex.clone());
-        record.key_version = crate::crypto_file::KEY_VERSION_V1;
+        setup.material(None).apply_to(&mut record);
     }
 
     let record =
@@ -139,7 +133,7 @@ pub async fn reserve_upload_handler(
             raw_url,
             download_url,
             delete_token,
-            status: "uploading".to_string(),
+            status: FileRecord::STATUS_UPLOADING.to_string(),
             protected: record.is_protected(),
             is_encrypted: record.is_encrypted,
         }),
@@ -147,21 +141,20 @@ pub async fn reserve_upload_handler(
 }
 
 fn build_upload_response(
+    state: &Arc<AppState>,
     headers: &HeaderMap,
     record: &FileRecord,
-    public_url: &str,
-    raw_url: &str,
-    download_url: &str,
     wants_html: bool,
     ttl_seconds: i64,
     now: i64,
 ) -> Result<Response, AppError> {
     if wants_html {
+        let (public_url, raw_url, download_url) = super::ticket::public_urls_for(state, record);
         return Ok(noscript::upload_redirect(
             headers,
-            public_url,
-            raw_url,
-            download_url,
+            &public_url,
+            &raw_url,
+            &download_url,
             &record.filename,
             &record.delete_token,
             &record.id,
@@ -172,30 +165,7 @@ fn build_upload_response(
         ));
     }
 
-    let entry = noscript::FileCookieEntry {
-        id: record.id.clone(),
-        token: record.delete_token.clone(),
-    };
-    let cookie_hdr = noscript::file_cookie_header(headers, &entry);
-
-    let mut resp = Json(UploadResponse {
-        url: public_url.to_string(),
-        raw_url: raw_url.to_string(),
-        download_url: download_url.to_string(),
-        id: record.id.clone(),
-        filename: record.filename.clone(),
-        size_bytes: record.size_bytes,
-        mime_type: record.mime_type.clone(),
-        expires_at: record.expires_at,
-        delete_token: record.delete_token.clone(),
-        status: record.status.clone(),
-        protected: record.is_protected(),
-        is_encrypted: record.is_encrypted,
-    })
-    .into_response();
-
-    resp.headers_mut().insert(header::SET_COOKIE, cookie_hdr);
-    Ok(resp)
+    Ok(upload_json_response(state, record, true, headers))
 }
 
 #[utoipa::path(
@@ -237,8 +207,7 @@ pub async fn upload_handler(
         .get("x-delete-token")
         .and_then(|value| value.to_str().ok());
     let fresh_capability = uuid::Uuid::new_v4().to_string();
-    
-    
+
     let params = Box::pin(parse_multipart(
         &mut multipart,
         &state,
@@ -251,9 +220,6 @@ pub async fn upload_handler(
 
     let now = chrono::Utc::now().timestamp();
 
-    
-    
-    
     let protection = params.protection;
     let protected = protection.is_some();
     if protected && params.enc_header.is_none() {
@@ -268,53 +234,32 @@ pub async fn upload_handler(
         let fname = params.filename.clone();
         let mtype = params.mime_type.clone();
         let enc_ip = encrypted_ip.clone();
-        let completed = match state
-            .db_call("finish_reservation", move |db| {
-                crate::db::finish_reservation(
-                    db,
-                    &fname,
-                    &mtype,
-                    params.total_bytes,
-                    &update_id,
-                    &delete_token,
-                    enc_ip.as_deref(),
-                )
-            })
-            .await?
-        {
-            db::FinishReservationResult::Completed(record) => record,
-            db::FinishReservationResult::NotFound => {
-                return Err(AppError::BadRequest("invalid reserve_id".into()));
-            }
-            db::FinishReservationResult::NotUploading => {
-                return Err(AppError::BadRequest("reservation is not uploading".into()));
-            }
-            db::FinishReservationResult::InvalidToken => {
-                return Err(AppError::Forbidden(
-                    "invalid reservation delete token".into(),
-                ));
-            }
-        };
+        let mut completed = crate::reservation::finish(
+            &state,
+            crate::reservation::FinishRequest {
+                id: update_id,
+                delete_token,
+                filename: fname,
+                mime_type: mtype,
+                size_bytes: params.total_bytes,
+                uploader_ip: enc_ip,
+            },
+            crate::reservation::FinishPolicy::Strict,
+        )
+        .await?;
 
         tracing::info!(
             "reserved upload completed: id={} size={}",
             existing.id,
             params.total_bytes
         );
-        let mut completed = completed;
         if let Some(ref upload_protection) = protection {
             let header = params
                 .enc_header
                 .ok_or_else(|| AppError::Internal("protected upload missing ciphertext".into()))?;
-            let material = upload_protection.material(hex::encode(header));
+            let material = upload_protection.material(Some(hex::encode(header)));
             super::protected::mark_protected(&state, &completed.id, &material).await?;
-            completed.password_hash = material.password_hash.clone();
-            completed.is_encrypted = material.is_encrypted;
-            completed.enc_header = material.enc_header.clone();
-            completed.dek_wrapped = material.dek_wrapped.clone();
-            completed.dek_salt = material.dek_salt.clone();
-            completed.dek_escrow = material.dek_escrow.clone();
-            completed.key_version = material.key_version;
+            material.apply_to(&mut completed);
         }
         completed
     } else {
@@ -333,20 +278,14 @@ pub async fn upload_handler(
             let header = params
                 .enc_header
                 .ok_or_else(|| AppError::Internal("protected upload missing ciphertext".into()))?;
-            let material = upload_protection.material(hex::encode(header));
-            record.password_hash = material.password_hash.clone();
-            record.is_encrypted = material.is_encrypted;
-            record.enc_header = material.enc_header.clone();
-            record.dek_wrapped = material.dek_wrapped.clone();
-            record.dek_salt = material.dek_salt.clone();
-            record.dek_escrow = material.dek_escrow.clone();
-            record.key_version = material.key_version;
+            let material = upload_protection.material(Some(hex::encode(header)));
+            material.apply_to(&mut record);
         }
 
         let db_start = std::time::Instant::now();
         let record = db::insert_new_file(&state, record).await?;
         tracing::debug!("db insert took {:?}", db_start.elapsed());
-        Box::new(record)
+        record
     };
 
     let owned_record = record.clone();
@@ -374,14 +313,10 @@ pub async fn upload_handler(
         );
     }
 
-    let (public_url, raw_url, download_url) = super::ticket::public_urls_for(&state, &record);
-
     build_upload_response(
+        &state,
         &headers,
         &record,
-        &public_url,
-        &raw_url,
-        &download_url,
         wants_html,
         params.ttl_seconds,
         now,

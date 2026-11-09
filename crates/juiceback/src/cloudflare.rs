@@ -93,7 +93,10 @@ pub fn cache_variants(
             urls.push(format!("{}/d/{}", stem.0, stem.1));
         }
     }
-    if tier == "hot" && !r2_key.is_empty() && !config.r2_public_base_url.is_empty() {
+    if tier == crate::db::FileRecord::TIER_HOT
+        && !r2_key.is_empty()
+        && !config.r2_public_base_url.is_empty()
+    {
         urls.push(format!(
             "{}/{}",
             config.r2_public_base_url.trim_end_matches('/'),
@@ -104,18 +107,29 @@ pub fn cache_variants(
 }
 
 pub fn purge_file(config: &Arc<Config>, record: &crate::db::FileRecord) {
-    let urls = cache_variants(
-        config,
-        record.storage_host.as_deref(),
-        &record.id,
-        &record.filename,
-        &record.tier,
-        &record.r2_key,
-    );
+    purge_files(config, std::slice::from_ref(record));
+}
+
+pub fn purge_files(config: &Arc<Config>, records: &[crate::db::FileRecord]) {
+    let mut urls = Vec::new();
+    let mut tags = Vec::with_capacity(records.len());
+    for record in records {
+        urls.extend(cache_variants(
+            config,
+            record.storage_host.as_deref(),
+            &record.id,
+            &record.filename,
+            &record.tier,
+            &record.r2_key,
+        ));
+        tags.push(format!("juicebox:{}", record.id));
+    }
+    if urls.is_empty() && tags.is_empty() {
+        return;
+    }
     let config = Arc::clone(config);
-    let id = record.id.clone();
     tokio::spawn(async move {
         purge_urls(Arc::clone(&config), urls).await;
-        purge_tags(config, vec![format!("juicebox:{id}")]).await;
+        purge_tags(config, tags).await;
     });
 }

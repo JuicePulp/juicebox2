@@ -22,11 +22,6 @@ pub use query::{
     delete_upload_handler, get_upload_handler, health_upload_handler, options_handler,
 };
 
-#[must_use]
-pub fn tus_routes() -> axum::Router<Arc<AppState>> {
-    tus_create_routes().merge(tus_data_routes())
-}
-
 pub fn tus_create_routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new().route(
         "/api/tus",
@@ -42,8 +37,5 @@ pub fn tus_data_routes() -> axum::Router<Arc<AppState>> {
                 .patch(patch_upload_handler)
                 .delete(delete_upload_handler),
         )
-        .route(
-            "/api/tus/{id}/health",
-            routing::get(health_upload_handler),
-        )
+        .route("/api/tus/{id}/health", routing::get(health_upload_handler))
 }

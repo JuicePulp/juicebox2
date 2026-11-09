@@ -8,7 +8,7 @@ use axum::{
 use serde_json::json;
 use utoipa::OpenApi;
 
-use crate::{error::AppError, routes::api_doc::ApiDoc, state::AppState};
+use crate::{auth::InternalApiKey, error::AppError, routes::api_doc::ApiDoc, state::AppState};
 
 #[utoipa::path(
     get,
@@ -19,11 +19,6 @@ use crate::{error::AppError, routes::api_doc::ApiDoc, state::AppState};
     tag = "General",
 )]
 pub async fn health_handler() -> Json<serde_json::Value> {
-    
-    
-    
-    
-    
     Json(json!({
         "status": "ok",
         "juiceback": "ok",
@@ -39,10 +34,6 @@ pub async fn health_handler() -> Json<serde_json::Value> {
     tag = "General",
 )]
 pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    
-    
-    
-    
     let jh = match state.juicehost_config() {
         Ok(cfg) => {
             if state.juicehost_config_stale() {
@@ -68,7 +59,6 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
                 "danger_level": danger_level_str,
                 "quick_link": cfg.quick_link,
                 "custom_id": cfg.custom_id_enabled,
-                "ultrafast": cfg.ultrafast,
                 "direct_upload": state.config.direct_upload_enabled
                     && !state.config.public_juicehost_url.is_empty(),
                 "upload_mode": if state.config.dte_enabled
@@ -306,19 +296,8 @@ pub async fn ban_status_handler(
 )]
 pub async fn ban_snapshot_handler(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    _key: InternalApiKey,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if state.config.juicehost_api_key.is_empty() {
-        return Err(AppError::Unauthorized("API key not configured".into()));
-    }
-    let provided = headers
-        .get("x-juicehost-api-key")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !crate::utils::constant_time_eq(provided, &state.config.juicehost_api_key) {
-        return Err(AppError::Unauthorized("invalid API key".into()));
-    }
-
     let (pepper, hashes) = crate::ban::snapshot(&state);
 
     tracing::debug!("internal ban snapshot: {} hashes", hashes.len());

@@ -7,7 +7,6 @@ fn part_session(total_parts: usize, declared_size: u64) -> crate::tus::PartSessi
         total_parts,
         filename: "file.bin".into(),
         mime_type: "application/octet-stream".into(),
-        hashed_ip: "hash".into(),
         storage_host: None,
         ttl_hours: 24.0,
         reserve_id: None,
@@ -119,9 +118,6 @@ fn duplicate_part_completion_does_not_finalize_early() {
     use super::parallel::note_part_finalized;
 
     let session = part_session(3, 30);
-    // Part 0 retried twice, part 1 once: three *events* but only two distinct
-    // parts. The old counter treated this as a complete session and merged
-    // while part 2 was still missing.
     assert!(!note_part_finalized(&session, 0, 3));
     assert!(!note_part_finalized(&session, 0, 3));
     assert!(!note_part_finalized(&session, 1, 3));
@@ -136,7 +132,6 @@ fn every_distinct_part_finalizes_once() {
     assert!(!note_part_finalized(&session, 0, 3));
     assert!(!note_part_finalized(&session, 1, 3));
     assert!(note_part_finalized(&session, 2, 3));
-    // A retried final PATCH still reports "all finalized", never more than.
     assert!(note_part_finalized(&session, 2, 3));
     assert!(!note_part_finalized(&session, 9, 3));
 }

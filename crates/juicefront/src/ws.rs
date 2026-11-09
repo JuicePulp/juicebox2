@@ -8,7 +8,7 @@ use axum::{
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
-use crate::{config::Config, proxy::clean_headers, state::AppState};
+use crate::{config::Config, proxy::clean_ws_headers, state::AppState};
 
 pub async fn device_ws_proxy(
     State(state): State<Arc<AppState>>,
@@ -43,7 +43,7 @@ pub async fn device_ws_proxy(
             .map_or("/api/device/ws", axum::http::uri::PathAndQuery::as_str)
     );
     let mut header_block = Vec::new();
-    for (name, value) in clean_headers(req.headers()) {
+    for (name, value) in clean_ws_headers(req.headers()) {
         header_block.extend_from_slice(name.as_str().as_bytes());
         header_block.extend_from_slice(b": ");
         header_block.extend_from_slice(value.as_bytes());

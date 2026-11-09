@@ -69,9 +69,6 @@ fn host_matches(host: &str, candidate: &str) -> bool {
     !candidate.is_empty() && (host == candidate || host.ends_with(&format!(".{candidate}")))
 }
 
-/// Juicebox is the place files live, not a media source to feed back into the
-/// fetcher. Catch that mistake early with a friendlier (and funnier) message
-/// than whatever cobalt would return for our own links.
 #[must_use]
 pub(crate) fn juicebox_link_message(
     raw: &str,

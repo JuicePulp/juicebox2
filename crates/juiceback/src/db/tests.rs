@@ -151,7 +151,7 @@ fn removed_device_is_immediately_revoked() {
 }
 
 #[test]
-fn file_record_new_sets_fields() {
+fn file_record_new_derives_storage_path_and_ready_state() {
     let record = FileRecord::new(
         "id1".into(),
         "test.txt".into(),
@@ -163,14 +163,10 @@ fn file_record_new_sets_fields() {
         Some("1.2.3.4".into()),
         Some("https://files.example.com".into()),
     );
-    assert_eq!(record.id, "id1");
-    assert_eq!(record.filename, "test.txt");
-    assert_eq!(record.mime_type, "text/plain");
-    assert_eq!(record.size_bytes, 1024);
     assert_eq!(record.storage_path, "remote-id1");
-    assert_eq!(record.delete_token, "token1");
-    assert_eq!(record.uploaded_at, 100);
-    assert_eq!(record.expires_at, 200);
+    assert_eq!(record.status, FileRecord::STATUS_READY);
+    assert_eq!(record.tier, FileRecord::TIER_STANDARD);
+    assert!(!record.is_protected());
     assert_eq!(record.uploader_ip.as_deref(), Some("1.2.3.4"));
     assert_eq!(
         record.storage_host.as_deref(),
@@ -179,63 +175,32 @@ fn file_record_new_sets_fields() {
 }
 
 #[test]
-fn file_record_from_upload_with_token_ttl() {
-    let before = chrono::Utc::now().timestamp();
-    let record = FileRecord::from_upload_with_token(
-        "id2".into(),
-        "file.bin".into(),
-        "application/octet-stream".into(),
-        2048,
-        24.0,
-        "tok2".into(),
-        None,
-        None,
-    );
-    let after = chrono::Utc::now().timestamp();
-    assert_eq!(record.id, "id2");
-    assert_eq!(record.size_bytes, 2048);
-    assert_eq!(record.delete_token, "tok2");
-    assert!(record.uploaded_at >= before);
-    assert!(record.expires_at <= after + 24 * 3600 + 2);
-    assert!(record.expires_at >= before + 24 * 3600 - 2);
-    assert!(record.uploader_ip.is_none());
-    assert!(record.storage_host.is_none());
-}
-
-#[test]
-fn file_record_from_upload_with_token_clamped_high() {
-    let before = chrono::Utc::now().timestamp();
-    let record = FileRecord::from_upload_with_token(
-        "id3".into(),
-        "file.bin".into(),
-        "application/octet-stream".into(),
-        100,
-        99999.0,
-        "tok3".into(),
-        None,
-        None,
-    );
-    let expected_ttl = (99999.0 * crate::constants::SECONDS_PER_HOUR_F64).round() as i64;
-    assert!(record.expires_at >= before + expected_ttl - 2);
-    assert!(record.expires_at <= before + expected_ttl + 3);
-}
-
-#[test]
-fn file_record_from_upload_with_token_clamped_low() {
-    let before = chrono::Utc::now().timestamp();
-    let record = FileRecord::from_upload_with_token(
-        "id4".into(),
-        "file.bin".into(),
-        "application/octet-stream".into(),
-        100,
-        0.0001,
-        "tok4".into(),
-        None,
-        None,
-    );
-    let expected_ttl = (0.0001 * crate::constants::SECONDS_PER_HOUR_F64).round() as i64;
-    assert!(record.expires_at >= before + expected_ttl - 2);
-    assert!(record.expires_at <= before + expected_ttl + 3);
+fn file_record_from_upload_with_token_sets_expiry_from_ttl() {
+    for (id, ttl_hours) in [("id2", 24.0), ("id3", 99999.0), ("id4", 0.0001)] {
+        let before = chrono::Utc::now().timestamp();
+        let record = FileRecord::from_upload_with_token(
+            id.into(),
+            "file.bin".into(),
+            "application/octet-stream".into(),
+            2048,
+            ttl_hours,
+            format!("tok-{id}"),
+            None,
+            None,
+        );
+        let expected_ttl = (ttl_hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64;
+        assert_eq!(record.id, id);
+        assert_eq!(record.size_bytes, 2048);
+        assert_eq!(record.delete_token, format!("tok-{id}"));
+        assert!(record.uploaded_at >= before);
+        assert!(
+            (record.expires_at - (record.uploaded_at + expected_ttl)).abs() <= 2,
+            "ttl {ttl_hours}h produced expires_at {}",
+            record.expires_at
+        );
+        assert!(record.uploader_ip.is_none());
+        assert!(record.storage_host.is_none());
+    }
 }
 
 fn setup_db() -> Connection {
@@ -335,6 +300,19 @@ fn finish_reservation_requires_token_and_uploading_status() {
         )
         .unwrap(),
         FinishReservationResult::NotUploading
+    ));
+    assert!(matches!(
+        finish_reservation(
+            &conn,
+            "again.txt",
+            "text/plain",
+            5,
+            "reserved",
+            "wrong",
+            None
+        )
+        .unwrap(),
+        FinishReservationResult::InvalidToken
     ));
 }
 
@@ -1099,18 +1077,22 @@ fn manual_tier_pins_and_skips_auto_promo() {
     let got = get_file(&conn, "pin1").unwrap().unwrap();
     assert_eq!(got.tier, "standard");
     assert!(got.tier_pinned);
-    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
-        .unwrap()
-        .is_empty());
+    assert!(
+        list_promo_candidates(&conn, 9_999_999_000, 500)
+            .unwrap()
+            .is_empty()
+    );
 
     set_file_tier_manual(&conn, "pin1", "hot", "hot/pin1.mp4").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();
     assert_eq!(got.tier, "hot");
     assert_eq!(got.r2_key, "hot/pin1.mp4");
     assert!(got.tier_pinned);
-    assert!(list_promo_candidates(&conn, 9_999_999_000, 500)
-        .unwrap()
-        .is_empty());
+    assert!(
+        list_promo_candidates(&conn, 9_999_999_000, 500)
+            .unwrap()
+            .is_empty()
+    );
 
     set_file_tier(&conn, "pin1", "standard", "").unwrap();
     let got = get_file(&conn, "pin1").unwrap().unwrap();

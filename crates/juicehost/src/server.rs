@@ -14,10 +14,7 @@ use sentry::integrations::tower::NewSentryLayer;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 
-use crate::{
-    api_doc::ApiDoc, config::Config, error::JuicehostError, handlers, state::AppState,
-    ticket::verify_ticket_jwt,
-};
+use crate::{api_doc::ApiDoc, config::Config, error::JuicehostError, handlers, state::AppState};
 
 pub const BANNER_ART: &str = r"
  ▄▄ ▄▄ ▄▄ ▄▄  ▄▄▄▄  ▄▄▄▄ ▄▄ ▄▄  ▄▄▄   ▄▄▄▄ ▄▄▄▄▄
@@ -56,18 +53,13 @@ async fn require_api_key(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
     next: middleware::Next,
-) -> impl IntoResponse {
+) -> Response {
     if state.api_key.is_empty() {
-        let has_capability = req.headers().contains_key("x-juicehost-file-capability");
-        if state.allow_no_auth || has_capability {
+        if state.allow_no_auth {
             return next.run(req).await;
         }
         tracing::warn!("auth: rejected request - JUICEHOST_API_KEY is not configured");
         return JuicehostError::Unauthorized.into_response();
-    }
-
-    if req.headers().contains_key("x-juicehost-file-capability") {
-        return next.run(req).await;
     }
 
     let provided_key = req
@@ -99,6 +91,26 @@ async fn require_api_key(
     next.run(req).await
 }
 
+async fn require_api_key_or_capability(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: middleware::Next,
+) -> Response {
+    if state.api_key.is_empty() {
+        let has_capability = req
+            .headers()
+            .get("x-juicehost-file-capability")
+            .is_some_and(|v| !v.is_empty());
+        if state.allow_no_auth || has_capability {
+            return next.run(req).await;
+        }
+        tracing::warn!("auth: rejected request - JUICEHOST_API_KEY is not configured");
+        return JuicehostError::Unauthorized.into_response();
+    }
+
+    require_api_key(State(state), req, next).await
+}
+
 async fn require_api_key_or_ticket(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
@@ -115,7 +127,7 @@ async fn require_api_key_or_ticket(
     }
 
     if let Some(token) = juiceutils::extract_bearer_token(req.headers())
-        && verify_ticket_jwt(token, &state.ticket_jwt_secret).is_ok()
+        && juiceproto::ticket::verify(token, &state.ticket_jwt_secret).is_ok()
     {
         return next.run(req).await;
     }
@@ -149,7 +161,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/internal/file/concat", post(handlers::concat_files))
         .layer(DefaultBodyLimit::max(64 * 1024));
 
-    let internal = Router::new()
+    let capability_internal = Router::new()
         .route("/internal/file", post(handlers::store_file))
         .route(
             "/internal/file/stream/{id}/{filename}",
@@ -157,6 +169,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/internal/file/{id}", delete(handlers::delete_file))
         .route("/internal/file/{id}/rename", post(handlers::rename_file))
+        .merge(concat)
+        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_api_key_or_capability,
+        ));
+
+    let internal = Router::new()
         .route("/internal/file/{id}/freeze", post(handlers::freeze_file))
         .route(
             "/internal/file/{id}/unfreeze",
@@ -176,15 +196,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/internal/live/{id}/register",
             post(handlers::register_live_upload),
         )
-        .route(
-            "/internal/live/part/{id}",
-            get(handlers::live_part_status),
-        )
-        .route(
-            "/internal/live/{id}",
-            delete(handlers::remove_live_upload),
-        )
-        .merge(concat)
+        .route("/internal/live/part/{id}", get(handlers::live_part_status))
+        .route("/internal/live/{id}", delete(handlers::remove_live_upload))
         .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
@@ -235,6 +248,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(public)
         .merge(files_router)
         .merge(internal)
+        .merge(capability_internal)
         .merge(ticket_upload)
         .fallback(fallback_404)
         .layer(TimeoutLayer::with_status_code(

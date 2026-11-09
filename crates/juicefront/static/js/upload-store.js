@@ -1,8 +1,3 @@
-// Durable upload queue shared by the page and the upload SharedWorker.
-//
-// The store keeps only metadata. File bytes stay on the user's device, so a
-// full reload can restore the row and the TUS session, then ask the user to
-// select the same file again to continue.
 const DB_NAME = "juicebox_upload_queue";
 const DB_VERSION = 1;
 const STORE_NAME = "uploads";
@@ -335,7 +330,6 @@ export async function loadQueueItems() {
           tx.onabort = () => resolve();
         });
       } catch {
-        // Fall back to whatever this module already has in memory.
       }
     }
     for (const row of memory.values()) {

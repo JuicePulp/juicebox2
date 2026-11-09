@@ -51,7 +51,6 @@
       setProgress(pct, label);
       showEvent(data);
     } catch (_) {
-      // Transient network error while the upload is still going.
     }
     timer = setTimeout(poll, 1500);
   }

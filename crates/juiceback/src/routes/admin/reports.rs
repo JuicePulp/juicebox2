@@ -27,8 +27,6 @@ pub struct AdminReportEntry {
 
     pub created_at: i64,
 
-    
-    
     pub has_password: bool,
 }
 

@@ -63,10 +63,6 @@ function hydrateRecord(record) {
   return null;
 }
 
-// Restore the queue before upload-card subscribes, so a reload paints the
-// interrupted rows immediately instead of flashing an empty list. A live
-// SharedWorker snapshot will switch the rows back to "uploading" if the worker
-// survived the navigation.
 if (typeof window !== "undefined") {
   try {
     const stored = await loadQueueItems();
@@ -105,9 +101,6 @@ function upsertItem(item) {
   if (item.state === "error" || item.state === "cancelled") {
     void removeQueueItem(item.id);
   } else if (item.state === "done") {
-    // Persist the completion briefly so a page that closes during the
-    // localStorage write can still recover it on the next load. Once the write
-    // completes, remove the queue record so deleted files cannot come back.
     queueItemNow(item);
     persisted.then(() => {
       void removeQueueItem(item.id);
@@ -237,16 +230,12 @@ function restartWithoutWorker() {
   workerInputs.clear();
   workerAcked.clear();
 
-  // Uploads the worker never acknowledged can safely be run here.
   for (const [id, input] of pending) {
     const item = items.find((i) => i.id === id);
     if (!item || isTerminal(item.state))
       continue;
     startLocal({ ...item, state: "queued", progress: 0 }, input);
   }
-  // Already-acknowledged uploads may be mid-flight. The page no longer holds
-  // the File object, so keep the row and the TUS offset and ask for the file
-  // again instead of starting a second upload.
   for (const id of acked) {
     const item = items.find((i) => i.id === id);
     if (item && !isTerminal(item.state)) {
@@ -272,9 +261,6 @@ function onWorkerMessage(e) {
         continue;
       noteWorkerAlive(it.id);
       if (isTerminal(it.state)) {
-        // Completed entries belong to the files history, not the upload queue.
-        // Replaying them here would duplicate rows, re-copy URLs over the
-        // clipboard, and resurrect files the user already deleted.
         forgetWorkerItem(it.id);
       } else {
         active.push(it);
@@ -314,9 +300,6 @@ function ensurePort() {
   if (port) return port;
   try {
     if (typeof SharedWorker === "undefined") return null;
-    // Stable per-asset-version name: a reload reconnects to the worker that
-    // already owns the upload, while a new asset version always gets a fresh
-    // worker instead of inheriting stale code.
     var sw = new SharedWorker(workerScriptUrl(), {
       name: WORKER_INSTANCE_NAME,
       type: "module",

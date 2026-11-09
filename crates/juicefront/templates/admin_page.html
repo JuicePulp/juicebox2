@@ -1,0 +1,2 @@
+{% extends "admin.html" %}
+{% block content %}{% if page == "index" %}{% include "admin_index.html" %}{% elif page == "login" %}{% include "admin_login.html" %}{% elif page == "files" %}{% include "admin_files.html" %}{% elif page == "bans" %}{% include "admin_bans.html" %}{% elif page == "hosters" %}{% include "admin_hosters.html" %}{% elif page == "reports" %}{% include "admin_reports.html" %}{% elif page == "feedback" %}{% include "admin_feedback.html" %}{% else %}{% include "admin_announcement.html" %}{% endif %}{% endblock %}

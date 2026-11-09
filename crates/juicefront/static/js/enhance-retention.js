@@ -12,9 +12,6 @@ function scrubTick(direction) {
   } catch {}
 }
 
-// Tiny Pixel-style tick for retention steps. Throttled so fast drags
-// produce discrete ticks instead of one merged buzz (vibrate() replaces
-// the previous pattern while it is still playing).
 let lastRetentionBuzzAt = 0;
 const RETENTION_TICK_MIN_MS = 30;
 function retentionTick() {
@@ -27,9 +24,6 @@ function retentionTick() {
 function lockPageScroll() {
   try {
     const root = document.documentElement;
-    // Hiding the page scrollbar widens the viewport by its width, which makes
-    // centered content jump to the right. Reserve that width on <html> for as
-    // long as the lock is active so the layout stays put.
     const scrollbarWidth = window.innerWidth - root.clientWidth;
     if (scrollbarWidth > 0) {
       root.style.setProperty("--rtt-scrollbar-width", `${scrollbarWidth}px`);
@@ -106,8 +100,6 @@ function buildOptions(fieldset, locale, allowed, def, stored) {
     prevTier = tier;
     const label = document.createElement("label");
     label.className = "rtt-option";
-    // Retention owns its haptics (throttled Pixel tick); skip the
-    // global pointerdown tap buzz for these labels.
     label.setAttribute("data-no-buzz", "");
     const input = document.createElement("input");
     input.type = "radio";
@@ -213,8 +205,6 @@ export function enhanceRetention(card, locale = "en") {
   if (!toolbar || !fieldset) return;
   const radios = resolveOptions(card, locale);
   if (!radios || radios.length === 0) return;
-  // Cover server-rendered labels too (buildOptions already tags the ones
-  // it creates): retention owns its haptics, skip the global tap buzz.
   try {
     fieldset.querySelectorAll("label.rtt-option:not([data-no-buzz])").forEach((el) => el.setAttribute("data-no-buzz", ""));
   } catch {}
@@ -254,10 +244,6 @@ export function enhanceRetention(card, locale = "en") {
     const enterClass = isUp ? "animate-up-enter" : "animate-down-enter";
     const old = splitRetentionLabel(labels[lastIndex] || "");
 
-    // Drop any exit clones still animating before querying the live nodes.
-    // Otherwise a stale suffix clone can be picked instead of the live one,
-    // leaving two suffixes behind ("7 dayss") when scrubbing faster than the
-    // 200ms exit animation.
     clearTimeout(cleanupTimer);
     wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
 
@@ -445,9 +431,6 @@ export function enhanceRetention(card, locale = "en") {
     for (const t of endTimers) clearTimeout(t);
     endTimers = [];
     drag = { id: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, touch: e.pointerType !== "mouse" };
-    // On touch, capture immediately so the browser never starts a page
-    // scroll gesture from this touch. Without this, the page can scroll
-    // during the 8px slop before we capture in onPointerMove.
     if (drag.touch) {
       try {
         fieldset.setPointerCapture(e.pointerId);
@@ -547,11 +530,6 @@ export function enhanceRetention(card, locale = "en") {
       haptic("tap");
     }
   };
-  // Belt-and-braces: while a scrub drag is active, kill the browser's
-  // touch-scroll gesture. pointermove preventDefault() alone does not stop
-  // scrolling; this non-passive touchmove blocker plus touch-action:none
-  // in CSS plus the body scroll lock together keep the page still on
-  // mobile while dragging the retention setting.
   const blockTouchMove = (e) => {
     if (drag && drag.moved) e.preventDefault();
   };

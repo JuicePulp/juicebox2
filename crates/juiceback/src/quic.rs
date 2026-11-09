@@ -109,7 +109,7 @@ fn create_quic_endpoint(
                 "server.quic_cert_path not set, auto-generating cert at {}",
                 default_path.display()
             );
-            let (cert_der, _) = juiceutils::get_or_generate_cert(&default_path);
+            let (cert_der, _) = juiceutils::get_or_generate_cert(&default_path)?;
             Arc::new(PinnedCertVerifier {
                 pinned_cert_der: cert_der.as_ref().to_vec(),
             })
@@ -172,8 +172,8 @@ async fn resolve_quic_addr(juicehost_url: &str) -> Result<(std::net::SocketAddr,
         .host()
         .ok_or("no hostname in juicehost URL")?
         .to_string();
-    let tcp_port = uri.port_u16().unwrap_or(6402);
-    let quic_port = tcp_port + 1;
+    let tcp_port = uri.port_u16().unwrap_or(juiceutils::config::ports::HOST);
+    let quic_port = tcp_port + juiceutils::config::ports::QUIC_OFFSET;
 
     let addr = if let Ok(ip) = hostname.parse::<std::net::IpAddr>() {
         std::net::SocketAddr::new(ip, quic_port)

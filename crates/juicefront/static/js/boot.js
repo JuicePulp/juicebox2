@@ -1,9 +1,6 @@
 document.documentElement.classList.remove("no-js");
 document.documentElement.classList.add("js");
 
-// Older browsers (for example the PS Vita browser) ignore type="module"
-// scripts entirely. Keep the plain multipart upload form usable when the
-// upload module never initializes, and as a safety net when it fails to parse.
 (function () {
   function armUploadFallback() {
     if (!document.getElementById("upload-card")) return;

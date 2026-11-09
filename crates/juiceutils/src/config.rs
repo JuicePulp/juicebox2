@@ -1,12 +1,23 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub mod ports {
+    pub const FRONTEND: u16 = 6400;
+    pub const BACKEND: u16 = 6401;
+    pub const HOST: u16 = 6402;
+    pub const QUIC_OFFSET: u16 = 1;
+}
+
+pub mod defaults {
+    pub const MAX_FILE_SIZE_MB: u64 = 500;
+    pub const MAX_FILE_SIZE_BYTES: u64 = MAX_FILE_SIZE_MB * 1024 * 1024;
+    pub const DEFAULT_TTL_HOURS: f64 = 24.0;
+    pub const ALLOWED_TTL_HOURS: &[f64] = &[0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0];
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SentrySettings {
-    #[serde(default)]
-    pub dsn: Option<String>,
-
     #[serde(default = "default_sentry_env")]
     pub environment: String,
 }
@@ -14,7 +25,6 @@ pub struct SentrySettings {
 impl Default for SentrySettings {
     fn default() -> Self {
         Self {
-            dsn: None,
             environment: default_sentry_env(),
         }
     }
@@ -27,15 +37,11 @@ fn default_sentry_env() -> String {
 impl SentrySettings {
     #[must_use]
     pub fn from_env_or(file: &Self) -> Self {
-        let dsn = std::env::var("SENTRY_DSN")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| file.dsn.clone());
         let environment = std::env::var("SENTRY_ENVIRONMENT")
             .ok()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| file.environment.clone());
-        Self { dsn, environment }
+        Self { environment }
     }
 }
 
@@ -44,7 +50,7 @@ where
     T: Default + for<'de> Deserialize<'de>,
 {
     let Ok(text) = std::fs::read_to_string(path) else {
-        tracing::warn!("config file {} not found, using defaults", path.display());
+        tracing::warn!("config file {} unreadable, using defaults", path.display());
         return T::default();
     };
     match toml::from_str::<T>(&text) {
@@ -57,6 +63,34 @@ where
             T::default()
         }
     }
+}
+
+pub fn load_service_config<T>(service_name: &str, env_var: &str, names: &[&str]) -> T
+where
+    T: Default + for<'de> Deserialize<'de>,
+{
+    for path in candidate_paths(env_var, names) {
+        if path.exists() {
+            return load_toml_or_default(&path);
+        }
+    }
+    tracing::warn!("no {service_name} config file found, using defaults");
+    T::default()
+}
+
+fn candidate_paths(env_var: &str, names: &[&str]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var(env_var) {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            paths.push(PathBuf::from(trimmed));
+        }
+    }
+    for name in names {
+        paths.push(PathBuf::from(name));
+        paths.push(PathBuf::from("/etc/juicebox").join(name.trim_start_matches('.')));
+    }
+    paths
 }
 
 pub fn load_dotenv() {
@@ -110,6 +144,62 @@ pub fn is_placeholder_secret(value: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with("change_me") || trimmed.starts_with("change_this")
 }
 
+pub fn env_bool(name: &str) -> Result<Option<bool>, String> {
+    match std::env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(Some(true)),
+            "0" | "false" | "no" | "off" => Ok(Some(false)),
+            _ => Err(format!("{name} must be a boolean (true/false/1/0)")),
+        },
+        _ => Ok(None),
+    }
+}
+
+pub fn ticket_secret(fallback: &str) -> Result<String, String> {
+    let (secret, source) = optional_secret("TICKET_JWT_SECRET")
+        .map(|secret| (secret, "TICKET_JWT_SECRET"))
+        .or_else(|| optional_secret("JWT_SECRET").map(|secret| (secret, "JWT_SECRET")))
+        .unwrap_or_else(|| (fallback.trim().to_owned(), "the service API key"));
+    if secret.is_empty() {
+        return Err(
+            "TICKET_JWT_SECRET is not set. Set TICKET_JWT_SECRET (or JWT_SECRET) to a real secret."
+                .to_string(),
+        );
+    }
+    if is_placeholder_secret(&secret) {
+        return Err(format!(
+            "{source} is set to a placeholder value. Generate a real secret before starting."
+        ));
+    }
+    Ok(secret)
+}
+
+pub fn validate_jwt_secret(secret: &str) -> Result<(), String> {
+    if secret.trim().is_empty() {
+        return Err("JWT_SECRET is not set. Set a real secret.".to_string());
+    }
+    if is_placeholder_secret(secret) {
+        return Err(
+            "JWT_SECRET is set to a placeholder value. Generate a real secret before starting."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+pub fn validate_ip_encryption_key(key: &str) -> Result<(), String> {
+    validate_hex_key("IP_ENCRYPTION_KEY", key)
+}
+
+pub fn validate_hex_key(name: &str, key: &str) -> Result<(), String> {
+    let bytes =
+        hex::decode(key.trim()).map_err(|_| format!("{name} must be a hexadecimal string"))?;
+    if bytes.len() != 32 {
+        return Err(format!("{name} must encode exactly 32 bytes"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,7 +207,6 @@ mod tests {
     fn missing_file_uses_defaults() {
         let cfg: SentrySettings = load_toml_or_default(Path::new("/nonexistent-config.toml"));
         assert_eq!(cfg.environment, "production");
-        assert_eq!(cfg.dsn, None);
     }
 
     #[test]
@@ -137,5 +226,30 @@ mod tests {
         assert!(!is_placeholder_secret(
             "9f8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8"
         ));
+    }
+
+    #[test]
+    fn jwt_secret_validation_rejects_empty_and_placeholders() {
+        assert!(validate_jwt_secret("").is_err());
+        assert!(validate_jwt_secret("   ").is_err());
+        assert!(validate_jwt_secret("change_me_to_something").is_err());
+        assert!(validate_jwt_secret("a-real-secret-value").is_ok());
+    }
+
+    #[test]
+    fn ip_encryption_key_validation_requires_32_hex_bytes() {
+        assert!(validate_ip_encryption_key(&"ab".repeat(32)).is_ok());
+        assert!(validate_ip_encryption_key(&format!("  {}  ", "ab".repeat(32))).is_ok());
+        assert!(validate_ip_encryption_key("").is_err());
+        assert!(validate_ip_encryption_key("not-hex").is_err());
+        assert!(validate_ip_encryption_key(&"ab".repeat(31)).is_err());
+        assert!(validate_ip_encryption_key(&"zz".repeat(32)).is_err());
+        let err = validate_ip_encryption_key("nope").unwrap_err();
+        assert!(!err.contains("nope"), "key material must not leak: {err}");
+    }
+
+    #[test]
+    fn quic_default_follows_backend_port() {
+        assert_eq!(ports::BACKEND + ports::QUIC_OFFSET, ports::HOST);
     }
 }

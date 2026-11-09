@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use juiceutils::file_validation::ProtectionLevel;
 use serde::{Deserialize, Serialize};
@@ -423,7 +423,7 @@ const fn default_min_free_space_gb() -> u64 {
 }
 
 const fn default_max_file_size_mb() -> u64 {
-    500
+    juiceutils::config::defaults::MAX_FILE_SIZE_MB
 }
 
 const fn default_max_range_response_mb() -> u64 {
@@ -497,11 +497,11 @@ const fn default_file_cache_max_age() -> u64 {
 }
 
 const fn default_default_ttl() -> f64 {
-    24.0
+    juiceutils::config::defaults::DEFAULT_TTL_HOURS
 }
 
 fn default_allowed_ttls() -> Vec<f64> {
-    vec![0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
+    juiceutils::config::defaults::ALLOWED_TTL_HOURS.to_vec()
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -516,49 +516,12 @@ impl Default for BanFile {
     }
 }
 
-fn candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(dir) = std::env::var("JUICEHOST_CONFIG") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            paths.push(PathBuf::from(trimmed));
-        }
-    }
-    for name in [".juicehost.toml", "juicehost.toml", "config.toml"] {
-        paths.push(PathBuf::from(name));
-        paths.push(PathBuf::from("/etc/juicebox").join(name.trim_start_matches('.')));
-    }
-    paths
-}
-
 fn load_file_config() -> FileConfig {
-    for path in candidate_paths() {
-        if path.exists() {
-            return load_one_file(&path);
-        }
-    }
-    tracing::warn!("no juicehost config file found, using defaults");
-    FileConfig::default()
-}
-
-fn load_one_file(path: &Path) -> FileConfig {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        tracing::warn!(
-            "config file {path} unreadable, using defaults",
-            path = path.display()
-        );
-        return FileConfig::default();
-    };
-    match toml::from_str::<FileConfig>(&text) {
-        Ok(cfg) => cfg,
-        Err(err) => {
-            tracing::warn!(
-                "config file {path} invalid ({err}), using defaults",
-                path = path.display()
-            );
-            FileConfig::default()
-        }
-    }
+    juiceutils::config::load_service_config(
+        "juicehost",
+        "JUICEHOST_CONFIG",
+        &[".juicehost.toml", "juicehost.toml", "config.toml"],
+    )
 }
 
 impl Config {
@@ -653,9 +616,28 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn shipped_example_matches_code_defaults() {
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../juicehost.toml.example"
+        ));
+        let example: FileConfig = toml::from_str(text).expect("juicehost.toml.example must parse");
+        let defaults = FileConfig::default();
+        assert_eq!(
+            example.security.danger_level, defaults.security.danger_level,
+            "danger_level in juicehost.toml.example must match the code default"
+        );
+        assert_eq!(
+            example.features.file_cache_max_age_secs, defaults.features.file_cache_max_age_secs,
+            "file_cache_max_age_secs in juicehost.toml.example must match the code default"
+        );
+    }
+
     fn clear_juicehost_env() {
         for name in [
             "JUICEHOST_API_KEY",
+            "JUICEHOST_ALLOW_NO_AUTH",
             "JUICEHOST_CONFIG",
             "S3_ACCESS_KEY",
             "S3_SECRET_KEY",
@@ -692,13 +674,8 @@ mod tests {
         clear_juicehost_env();
         let result = Config::from_env();
         assert!(
-            matches!(
-                result,
-                Err(ConfigError::MissingSecret {
-                    name: "TICKET_JWT_SECRET"
-                })
-            ),
-            "expected MissingSecret, got: {:?}",
+            matches!(result, Err(ConfigError::InvalidSecret(ref msg)) if msg.contains("TICKET_JWT_SECRET")),
+            "expected InvalidSecret, got: {:?}",
             result
                 .map(|cfg| cfg.ticket_jwt_secret.is_empty())
                 .map_err(|e| e.to_string())

@@ -13,6 +13,6 @@
 <main id="main-content">
 {% block content %}{% endblock %}
 </main>
-{% for s in scripts %}<script src="{{ s }}"></script>
+{% for s in scripts %}<script type="module" src="{{ s }}"></script>
 {% endfor %}</body>
 </html>

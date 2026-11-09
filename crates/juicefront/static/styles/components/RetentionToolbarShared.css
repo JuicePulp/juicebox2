@@ -307,9 +307,6 @@
     overscroll-behavior: contain;
   }
 
-  /* touch-action intersects up the ancestor chain: children defaulting
-     to auto can re-enable panning even when the fieldset is none.
-     Pin descendants too so a scrub drag never starts a page scroll. */
   .rtt-options .rtt-tier,
   .rtt-options .rtt-option,
   .rtt-options .rtt-option span {
@@ -354,9 +351,6 @@
   }
 }
 
-/* While a retention scrub drag is active, JS adds .rtt-scrolllock to
-   <body> and <html> to keep the page from scrolling under the finger.
-   Removed on pointerup/pointercancel/destroy. */
 body.rtt-scrolllock,
 html.rtt-scrolllock {
   overscroll-behavior: none !important;
@@ -366,14 +360,10 @@ body.rtt-scrolllock {
   overflow: hidden !important;
 }
 
-/* JS measures the scrollbar width before locking the page and sets this
-   variable, keeping the layout from widening (and centered content from
-   jumping right) once the scrollbar is gone. */
 html.rtt-scrollbar-compensate {
   padding-right: var(--rtt-scrollbar-width, 0px);
 }
 
-/* Extra guard while dragging: no panning starting anywhere in the pill. */
 .rtt-options.rtt-dragging,
 .rtt-options.rtt-dragging * {
   touch-action: none !important;

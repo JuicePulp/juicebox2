@@ -10,7 +10,12 @@ const COOL_CONCURRENCY: usize = 4;
 
 #[must_use]
 pub fn embed_mime_eligible(mime: &str) -> bool {
-    let base = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let base = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     if base.starts_with("image/") || base.starts_with("text/") {
         return true;
     }
@@ -39,8 +44,8 @@ pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
         Ok(Some(r)) => r,
         _ => return,
     };
-    if record.status != "ready"
-        || record.tier != "standard"
+    if record.status != db::FileRecord::STATUS_READY
+        || record.tier != db::FileRecord::TIER_STANDARD
         || record.tier_pinned
         || record.size_bytes <= 0
         || record.size_bytes > state.config.embed_promote_max_bytes as i64
@@ -50,18 +55,9 @@ pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
     {
         return;
     }
-    let official = state.official_hosts();
-    let host = record.storage_host.as_deref().unwrap_or("").trim();
-    let promote_host: Option<String> = if host.is_empty() {
-        None
-    } else if official.contains(host) {
-        Some(host.to_string())
-    } else {
+    let Some(promote_host) = promotion_target(&state.config, record.storage_host.as_deref()) else {
         return;
     };
-    if promote_host.is_none() && state.config.juicehost_url.trim().is_empty() {
-        return;
-    }
     let cooldown = state.config.embed_promote_cooldown_secs;
     let due = match state
         .db_call("embed_due", {
@@ -90,10 +86,12 @@ pub(crate) async fn maybe_embed_promote(state: &Arc<AppState>, id: &str) {
         Ok(u) => u,
         Err(_) => return,
     };
-    if hot_count.max(0) as u64 >= state.config.r2_max_hot_files
-        || (hot_bytes.max(0) as u64).saturating_add(record.size_bytes.max(0) as u64)
-            > state.config.r2_max_bytes
-    {
+    if !hot_capacity_available(
+        &state.config,
+        hot_count.max(0) as u64,
+        hot_bytes.max(0) as u64,
+        record.size_bytes.max(0) as u64,
+    ) {
         tracing::info!("promo: embed R2 cap reached, skipping {}", record.id);
         return;
     }
@@ -136,6 +134,33 @@ pub async fn run_promo_loop(state: Arc<AppState>) {
             tracing::error!("promo: sweep task failed: {e}");
         }
     }
+}
+
+#[must_use]
+pub(crate) fn promotion_target(
+    config: &crate::config::Config,
+    storage_host: Option<&str>,
+) -> Option<Option<String>> {
+    let host = storage_host.unwrap_or("").trim();
+    if !crate::utils::is_official_host(config, host) {
+        return None;
+    }
+    if host.is_empty() {
+        (!config.juicehost_url.trim().is_empty()).then_some(None)
+    } else {
+        Some(Some(host.to_string()))
+    }
+}
+
+#[must_use]
+fn hot_capacity_available(
+    config: &crate::config::Config,
+    hot_count: u64,
+    hot_bytes: u64,
+    incoming_bytes: u64,
+) -> bool {
+    hot_count < config.r2_max_hot_files
+        && hot_bytes.saturating_add(incoming_bytes) <= config.r2_max_bytes
 }
 
 async fn cool_sweep_once(state: &Arc<AppState>) {
@@ -195,8 +220,6 @@ async fn cool_sweep_once(state: &Arc<AppState>) {
                     return;
                 }
             };
-            // The sweep result can be stale. Do not pull a file back after an
-            // admin pinned it or after it left the hot tier.
             if record.status != "ready" || record.tier != "hot" || record.tier_pinned {
                 return;
             }
@@ -270,7 +293,6 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
         }
     };
 
-    let official = state.official_hosts();
     let mut reserved_bytes: u64 = hot_bytes.max(0) as u64;
     let mut reserved_count: u64 = hot_count.max(0) as u64;
     let mut state_rows: Vec<(String, i64, i64, i64)> = Vec::new();
@@ -306,18 +328,17 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
         {
             continue;
         }
-        let host = candidate.storage_host.trim();
-        let promote_host: Option<String> = if host.is_empty() {
-            None
-        } else if official.contains(host) {
-            Some(host.to_string())
-        } else {
+        let Some(promote_host) =
+            promotion_target(&state.config, Some(candidate.storage_host.as_str()))
+        else {
             continue;
         };
-        if reserved_count >= state.config.r2_max_hot_files
-            || reserved_bytes.saturating_add(candidate.size_bytes as u64)
-                > state.config.r2_max_bytes
-        {
+        if !hot_capacity_available(
+            &state.config,
+            reserved_count,
+            reserved_bytes,
+            candidate.size_bytes.max(0) as u64,
+        ) {
             tracing::info!(
                 "promo: R2 cap reached ({} files, {} bytes), skipping {}",
                 reserved_count,
@@ -365,24 +386,49 @@ async fn promo_sweep_once(state: &Arc<AppState>) {
     }
 }
 
+enum PromoteFailure {
+    Storage(String),
+    Tier(String),
+}
+
+async fn promote_and_mark(
+    state: &Arc<AppState>,
+    id: &str,
+    host: Option<&str>,
+    pinned: bool,
+    capability: Option<&str>,
+) -> Result<String, PromoteFailure> {
+    let key = crate::storage_client::promote_file_on_juicehost(state, id, host, capability)
+        .await
+        .map_err(PromoteFailure::Storage)?;
+    let id_owned = id.to_string();
+    let key_owned = key.clone();
+    let marked = if pinned {
+        state
+            .db_call("promote_mark_hot_pinned", move |db| {
+                db::set_file_tier_manual(db, &id_owned, db::FileRecord::TIER_HOT, &key_owned)
+            })
+            .await
+    } else {
+        state
+            .db_call("promote_mark_hot", move |db| {
+                db::set_file_tier(db, &id_owned, db::FileRecord::TIER_HOT, &key_owned)
+            })
+            .await
+    };
+    marked.map_err(|e| PromoteFailure::Tier(format!("{e:?}")))?;
+    Ok(key)
+}
+
 async fn promote_one(state: &Arc<AppState>, id: &str, host: Option<&str>) {
-    match crate::storage_client::promote_file_on_juicehost(state, id, host, None).await {
-        Ok(key) => {
-            let id_owned = id.to_string();
-            let key_owned = key.clone();
-            match state
-                .db_call("promote_mark_hot", move |db| {
-                    db::set_file_tier(db, &id_owned, "hot", &key_owned)
-                })
-                .await
-            {
-                Ok(_) => tracing::info!("promo: id={id} promoted to R2 ({key})"),
-                Err(e) => {
-                    tracing::error!("promo: id={id} promoted but tier update failed: {:?}", e)
-                }
-            }
+    match promote_and_mark(state, id, host, false, None).await {
+        Ok(key) => tracing::info!("promo: id={id} promoted to R2 ({key})"),
+        Err(PromoteFailure::Storage(e)) => {
+            tracing::warn!("promo: id={id} promote failed: {e}");
         }
-        Err(e) => tracing::warn!("promo: id={id} promote failed: {e}"),
+        Err(PromoteFailure::Tier(e)) => {
+            tracing::error!("promo: id={id} promoted but tier update failed: {e}");
+        }
     }
 }
 
@@ -393,34 +439,26 @@ pub(crate) async fn force_promote(state: &Arc<AppState>, id: &str) -> Result<Str
         .await
         .map_err(|e| format!("database error: {e:?}"))?
         .ok_or_else(|| "file not found".to_string())?;
-    let official = state.official_hosts();
     let host = record.storage_host.as_deref().unwrap_or("").trim();
-    let promote_host: Option<String> = if host.is_empty() {
-        None
-    } else if official.contains(host) {
-        Some(host.to_string())
-    } else {
-        return Err("file lives on an unofficial host".to_string());
+    let Some(promote_host) = promotion_target(&state.config, Some(host)) else {
+        return Err(if host.is_empty() {
+            "no storage host configured".to_string()
+        } else {
+            "file lives on an unofficial host".to_string()
+        });
     };
-    if promote_host.is_none() && state.config.juicehost_url.trim().is_empty() {
-        return Err("no storage host configured".to_string());
-    }
-    let key = crate::storage_client::promote_file_on_juicehost(
+    promote_and_mark(
         state,
         id,
         promote_host.as_deref(),
+        true,
         Some(&record.delete_token),
     )
-    .await?;
-    let id_owned = id.to_string();
-    let key_owned = key.clone();
-    state
-        .db_call("promote_mark_hot_pinned", move |db| {
-            db::set_file_tier_manual(db, &id_owned, "hot", &key_owned)
-        })
-        .await
-        .map_err(|e| format!("tier update failed: {e:?}"))?;
-    Ok(key)
+    .await
+    .map_err(|failure| match failure {
+        PromoteFailure::Storage(e) => e,
+        PromoteFailure::Tier(e) => format!("tier update failed: {e}"),
+    })
 }
 
 pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), String> {
@@ -435,13 +473,8 @@ pub(crate) async fn force_cool(state: &Arc<AppState>, id: &str) -> Result<(), St
         .as_deref()
         .map(str::trim)
         .filter(|h| !h.is_empty());
-    crate::storage_client::demote_file_on_juicehost(
-        state,
-        id,
-        host,
-        Some(&record.delete_token),
-    )
-    .await?;
+    crate::storage_client::demote_file_on_juicehost(state, id, host, Some(&record.delete_token))
+        .await?;
     let id_owned = id.to_string();
     state
         .db_call("demote_mark_standard_unpinned", move |db| {

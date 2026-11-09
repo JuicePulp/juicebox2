@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::State,
-    response::Json,
-};
+use axum::{extract::State, response::Json};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -76,7 +73,9 @@ pub async fn push_unban(
         ensure_pepper(&state, payload.pepper.trim());
     }
     let removed = state.ban_list.remove_hash(hash);
-    Ok(Json(serde_json::json!({"status": "ok", "removed": removed})))
+    Ok(Json(
+        serde_json::json!({"status": "ok", "removed": removed}),
+    ))
 }
 
 #[utoipa::path(
@@ -99,6 +98,11 @@ pub async fn push_snapshot(
         return Err(JuicehostError::BadRequest);
     }
     state.ban_list.set_snapshot(pepper, payload.hashes);
-    tracing::info!("applied pushed ban snapshot ({} bans)", state.ban_list.len());
-    Ok(Json(serde_json::json!({"status": "ok", "count": state.ban_list.len()})))
+    tracing::info!(
+        "applied pushed ban snapshot ({} bans)",
+        state.ban_list.len()
+    );
+    Ok(Json(
+        serde_json::json!({"status": "ok", "count": state.ban_list.len()}),
+    ))
 }

@@ -1,5 +1,3 @@
-
-
 use std::sync::Arc;
 
 use axum::{
@@ -106,10 +104,6 @@ const TITLE_FONT_DATA_URI: &str = include_str!("../templates/title_b64.txt");
 const BOT_UA_TOKENS: &[&str] = &[
     "curl",
     "wget",
-    // ComputerCraft's http API (CC: Tweaked, CraftOS-PC, and the original
-    // ComputerCraft) only sends a User-Agent, never an Accept header, so the
-    // Accept-based fallback below can't spot it. Match the UA directly or
-    // /v/ preview links get served as HTML instead of redirecting to raw.
     "computercraft",
     "cc-tweaked",
     "craftos",
@@ -209,9 +203,6 @@ const BOT_UA_TOKENS: &[&str] = &[
     "archiver",
 ];
 
-/// Tokens that identify a real browser when we have no `Accept` header to go
-/// on. Bot tokens are checked first, so crawlers that also claim to be Mozilla
-/// are still classified as bots.
 const BROWSER_UA_TOKENS: &[&str] = &[
     "mozilla",
     "applewebkit",
@@ -283,9 +274,6 @@ pub(crate) fn is_bot(headers: &HeaderMap) -> bool {
         .map(str::trim)
     {
         Some(accept) if !accept.is_empty() => !accept.contains("text/html"),
-        // Clients like ComputerCraft's http API send a User-Agent but no
-        // Accept header at all. Treat missing or empty Accept as non-browser
-        // unless the UA looks like an actual browser.
         _ => !looks_like_browser(&ua),
     }
 }
@@ -310,19 +298,14 @@ struct PreviewPage {
     file_id: String,
     mime: String,
     extension: String,
-    
-    
+
     zip_html: Option<String>,
-    
-    
+
     text_head: Option<(String, u64, String)>,
 
     uploading: Option<UploadInfo>,
 }
 
-/// Path segment used by `/f/`, `/d/`, and `/v/`. These routes resolve the
-/// leading ID, so the segment must start with the file ID rather than the
-/// original upload name.
 fn canonical_url_name(id: &str, extension: &str) -> String {
     if extension.is_empty() {
         id.to_string()
@@ -332,17 +315,16 @@ fn canonical_url_name(id: &str, extension: &str) -> String {
 }
 
 fn resolved_display_name(meta: Option<&BackendFileMeta>, filename: &str) -> String {
-    meta.and_then(BackendFileMeta::display_name)
-        .map_or_else(
-            || {
-                if filename.trim().is_empty() {
-                    "file".to_string()
-                } else {
-                    filename.to_string()
-                }
-            },
-            |name| truncate_chars(name, 120),
-        )
+    meta.and_then(BackendFileMeta::display_name).map_or_else(
+        || {
+            if filename.trim().is_empty() {
+                "file".to_string()
+            } else {
+                filename.to_string()
+            }
+        },
+        |name| truncate_chars(name, 120),
+    )
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -385,14 +367,17 @@ fn component_embed_payload(
     audio_video_url: Option<&str>,
 ) -> serde_json::Value {
     let name = truncate_chars(&page.display_name, 80);
-    let meta = truncate_chars(&format!("{} - {}", kind_label(page.kind), page.size_label), 160);
+    let meta = truncate_chars(
+        &format!("{} - {}", kind_label(page.kind), page.size_label),
+        160,
+    );
     let heading = format!("## [{name}]({abs_page})\n{meta}");
     let mut container: Vec<serde_json::Value> = Vec::new();
     container.push(serde_json::json!({
         "type": 10,
         "content": heading,
     }));
-    
+
     if page.kind == PreviewKind::Text
         && let Some(snippet) = page
             .text_head
@@ -460,12 +445,6 @@ fn component_embed_payload(
     })
 }
 
-/// Serialize a value for an inline `<script type="application/json">` block.
-///
-/// Script content is raw text to the HTML parser, so a file whose previewed
-/// contents include `</script>` would close the element early and dump the
-/// rest of the JSON onto the page. Unicode escapes keep the JSON valid while
-/// making the payload inert for the parser.
 fn json_script_payload(value: &serde_json::Value) -> String {
     serde_json::to_string(value)
         .unwrap_or_default()
@@ -583,7 +562,11 @@ fn text_head_from_bytes(bytes: &[u8]) -> Option<(String, u64, String)> {
     }
     let raw = String::from_utf8_lossy(&bytes[..valid]);
     let snippet: String = raw.chars().take(800).collect();
-    Some((escape_html(&raw), valid as u64, snippet.replace("```", "'''")))
+    Some((
+        escape_html(&raw),
+        valid as u64,
+        snippet.replace("```", "'''"),
+    ))
 }
 
 async fn load_text_head(
@@ -600,9 +583,6 @@ async fn load_text_head(
     text_head_from_bytes(&bytes)
 }
 
-/// Read the start of a text file that lives on another storage node. The
-/// canonical host renders these previews itself so HTML uploads keep working
-/// even when a node runs an older viewer.
 async fn load_remote_text_head(
     state: &AppState,
     location: &super::route::RemoteLocation,
@@ -633,8 +613,7 @@ async fn load_remote_text_head(
         .send()
         .await
         .ok()?;
-    if !response.status().is_success()
-        && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
     {
         return None;
     }
@@ -719,8 +698,7 @@ fn zip_listing_html(
                 .to_ascii_lowercase()
                 .as_str()
             {
-                "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico"
-                | "svg" => "image",
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => "image",
                 _ => "file",
             }
         };
@@ -782,13 +760,10 @@ fn stage_html(page: &PreviewPage) -> String {
             label = author_attr(page, "title"),
         ),
         PreviewKind::Text => {
-            let (content, loaded, _) = page.text_head.clone().unwrap_or_else(|| {
-                (
-                    String::from("Loading preview..."),
-                    0,
-                    String::new(),
-                )
-            });
+            let (content, loaded, _) = page
+                .text_head
+                .clone()
+                .unwrap_or_else(|| (String::from("Loading preview..."), 0, String::new()));
             let uploading_attr = if page.uploading.is_some() {
                 " data-uploading=\"1\""
             } else {
@@ -857,9 +832,6 @@ fn render_preview(
         .replace("__PREVIEW_CSS__", juiceutils::web::PREVIEW_CSS.trim_end())
         .replace(
             "__APP_JS__",
-            
-            
-            
             if page.kind == PreviewKind::Text {
                 PREVIEW_APP_JS.trim_end()
             } else if page.kind == PreviewKind::Zip {
@@ -917,10 +889,6 @@ pub async fn preview_file_wildcard(
     preview_file_inner(state, headers, method, &id, &ext, &path, viewer.0).await
 }
 
-/// Render a text/HTML preview for a file that lives on another node.
-///
-/// Returns `None` when the file is not ready, is not text, or when the caller
-/// should keep the existing redirect (non-Discord bots).
 async fn remote_text_preview(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -1020,7 +988,6 @@ async fn preview_file_inner(
     let meta = match state.storage.stat(id).await {
         Ok(meta) => meta,
         Err(crate::error::StorageError::Frozen) => {
-            
             let (status, html) = frozen_html();
             return Response::builder()
                 .status(status)
@@ -1030,9 +997,6 @@ async fn preview_file_inner(
                 .map_err(|_| JuicehostError::Internal);
         }
         Err(crate::error::StorageError::NotFound) => {
-            // Another storage node may hold the bytes (or R2 for hot files).
-            // Text previews are rendered here so the canonical host controls
-            // the viewer, even when the node runs an older juicehost.
             if let Some(location) = super::route::backend_location(&state, id).await {
                 if let Some(response) = remote_text_preview(
                     &state,
@@ -1088,21 +1052,12 @@ async fn preview_file_inner(
             if mime.trim().is_empty() {
                 mime = storage::guess_mime(&extension);
             }
-            // URLs are addressed by the file ID, not the original upload
-            // name. Using the display name here made the live preview's
-            // download/raw links point at a non-existent ID while the upload
-            // was still in progress.
             let canonical = canonical_url_name(id, &extension);
             let raw_url = format!("/f/{canonical}");
             let download_url = format!("/d/{canonical}");
             let page_url = format!("/v/{canonical}");
 
             if is_bot(&headers) && !is_discordbot(&headers) {
-                // Clients that cannot render the HTML preview (curl, wget,
-                // bot fetchers) get the bytes directly instead of a redirect,
-                // so a plain `curl -O /v/<id>` downloads the file without
-                // needing `-L`. The raw handler sets an inline
-                // Content-Disposition carrying the original filename.
                 let mut response = super::serve::serve_file_inner(
                     Arc::clone(&state),
                     headers.clone(),
@@ -1113,9 +1068,6 @@ async fn preview_file_inner(
                     &canonical,
                 )
                 .await?;
-                // The same preview URL serves an HTML page to browsers and
-                // raw bytes to everything else, so it must never be cached at
-                // the edge: one client type would poison it for the other.
                 response.headers_mut().insert(
                     header::CACHE_CONTROL,
                     axum::http::HeaderValue::from_static(NO_STORE),
@@ -1128,9 +1080,6 @@ async fn preview_file_inner(
             }
 
             let detected = preview_kind(&mime);
-            // Binary/media previews cannot be parsed reliably before the
-            // upload finishes. Keep the download CTA and the live progress
-            // meter instead of showing a broken player/image.
             let kind = if detected == PreviewKind::Text {
                 PreviewKind::Text
             } else {
@@ -1178,9 +1127,6 @@ async fn preview_file_inner(
         Err(_) => return Err(JuicehostError::Internal),
     };
 
-    // Trust what was actually stored over the extension in the requested
-    // URL. Old share links can still say `.mp4` for an audio upload, and
-    // building a video preview around MP3 bytes breaks embeds.
     let extension = if meta.extension.is_empty() {
         ext.to_ascii_lowercase()
     } else {
@@ -1190,8 +1136,6 @@ async fn preview_file_inner(
     let raw_url = format!("/f/{filename}");
 
     if is_bot(&headers) && !is_discordbot(&headers) {
-        // See the live-upload branch above: serve the file directly so
-        // `curl -O /v/<id>` works without following a redirect.
         let mut response = super::serve::serve_file_inner(
             Arc::clone(&state),
             headers.clone(),
@@ -1202,8 +1146,6 @@ async fn preview_file_inner(
             &filename,
         )
         .await?;
-        // See the live-upload branch above: the preview URL is shared by
-        // browsers and non-browsers, so it must not be edge-cached.
         response.headers_mut().insert(
             header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static(NO_STORE),
@@ -1245,19 +1187,11 @@ async fn preview_file_inner(
     } else {
         None
     };
-    
-    
+
     let zip_html = if kind == PreviewKind::Zip {
         super::zip_list::load_archive_entries(&state.storage, id, &filename, meta.size)
             .await
-            .map(|listing| {
-                zip_listing_html(
-                    id,
-                    &download_url,
-                    &listing.entries,
-                    listing.locked,
-                )
-            })
+            .map(|listing| zip_listing_html(id, &download_url, &listing.entries, listing.locked))
     } else {
         None
     };
@@ -1293,9 +1227,7 @@ async fn preview_file_inner(
             audio_embed.as_ref(),
         )))
         .map_err(|_| JuicehostError::Internal)?;
-    
-    
-    
+
     if method == Method::GET
         && (!is_bot(&headers) || is_discordbot(&headers))
         && let Some(ip) = viewer_ip.as_deref()
@@ -1324,8 +1256,6 @@ mod tests {
         );
         assert!(is_bot(&headers));
 
-        // A browser navigating the preview page keeps getting HTML, even
-        // though it also sends a non-empty non-bot UA.
         headers.insert(
             header::USER_AGENT,
             "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/130.0"
@@ -1351,7 +1281,6 @@ mod tests {
         headers.insert(header::ACCEPT, "".parse().expect("accept"));
         assert!(is_bot(&headers));
 
-        // A browser UA without an Accept header still gets the preview page.
         headers.insert(
             header::USER_AGENT,
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36"
@@ -1397,7 +1326,10 @@ mod tests {
         assert_eq!(preview_kind("application/javascript"), PreviewKind::Text);
         assert_eq!(preview_kind("application/ld+json"), PreviewKind::Text);
         assert_eq!(preview_kind("application/zip"), PreviewKind::Zip);
-        assert_eq!(preview_kind("application/x-7z-compressed"), PreviewKind::Zip);
+        assert_eq!(
+            preview_kind("application/x-7z-compressed"),
+            PreviewKind::Zip
+        );
         assert_eq!(preview_kind("application/x-tar"), PreviewKind::Zip);
         assert_eq!(preview_kind("application/gzip"), PreviewKind::Zip);
         assert_eq!(
@@ -1561,16 +1493,25 @@ mod tests {
             title: Some("Me at the zoo".into()),
             author: Some("jawed".into()),
         };
-        assert_eq!(resolved_display_name(Some(&meta), "X8yBKzsg.mp4"), "Me at the zoo");
+        assert_eq!(
+            resolved_display_name(Some(&meta), "X8yBKzsg.mp4"),
+            "Me at the zoo"
+        );
 
         let meta = BackendFileMeta {
             filename: Some("My Clip.mp4".into()),
             ..BackendFileMeta::default()
         };
-        assert_eq!(resolved_display_name(Some(&meta), "abc123.mp4"), "My Clip.mp4");
+        assert_eq!(
+            resolved_display_name(Some(&meta), "abc123.mp4"),
+            "My Clip.mp4"
+        );
 
         let meta = BackendFileMeta::default();
-        assert_eq!(resolved_display_name(Some(&meta), "abc123.mp4"), "abc123.mp4");
+        assert_eq!(
+            resolved_display_name(Some(&meta), "abc123.mp4"),
+            "abc123.mp4"
+        );
         assert_eq!(resolved_display_name(None, "abc123.mp4"), "abc123.mp4");
         assert_eq!(resolved_display_name(None, ""), "file");
     }

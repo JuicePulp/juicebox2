@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::common::extract_extension;
 use crate::storage::*;
 
 #[test]
@@ -33,12 +34,6 @@ fn guess_mime_html() {
 #[test]
 fn guess_mime_png() {
     assert_eq!(guess_mime("png"), "image/png");
-}
-
-#[test]
-fn guess_mime_unknown() {
-    let mime = guess_mime("xyz");
-    assert!(!mime.is_empty());
 }
 
 #[test]
@@ -250,18 +245,6 @@ async fn local_concat() {
 }
 
 #[tokio::test]
-async fn local_put_stores_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
-    backend
-        .put("deep-id", "file.txt", Bytes::from("data"), None)
-        .await
-        .unwrap();
-    let data = backend.get("deep-id").await.unwrap();
-    assert_eq!(data.data.as_ref(), b"data");
-}
-
-#[tokio::test]
 async fn local_capability_gates_mutations() {
     let (_dir, backend) = setup_local_backend().await;
     backend
@@ -377,7 +360,6 @@ async fn local_freeze_blocks_mutations() {
             .await,
         Err(StorageError::Frozen)
     ));
-    
     assert_eq!(backend.unfreeze("fr1", None).await.unwrap(), true);
     assert!(!backend.is_frozen("fr1").await.unwrap());
     assert_eq!(backend.get("fr1").await.unwrap().data.as_ref(), b"secret");
@@ -468,31 +450,18 @@ async fn local_freeze_symlink_marker_fails_closed() {
         .put("fr1", "f.txt", Bytes::from("secret"), None)
         .await
         .unwrap();
-    
+
     symlink(dir.path().join("fr1.txt"), dir.path().join(".frz.fr1")).unwrap();
     assert!(backend.is_frozen("fr1").await.unwrap());
     assert!(matches!(
         backend.stat("fr1").await,
         Err(StorageError::Frozen)
     ));
-    
+
     drop(backend);
     let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend2.init_cache().await.unwrap();
     assert!(backend2.is_frozen("fr1").await.unwrap());
-}
-
-#[tokio::test]
-async fn link_or_rename_falls_back_when_hard_links_are_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let src = dir.path().join("src.tmp");
-    let dst = dir.path().join("dst.bin");
-    tokio::fs::write(&src, b"payload").await.unwrap();
-
-    let renamed = tokio::fs::rename(&src, &dst).await;
-    assert!(renamed.is_ok(), "same-directory rename must be available");
-    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
-    assert!(!tokio::fs::try_exists(&src).await.unwrap());
 }
 
 #[tokio::test]

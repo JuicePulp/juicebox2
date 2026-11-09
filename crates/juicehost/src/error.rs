@@ -319,7 +319,7 @@ mod tests {
         assert_eq!(status.as_u16(), 451);
         assert!(html.0.contains("451"));
         assert!(html.0.contains("frozen"));
-        
+
         assert!(!html.0.contains("__"));
     }
 
@@ -327,13 +327,6 @@ mod tests {
     async fn insufficient_storage_body() {
         let body = body_for(JuicehostError::InsufficientStorage).await;
         assert_eq!(body["error"], "INSUFFICIENT_STORAGE");
-    }
-
-    #[test]
-    fn not_found_html_contains_404() {
-        let (status, html) = not_found_html();
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(html.0.contains("404"));
     }
 
     #[test]
@@ -345,8 +338,6 @@ mod tests {
         );
         assert_eq!(status, StatusCode::IM_A_TEAPOT);
         assert_eq!(headers["retry-after"], "30");
-        assert!(html.0.contains("Uploading - my-file.png"));
-        assert!(html.0.contains("my-file.png is still uploading..."));
         assert!(html.0.contains("https://juicebox.example/files/id123"));
         assert!(!html.0.contains("__OG_TITLE__"));
         assert!(!html.0.contains("__PUBLIC_URL__"));

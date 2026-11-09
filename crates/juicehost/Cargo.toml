@@ -22,7 +22,7 @@ flate2.workspace = true
 futures.workspace = true
 hex.workspace = true
 infer.workspace = true
-jsonwebtoken.workspace = true
+juiceproto = { path = "../juiceproto" }
 juiceutils = { path = "../juiceutils" }
 libc.workspace = true
 mimalloc = { workspace = true, optional = true }
@@ -47,6 +47,7 @@ utoipa.workspace = true
 sevenz-rust = { version = "0.6.1", features = ["aes256"] }
 
 [dev-dependencies]
+jsonwebtoken.workspace = true
 tempfile.workspace = true
 tower = { workspace = true, features = ["util"] }
 

@@ -77,7 +77,13 @@ async fn create(app: &axum::Router, total: u64) -> String {
         .expect("location")
 }
 
-async fn patch(app: &axum::Router, uri: &str, offset: u64, body: Vec<u8>, declared: u64) -> (StatusCode, Value) {
+async fn patch(
+    app: &axum::Router,
+    uri: &str,
+    offset: u64,
+    body: Vec<u8>,
+    declared: u64,
+) -> (StatusCode, Value) {
     let resp = app
         .clone()
         .oneshot(
@@ -97,7 +103,10 @@ async fn patch(app: &axum::Router, uri: &str, offset: u64, body: Vec<u8>, declar
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
         .unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 async fn offset(app: &axum::Router, uri: &str) -> Option<u64> {
@@ -161,7 +170,6 @@ async fn streaming_patch_without_content_length_is_capped_by_total() {
 
     let uri = create(&app, PAYLOAD.len() as u64).await;
 
-    // No content-length header at all: the stream is bounded by Upload-Length.
     let resp = app
         .clone()
         .oneshot(
@@ -192,12 +200,10 @@ async fn short_body_keeps_session_at_accepted_offset() {
     let uri = create(&app, total).await;
     let cut = 12;
 
-    // Declares the whole file but delivers only the first 12 bytes.
     let (status, _) = patch(&app, &uri, 0, PAYLOAD[..cut].to_vec(), total).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(offset(&app, &uri).await, Some(cut as u64));
 
-    // Resume exactly where the push left off.
     let (status, json) = patch(
         &app,
         &uri,
@@ -251,9 +257,6 @@ async fn empty_finalize_patch_completes_after_bytes_were_accepted() {
     let (status, _) = patch(&app, &uri, 0, PAYLOAD.to_vec(), total).await;
     assert_eq!(status, StatusCode::OK);
 
-    // A lost 200 makes the client retry with a zero-length finalize PATCH.
-    // The session is gone by then, which is the signal to confirm via the
-    // file record instead of re-uploading.
     let (status, _) = patch(&app, &uri, total, Vec::new(), 0).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

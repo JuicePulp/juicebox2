@@ -22,14 +22,17 @@ files_dir = "./files"
 
 [security]
 # File-type blocking strictness, least to most: none, low, medium, high.
-danger_level = "medium"
+danger_level = "high"
 # allowed_origins = ["http://localhost:6400"]
 # Trusted proxy CIDRs for client-IP extraction. Unset = none.
 # trusted_proxy_cidrs = "127.0.0.1/32"
 
 # this is dangerous, refrain from using this UNLESS you want an all public instance
+# Env override: JUICEHOST_ALLOW_NO_AUTH
 allow_no_auth = false
-# u gotta set the JUICEHOST_API_KEY
+# Internal API key. Env-only, no TOML key: JUICEHOST_API_KEY
+# Upload-ticket signing key. Env-only: TICKET_JWT_SECRET, then JWT_SECRET,
+# then JUICEHOST_API_KEY. Both services must resolve the same value.
 
 [s3]
 # bucket = "juicebox-files"
@@ -67,7 +70,7 @@ custom_id = true
 # Cache /f/* + /d/* at the edge, bypass /v/* + /api/* + /file/*.
 # Default off: responses are `no-store`.
 file_cache_enabled = false
-file_cache_max_age_secs = 86400
+file_cache_max_age_secs = 3600
 default_ttl_hours = 24.0
 allowed_ttl_hours = [0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0]
 

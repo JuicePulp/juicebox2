@@ -4,19 +4,19 @@ export const apiHealth = "/api/health";
 export const apiPresence = "/api/presence";
 
 export function publicFile(id) {
-  return `/file/${id}`;
+  return `/file/${enc(id)}`;
 }
 
 export function publicFileInfo(id) {
-  return `/file/${id}/info`;
+  return `/file/${enc(id)}/info`;
+}
+
+export function publicFileRename(id) {
+  return `/file/${enc(id)}/rename`;
 }
 
 export function publicFileRenew(id) {
-  return `/file/${id}/renew`;
-}
-
-export function apiOwnedFiles() {
-  return "/api/owned-files";
+  return `/file/${enc(id)}/renew`;
 }
 
 export const apiFetch = "/api/fetch";

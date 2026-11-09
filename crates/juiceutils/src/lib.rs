@@ -12,7 +12,13 @@ pub mod web;
 pub fn is_noisy_http_path(path: &str) -> bool {
     matches!(
         path,
-        "/api/health" | "/api/config" | "/api/presence" | "/api/ip" | "/api/device/status" | "/robots.txt" | "/agents.txt"
+        "/api/health"
+            | "/api/config"
+            | "/api/presence"
+            | "/api/ip"
+            | "/api/device/status"
+            | "/robots.txt"
+            | "/agents.txt"
     )
 }
 
@@ -28,14 +34,7 @@ pub use server::{
 #[must_use]
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
-    let max_len = a.len().max(b.len());
-    let a_padded = a.bytes().chain(std::iter::repeat(0u8)).take(max_len);
-    let b_padded = b.bytes().chain(std::iter::repeat(0u8)).take(max_len);
-    let mut result = 0u8;
-    for (x, y) in a_padded.zip(b_padded) {
-        result |= x ^ y;
-    }
-    result.ct_eq(&0u8).into()
+    a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
 #[must_use]
@@ -105,9 +104,6 @@ pub async fn add_security_headers(
     );
 
     if is_file_route {
-        
-        
-        
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
@@ -117,10 +113,6 @@ pub async fn add_security_headers(
             );
         }
     } else if is_preview_route {
-        
-        
-        
-        
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
@@ -147,24 +139,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constant_time_eq_equal() {
+    fn constant_time_eq_matches_string_equality() {
         assert!(constant_time_eq("hello", "hello"));
-    }
-
-    #[test]
-    fn constant_time_eq_unequal() {
+        assert!(constant_time_eq("", ""));
         assert!(!constant_time_eq("hello", "world"));
-    }
-
-    #[test]
-    fn constant_time_eq_different_lengths() {
         assert!(!constant_time_eq("a", "ab"));
         assert!(!constant_time_eq("ab", "a"));
-    }
-
-    #[test]
-    fn constant_time_eq_empty() {
-        assert!(constant_time_eq("", ""));
+        assert!(!constant_time_eq("abc\0", "abc"));
+        assert!(!constant_time_eq("abc", "abc\0"));
+        assert!(!constant_time_eq("abc\0", "abc\0\0"));
     }
 
     #[test]

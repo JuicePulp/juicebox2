@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     body::Body,
@@ -24,11 +27,7 @@ use crate::{
 
 const FILE_CACHE_CONTROL: &str = "no-store";
 
-fn download_filename(
-    id: &str,
-    extension: &str,
-    backend_meta: Option<&BackendFileMeta>,
-) -> String {
+fn download_filename(id: &str, extension: &str, backend_meta: Option<&BackendFileMeta>) -> String {
     if let Some(name) = backend_meta
         .and_then(|meta| meta.filename.as_deref())
         .map(str::trim)
@@ -96,9 +95,6 @@ fn content_disposition_value(disposition: &str, name: &str) -> String {
     )
 }
 
-/// Raw (`/f/`) responses keep the original filename without forcing a
-/// download, so `curl -OJ` and browsers save the file with its real name and
-/// extension instead of the bare file ID.
 fn disposition_for(force_download: bool) -> &'static str {
     if force_download {
         "attachment"
@@ -117,11 +113,7 @@ pub(crate) fn file_cache_control_value(
     }
     match ttl_remaining_secs {
         Some(secs) if secs > 5 => {
-            // The status response is cached for a few seconds, so leave a
-            // safety margin to avoid an edge cache outliving the file.
-            let age = secs
-                .saturating_sub(5)
-                .min(state.file_cache_max_age_secs);
+            let age = secs.saturating_sub(5).min(state.file_cache_max_age_secs);
             format!("public, max-age={age}, s-maxage={age}, immutable")
         }
         _ => FILE_CACHE_CONTROL.to_string(),
@@ -141,6 +133,7 @@ struct LiveReadState {
     end: u64,
     idle: Instant,
     wait: bool,
+    #[expect(dead_code, reason = "held for the lifetime of the live read")]
     permit: tokio::sync::OwnedSemaphorePermit,
 }
 
@@ -154,9 +147,6 @@ async fn read_live_at(
         return Ok(None);
     }
 
-    // Once the real object exists, it is always the best source. This also
-    // handles the short transition between "last part uploaded" and "concat
-    // finished" without exposing deleted part files.
     if let Ok(meta) = state.storage.stat(id).await
         && offset < meta.size
     {
@@ -357,17 +347,19 @@ async fn serve_live_upload(
             RangeResult::Satisfiable(start, end) => {
                 let end = end.min(snapshot.available.saturating_sub(1));
                 if snapshot.available == 0 || end < start {
-                    return Ok(Some(with_headers(
-                        Response::builder()
-                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                            .header(
-                                header::CONTENT_RANGE,
-                                format!("bytes */{}", snapshot.total_size),
-                            )
-                            .header(header::ACCEPT_RANGES, "bytes"),
-                    )
-                    .body(Body::empty())
-                    .map_err(|_| JuicehostError::Internal)?));
+                    return Ok(Some(
+                        with_headers(
+                            Response::builder()
+                                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                                .header(
+                                    header::CONTENT_RANGE,
+                                    format!("bytes */{}", snapshot.total_size),
+                                )
+                                .header(header::ACCEPT_RANGES, "bytes"),
+                        )
+                        .body(Body::empty())
+                        .map_err(|_| JuicehostError::Internal)?,
+                    ));
                 }
                 let content_len = end - start + 1;
                 let body = if is_head {
@@ -376,14 +368,7 @@ async fn serve_live_upload(
                     let permit = Arc::clone(&state.download_semaphore)
                         .try_acquire_owned()
                         .map_err(|_| JuicehostError::ServiceUnavailable)?;
-                    live_body_stream(
-                        Arc::clone(state),
-                        id.to_string(),
-                        start,
-                        end,
-                        false,
-                        permit,
-                    )
+                    live_body_stream(Arc::clone(state), id.to_string(), start, end, false, permit)
                 };
                 count_hit(viewer_ip);
                 return Ok(Some(
@@ -394,10 +379,7 @@ async fn serve_live_upload(
                             .header(header::CONTENT_LENGTH, content_len)
                             .header(
                                 header::CONTENT_RANGE,
-                                format!(
-                                    "bytes {start}-{end}/{}",
-                                    snapshot.total_size
-                                ),
+                                format!("bytes {start}-{end}/{}", snapshot.total_size),
                             )
                             .header(header::ACCEPT_RANGES, "bytes"),
                     )
@@ -635,21 +617,13 @@ pub(crate) async fn serve_file_inner(
             return Ok(prevent_file_caching(frozen_html().into_response()));
         }
         Err(StorageError::NotFound) => {
-            if let Some(response) = serve_live_upload(
-                &state,
-                &headers,
-                &method,
-                &id,
-                force_download,
-                &viewer_ip,
-            )
-            .await?
+            if let Some(response) =
+                serve_live_upload(&state, &headers, &method, &id, force_download, &viewer_ip)
+                    .await?
             {
                 return Ok(response);
             }
 
-            // The file may live on another storage node (or R2). Redirect to
-            // the node that actually has the bytes instead of 404ing here.
             if let Some(response) = super::route::remote_redirect(
                 &state,
                 &headers,
@@ -710,8 +684,6 @@ pub(crate) async fn serve_file_inner(
         Err(other) => return Err(JuicehostError::from(other)),
     };
 
-    
-    
     let mode = if force_download {
         ShellMode::Download
     } else {
@@ -763,14 +735,11 @@ pub(crate) async fn serve_file_inner(
         builder
     };
 
-    
-    
-    
     let count_hit = |viewer_ip: &Option<String>| {
         if method != Method::GET {
             return;
         }
-        
+
         if is_bot(&headers) {
             return;
         }

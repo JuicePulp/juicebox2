@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, GeoSettings};
 
-/// The canonical public host. It serves downloads and previews, but never
-/// receives new uploads.
 const HOME_REGION: &str = "home";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -17,9 +15,7 @@ const HOME_REGION: &str = "home";
 pub enum HealthState {
     Unknown,
     Healthy,
-    /// Reached the node, but it rejected the shared key.
     AuthError,
-    /// Reached the node, but `/internal` is not exposed.
     RouteMissing,
     Unreachable,
 }
@@ -34,8 +30,6 @@ impl HealthState {
             Self::RouteMissing => 4,
         }
     }
-
-
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,7 +120,7 @@ impl Registry {
     }
 
     #[must_use]
-    #[allow(dead_code)] // used by tests and kept for future policy callers
+    #[allow(dead_code)]
     pub fn get(&self, region: &str) -> Option<&Node> {
         self.nodes.iter().find(|node| node.region == region)
     }
@@ -156,12 +150,6 @@ impl Registry {
             })
     }
 
-    /// Pick a node for an upload.
-    ///
-    /// Preference order: an explicitly requested region, then the country
-    /// map, then the Cloudflare colo map, then the configured default. If the
-    /// preferred region has no usable node, fall back to any usable storage
-    /// node. The canonical home host is never returned for uploads.
     #[must_use]
     pub fn select(
         &self,
@@ -221,8 +209,6 @@ pub struct Selection {
     pub health: NodeHealth,
 }
 
-/// Routing information for one file, as returned by juiceback's
-/// `/internal/resolve/{id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolveRecord {
     #[serde(default)]
@@ -265,7 +251,6 @@ pub struct RouteDecision {
     pub id: String,
     pub kind: RouteKind,
     pub status: String,
-    /// Absolute URL including the `/v|f|d` path, or the R2 object URL.
     pub target: Option<String>,
     pub storage_host: Option<String>,
     pub r2_url: Option<String>,
@@ -276,7 +261,6 @@ pub struct AppState {
     pub config: Config,
     pub registry: Registry,
     pub client: reqwest::Client,
-    /// No global timeout: used for streaming local files in proxy mode.
     pub stream_client: reqwest::Client,
     pub cache: DashMap<String, (Instant, ResolveRecord)>,
     pub api_key: String,
@@ -312,9 +296,6 @@ impl AppState {
         })
     }
 
-    /// Probe a node's writability/auth by calling the same `/internal` route
-    /// juiceback uses before a push. Requires no writes: a missing file still
-    /// returns 200 with `{"exists":false}` when the key is accepted.
     pub async fn probe_node(&self, node: &Node) {
         let url = format!("{}/internal/file/00000000/stat", node.url);
         let started = Instant::now();
@@ -352,7 +333,6 @@ impl AppState {
         node.set_health(health);
     }
 
-    /// Resolve a file ID through the central juiceback, with a short cache.
     pub async fn resolve(&self, id: &str) -> Result<Option<ResolveRecord>, ResolveError> {
         if let Some(entry) = self.cache.get(id) {
             let ttl = if entry.1.status == "uploading" {
@@ -400,8 +380,6 @@ impl AppState {
         Ok(Some(record))
     }
 
-    /// Build the routing decision for a request path. `kind == Uploading`
-    /// means the caller should not redirect yet.
     #[must_use]
     pub fn decision(
         &self,

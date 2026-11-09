@@ -1,14 +1,14 @@
 {{ flags_html|safe }}
 <main id="main-content">
-<div id="report-card" class="upload-card report-card" style="view-transition-name: main-card;" data-report-card="" data-component="report-card" aria-labelledby="report-card-header">
-<header id="report-card-header" class="upload-header upload-header--centered">
+<div id="{{ card_id }}" class="upload-card report-card" style="view-transition-name: main-card;" data-report-card="" data-component="{{ card_id }}" aria-labelledby="{{ card_id }}-header">
+<header id="{{ card_id }}-header" class="upload-header upload-header--centered">
 <h1 class="upload-header__title"><img src="/static/assets/logo_big.webp?v=2" alt="Juicebox" class="upload-header__logo" width="64" height="64" loading="eager" fetchpriority="high">{{ title }}</h1>
 <p class="upload-header__subtitle">{{ subtitle }}</p>
 </header>
 <section class="rpfcontainer" data-report-form="">
 <div class="rpfcontent">
-{% if submitted %}<div class="report-success-banner" role="alert"><p><strong>{{ shell.cx.t("report.success") }}</strong></p></div>{% endif %}
-<form class="report-form" method="POST" action="/api/report">
+{% if submitted %}<div class="report-success-banner" role="alert"><p><strong>{{ shell.cx.t(success_key) }}</strong></p></div>{% endif %}
+{% if report %}<form class="report-form" method="POST" action="/api/report">
 <div class="form-field">
 <label class="form-label" for="report-card-url">{{ shell.cx.t("report.url_label") }}<span class="required">*</span></label>
 <input id="report-card-url" data-cuelume-type class="form-input" type="url" name="file_url" required placeholder="https://example.com/v/abc123">
@@ -45,17 +45,32 @@
 <button type="submit" data-cuelume-tap class="report-btn report-btn--primary">{{ shell.cx.t("report.submit") }}</button>
 </div>
 </form>
-<div class="rpffooter"><p class="report-footer-text">{{ shell.cx.t("report.warning") }}</p></div>
+<div class="rpffooter"><p class="report-footer-text">{{ shell.cx.t("report.warning") }}</p></div>{% endif %}
+{%- if !report %}<form class="report-form" method="POST" action="/api/feedback">
+<div class="form-field">
+<label class="form-label" for="feedback-card-message">{{ shell.cx.t("feedback.label") }}<span class="required">*</span></label>
+<textarea id="feedback-card-message" data-cuelume-type class="form-textarea" name="message" rows="5" maxlength="1000" required placeholder="{{ shell.cx.t("feedback.placeholder") }}"></textarea>
+<p class="form-help-text">{{ shell.cx.t("feedback.max") }}</p>
+</div>
+<div class="form-field">
+<label class="form-label" for="feedback-card-email">{{ shell.cx.t("feedback.email") }}</label>
+<input id="feedback-card-email" data-cuelume-type class="form-input" type="email" name="email">
+<p class="form-help-text">{{ shell.cx.t("feedback.email_hint") }}</p>
+</div>
+<div class="rpfactions">
+<button type="submit" data-cuelume-tap class="report-btn report-btn--primary">{{ shell.cx.t("feedback.submit") }}</button>
+</div>
+</form>{% endif %}
 </div>
 </section>
 <span id="actions-area" tabindex="-1" style="position:absolute"></span>
-<nav id="report-card-actions" class="act" aria-label="{{ shell.cx.t("actions.report_actions") }}" data-act="">
+<nav id="{{ card_id }}-actions" class="act" aria-label="{{ shell.cx.t(actions_key) }}" data-act="">
 {% for a in actions %}{% if a.id == "more" %}<details class="select-details" data-cuelume-emphasis="subtle" data-select-details="">
-<summary class="action-btn" data-cuelume-open aria-haspopup="menu" aria-label="{{ a.aria }}" aria-describedby="report-card-actions-more-desc" title="{{ a.aria }}"><span class="action-btn__icon">{{ shell.cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></summary>
-<span id="report-card-actions-more-desc" class="sr-only">{{ shell.cx.t("sr.more_menu_sr") }}</span>
+<summary class="action-btn" data-cuelume-open aria-haspopup="menu" aria-label="{{ a.aria }}" aria-describedby="{{ card_id }}-actions-more-desc" title="{{ a.aria }}"><span class="action-btn__icon">{{ shell.cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></summary>
+<span id="{{ card_id }}-actions-more-desc" class="sr-only">{{ shell.cx.t("sr.more_menu_sr") }}</span>
 <summary class="select-backdrop" data-select-backdrop=""></summary>
 <summary class="select-close-btn nojs-only">{{ shell.cx.t("sr.close_btn") }}</summary>
-<div class="select-menu select-menu--details" role="menu" aria-label="{{ shell.cx.t("sr.more_options") }}" aria-describedby="report-card-actions-more-desc">
+<div class="select-menu select-menu--details" role="menu" aria-label="{{ shell.cx.t("sr.more_options") }}" aria-describedby="{{ card_id }}-actions-more-desc">
 <div class="select-options-list">
 {% for entry in shell.cx.menu() %}{% if let Some(item) = entry.item %}<a class="select-option{% if item.js_only %} js-only{% endif %}" data-cuelume-navigate role="menuitem" href="{{ item.href }}"><span class="select-option__icon">{{ shell.cx.icon(item.icon.as_str(), 24)|safe }}</span><span class="select-option__label">{{ item.label }}</span></a>{% else %}<div class="select-option--divider"></div>{% endif %}{% endfor %}
 </div>
@@ -63,7 +78,7 @@
 </details>{% else %}<a class="action-btn" data-cuelume-navigate href="{{ a.href }}" aria-label="{{ a.aria }}" title="{{ a.aria }}" data-action-id="{{ a.id }}"><span class="action-btn__icon">{{ shell.cx.icon(a.icon.as_str(), 24)|safe }}</span><span>{{ a.label }}</span></a>{% endif %}
 {% endfor %}</nav>
 <footer class="footr footr--divd" data-footr="">
-<div class="footr__primary">{% if footer_message != "" %}<p class="footr__message">{{ footer_message }}</p>{% endif %}<a class="footr__commit footr__link" href="{{ footer_repo }}" target="_blank" rel="noopener noreferrer">{{ footer_commit }}</a></div>
+<div class="footr__primary"><a class="footr__commit footr__link" href="{{ footer_repo }}" target="_blank" rel="noopener noreferrer">{{ footer_commit }}</a></div>
 </footer>
 </div>
 </main>

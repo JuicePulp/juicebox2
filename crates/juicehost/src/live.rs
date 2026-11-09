@@ -119,8 +119,6 @@ impl LiveUploads {
         Self::default()
     }
 
-    /// Register a single-stream upload whose bytes are written to the target
-    /// ID directly. Returns the ID used by `track`.
     pub fn ensure_single(&self, id: &str, filename: &str, mime: &str, total_size: u64) {
         if self.parts.contains_key(id) {
             return;
@@ -129,8 +127,6 @@ impl LiveUploads {
             Some(entry) => {
                 let upload = entry.value();
                 if upload.total_size == 0 && total_size > 0 {
-                    // `total_size` is immutable, so replace the entry when the
-                    // real size becomes known. The state is preserved.
                     let state = upload.state.lock().unwrap_or_else(|e| e.into_inner());
                     let written = match &*state {
                         LiveState::Single { written, .. } => *written,
@@ -175,8 +171,6 @@ impl LiveUploads {
         }
     }
 
-    /// Register part metadata supplied by juiceback. Parts are addressed by
-    /// the target/reservation ID and may arrive in any order.
     pub fn register_parts(
         &self,
         target_id: &str,
@@ -234,8 +228,6 @@ impl LiveUploads {
         self.parts.contains_key(id)
     }
 
-    /// Return a writer for an upload ID that is either a single target or a
-    /// registered part. Returns `None` for unknown IDs.
     #[must_use]
     pub fn track(&self, id: &str) -> Option<LiveWriter> {
         let known = self.parts.contains_key(id) || self.uploads.contains_key(id);
@@ -336,7 +328,10 @@ impl LiveUploads {
                     if part.offset > cursor || part.written == 0 {
                         break;
                     }
-                    let end = part.offset.saturating_add(part.written).min(upload.total_size);
+                    let end = part
+                        .offset
+                        .saturating_add(part.written)
+                        .min(upload.total_size);
                     if end > cursor {
                         cursor = end;
                     }
@@ -346,11 +341,7 @@ impl LiveUploads {
                 }
                 let complete = !map.is_empty()
                     && map.values().all(|p| p.ready)
-                    && map
-                        .values()
-                        .map(|p| p.length)
-                        .sum::<u64>()
-                        >= upload.total_size;
+                    && map.values().map(|p| p.length).sum::<u64>() >= upload.total_size;
                 (uploaded, cursor, complete)
             }
         };
@@ -377,9 +368,6 @@ impl LiveUploads {
         })
     }
 
-    /// Return the progress of one registered part. Unlike `snapshot`, this is
-    /// keyed by the part id, so a client can ask whether juicehost has the
-    /// bytes for the exact TUS resource it is about to resume.
     #[must_use]
     pub fn part_snapshot(&self, id: &str) -> Option<LivePartSnapshot> {
         let target_id = self.parts.get(id)?.value().clone();
@@ -408,9 +396,6 @@ impl LiveUploads {
         })
     }
 
-    /// Locate the part/single stream containing `offset`, and report how far
-    /// that source is currently readable. The caller maps the returned source
-    /// to either a final storage object or the live temp file.
     pub fn source_at(&self, id: &str, offset: u64) -> Option<LiveSource> {
         let entry = self.uploads.get(id)?;
         let upload = entry.value();

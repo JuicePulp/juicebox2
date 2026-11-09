@@ -3,11 +3,7 @@ use std::{collections::HashMap, net::IpAddr, sync::Mutex, time::Instant};
 use crate::{
     config::Config,
     page_cache::PageCache,
-    ssr::{
-        announce::AnnouncementCache,
-        ban::BanStatus,
-        host::HostCache,
-    },
+    ssr::{announce::AnnouncementCache, ban::BanStatus, host::HostCache},
 };
 
 #[derive(Debug)]

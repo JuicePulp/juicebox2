@@ -1,6 +1,7 @@
 import { announce, esc, formatSize } from "./util.js";
 import { playSound } from "./sounds.js?v=2.2.0";
-import { iconHTML, iconForMime, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.2.0";
+import { iconHTML, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.2.0";
+import { publicFile, publicFileRename, publicFileRenew } from "./api.js";
 import { openQrModal } from "./qr.js?v=2.2.0";
 import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js";
 import { t } from "./i18n.js";
@@ -166,10 +167,6 @@ function trashIconHtml() {
   return iconHTML("trash", 24);
 }
 
-function fileIconHtml(mime) {
-  return iconHTML(iconForMime(mime || ""), 24);
-}
-
 function editIconHtml() {
   return iconHTML("edit", 24);
 }
@@ -211,7 +208,7 @@ function renameModalHtml(f, locale) {
     '<a href="#!" class="mdl-target__backdrop" aria-label="' + esc(t(locale, "modal.close")) + '"></a>' +
     '<div class="mdlcontent"><div class="mdlheader"><h2 id="rename-title-' + esc(f.id) + '" class="mdltitle">' + esc(t(locale, "files.rename")) + '</h2>' +
     '<a href="#!" class="mdlclose" aria-label="' + esc(t(locale, "modal.close")) + '">x</a></div>' +
-    '<form class="rename-form" method="POST" action="/file/' + esc(f.id) + '/rename"><div class="mdlbody">' +
+    '<form class="rename-form" method="POST" action="' + esc(publicFileRename(f.id)) + '"><div class="mdlbody">' +
     '<input type="hidden" name="token" value="' + esc(f.delete_token) + '">' +
     '<div class="form-field"><label class="form-label" for="rename-input-' + esc(f.id) + '">' + esc(t(locale, "files.rename_placeholder")) + '</label>' +
     '<div class="rename-input-group"><span class="rename-input-prefix">/v/</span>' +
@@ -321,7 +318,7 @@ function makeDeleteBtn(card, el, f, locale, existing) {
       btn.innerHTML = '<img src="/static/assets/loading.webp" alt="" class="spinner-icon" width="18" height="18"><span class="confirm-text"></span>';
       btn.classList.add("spinning");
       if (f.delete_token) {
-        const res = await fetch("/file/" + encodeURIComponent(f.id), {
+        const res = await fetch(publicFile(f.id), {
           method: "DELETE",
           headers: { "X-Delete-Token": f.delete_token },
         });
@@ -374,7 +371,7 @@ function wireRenameModal(card, modal, f, locale) {
     errorEl.hidden = true;
     const customId = input.value.trim();
     try {
-      const res = await fetch("/file/" + encodeURIComponent(f.id) + "/renew", {
+      const res = await fetch(publicFileRenew(f.id), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Delete-Token": f.delete_token },
         body: JSON.stringify({ custom_id: customId }),

@@ -1,8 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
-use futures::{StreamExt, stream::FuturesUnordered};
-use tokio::sync::Semaphore;
 
 use crate::{db, error::AppError, state::AppState};
 
@@ -93,93 +91,9 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         let full_page = batch.len() >= crate::constants::CLEANUP_BATCH_SIZE;
         cursor = batch.last().map(|r| r.id.clone()).unwrap_or_default();
         tracing::info!("cleanup: purging batch of {} expired files", batch.len());
-        purge_expired_batch(state, batch).await;
+        crate::routes::manage::lifecycle::delete_files_everywhere(state, batch, "cleanup").await;
         if !full_page {
             break;
-        }
-    }
-
-    async fn purge_expired_batch(state: &Arc<AppState>, expired: Vec<db::FileRecord>) {
-        let sem = Arc::new(Semaphore::new(20));
-        let mut pending = FuturesUnordered::new();
-        for record in expired {
-            let permit = match Arc::clone(&sem).acquire_owned().await {
-                Ok(p) => p,
-                Err(_) => {
-                    tracing::error!("cleanup: semaphore closed, aborting deletion loop");
-                    break;
-                }
-            };
-            let state = Arc::clone(state);
-            let id = record.id.clone();
-            let host = record.storage_host.clone();
-            let capability = record.delete_token.clone();
-            pending.push(tokio::spawn(async move {
-                let _permit = permit;
-                match crate::storage_client::delete_file_on_juicehost(
-                    &state,
-                    &id,
-                    host.as_deref(),
-                    Some(&capability),
-                )
-                .await
-                {
-                    Ok(()) => Some(record),
-                    Err(e) => {
-                        tracing::warn!("cleanup: failed to delete id={id} from juicehost: {e}");
-                        None
-                    }
-                }
-            }));
-        }
-        let mut deleted = Vec::new();
-        while let Some(result) = pending.next().await {
-            match result {
-                Ok(Some(record)) => deleted.push(record),
-                Ok(None) => {}
-                Err(e) => tracing::warn!("cleanup: juicehost delete task failed: {e}"),
-            }
-        }
-
-        let ids_to_purge: Vec<String> = deleted.iter().map(|r| r.id.clone()).collect();
-
-        let cf_urls: Vec<String> = deleted
-            .iter()
-            .flat_map(|r| {
-                crate::cloudflare::cache_variants(
-                    &state.config,
-                    r.storage_host.as_deref(),
-                    &r.id,
-                    &r.filename,
-                    &r.tier,
-                    &r.r2_key,
-                )
-            })
-            .collect();
-        if !cf_urls.is_empty() {
-            crate::cloudflare::purge_urls(Arc::clone(&state.config), cf_urls).await;
-            let tags: Vec<String> = deleted
-                .iter()
-                .map(|r| format!("juicebox:{}", r.id))
-                .collect();
-            crate::cloudflare::purge_tags(Arc::clone(&state.config), tags).await;
-        }
-
-        let state3 = Arc::clone(state);
-        let purge_result = tokio::task::spawn_blocking(move || -> Result<usize, AppError> {
-            let db = state3
-                .db
-                .get()
-                .map_err(|e| AppError::DbPoolError(e.to_string()))?;
-            db::delete_files_by_ids(&db, &ids_to_purge).map_err(AppError::DatabaseError)
-        })
-        .await
-        .map_err(|e| tracing::error!("cleanup: purge task panicked: {e}"));
-
-        match purge_result {
-            Ok(Ok(count)) => tracing::info!("cleanup: purged {count} rows from db"),
-            Ok(Err(e)) => tracing::error!("cleanup: failed to purge db rows: {:?}", e),
-            Err(_) => {}
         }
     }
 
@@ -215,10 +129,6 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
         state.part_sessions.remove(sid);
     }
 
-    // A reservation row is created when the upload starts, but the transfer
-    // itself can easily take longer than the stale timeout on a slow link.
-    // Keep rows that are still owned by a live TUS session; they are reaped
-    // on a later pass once the session is gone (idle timeout or restart).
     let active_reserves: std::collections::HashSet<String> = state
         .tus
         .iter()

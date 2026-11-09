@@ -242,9 +242,6 @@ async function waitForReservedFile(id, signal, timeoutMs = 60000) {
 }
 
 export function startUpload(item, file, controls) {
-  // Resume must keep the transport that created the server session. Protected
-  // uploads normally take the direct relay, but an interrupted protected TUS
-  // session is already encrypted and has a server offset to continue from.
   if (item.method === "direct-stream" && item.tusId)
     return startTusStreamUpload(item, file, controls);
   if (item.method === "tus" && item.tusSessionId)
@@ -483,8 +480,6 @@ function startDirectUpload(item, file, controls) {
         await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
         if (runState.cancelled)
           break;
-        // A lost response can hide a completed upload. If the reserved file
-        // is already live, finish without sending the bytes again.
         if (reserveId) {
           const info = await waitForReservedFile(reserveId, waitCtrl.signal, 12000);
           if (info) {
@@ -685,7 +680,6 @@ function startDirectTicketUpload(item, file, controls) {
           const retryableStatus = uploadStatus.status === 408 || uploadStatus.status >= 500;
           if (!retryableStatus || uploadTry === maxUploadTries - 1)
             break;
-          // The request may have landed even though the response was lost.
           const health = await directPartHealth(uploadUrl, fileId, file.size);
           if (health) {
             uploadStatus = { status: 200, ok: true, body: JSON.stringify(health) };
@@ -701,7 +695,6 @@ function startDirectTicketUpload(item, file, controls) {
             update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
             return;
           }
-          // The request may have landed even though the response was lost.
           const health = await directPartHealth(uploadUrl, fileId, file.size);
           if (health) {
             uploadStatus = { status: 200, ok: true, body: JSON.stringify(health) };
@@ -1191,9 +1184,6 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
             return;
           }
           if (healthStorageReady(health) && Number(health.length) >= partFile.size) {
-            // The bytes are on storage, but the TUS resource still has to be
-            // finalized. Persist the offset only; a health snapshot must not
-            // let a reload skip a part that was never finalized.
             hooks.onPartState?.({
               id: partTusId,
               offset: partFile.size,
@@ -1293,10 +1283,6 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
               return;
             }
             const transient = x.status === 0 || x.status === 408 || x.status >= 500;
-            // A 409 means another PATCH moved the server offset (or this one
-            // landed but the response was lost). Ask the server where it is
-            // before retrying: replaying a chunk blindly both wastes an RTT and
-            // can stall a 20-part upload for minutes.
             if (x.status === 409 && !partSignal.aborted) {
               discoverOffset().then((serverOff) => {
                 if (partSignal.aborted) {
@@ -1480,10 +1466,6 @@ async function uploadTusPart(item, file, sessionId, partIndex, totalParts, signa
   }
   throw lastError;
 }
-// Single-session sequential upload: one TUS resource for the whole file, one
-// PATCH in flight at a time, each body a Blob slice the browser streams from
-// disk. No part split, no concat, and any failed chunk resumes from the offset
-// the server reports instead of restarting the file.
 const STREAM_MAX_FAILURES = 5;
 const STREAM_RETRY_DELAY_MS = 600;
 
@@ -1577,8 +1559,6 @@ function startTusStreamUpload(item, file, controls) {
     const adoptSession = async (withReserve) => {
       let created = await createStreamSession(withReserve);
       if (!created.res?.ok && created.res?.status === 400 && reserveId) {
-        // The old quick-link reservation expired while the page was closed.
-        // Drop it and continue as an ordinary upload rather than failing.
         reserveId = "";
         reserveUrl = "";
         reserveRawUrl = "";
@@ -1704,8 +1684,6 @@ function startTusStreamUpload(item, file, controls) {
         cleanup();
         reject(signal.aborted ? new Error("Upload cancelled") : new Error("aborted"));
       };
-      // slice() keeps only a view: the browser reads the bytes from disk as
-      // the request body is consumed, so chunk size does not cost JS memory.
       x.send(file.slice(start, end));
     });
 
@@ -1756,8 +1734,6 @@ function startTusStreamUpload(item, file, controls) {
       return null;
     };
     const restartSession = async () => {
-      // The final bytes may have landed even though the session disappeared
-      // before the client saw the completion response.
       const info = await readyFile();
       if (info) {
         complete({
@@ -1806,7 +1782,6 @@ function startTusStreamUpload(item, file, controls) {
           }
           throw err;
         }
-        // The server may have accepted part of the body before the drop.
         offset = Math.min(next, file.size);
         progress.set(offset);
         await new Promise((res) => setTimeout(res, STREAM_RETRY_DELAY_MS * failures));
@@ -1866,7 +1841,6 @@ function startTusStreamUpload(item, file, controls) {
       failures++;
       if (failures > maxStreamFailures)
         throw new Error(`Upload failed: ${r.status}`);
-      // The body may have been accepted up to the point the connection broke.
       const next = await discoverOffset();
       if (next === null) {
         if (safe) {
@@ -1885,15 +1859,12 @@ function startTusStreamUpload(item, file, controls) {
 
     if (finished)
       return;
-    // Everything was accepted but the final response was lost (409 path).
     offset = (await discoverOffset()) ?? file.size;
     if (offset < file.size)
       throw new Error("Upload incomplete");
     update({ id: item.id, state: "finalizing" });
     const fin = await patch(file.size, file.size, DIRECT_COMPLETE_TIMEOUT_MS);
     if (fin.status === 404) {
-      // The session was already finalized but the response was lost. TUS
-      // resource ids are the file ids, so the record can be found directly.
       const info = await waitForReservedFile(reserveId || tusId, signal, 60000);
       if (info) {
         complete({
@@ -1921,9 +1892,6 @@ function startTusStreamUpload(item, file, controls) {
       return;
     }
     if (item.resumeAttempt) {
-      // A resumed upload keeps its TUS session and saved offset. Going back
-      // to paused on a transient failure lets the user reselect and retry
-      // instead of discarding the session as a terminal error.
       update({
         id: item.id,
         state: "paused",
@@ -2117,8 +2085,6 @@ function startTusUpload(item, file, controls) {
             results[i] = await uploadTusPart(item, file, sessionId, i, numParts, signal, {
               onWire: (bytes) => {
                 partSent[i] += bytes;
-                // Do not let the bar race far ahead of bytes the server has
-                // acknowledged; the browser can buffer a whole burst locally.
                 progress.set(Math.min(sum(partSent), sum(partAcked) + PROGRESS_LEAD_BYTES));
               },
               onAcked: (bytes) => {
@@ -2354,9 +2320,6 @@ function startTusUpload(item, file, controls) {
       }
     }
     if (!merged && !signal.aborted) {
-      // A saved part id doubles as the finished file id once its merge wins.
-      // Probe the ids we know about before declaring failure, which also
-      // recovers a merge whose response was lost during the navigation.
       update({ id: item.id, state: "finalizing" });
       const info = await findReadyPart(partTusIds, 8000);
       if (info) {

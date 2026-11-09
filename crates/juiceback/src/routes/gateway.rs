@@ -1,5 +1,3 @@
-
-
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
@@ -162,13 +160,12 @@ pub async fn unlock_handler(
     if !record.uses_per_file_key() {
         let password = body.password.clone();
         let hash = record.password_hash.clone().unwrap_or_default();
-        let hash_empty = hash.is_empty();
         let ok = tokio::task::spawn_blocking(move || {
             crate::auth::verify_password(&password, &hash).map_err(AppError::Internal)
         })
         .await
         .map_err(|_| AppError::Internal("unlock task panicked".into()))??;
-        if hash_empty || !ok {
+        if !ok {
             return Err(AppError::Forbidden("invalid password".into()));
         }
         let mut resp = Json(UnlockResponse {
@@ -194,8 +191,6 @@ pub async fn unlock_handler(
         ));
     }
 
-    
-    
     let password = body.password.clone();
     let hash = record.password_hash.clone().unwrap_or_default();
     let salt_b64 = record.dek_salt.clone().unwrap_or_default();

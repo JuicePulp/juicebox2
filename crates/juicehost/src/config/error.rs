@@ -12,6 +12,9 @@ pub enum ConfigError {
     #[error("{0}")]
     InvalidTrustedProxyCidrs(String),
 
-    #[error("{name} must be set (ticket JWTs cannot be signed with an empty key)")]
-    MissingSecret { name: &'static str },
+    #[error("{0}")]
+    InvalidEnvironment(String),
+
+    #[error("{0}")]
+    InvalidSecret(String),
 }

@@ -10,12 +10,7 @@ use super::{
     },
     ticket::clamp_ttl_seconds,
 };
-use crate::{
-    db::{self, FileRecord},
-    error::AppError,
-    state::AppState,
-    upload_mode::UploadMode,
-};
+use crate::{db::FileRecord, error::AppError, state::AppState, upload_mode::UploadMode};
 
 pub struct UploadParams {
     pub(crate) file_id: String,
@@ -27,10 +22,9 @@ pub struct UploadParams {
     pub(crate) ttl_seconds: i64,
     pub(crate) reservation: Option<FileRecord>,
     pub(crate) file_capability: String,
-    
+
     pub(crate) enc_header: Option<[u8; crate::crypto_file::HEADER_LEN]>,
-    
-    
+
     pub(crate) protection: Option<super::protected::UploadProtection>,
 }
 
@@ -84,8 +78,6 @@ pub async fn parse_multipart(
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().trim_end_matches('/').to_string();
             if !text.is_empty() {
-                
-                
                 let checked = crate::storage_client::check_storage_host(
                     &text,
                     state.config.allow_private_fetch,
@@ -99,25 +91,10 @@ pub async fn parse_multipart(
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             let text = text.trim().to_string();
             if !text.is_empty() {
-                if !crate::utils::is_valid_id(&text) {
-                    return Err(AppError::BadRequest("invalid reserve_id".into()));
-                }
                 let token = reservation_token.ok_or_else(|| {
                     AppError::Forbidden("reservation delete token required".into())
                 })?;
-                let lookup_id = text.clone();
-                let existing = state
-                    .db_call("get_reserved_file", move |db| db::get_file(db, &lookup_id))
-                    .await?
-                    .ok_or_else(|| AppError::BadRequest("invalid reserve_id".into()))?;
-                if existing.status != "uploading" {
-                    return Err(AppError::BadRequest("reservation is not uploading".into()));
-                }
-                if !crate::utils::constant_time_eq(&existing.delete_token, token) {
-                    return Err(AppError::Forbidden(
-                        "invalid reservation delete token".into(),
-                    ));
-                }
+                let existing = crate::reservation::verify_by_id(state, &text, token).await?;
                 file_id = text;
                 file_capability.clone_from(&existing.delete_token);
                 reservation = Some(existing);
@@ -156,9 +133,7 @@ pub async fn parse_multipart(
 
             let protected =
                 password.is_some() || reservation.as_ref().is_some_and(|r| r.is_protected());
-            
-            
-            
+
             let push_mode = if protected && state.config.encrypted_force_relay {
                 UploadMode::Standard
             } else {

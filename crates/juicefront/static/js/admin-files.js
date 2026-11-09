@@ -1,3 +1,5 @@
+import { formatSize } from "./util.js";
+import { publicFileInfo } from "./api.js";
 
     var PAGE = 200;
     var allFiles = [];
@@ -57,9 +59,6 @@
         var html = "";
         for (var i = 0; i < files.length; i++) {
             var f = files[i];
-            // "cooling"/"warming" are display states, not storage tiers.
-            // The action must follow where the file actually lives, otherwise
-            // a cooling (still hot) file only offers "Warm" and stays on R2.
             var isHot = f.tier === "hot" || (!f.tier && f.hot);
             var tierAction = isHot ? "cool" : "warm";
             var tierLabel = tierAction === "cool" ? "Cool" : "Warm";
@@ -85,7 +84,7 @@
                 "</td>" +
                 "<td nowrap>" +
                     '<a href="' + esc(f.url) + '" target="_blank">View</a> | ' +
-                    '<a href="/file/' + encodeURIComponent(f.id) + '/info" target="_blank">Info</a> | ' +
+                    '<a href="' + publicFileInfo(f.id) + '" target="_blank">Info</a> | ' +
                     '<a href="#" data-tier-toggle data-file-id="' + esc(f.id) + '" data-tier-action="' + tierAction + '">' + tierLabel + '</a> | ' +
                     '<a href="#" data-freeze-link data-file-id="' + esc(f.id) + '" data-frozen="0">Freeze</a> | ' +
                     '<a href="#" data-delete-link data-file-id="' + esc(f.id) + '">Delete</a>' +

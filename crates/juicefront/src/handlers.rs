@@ -50,17 +50,11 @@ pub struct CardAction {
 }
 
 fn hreflang_links_absolute(headers: &HeaderMap, stripped: &str) -> Vec<Hreflang> {
-    hreflang_links_absolute_inner(stripped, &|href| absolute_url(headers, &href))
-}
-
-fn hreflang_links_absolute_inner(
-    stripped: &str,
-    resolve: &dyn Fn(String) -> String,
-) -> Vec<Hreflang> {
     i18n::LOCALES
         .iter()
+        .copied()
         .map(|(code, _)| {
-            let href = if *code == "en" {
+            let href = if code == i18n::DEFAULT_LOCALE {
                 stripped.to_owned()
             } else if stripped == "/" {
                 format!("/{code}")
@@ -68,14 +62,8 @@ fn hreflang_links_absolute_inner(
                 format!("/{code}{stripped}")
             };
             Hreflang {
-                code: match *code {
-                    "fr" => "fr",
-                    "ru" => "ru",
-                    "es" => "es",
-                    "ja" => "ja",
-                    _ => "en",
-                },
-                href: resolve(href),
+                code,
+                href: absolute_url(headers, &href),
             }
         })
         .collect()
@@ -96,7 +84,9 @@ fn absolute_url(headers: &HeaderMap, path_query: &str) -> String {
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let header = headers.get("cookie")?.to_str().ok()?;
     for part in header.split(';') {
-        let (key, value) = part.split_once('=')?;
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
         if key.trim() == name {
             return Some(value.trim().to_owned());
         }
@@ -124,15 +114,18 @@ async fn cached_backend_offline(state: &AppState) -> bool {
     {
         return !healthy;
     }
-    let healthy =
-        health::check_backend_health(&state.http, &state.config.juiceback_url).await;
+    let healthy = health::check_backend_health(&state.http, &state.config.juiceback_url).await;
     if let Ok(mut cache) = state.health_cache.lock() {
         *cache = Some((Instant::now(), healthy));
     }
     !healthy
 }
 
-pub(crate) async fn cached_ban(state: &AppState, headers: &HeaderMap, peer: IpAddr) -> ban::BanStatus {
+pub(crate) async fn cached_ban(
+    state: &AppState,
+    headers: &HeaderMap,
+    peer: IpAddr,
+) -> ban::BanStatus {
     let ip = juiceutils::proxy::client_ip(headers, peer, &state.config.trusted_proxies);
     if let Ok(cache) = state.ban_cache.lock()
         && let Some((at, status)) = cache.get(&ip)
@@ -211,7 +204,6 @@ struct ServerFlags {
     quick_link: bool,
     quic: bool,
     custom_id: bool,
-    ultrafast: bool,
     cobalt: bool,
 }
 
@@ -252,8 +244,9 @@ fn modals_html(
     let base_path = i18n::split_locale(url_path).1;
     let lang_links = i18n::LOCALES
         .iter()
+        .copied()
         .map(|(code, label)| {
-            let href = if *code == "en" {
+            let href = if code == "en" {
                 base_path.clone()
             } else if base_path == "/" {
                 format!("/{code}")
@@ -261,16 +254,10 @@ fn modals_html(
                 format!("/{code}{base_path}")
             };
             LangLink {
-                code: match *code {
-                    "fr" => "fr",
-                    "ru" => "ru",
-                    "es" => "es",
-                    "ja" => "ja",
-                    _ => "en",
-                },
-                label: (*label).to_owned(),
+                code,
+                label: label.to_owned(),
                 href,
-                active: *code == locale,
+                active: code == locale,
             }
         })
         .collect();
@@ -280,7 +267,6 @@ fn modals_html(
             quick_link: config.quick_link.unwrap_or(true),
             quic: config.quic.unwrap_or(true),
             custom_id: config.custom_id.unwrap_or(true),
-            ultrafast: config.ultrafast.unwrap_or(false),
             cobalt: config.cobalt.unwrap_or(false),
         },
         upload_mode: config
@@ -288,7 +274,9 @@ fn modals_html(
             .clone()
             .unwrap_or_else(|| "standard".to_owned()),
         danger_level: danger.to_owned(),
-        max_bytes: config.max_file_size_bytes.unwrap_or(524_288_000),
+        max_bytes: config
+            .max_file_size_bytes
+            .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES),
         allowed_ttl: serde_json::to_string(
             &config
                 .allowed_ttl_hours
@@ -323,7 +311,13 @@ fn modals_html(
             shortcut("shortcuts.open_settings", &["G", "T"]),
         ],
         lang_links,
-        locale_codes_json: "[\"en\",\"fr\",\"ru\",\"es\",\"ja\"]".to_owned(),
+        locale_codes_json: serde_json::to_string(
+            &i18n::LOCALES
+                .iter()
+                .map(|(code, _)| *code)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| "[]".to_owned()),
     }
     .render()
     .unwrap_or_default()
@@ -456,10 +450,6 @@ fn shell(locale: &'static str, modals: String, ads: String, extra_scripts: Vec<S
     }
 }
 
-const fn no_extra() -> Vec<String> {
-    Vec::new()
-}
-
 struct HeadCtx {
     cx: Cx,
     lang: &'static str,
@@ -524,6 +514,70 @@ fn head_ctx(
     }
 }
 
+struct PageCtx {
+    locale: &'static str,
+    cx: Cx,
+    stripped: String,
+    uri_path: String,
+    path_query: String,
+}
+
+impl PageCtx {
+    fn resolve(locale_path: Option<Path<String>>, uri: &axum::http::Uri) -> Option<Self> {
+        let locale = locale_from_path(locale_path)?;
+        Some(Self {
+            locale,
+            cx: Cx::new(locale),
+            stripped: i18n::split_locale(uri.path()).1,
+            uri_path: uri.path().to_owned(),
+            path_query: uri
+                .path_and_query()
+                .map_or("/", axum::http::uri::PathAndQuery::as_str)
+                .to_owned(),
+        })
+    }
+
+    fn from_uri_path(uri_path: String) -> Self {
+        let (locale, stripped) = i18n::split_locale(&uri_path);
+        let locale = if locale == i18n::DEFAULT_LOCALE || i18n::is_valid_locale(locale) {
+            locale
+        } else {
+            i18n::DEFAULT_LOCALE
+        };
+        Self {
+            locale,
+            cx: Cx::new(locale),
+            stripped,
+            path_query: uri_path.clone(),
+            uri_path,
+        }
+    }
+
+    fn head(
+        &self,
+        state: &AppState,
+        headers: &HeaderMap,
+        title: String,
+        description: String,
+        body_class: &'static str,
+    ) -> String {
+        HeadTpl {
+            head: head_ctx(
+                self.locale,
+                title,
+                description,
+                body_class,
+                &self.stripped,
+                &self.uri_path,
+                headers,
+                state.live_reload,
+            ),
+        }
+        .render()
+        .unwrap_or_default()
+    }
+}
+
 fn flags_html(offline: bool, banned: bool) -> String {
     format!(
         "<div id=\"page-flags\" hidden{}{}></div>",
@@ -540,9 +594,6 @@ async fn stream_page(
     status: StatusCode,
     stream: impl futures::Stream<Item = Result<bytes::Bytes, std::convert::Infallible>> + Send + 'static,
 ) -> Response<Body> {
-    // Compression of a chunked response can add a delayed-ACK stall per page.
-    // Rendering into one buffer gives the compression layer a fixed-size body
-    // and avoids sending the head as a separate tiny TCP write.
     let mut stream = Box::pin(stream);
     let mut body = Vec::with_capacity(128 * 1024);
     while let Some(Ok(chunk)) = stream.next().await {
@@ -637,7 +688,8 @@ fn css_assets() -> &'static CssAssets {
         use std::io::Write as _;
         let source = CSS_BUNDLE.as_bytes();
         let gzip = (|| -> std::io::Result<Vec<u8>> {
-            let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
             encoder.write_all(source)?;
             encoder.finish()
         })()
@@ -697,9 +749,7 @@ pub async fn css_bundle(headers: HeaderMap, uri: axum::http::Uri) -> Response<Bo
     if let Some(encoding) = encoding {
         builder = builder.header("content-encoding", encoding);
     }
-    builder
-        .body(Body::from(body.clone()))
-        .unwrap_or_default()
+    builder.body(Body::from(body.clone())).unwrap_or_default()
 }
 
 fn plain_text_response(body: &'static str) -> Response<Body> {
@@ -721,14 +771,16 @@ pub async fn agents_txt() -> Response<Body> {
 
 fn locale_from_path(path: Option<Path<String>>) -> Option<&'static str> {
     match path {
-        Some(Path(code)) => match code.as_str() {
-            "fr" => Some("fr"),
-            "ru" => Some("ru"),
-            "es" => Some("es"),
-            "ja" => Some("ja"),
-            _ => None,
-        },
-        None => Some("en"),
+        Some(Path(code)) => {
+            if code == i18n::DEFAULT_LOCALE || !i18n::is_valid_locale(&code) {
+                return None;
+            }
+            i18n::LOCALES
+                .iter()
+                .find(|(locale, _)| *locale == code)
+                .map(|(locale, _)| *locale)
+        }
+        None => Some(i18n::DEFAULT_LOCALE),
     }
 }
 
@@ -816,8 +868,7 @@ fn parse_uploaded(param: &str) -> Option<UploadedFile> {
     let bytes = base64url_decode(param)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let mime = json_str(&value, "mime_type", 200);
-    
-    
+
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let size = json_num(&value, "size_bytes") as u64;
     Some(UploadedFile {
@@ -842,8 +893,6 @@ struct IndexTpl {
     hostsel_html: String,
 }
 
-/// Proxy `/router/upload-target` to juicerouter so the browser can ask for a
-/// storage node without a cross-origin call or a hardcoded router hostname.
 pub async fn upload_target_proxy(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -858,10 +907,7 @@ pub async fn upload_target_proxy(
         return (StatusCode::SERVICE_UNAVAILABLE, "router not configured").into_response();
     };
     let url = format!("{}/upload-target", router_url.trim_end_matches('/'));
-    let mut request = state
-        .http
-        .get(url)
-        .timeout(Duration::from_millis(1_500));
+    let mut request = state.http.get(url).timeout(Duration::from_millis(1_500));
     for name in ["cf-ipcountry", "cf-ray", "cf-connecting-ip"] {
         if let Some(value) = headers.get(name) {
             request = request.header(name, value);
@@ -901,30 +947,23 @@ pub async fn index(
     let uri = req.uri().clone();
     let headers = req.headers().clone();
     let query = query_map(&uri);
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let uri_path = uri.path().to_owned();
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            cx.t("site.title"),
-            cx.t("site.description_short"),
-            "upload-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let head = page.head(
+        &state,
+        &headers,
+        page.cx.t("site.title"),
+        page.cx.t("site.description_short"),
+        "upload-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let (data, announcement) = tokio::join!(
@@ -947,8 +986,7 @@ pub async fn index(
         .unwrap_or(retention::DEFAULT_TTL_HOURS);
     let default_index = allowed
         .iter()
-        
-        
+
         .position(|hours| {
             #[allow(clippy::float_cmp)]
             {
@@ -956,7 +994,11 @@ pub async fn index(
             }
         })
         .unwrap_or(0);
-    let max_bytes = data.eff.config.max_file_size_bytes.unwrap_or(524_288_000);
+    let max_bytes = data
+        .eff
+        .config
+        .max_file_size_bytes
+        .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
     let cobalt = data.eff.config.cobalt.unwrap_or(false);
     let services = if cobalt {
         host::fetch_cobalt_services(&state).await
@@ -1075,7 +1117,6 @@ struct FilesTpl {
     title: String,
     subtitle: String,
     footer_commit: String,
-    footer_message: String,
     footer_repo: String,
     empty_message: String,
     notice: String,
@@ -1214,13 +1255,12 @@ pub async fn files_rows_handler(
     headers: HeaderMap,
     Json(body): Json<RowsRequest>,
 ) -> Response<Body> {
-    let locale: &'static str = match body.locale.as_deref() {
-        Some("fr") => "fr",
-        Some("ru") => "ru",
-        Some("es") => "es",
-        Some("ja") => "ja",
-        _ => "en",
-    };
+    let locale: &'static str = body.locale.as_deref().map_or(i18n::DEFAULT_LOCALE, |code| {
+        i18n::LOCALES
+            .iter()
+            .find(|(locale, _)| *locale == code)
+            .map_or(i18n::DEFAULT_LOCALE, |(locale, _)| *locale)
+    });
     let cx = Cx::new(locale);
     let data = shared(&state, &headers, peer.ip()).await;
     let pairs: Vec<serde_json::Value> = body
@@ -1230,25 +1270,25 @@ pub async fn files_rows_handler(
         .filter(|pair| !pair.id.trim().is_empty() && !pair.token.trim().is_empty())
         .map(|pair| serde_json::json!({ "id": pair.id, "token": pair.token }))
         .collect();
-    let files = owned_files_for_pairs(&state, pairs).await;
+    let Ok(files) = owned_files_for_pairs(&state, pairs).await else {
+        return Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .header("content-type", "application/json; charset=utf-8")
+            .body(Body::from(r#"{"error":"upstream unavailable"}"#))
+            .unwrap_or_default();
+    };
     let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
     let custom_id = data.eff.config.custom_id.unwrap_or(true);
-    let rows = file_rows(
-        &cx,
-        locale,
-        files,
-        &default_host,
-        custom_id,
-        now_ms(),
-        0,
-    );
+    let rows = file_rows(&cx, locale, files, &default_host, custom_id, now_ms(), 0);
     let cards = FileRowsTpl {
         cx: cx.clone(),
         files: rows.clone(),
     }
     .render()
     .unwrap_or_default();
-    let modals = FileModalsTpl { cx, files: rows }.render().unwrap_or_default();
+    let modals = FileModalsTpl { cx, files: rows }
+        .render()
+        .unwrap_or_default();
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json; charset=utf-8")
@@ -1259,12 +1299,12 @@ pub async fn files_rows_handler(
         .unwrap_or_default()
 }
 
-async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> {
+async fn server_files(state: &AppState, headers: &HeaderMap) -> Result<Vec<ServerFile>, ()> {
     let Some(encoded) = cookie_value(headers, "jb_files") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(bytes) = base64url_decode(&encoded) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let pairs: Vec<serde_json::Value> = serde_json::from_slice::<serde_json::Value>(&bytes)
         .ok()
@@ -1291,9 +1331,9 @@ async fn server_files(state: &AppState, headers: &HeaderMap) -> Vec<ServerFile> 
 async fn owned_files_for_pairs(
     state: &AppState,
     pairs: Vec<serde_json::Value>,
-) -> Vec<ServerFile> {
+) -> Result<Vec<ServerFile>, ()> {
     if pairs.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let Ok(Some(files)) = tokio::time::timeout(Duration::from_secs(5), async {
         let response = state
@@ -1310,17 +1350,18 @@ async fn owned_files_for_pairs(
     })
     .await
     else {
-        return Vec::new();
+        tracing::warn!("owned-files lookup failed; showing the files page without server entries");
+        return Err(());
     };
     let now = chrono_now();
-    files
+    Ok(files
         .get("files")
         .and_then(|data| data.as_array().cloned())
         .unwrap_or_default()
         .into_iter()
         .filter_map(|file| serde_json::from_value::<ServerFile>(file).ok())
         .filter(|file| file.expires_at > now)
-        .collect()
+        .collect())
 }
 
 #[allow(clippy::cast_possible_wrap)]
@@ -1352,35 +1393,28 @@ pub async fn files_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let uri_path = uri.path().to_owned();
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("files.title")),
+        page.cx.t("files.subtitle"),
+        "files-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let query = query_map(&uri);
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("files.title")),
-            cx.t("files.subtitle"),
-            "files-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let data = shared(&state, &headers, peer.ip()).await;
-        let notice = query
+        let mut notice = query
             .get("deleted")
             .filter(|value| !value.is_empty())
             .map(|_| cx.t("sr.file_deleted"))
@@ -1394,8 +1428,11 @@ pub async fn files_page(
 
     let server_files = if data.offline {
         Vec::new()
+    } else if let Ok(files) = server_files(&state, &headers).await {
+        files
     } else {
-        server_files(&state, &headers).await
+        notice = cx.t("files.offline");
+        Vec::new()
     };
     let default_host = data.eff.config.public_base_url.clone().unwrap_or_default();
     let custom_id = data.eff.config.custom_id.unwrap_or(true);
@@ -1431,7 +1468,6 @@ pub async fn files_page(
         title: cx.t("files.fallback_title"),
         subtitle: cx.t("files.fallback_subtitle"),
         footer_commit: metadata::commit_short_hash(),
-        footer_message: String::new(),
         footer_repo: metadata::REPO_URL.to_owned(),
         empty_message: cx.t("files.fallback_empty"),
         notice,
@@ -1461,7 +1497,7 @@ pub async fn files_page(
     stream_page(StatusCode::OK, stream).await
 }
 
-fn content_actions(locale: &str, cx: &Cx) -> Vec<CardAction> {
+fn content_actions(cx: &Cx) -> Vec<CardAction> {
     vec![
         CardAction {
             id: "back".to_owned(),
@@ -1470,8 +1506,8 @@ fn content_actions(locale: &str, cx: &Cx) -> Vec<CardAction> {
             aria: cx.t("nav.back_aria"),
             href: cx.lp("/"),
         },
-        card_action(locale, "files", "nav.files", "files", cx.lp("/files")),
-        card_action(locale, "more", "nav.more", "more", String::new()),
+        card_action(cx.locale, "files", "nav.files", "files", cx.lp("/files")),
+        card_action(cx.locale, "more", "nav.more", "more", String::new()),
     ]
 }
 
@@ -1493,7 +1529,7 @@ async fn content_shell(
             &data.eff,
         ),
         ads_html(locale, headers),
-        no_extra(),
+        Vec::new(),
     );
     (shell, data)
 }
@@ -1519,10 +1555,34 @@ struct ContentTpl {
     title: String,
     subtitle: String,
     footer_commit: String,
-    footer_message: String,
     footer_repo: String,
     actions: Vec<CardAction>,
     body_html: String,
+}
+
+impl ContentTpl {
+    fn new(
+        shell: Shell,
+        data: &Shared,
+        cx: &Cx,
+        title: String,
+        subtitle: String,
+        body_html: String,
+    ) -> Self {
+        Self {
+            shell,
+            flags_html: flags_html(data.offline, data.ban.banned),
+            card_id: "content-card".to_owned(),
+            header_id: "content-card-header".to_owned(),
+            actions_id: "content-card-actions".to_owned(),
+            title,
+            subtitle,
+            footer_commit: metadata::commit_short_hash(),
+            footer_repo: metadata::REPO_URL.to_owned(),
+            actions: content_actions(cx),
+            body_html,
+        }
+    }
 }
 
 struct LinuxFormat {
@@ -1578,30 +1638,23 @@ pub async fn download_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("download.title")),
-            cx.t("download.description"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("download.title")),
+        page.cx.t("download.description"),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let ((shell, data), tag) = tokio::join!(
@@ -1627,20 +1680,14 @@ pub async fn download_page(
     .render()
     .unwrap_or_default();
     yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-        ContentTpl {
+        ContentTpl::new(
             shell,
-            flags_html: flags_html(data.offline, data.ban.banned),
-            card_id: "content-card".to_owned(),
-            header_id: "content-card-header".to_owned(),
-            actions_id: "content-card-actions".to_owned(),
-            title: "Download Juicebox+".to_owned(),
-            subtitle: "The desktop app for UltraFast uploads".to_owned(),
-            footer_commit: metadata::commit_short_hash(),
-            footer_message: String::new(),
-            footer_repo: metadata::REPO_URL.to_owned(),
-            actions: content_actions(locale, &cx),
+            &data,
+            &cx,
+            "Download Juicebox+".to_owned(),
+            "The desktop app for paired-device uploads".to_owned(),
             body_html,
-        }
+        )
         .render()
         .unwrap_or_default(),
     ));
@@ -1664,34 +1711,26 @@ pub async fn banned_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
     let ban = cached_ban(&state, &headers, peer.ip()).await;
     if !ban.banned {
-        return redirect_to(&cx.lp("/"));
+        return redirect_to(&page.cx.lp("/"));
     }
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("banned.title")),
-            cx.t("banned.description"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("banned.title")),
+        page.cx.t("banned.description"),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let (shell, data) = content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path).await;
@@ -1711,31 +1750,108 @@ pub async fn banned_page(
 }
 
 #[derive(Template)]
-#[template(path = "report.html")]
-struct ReportTpl {
+#[template(path = "form_card.html")]
+struct FormCardTpl {
     shell: Shell,
     flags_html: String,
+    card_id: &'static str,
     title: String,
     subtitle: String,
     submitted: bool,
     footer_commit: String,
-    footer_message: String,
     footer_repo: String,
     actions: Vec<CardAction>,
+    success_key: &'static str,
+    actions_key: &'static str,
+    report: bool,
 }
 
-#[derive(Template)]
-#[template(path = "feedback.html")]
-struct FeedbackTpl {
-    shell: Shell,
-    flags_html: String,
-    title: String,
-    subtitle: String,
-    submitted: bool,
-    footer_commit: String,
-    footer_message: String,
-    footer_repo: String,
-    actions: Vec<CardAction>,
+#[derive(Clone, Copy)]
+struct FormKind {
+    card_id: &'static str,
+    title_key: &'static str,
+    subtitle_key: &'static str,
+    body_class: &'static str,
+    success_key: &'static str,
+    actions_key: &'static str,
+    report: bool,
+}
+
+const REPORT_FORM: FormKind = FormKind {
+    card_id: "report-card",
+    title_key: "report.title",
+    subtitle_key: "report.subtitle",
+    body_class: "report-page",
+    success_key: "report.success",
+    actions_key: "actions.report_actions",
+    report: true,
+};
+
+const FEEDBACK_FORM: FormKind = FormKind {
+    card_id: "feedback-card",
+    title_key: "feedback.title",
+    subtitle_key: "feedback.subtitle",
+    body_class: "content-page",
+    success_key: "feedback.success",
+    actions_key: "actions.feedback_actions",
+    report: false,
+};
+
+async fn form_page(
+    state: Arc<AppState>,
+    peer: std::net::SocketAddr,
+    locale_path: Option<Path<String>>,
+    query: HashMap<String, String>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    kind: FormKind,
+) -> Response<Body> {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
+        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
+    };
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t(kind.title_key)),
+        page.cx.t(kind.subtitle_key),
+        kind.body_class,
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
+    let stream = async_stream::stream! {
+        yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
+        let data = shared(&state, &headers, peer.ip()).await;
+        let shell = shell(
+            locale,
+            modals_html(locale, &absolute_url(&headers, &path_query), &uri_path, &data.eff),
+            ads_html(locale, &headers),
+            Vec::new(),
+        );
+        yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
+            FormCardTpl {
+                shell,
+                flags_html: flags_html(data.offline, data.ban.banned),
+                card_id: kind.card_id,
+                title: cx.t(kind.title_key),
+                subtitle: cx.t(kind.subtitle_key),
+                submitted: query.get("submitted").is_some_and(|value| value == "1"),
+                footer_commit: metadata::commit_short_hash(),
+                footer_repo: metadata::REPO_URL.to_owned(),
+                actions: content_actions(&cx),
+                success_key: kind.success_key,
+                actions_key: kind.actions_key,
+                report: kind.report,
+            }
+            .render()
+            .unwrap_or_default(),
+        ));
+    };
+    stream_page(StatusCode::OK, stream).await
 }
 
 pub async fn report_page(
@@ -1746,56 +1862,7 @@ pub async fn report_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
-        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
-    };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("report.title")),
-            cx.t("report.subtitle"),
-            "report-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
-    let stream = async_stream::stream! {
-    yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
-    let data = shared(&state, &headers, peer.ip()).await;
-    let shell = shell(
-        locale,
-        modals_html(locale, &absolute_url(&headers, &path_query), &uri_path, &data.eff),
-        ads_html(locale, &headers),
-        no_extra(),
-    );
-    yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-        ReportTpl {
-            shell,
-            flags_html: flags_html(data.offline, data.ban.banned),
-            title: cx.t("report.title"),
-        subtitle: cx.t("report.subtitle"),
-        submitted: query.get("submitted").is_some_and(|value| value == "1"),
-        footer_commit: metadata::commit_short_hash(),
-        footer_message: String::new(),
-        footer_repo: metadata::REPO_URL.to_owned(),
-        actions: content_actions(locale, &cx),
-        }
-        .render()
-        .unwrap_or_default(),
-    ));
-    };
-    stream_page(StatusCode::OK, stream).await
+    form_page(state, peer, locale_path, query, headers, uri, REPORT_FORM).await
 }
 
 pub async fn feedback_page(
@@ -1806,56 +1873,7 @@ pub async fn feedback_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
-        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
-    };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("feedback.title")),
-            cx.t("feedback.subtitle"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
-    let stream = async_stream::stream! {
-    yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
-    let data = shared(&state, &headers, peer.ip()).await;
-    let shell = shell(
-        locale,
-        modals_html(locale, &absolute_url(&headers, &path_query), &uri_path, &data.eff),
-        ads_html(locale, &headers),
-        no_extra(),
-    );
-    yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-        FeedbackTpl {
-            shell,
-            flags_html: flags_html(data.offline, data.ban.banned),
-            title: cx.t("feedback.title"),
-        subtitle: cx.t("feedback.subtitle"),
-        submitted: query.get("submitted").is_some_and(|value| value == "1"),
-        footer_commit: metadata::commit_short_hash(),
-        footer_message: String::new(),
-        footer_repo: metadata::REPO_URL.to_owned(),
-        actions: content_actions(locale, &cx),
-        }
-        .render()
-        .unwrap_or_default(),
-    ));
-    };
-    stream_page(StatusCode::OK, stream).await
+    form_page(state, peer, locale_path, query, headers, uri, FEEDBACK_FORM).await
 }
 
 #[derive(Template)]
@@ -1877,30 +1895,23 @@ pub async fn faq_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("faq.title")),
-            cx.t("faq.subtitle"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("faq.title")),
+        page.cx.t("faq.subtitle"),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let (shell, data) = content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path).await;
@@ -1915,20 +1926,14 @@ pub async fn faq_page(
         .render()
         .unwrap_or_default();
     yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-        ContentTpl {
+        ContentTpl::new(
             shell,
-            flags_html: flags_html(data.offline, data.ban.banned),
-            card_id: "content-card".to_owned(),
-            header_id: "content-card-header".to_owned(),
-            actions_id: "content-card-actions".to_owned(),
-            title: cx.t("faq.title"),
-            subtitle: cx.t("faq.subtitle"),
-            footer_commit: metadata::commit_short_hash(),
-            footer_message: String::new(),
-            footer_repo: metadata::REPO_URL.to_owned(),
-            actions: content_actions(locale, &cx),
+            &data,
+            &cx,
+            cx.t("faq.title"),
+            cx.t("faq.subtitle"),
             body_html,
-        }
+        )
         .render()
         .unwrap_or_default(),
     ));
@@ -1949,30 +1954,23 @@ pub async fn docs_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
         return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
     };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("docs.title")),
-            cx.t("docs.description"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("docs.title")),
+        page.cx.t("docs.description"),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let rustdoc_exists = state.rustdoc_exists;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
@@ -1981,20 +1979,14 @@ pub async fn docs_page(
         .render()
         .unwrap_or_default();
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-            ContentTpl {
+            ContentTpl::new(
                 shell,
-                flags_html: flags_html(data.offline, data.ban.banned),
-                card_id: "content-card".to_owned(),
-                header_id: "content-card-header".to_owned(),
-                actions_id: "content-card-actions".to_owned(),
-                title: cx.t("docs.title"),
-                subtitle: cx.t("docs.description"),
-                footer_commit: metadata::commit_short_hash(),
-                footer_message: String::new(),
-                footer_repo: metadata::REPO_URL.to_owned(),
-                actions: content_actions(locale, &cx),
+                &data,
+                &cx,
+                cx.t("docs.title"),
+                cx.t("docs.description"),
                 body_html,
-            }
+            )
             .render()
             .unwrap_or_default(),
         ));
@@ -2002,38 +1994,50 @@ pub async fn docs_page(
     stream_page(StatusCode::OK, stream).await
 }
 
-#[allow(clippy::unused_async)]
-async fn legal_page(
-    state: Arc<AppState>,
-    headers: HeaderMap,
-    peer: IpAddr,
-    locale: &'static str,
-    uri_path: String,
-    path_query: String,
+#[derive(Clone, Copy)]
+struct LegalDoc {
     title_key: &'static str,
     subtitle_key: &'static str,
-    legal_html: String,
-    head: String,
+    body: &'static str,
+}
+
+async fn legal_page(
+    state: Arc<AppState>,
+    peer: std::net::SocketAddr,
+    locale_path: Option<Path<String>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    doc: LegalDoc,
 ) -> Response<Body> {
-    let cx = Cx::new(locale);
+    let Some(page) = PageCtx::resolve(locale_path, &uri) else {
+        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
+    };
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t(doc.title_key)),
+        page.cx.t(doc.subtitle_key),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        cx,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
-        let (shell, data) = content_shell(&state, &headers, peer, locale, &path_query, &uri_path).await;
+        let (shell, data) = content_shell(&state, &headers, peer.ip(), locale, &path_query, &uri_path).await;
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
-            ContentTpl {
+            ContentTpl::new(
                 shell,
-                flags_html: flags_html(data.offline, data.ban.banned),
-                card_id: "content-card".to_owned(),
-                header_id: "content-card-header".to_owned(),
-                actions_id: "content-card-actions".to_owned(),
-                title: cx.t(title_key),
-                subtitle: cx.t(subtitle_key),
-                footer_commit: metadata::commit_short_hash(),
-                footer_message: String::new(),
-                footer_repo: metadata::REPO_URL.to_owned(),
-                actions: content_actions(locale, &cx),
-                body_html: legal_html,
-            }
+                &data,
+                &cx,
+                cx.t(doc.title_key),
+                cx.t(doc.subtitle_key),
+                doc.body.to_owned(),
+            )
             .render()
             .unwrap_or_default(),
         ));
@@ -2048,41 +2052,17 @@ pub async fn terms_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
-        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
-    };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("terms.title")),
-            cx.t("terms.subtitle"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
     legal_page(
         state,
+        peer,
+        locale_path,
         headers,
-        peer.ip(),
-        locale,
-        uri_path,
-        path_query,
-        "terms.title",
-        "terms.subtitle",
-        legal::TERMS_HTML.clone(),
-        head,
+        uri,
+        LegalDoc {
+            title_key: "terms.title",
+            subtitle_key: "terms.subtitle",
+            body: legal::TERMS_HTML.as_str(),
+        },
     )
     .await
 }
@@ -2094,41 +2074,17 @@ pub async fn privacy_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response<Body> {
-    let Some(locale) = locale_from_path(locale_path) else {
-        return not_found_page(state, headers, peer.ip(), uri.path().to_owned()).await;
-    };
-    let cx = Cx::new(locale);
-    let stripped = i18n::split_locale(uri.path()).1;
-    let path_query = uri
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str)
-        .to_owned();
-    let uri_path = uri.path().to_owned();
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("privacy.title")),
-            cx.t("privacy.subtitle"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
     legal_page(
         state,
+        peer,
+        locale_path,
         headers,
-        peer.ip(),
-        locale,
-        uri_path,
-        path_query,
-        "privacy.title",
-        "privacy.subtitle",
-        legal::PRIVACY_HTML.clone(),
-        head,
+        uri,
+        LegalDoc {
+            title_key: "privacy.title",
+            subtitle_key: "privacy.subtitle",
+            body: legal::PRIVACY_HTML.as_str(),
+        },
     )
     .await
 }
@@ -2147,35 +2103,28 @@ pub async fn not_found_page(
     peer: IpAddr,
     uri_path: String,
 ) -> Response<Body> {
-    let (locale, stripped) = i18n::split_locale(&uri_path);
-    let locale = if locale == "en" || i18n::is_valid_locale(locale) {
-        locale
-    } else {
-        "en"
-    };
-    let cx = Cx::new(locale);
-    let head = HeadTpl {
-        head: head_ctx(
-            locale,
-            format!("{} - Juicebox", cx.t("not_found.title")),
-            cx.t("not_found.description"),
-            "content-page",
-            &stripped,
-            &uri_path,
-            &headers,
-            state.live_reload,
-        ),
-    }
-    .render()
-    .unwrap_or_default();
+    let page = PageCtx::from_uri_path(uri_path);
+    let head = page.head(
+        &state,
+        &headers,
+        format!("{} - Juicebox", page.cx.t("not_found.title")),
+        page.cx.t("not_found.description"),
+        "content-page",
+    );
+    let PageCtx {
+        locale,
+        uri_path,
+        path_query,
+        ..
+    } = page;
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(head));
         let data = shared(&state, &headers, peer).await;
         let shell = shell(
             locale,
-            modals_html(locale, &absolute_url(&headers, &uri_path), &uri_path, &data.eff),
+            modals_html(locale, &absolute_url(&headers, &path_query), &uri_path, &data.eff),
             ads_html(locale, &headers),
-            no_extra(),
+            Vec::new(),
         );
         yield Ok::<_, std::convert::Infallible>(bytes::Bytes::from(
             NotFoundTpl {
@@ -2190,62 +2139,80 @@ pub async fn not_found_page(
 }
 
 #[derive(Template)]
-#[template(path = "admin_index.html")]
-struct AdminIndexTpl {
+#[template(path = "admin_page.html")]
+struct AdminTpl {
+    page: &'static str,
     title: String,
     scripts: Vec<String>,
 }
 
-#[derive(Template)]
-#[template(path = "admin_login.html")]
-struct AdminLoginTpl {
-    title: String,
-    scripts: Vec<String>,
+#[derive(Clone, Copy)]
+struct AdminPage {
+    page: &'static str,
+    title: &'static str,
+    scripts: &'static [&'static str],
 }
 
-#[derive(Template)]
-#[template(path = "admin_files.html")]
-struct AdminFilesTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_INDEX: AdminPage = AdminPage {
+    page: "index",
+    title: "Admin Panel - Juicebox",
+    scripts: &["/static/js/admin-index.js"],
+};
 
-#[derive(Template)]
-#[template(path = "admin_bans.html")]
-struct AdminBansTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_LOGIN: AdminPage = AdminPage {
+    page: "login",
+    title: "Admin Login - Juicebox",
+    scripts: &["/static/js/admin-login.js"],
+};
 
-#[derive(Template)]
-#[template(path = "admin_hosters.html")]
-struct AdminHostersTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_FILES: AdminPage = AdminPage {
+    page: "files",
+    title: "Uploaded Files - Admin - Juicebox",
+    scripts: &["/static/js/admin-files.js"],
+};
 
-#[derive(Template)]
-#[template(path = "admin_reports.html")]
-struct AdminReportsTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_BANS: AdminPage = AdminPage {
+    page: "bans",
+    title: "Banned IPs - Admin - Juicebox",
+    scripts: &["/static/js/admin-bans.js"],
+};
 
-#[derive(Template)]
-#[template(path = "admin_feedback.html")]
-struct AdminFeedbackTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_HOSTERS: AdminPage = AdminPage {
+    page: "hosters",
+    title: "Hosters - Admin - Juicebox",
+    scripts: &["/static/js/admin-hosters.js"],
+};
 
-#[derive(Template)]
-#[template(path = "admin_announcement.html")]
-struct AdminAnnouncementTpl {
-    title: String,
-    scripts: Vec<String>,
-}
+const ADMIN_REPORTS: AdminPage = AdminPage {
+    page: "reports",
+    title: "Reports - Admin - Juicebox",
+    scripts: &["/static/js/admin-reports.js"],
+};
 
-fn admin_html(status: StatusCode, body: String) -> Response<Body> {
+const ADMIN_FEEDBACK: AdminPage = AdminPage {
+    page: "feedback",
+    title: "Feedback - Admin - Juicebox",
+    scripts: &["/static/js/admin-feedback.js"],
+};
+
+const ADMIN_ANNOUNCEMENT: AdminPage = AdminPage {
+    page: "announcement",
+    title: "Announcement - Admin - Juicebox",
+    scripts: &["/static/js/admin-announcement.js"],
+};
+
+fn admin_html(status: StatusCode, page: AdminPage) -> Response<Body> {
+    let body = AdminTpl {
+        page: page.page,
+        title: page.title.to_owned(),
+        scripts: page
+            .scripts
+            .iter()
+            .map(|script| (*script).to_owned())
+            .collect(),
+    }
+    .render()
+    .unwrap_or_default();
     Response::builder()
         .status(status)
         .header("content-type", "text/html; charset=utf-8")
@@ -2254,100 +2221,33 @@ fn admin_html(status: StatusCode, body: String) -> Response<Body> {
 }
 
 pub async fn admin_index() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminIndexTpl {
-            title: "Admin Panel - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-index.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_INDEX)
 }
 
 pub async fn admin_login() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminLoginTpl {
-            title: "Admin Login - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-login.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_LOGIN)
 }
 
 pub async fn admin_files() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminFilesTpl {
-            title: "Uploaded Files - Admin - Juicebox".to_owned(),
-            scripts: vec![
-                "/static/js/format.js".to_owned(),
-                "/static/js/admin-files.js".to_owned(),
-            ],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_FILES)
 }
 
 pub async fn admin_bans() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminBansTpl {
-            title: "Banned IPs - Admin - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-bans.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_BANS)
 }
 
 pub async fn admin_hosters() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminHostersTpl {
-            title: "Hosters - Admin - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-hosters.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_HOSTERS)
 }
 
 pub async fn admin_reports() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminReportsTpl {
-            title: "Reports - Admin - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-reports.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_REPORTS)
 }
 
 pub async fn admin_feedback() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminFeedbackTpl {
-            title: "Feedback - Admin - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-feedback.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_FEEDBACK)
 }
 
 pub async fn admin_announcement() -> Response<Body> {
-    admin_html(
-        StatusCode::OK,
-        AdminAnnouncementTpl {
-            title: "Announcement - Admin - Juicebox".to_owned(),
-            scripts: vec!["/static/js/admin-announcement.js".to_owned()],
-        }
-        .render()
-        .unwrap_or_default(),
-    )
+    admin_html(StatusCode::OK, ADMIN_ANNOUNCEMENT)
 }

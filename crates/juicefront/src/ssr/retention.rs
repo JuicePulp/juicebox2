@@ -1,7 +1,7 @@
 use crate::i18n;
 
-pub const DEFAULT_ALLOWED_TTL_HOURS: &[f64] = &[0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0];
-pub const DEFAULT_TTL_HOURS: f64 = 24.0;
+pub const DEFAULT_ALLOWED_TTL_HOURS: &[f64] = juiceutils::config::defaults::ALLOWED_TTL_HOURS;
+pub const DEFAULT_TTL_HOURS: f64 = juiceutils::config::defaults::DEFAULT_TTL_HOURS;
 
 #[allow(clippy::float_cmp)]
 fn known_key(hours: f64) -> Option<&'static str> {
@@ -31,7 +31,7 @@ pub fn ttl_tier(hours: f64) -> u8 {
     if hours < 1.0 {
         return 0;
     }
-    
+
     #[allow(clippy::float_cmp)]
     if (hours / 24.0).fract() == 0.0 {
         return 2;
@@ -49,8 +49,6 @@ pub fn ttl_label(locale: &str, hours: f64) -> String {
         DEFAULT_TTL_HOURS
     };
     if hours < 1.0 {
-        
-        
         #[allow(clippy::cast_possible_truncation)]
         let mins = (hours * 60.0).round() as i64;
         let key = if mins == 1 {
@@ -61,8 +59,7 @@ pub fn ttl_label(locale: &str, hours: f64) -> String {
         return i18n::tv(locale, key, "count", &mins.to_string());
     }
     let days = hours / 24.0;
-    
-    
+
     #[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
     if days.fract() == 0.0 {
         let days = days as i64;
