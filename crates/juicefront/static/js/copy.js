@@ -1,4 +1,5 @@
 import { announce } from "./util.js?v=2.2.0-r2";
+import { publicFile } from "./api.js?v=2.2.0-r2";
 import { t } from "./i18n.js?v=2.2.0-r2";
 import { playSound } from "./sounds.js?v=2.2.0-r2";
 
@@ -247,19 +248,27 @@ export function createDeleteButton(opts) {
 
   btn.addEventListener("click", function (e) {
     if (opts.immediate || e.shiftKey || btn.dataset.confirming) {
-      fetch(opts.apiBase + "/file/" + opts.fileId, {
+      var headers = {};
+      if (opts.deleteToken) headers["X-Delete-Token"] = opts.deleteToken;
+      btn.disabled = true;
+      fetch(publicFile(opts.fileId), {
         method: "DELETE",
-        headers: { "X-Delete-Token": opts.deleteToken },
+        headers: headers,
       })
         .then(function (res) {
-          if (res.ok) {
+          // 404 means the file is already gone, which is the desired end state.
+          if (res.ok || res.status === 404) {
             var item = btn.closest(".file-item, .file-card");
-            if (item) opts.onDeleted(item);
+            if (item && opts.onDeleted) opts.onDeleted(item);
             announce("File deleted");
             playSound("close");
+            return;
           }
+          throw new Error("delete failed with status " + res.status);
         })
         .catch(function (err) {
+          btn.disabled = false;
+          btn.dataset.confirming = "";
           console.error("Failed to delete file:", err);
           announce("Failed to delete file");
         });

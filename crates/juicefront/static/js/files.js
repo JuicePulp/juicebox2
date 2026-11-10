@@ -324,15 +324,12 @@ function makeDeleteBtn(card, el, f, locale, existing) {
     try {
       btn.innerHTML = '<img src="/static/assets/loading.webp" alt="" class="spinner-icon" width="18" height="18"><span class="confirm-text"></span>';
       btn.classList.add("spinning");
-      if (f.delete_token) {
-        const res = await fetch(publicFile(f.id), {
-          method: "DELETE",
-          headers: { "X-Delete-Token": f.delete_token },
-        });
-        if (!res.ok) throw new Error("delete failed");
-        removeLocalFile(f.id);
-        emitFileDeleted(f.id);
-      }
+      const headers = f.delete_token ? { "X-Delete-Token": f.delete_token } : {};
+      const res = await fetch(publicFile(f.id), { method: "DELETE", headers });
+      // A 404 means the file was already removed; finish the UI either way.
+      if (!res.ok && res.status !== 404) throw new Error("delete failed");
+      removeLocalFile(f.id);
+      emitFileDeleted(f.id);
       el.classList.add("exiting");
       announce(t(locale, "sr.file_deleted"));
       playSound("close");
