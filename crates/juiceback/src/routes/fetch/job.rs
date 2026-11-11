@@ -237,6 +237,31 @@ pub(crate) async fn fetch_via(
                     );
                     return Err(cobalt::instance_failure_message(&code));
                 }
+                if matches!(
+                    code.as_str(),
+                    "error.api.fetch.empty" | "error.api.fetch.fail" | "error.api.fetch.critical"
+                ) {
+                    if let Some((media_url, filename)) = instagram_photo_fallback(source_url) {
+                        tracing::info!(
+                            "fetch job {job_id}: cobalt found no media; trying the Instagram media endpoint"
+                        );
+                        return download_and_store(
+                            state,
+                            user_id,
+                            job_id,
+                            source_url,
+                            ByteSource::Tunnel(media_url),
+                            Some(&filename),
+                            FetchMeta::default(),
+                            opts,
+                            max_size,
+                            default_ttl_hours,
+                            encrypted_ip,
+                            password,
+                        )
+                        .await;
+                    }
+                }
                 return Err(cobalt::friendly_error(&code));
             }
             CobaltResponse::Picker { items } => {
@@ -308,6 +333,34 @@ pub(crate) async fn fetch_via(
             other => return other,
         }
     }
+}
+
+/// Instagram's public `/media/` redirect still serves photo bytes when cobalt's
+/// extractor hits a login wall, so use it as a last resort for photo posts.
+fn instagram_photo_fallback(raw: &str) -> Option<(String, String)> {
+    let parsed = url::Url::parse(raw.trim()).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if host != "instagram.com" && !host.ends_with(".instagram.com") {
+        return None;
+    }
+
+    let mut segments = parsed.path_segments()?.filter(|s| !s.is_empty());
+    if segments.next()? != "p" {
+        return None;
+    }
+    let id = segments.next()?;
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+
+    Some((
+        format!("https://www.instagram.com/p/{id}/media/?size=l"),
+        format!("instagram_{id}.jpg"),
+    ))
 }
 
 fn is_rescue_err(err: &str) -> bool {
