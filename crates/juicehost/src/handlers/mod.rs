@@ -15,6 +15,7 @@ pub mod shell;
 pub mod stats;
 pub mod store;
 pub mod zip_entry;
+pub(crate) mod zip_index;
 pub mod zip_list;
 
 #[cfg(test)]
@@ -38,4 +39,4 @@ pub use rename::{RenameRequest, rename_file};
 pub use serve::{serve_file_download, serve_file_wildcard};
 pub(crate) use stats::viewer_ip_middleware;
 pub use store::{store_file, store_file_streaming, store_file_ticket};
-pub use zip_entry::zip_entry_file;
+pub use zip_entry::{zip_entry_file, zip_index_json};

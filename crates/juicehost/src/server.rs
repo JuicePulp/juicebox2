@@ -222,6 +222,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let files_router = Router::new()
         .route("/api/zipentry/{id}", get(handlers::zip_entry_file))
+        .route("/api/zipindex/{id}", get(handlers::zip_index_json))
         .route("/f/{*path}", get(handlers::serve_file_wildcard))
         .route("/d/{*path}", get(handlers::serve_file_download))
         .route("/v/{*path}", get(handlers::preview_file_wildcard))

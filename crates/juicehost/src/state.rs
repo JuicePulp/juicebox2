@@ -7,7 +7,10 @@ use dashmap::DashMap;
 
 use crate::{
     config::{AudioEmbedSettings, Config},
-    handlers::stats::HitKey,
+    handlers::{
+        stats::HitKey,
+        zip_index::{ZipIndexCache, ZipRateLimiter},
+    },
     live::LiveUploads,
     storage::{R2Store, StorageBackend},
 };
@@ -60,6 +63,12 @@ pub struct AppState {
     /// `ServiceUnavailable`.
     pub upload_semaphore: Arc<tokio::sync::Semaphore>,
     pub download_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Bounds synchronous deflate work and its per-request memory cost.
+    pub zip_decode_semaphore: Arc<tokio::sync::Semaphore>,
+
+    pub(crate) zip_index_cache: Arc<ZipIndexCache>,
+
+    pub(crate) zip_rate_limiter: Arc<ZipRateLimiter>,
 
     /// Optional R2 hot tier; `None` when unconfigured or when the client failed
     /// to build.
@@ -113,6 +122,9 @@ impl AppState {
             download_semaphore: Arc::new(tokio::sync::Semaphore::new(
                 config.max_concurrent_downloads,
             )),
+            zip_decode_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            zip_index_cache: Arc::new(DashMap::new()),
+            zip_rate_limiter: Arc::new(ZipRateLimiter::new()),
             r2: match (
                 config.r2_bucket.as_deref(),
                 config.r2_endpoint.as_deref(),

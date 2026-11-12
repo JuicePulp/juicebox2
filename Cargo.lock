@@ -2255,6 +2255,7 @@ dependencies = [
  "mimalloc",
  "mime_guess",
  "object_store",
+ "percent-encoding",
  "reqwest",
  "sentry",
  "sentry-tracing",

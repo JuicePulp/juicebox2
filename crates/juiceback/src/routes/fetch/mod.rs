@@ -1,4 +1,5 @@
 pub mod bun;
+mod bundle;
 pub mod handlers;
 pub mod job;
 pub mod meta;

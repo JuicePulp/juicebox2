@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::{
     bun::{bun_fetch_configured, run_bun_tier},
+    bundle::{bundle_picker, picker_item_filename},
     meta,
     store::download_and_store,
     types::{ByteSource, FetchMeta, FetchResult},
@@ -265,10 +266,38 @@ pub(crate) async fn fetch_via(
                 return Err(cobalt::friendly_error(&code));
             }
             CobaltResponse::Picker { items } => {
-                return Err(format!(
-                    "found {} media items at that link; pickers aren't supported yet",
-                    items.len()
-                ));
+                if items.len() == 1 {
+                    let item = &items[0];
+                    download_and_store(
+                        state,
+                        user_id,
+                        job_id,
+                        source_url,
+                        ByteSource::Tunnel(item.url.clone()),
+                        Some(picker_item_filename(item)),
+                        FetchMeta::default(),
+                        opts,
+                        max_size,
+                        default_ttl_hours,
+                        encrypted_ip.clone(),
+                        password.clone(),
+                    )
+                    .await
+                } else {
+                    bundle_picker(
+                        state,
+                        user_id,
+                        job_id,
+                        source_url,
+                        &items,
+                        opts,
+                        max_size,
+                        default_ttl_hours,
+                        encrypted_ip.clone(),
+                        password.clone(),
+                    )
+                    .await
+                }
             }
             CobaltResponse::LocalProcessing { service } => {
                 return Err(format!(

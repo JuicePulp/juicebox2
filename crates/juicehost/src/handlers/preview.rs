@@ -13,6 +13,7 @@ use super::{
     common::{NO_STORE, backend_request},
     shell::{BackendFileMeta, ShellMode, protected_shell_response},
     stats::{ViewerIp, report_file_hit},
+    zip_index::{self, Resolved},
 };
 use crate::{
     error::{frozen_html, not_found_html},
@@ -841,7 +842,7 @@ fn render_preview(
             "__APP_JS__",
             if page.kind == PreviewKind::Text {
                 PREVIEW_APP_JS.trim_end()
-            } else if page.kind == PreviewKind::Zip {
+            } else if page.kind == PreviewKind::Zip && !page.file_id.is_empty() {
                 ZIP_APP_JS.trim_end()
             } else {
                 ""
@@ -872,7 +873,270 @@ fn render_preview(
         .replace("__UPLOAD_LABEL__", &escape_html(&upload_label))
         .replace("__UPLOAD_WIDTH__", &upload_width)
         .replace("__FILE_ID__", &escape_html(&page.file_id))
-        .replace("__LIVE_JS__", LIVE_UPLOAD_JS.trim_end())
+        .replace(
+            "__LIVE_JS__",
+            if page.file_id.is_empty() {
+                ""
+            } else {
+                LIVE_UPLOAD_JS.trim_end()
+            },
+        )
+}
+
+fn zip_folder_listing_html(
+    index: &zip_index::ZipIndex,
+    folder: &str,
+    download_url: &str,
+) -> String {
+    let (dirs, files) = index.children(folder);
+    let archive = escape_html(&index.archive_name);
+    let mut crumbs = format!("<a href=\"/v/{archive}\">root</a>");
+    let mut acc = String::new();
+    for segment in folder.split('/').filter(|s| !s.is_empty()) {
+        if !acc.is_empty() {
+            acc.push('/');
+        }
+        acc.push_str(segment);
+        crumbs.push_str(&format!(
+            " / <a href=\"/v/{archive}/z/{}/\">{}</a>",
+            zip_index::encode_entry_path(&acc),
+            escape_html(segment)
+        ));
+    }
+    let parent = if folder.is_empty() {
+        String::new()
+    } else {
+        let parent_path = folder.rsplit_once('/').map_or("", |(parent, _)| parent);
+        let href = if parent_path.is_empty() {
+            format!("/v/{archive}")
+        } else {
+            format!(
+                "/v/{archive}/z/{}/",
+                zip_index::encode_entry_path(parent_path)
+            )
+        };
+        format!("<a class=\"zip-up\" href=\"{href}\">..</a> ")
+    };
+
+    const SHOWN: usize = 500;
+    let available = dirs.len() + files.len();
+    let mut rows = String::new();
+    let mut shown = 0usize;
+    for dir in dirs.iter().take(SHOWN) {
+        let path = if folder.is_empty() {
+            dir.clone()
+        } else {
+            format!("{folder}/{dir}")
+        };
+        let href = format!("/v/{archive}/z/{}/", zip_index::encode_entry_path(&path));
+        rows.push_str(&format!(
+            "<tr class=\"zip-dir\"><td class=\"zip-ico\">{}</td><td class=\"zip-name\"><a href=\"{href}\">{}</a></td><td class=\"zip-size\">-</td><td class=\"zip-mod\">-</td></tr>",
+            juiceutils::icons::file_icon(dir, true),
+            escape_html(dir),
+        ));
+        shown += 1;
+    }
+    for entry in files.iter().take(SHOWN.saturating_sub(shown)) {
+        let (preview, _, _, _) = zip_index::entry_urls(index, entry);
+        let size = entry.entry.size.map_or_else(|| "?".to_string(), human_size);
+        rows.push_str(&format!(
+            "<tr class=\"zip-file\" data-path=\"{}\" data-dir=\"0\"><td class=\"zip-idx\">{}</td><td class=\"zip-ico\">{}</td><td class=\"zip-name\"><a href=\"{}\">{}</a></td><td class=\"zip-size\">{}</td><td class=\"zip-mod\">{}</td></tr>",
+            escape_html(&entry.entry.name),
+            entry.index,
+            juiceutils::icons::file_icon(&entry.basename, false),
+            escape_html(&preview),
+            escape_html(&entry.basename),
+            escape_html(&size),
+            escape_html(entry.entry.modified.as_deref().unwrap_or("-")),
+        ));
+        shown += 1;
+    }
+    let total = index.total_size();
+    let more = available;
+    let more_html = if more > shown {
+        format!("<p class=\"zip-more\">+{} more files</p>", more - shown)
+    } else {
+        String::new()
+    };
+    format!(
+        "<div class=\"zip-list\"><nav class=\"zip-crumbs\">{parent}{crumbs}</nav><p class=\"zip-head\">{} files - {}</p><div class=\"zip-scroll\"><table class=\"zip-table\" data-static=\"1\"><thead><tr><th>#</th><th></th><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>{rows}</tbody></table></div>{more_html}<a class=\"dl-btn\" href=\"{}\">Download archive</a></div>",
+        index.files.len(),
+        human_size(total),
+        escape_html(download_url),
+    )
+}
+
+fn zip_ambiguous_html(index: &zip_index::ZipIndex, entries: &[zip_index::IndexedEntry]) -> String {
+    let mut links = String::new();
+    for entry in entries {
+        let (preview, _, _, _) = zip_index::entry_urls(index, entry);
+        links.push_str(&format!(
+            "<li><a href=\"{}\">{}</a></li>",
+            escape_html(&preview),
+            escape_html(&entry.entry.name)
+        ));
+    }
+    format!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Multiple matches - Juicebox²</title><style>body{{font-family:system-ui,sans-serif;max-width:52rem;margin:3rem auto;padding:0 1rem}}li{{margin:.4rem 0}}</style></head><body><h1>Multiple files match</h1><p>Choose the file you meant:</p><ul>{links}</ul></body></html>"
+    )
+}
+
+fn zip_rate_limited(delay: u64) -> Response<Body> {
+    use axum::http::header;
+    Response::builder()
+        .status(axum::http::StatusCode::TOO_MANY_REQUESTS)
+        .header(header::RETRY_AFTER, delay.to_string())
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, NO_STORE)
+        .body(Body::from(
+            "<!DOCTYPE html><html><body><h1>Too many ZIP requests</h1><p>Slow down and try again.</p></body></html>",
+        ))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
+}
+
+async fn zip_entry_preview(
+    state: Arc<AppState>,
+    headers: HeaderMap,
+    method: Method,
+    id: &str,
+    selector: &str,
+    viewer_ip: Option<String>,
+) -> Result<Response<Body>, crate::error::JuicehostError> {
+    use crate::error::JuicehostError;
+
+    let meta = state
+        .storage
+        .stat(id)
+        .await
+        .map_err(|_| JuicehostError::NotFound)?;
+    if !meta.extension.eq_ignore_ascii_case("zip") {
+        return Err(JuicehostError::NotFound);
+    }
+    match super::shell::gate_decision(&state, id, ShellMode::View, None, false).await {
+        super::shell::GateDecision::Respond(_) | super::shell::GateDecision::Ciphertext => {
+            return Err(JuicehostError::Forbidden);
+        }
+        super::shell::GateDecision::HotServe { .. }
+        | super::shell::GateDecision::ServeLocal { .. } => {}
+    }
+
+    let index = zip_index::load_index(&state, id, &meta)
+        .await
+        .ok_or(JuicehostError::NotFound)?;
+    let resolved = zip_index::resolve(&index, selector);
+    if let Resolved::File(entry) = &resolved
+        && is_bot(&headers)
+        && !is_discordbot(&headers)
+    {
+        return super::zip_entry::zip_entry_bytes(
+            &state,
+            &headers,
+            method,
+            id,
+            &entry.entry.name,
+            false,
+            viewer_ip,
+        )
+        .await;
+    }
+    if let Some(delay) = state.zip_rate_limiter.check(viewer_ip.as_deref()) {
+        return Ok(zip_rate_limited(delay));
+    }
+
+    match resolved {
+        Resolved::Root | Resolved::Dir(_) => {
+            let folder = match &resolved {
+                Resolved::Dir(folder) => folder.clone(),
+                _ => String::new(),
+            };
+            let encoded = zip_index::encode_entry_path(&folder);
+            let page_url = if folder.is_empty() {
+                format!("/v/{}", index.archive_name)
+            } else {
+                format!("/v/{}/z/{encoded}/", index.archive_name)
+            };
+            let raw_url = format!("/f/{}", index.archive_name);
+            let download_url = format!("/d/{}", index.archive_name);
+            let zip_html = Some(zip_folder_listing_html(&index, &folder, &download_url));
+            let page = PreviewPage {
+                kind: PreviewKind::Zip,
+                title: format!("{} - Juicebox²", index.archive_name),
+                filename: index.archive_name.clone(),
+                display_name: if folder.is_empty() {
+                    index.archive_name.clone()
+                } else {
+                    format!("{} / {folder}", index.archive_name)
+                },
+                author: None,
+                size_label: format!(
+                    "{} files - {}",
+                    index.files.len(),
+                    human_size(index.total_size())
+                ),
+                raw_url,
+                download_url,
+                page_url,
+                file_id: String::new(),
+                mime: "application/zip".to_string(),
+                extension: "zip".to_string(),
+                zip_html,
+                text_head: None,
+                uploading: None,
+            };
+            Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CACHE_CONTROL, NO_STORE)
+                .body(Body::from(render_preview(&page, &headers, None)))
+                .map_err(|_| JuicehostError::Internal)
+        }
+        Resolved::File(entry) => {
+            let (preview_url, raw_url, download_url, _) = zip_index::entry_urls(&index, &entry);
+            let extension = entry
+                .entry
+                .name
+                .rsplit_once('.')
+                .map_or(String::new(), |(_, ext)| ext.to_ascii_lowercase());
+            let mime = storage::guess_mime(&extension);
+            let kind = preview_kind(&mime);
+            let text_head = if kind == PreviewKind::Text {
+                super::zip_entry::read_entry_head(&state, id, &meta, &entry, TEXT_PREVIEW_MAX_BYTES)
+                    .await
+            } else {
+                None
+            };
+            let page = PreviewPage {
+                kind,
+                title: format!("{} - Juicebox²", entry.basename),
+                filename: entry.basename.clone(),
+                display_name: entry.entry.name.clone(),
+                author: None,
+                size_label: entry.entry.size.map_or_else(|| "?".to_string(), human_size),
+                raw_url,
+                download_url,
+                page_url: preview_url,
+                file_id: String::new(),
+                mime,
+                extension,
+                zip_html: None,
+                text_head,
+                uploading: None,
+            };
+            Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CACHE_CONTROL, NO_STORE)
+                .body(Body::from(render_preview(&page, &headers, None)))
+                .map_err(|_| JuicehostError::Internal)
+        }
+        Resolved::Ambiguous(entries) => Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(header::CACHE_CONTROL, NO_STORE)
+            .body(Body::from(zip_ambiguous_html(&index, &entries)))
+            .map_err(|_| JuicehostError::Internal),
+        Resolved::NotFound => Err(JuicehostError::NotFound),
+    }
 }
 
 #[tracing::instrument(skip_all)]
@@ -885,6 +1149,12 @@ pub async fn preview_file_wildcard(
     Path(path): Path<String>,
 ) -> Result<Response<Body>, crate::error::JuicehostError> {
     use crate::error::JuicehostError;
+
+    if let Some((archive, selector)) = zip_index::parse_zip_selector(&path)
+        && let Some((id, _)) = zip_index::archive_id_from_url_path(&archive)
+    {
+        return zip_entry_preview(state, headers, method, &id, &selector, viewer.0).await;
+    }
 
     let (id, ext) = match path.rsplit_once('.') {
         Some((id, ext)) if !id.is_empty() && !ext.is_empty() => (id.to_string(), ext.to_string()),
@@ -1197,7 +1467,12 @@ async fn preview_file_inner(
         None
     };
 
-    let zip_html = if kind == PreviewKind::Zip {
+    let zip_is_indexed = kind == PreviewKind::Zip && meta.extension.eq_ignore_ascii_case("zip");
+    let zip_html = if zip_is_indexed {
+        zip_index::load_index(&state, id, &meta)
+            .await
+            .map(|index| zip_folder_listing_html(&index, "", &download_url))
+    } else if kind == PreviewKind::Zip {
         super::zip_list::load_archive_entries(&state.storage, id, &filename, meta.size)
             .await
             .map(|listing| zip_listing_html(id, &download_url, &listing.entries, listing.locked))
@@ -1219,7 +1494,11 @@ async fn preview_file_inner(
         raw_url,
         download_url,
         page_url,
-        file_id: id.to_string(),
+        file_id: if zip_is_indexed {
+            String::new()
+        } else {
+            id.to_string()
+        },
         mime,
         extension,
         zip_html,

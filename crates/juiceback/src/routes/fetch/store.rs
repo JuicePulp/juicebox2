@@ -228,7 +228,7 @@ fn tunnel_url_host_port(url: &str) -> Option<(String, u16)> {
 
 /// Redirects are followed by hand so every hop passes the SSRF check; cobalt
 /// hosts are trusted because tunnels point at localhost.
-async fn fetch_tunnel_response(
+pub(crate) async fn fetch_tunnel_response(
     client: &reqwest::Client,
     state: &Arc<AppState>,
     initial_url: &str,

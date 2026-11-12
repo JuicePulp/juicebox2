@@ -85,7 +85,7 @@ fn encode_rfc5987(value: &str) -> String {
     out
 }
 
-fn content_disposition_value(disposition: &str, name: &str) -> String {
+pub(crate) fn content_disposition_value(disposition: &str, name: &str) -> String {
     if name.is_ascii() {
         return format!("{disposition}; filename=\"{name}\"");
     }
@@ -565,6 +565,14 @@ pub async fn serve_file_wildcard(
     Path(path): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response<Body>, JuicehostError> {
+    if let Some((archive, selector)) = super::zip_index::parse_zip_selector(&path)
+        && let Some((id, _)) = super::zip_index::archive_id_from_url_path(&archive)
+    {
+        return super::zip_entry::zip_entry_bytes(
+            &state, &headers, method, &id, &selector, false, viewer.0,
+        )
+        .await;
+    }
     let id = path.split('.').next().unwrap_or(&path).to_string();
     if params.get("inline").is_some_and(|value| value == "1") {
         return super::serve_stored_bytes_inline(&state, &headers, &id).await;
@@ -580,6 +588,14 @@ pub async fn serve_file_download(
     headers: HeaderMap,
     Path(path): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
+    if let Some((archive, selector)) = super::zip_index::parse_zip_selector(&path)
+        && let Some((id, _)) = super::zip_index::archive_id_from_url_path(&archive)
+    {
+        return super::zip_entry::zip_entry_bytes(
+            &state, &headers, method, &id, &selector, true, viewer.0,
+        )
+        .await;
+    }
     let id = path.split('.').next().unwrap_or(&path).to_string();
     serve_file_inner(state, headers, method, id, true, viewer.0, &path).await
 }

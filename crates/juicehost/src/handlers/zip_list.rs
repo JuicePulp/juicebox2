@@ -5,6 +5,7 @@ use futures::StreamExt;
 
 use crate::storage::StorageBackend;
 
+#[derive(Clone)]
 pub struct ZipEntry {
     pub name: String,
     pub size: Option<u64>,

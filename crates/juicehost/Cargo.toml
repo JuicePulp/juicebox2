@@ -28,6 +28,7 @@ libc.workspace = true
 mimalloc = { workspace = true, optional = true }
 mime_guess.workspace = true
 object_store.workspace = true
+percent-encoding.workspace = true
 reqwest.workspace = true
 sentry = { workspace = true, features = ["tower", "tower-axum-matched-path", "logs", "metrics"] }
 sentry-tracing = { workspace = true, features = ["logs"] }
