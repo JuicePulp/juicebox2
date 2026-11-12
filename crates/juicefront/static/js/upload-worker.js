@@ -20,7 +20,10 @@ function emit(message) {
   for (const port of ports) {
     try {
       port.postMessage(message);
-    } catch {}
+    } catch {
+      // Closed ports can linger because MessagePort has no standard close event.
+      ports.delete(port);
+    }
   }
 }
 function entryItem(item) {
@@ -184,6 +187,10 @@ ctx.onconnect = (event) => {
     } else if (msg.type === "ping") {
       // Ping/pong is the client's liveness check; a missed pong triggers a main-thread fallback.
       try { port.postMessage({ type: "pong" }); } catch {}
+    } else if (msg.type === "disconnect") {
+      // The page is going away; drop its port so broadcast work stays proportional to open tabs.
+      ports.delete(port);
+      try { port.close(); } catch {}
     }
   };
   port.start();

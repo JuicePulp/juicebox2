@@ -49,7 +49,8 @@ function hydrateRecord(record) {
       errorCode: "",
       errorMessage: ""
     };
-    queueItemNow(paused);
+    // Do not write the paused state yet: another tab's worker may still be uploading it.
+    // The worker snapshot promotes it back to active; a failed handshake leaves it paused.
     return paused;
   }
   if (record.state === "paused")
@@ -67,7 +68,10 @@ if (typeof window !== "undefined") {
     }
   } catch {}
   // `pagehide` rather than `beforeunload` so iOS Safari still flushes the queue.
-  window.addEventListener("pagehide", () => {
+  window.addEventListener("pagehide", (event) => {
+    if (!event.persisted) {
+      try { port?.postMessage({ type: "disconnect" }); } catch {}
+    }
     void flushQueue();
   });
 }
@@ -130,6 +134,7 @@ function reset(snapshot) {
 }
 let port = null;
 let workerDead = false;
+let workerRetryAt = 0;
 let workerHeard = false;
 let workerValidating = false;
 const workerInputs = new Map;
@@ -139,6 +144,8 @@ const workerAcked = new Set;
 const WORKER_ACK_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 8000;
 const PONG_TIMEOUT_MS = 6000;
+// A failed handshake disables the worker only briefly; another tab may have fixed it.
+const WORKER_RETRY_MS = 30000;
 const WORKER_INSTANCE_NAME = (() => {
   try {
     const version = document.getElementById("server-config")?.getAttribute("data-version") || "";
@@ -160,7 +167,9 @@ function clearWorkerTimer(id) {
 function noteWorkerAlive(id) {
   workerHeard = true;
   workerValidating = false;
-  if (!id)
+  // Only this tab's enqueues count. A tab displaying another tab's upload must not
+  // heartbeat for it, or a false timeout here would incorrectly pause that upload.
+  if (!id || !workerInputs.has(id))
     return;
   clearWorkerTimer(id);
   workerAcked.add(id);
@@ -219,6 +228,7 @@ function restartWithoutWorker() {
   }
   port = null;
   workerDead = true;
+  workerRetryAt = Date.now() + WORKER_RETRY_MS;
   workerValidating = false;
   for (const id of workerInputs.keys())
     clearWorkerTimer(id);
@@ -293,7 +303,11 @@ function workerScriptUrl() {
 // One SharedWorker per version; no hello within 4 s means upload locally.
 function ensurePort() {
   if (typeof window === "undefined") return null;
-  if (workerDead) return null;
+  if (workerDead) {
+    if (Date.now() < workerRetryAt) return null;
+    workerDead = false;
+    pingStartedAt = 0;
+  }
   if (port) return port;
   try {
     if (typeof SharedWorker === "undefined") return null;
