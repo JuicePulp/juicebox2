@@ -191,7 +191,9 @@ pub async fn ciphertext_file(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response<Body>, JuicehostError> {
-    serve_stored_bytes(&state, &headers, &id).await
+    // The backend decrypts ciphertext for `/file/{id}/content`; it must receive
+    // every requested byte even when the public range-response cap is smaller.
+    serve_stored_bytes_with_limit(&state, &headers, &id, u64::MAX).await
 }
 
 pub(crate) async fn serve_stored_bytes_inline(
@@ -215,6 +217,15 @@ pub(crate) async fn serve_stored_bytes(
     state: &Arc<AppState>,
     headers: &HeaderMap,
     id: &str,
+) -> Result<Response<Body>, JuicehostError> {
+    serve_stored_bytes_with_limit(state, headers, id, state.max_range_response_bytes).await
+}
+
+async fn serve_stored_bytes_with_limit(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    id: &str,
+    max_range_bytes: u64,
 ) -> Result<Response<Body>, JuicehostError> {
     use futures::StreamExt as _;
 
@@ -247,7 +258,7 @@ pub(crate) async fn serve_stored_bytes(
         if let Some(range_header) = headers.get(axum::http::header::RANGE)
             && let Ok(range_val) = range_header.to_str()
         {
-            match parse_range(range_val, total_size, state.max_range_response_bytes) {
+            match parse_range(range_val, total_size, max_range_bytes) {
                 RangeResult::Satisfiable(start, end) => {
                     if let Ok(stream) = r2.get_range_stream(key, start, end).await {
                         return Response::builder()
@@ -304,7 +315,7 @@ pub(crate) async fn serve_stored_bytes(
     if let Some(range_header) = headers.get(axum::http::header::RANGE)
         && let Ok(range_val) = range_header.to_str()
     {
-        match parse_range(range_val, total_size, state.max_range_response_bytes) {
+        match parse_range(range_val, total_size, max_range_bytes) {
             RangeResult::Satisfiable(start, end) => {
                 let stream = state
                     .storage

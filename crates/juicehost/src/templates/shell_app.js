@@ -62,14 +62,42 @@
       for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out;
     }
+    // The storage host caps a single range response (max_range_response_mb),
+    // so large ciphertext reads must be assembled from several requests.
+    var RANGE_CHUNK_MAX = 8 * 1024 * 1024;
     async function fetchRange(url, start, len, extraHeaders) {
-      var headers = extraHeaders || {};
-      headers["Range"] = "bytes=" + start + "-" + (start + len - 1);
-      var res = await fetch(url, { headers: headers, cache: "no-store" });
-      if (res.status !== 206 && !(start === 0 && res.status === 200)) {
+      if (len === 0) return new Uint8Array(0);
+      var out = new Uint8Array(len);
+      var filled = 0;
+      while (filled < len) {
+        var chunkStart = start + filled;
+        var chunkEnd = Math.min(start + len - 1, chunkStart + RANGE_CHUNK_MAX - 1);
+        var headers = {};
+        if (extraHeaders) {
+          for (var k in extraHeaders) {
+            if (Object.prototype.hasOwnProperty.call(extraHeaders, k)) headers[k] = extraHeaders[k];
+          }
+        }
+        headers["Range"] = "bytes=" + chunkStart + "-" + chunkEnd;
+        var res = await fetch(url, { headers: headers, cache: "no-store" });
+        if (res.status === 206) {
+          var bytes = new Uint8Array(await res.arrayBuffer());
+          if (bytes.length === 0) throw new Error("ciphertext truncated");
+          var take = Math.min(bytes.length, len - filled);
+          out.set(bytes.subarray(0, take), filled);
+          filled += take;
+          continue;
+        }
+        if (res.status === 200 && chunkStart === 0) {
+          var whole = new Uint8Array(await res.arrayBuffer());
+          var takeWhole = Math.min(whole.length, len);
+          out.set(whole.subarray(0, takeWhole), 0);
+          filled = takeWhole;
+          continue;
+        }
         throw new Error("range request failed: " + res.status);
       }
-      return new Uint8Array(await res.arrayBuffer());
+      return out;
     }
     function parseHeader(bytes) {
       if (bytes.length < HEADER || bytes[0] !== 0x4A || bytes[1] !== 0x42 || bytes[2] !== 0x43 || bytes[3] !== 0x31 || bytes[4] !== 16) {
