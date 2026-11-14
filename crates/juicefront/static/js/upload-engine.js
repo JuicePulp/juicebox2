@@ -103,7 +103,8 @@ let sessionBootstrap = null;
  * Establish the anonymous session cookie before any upload starts. Two tabs
  * (or two files) that reserve at the same time otherwise get different
  * one-off anonymous identities, and the completion ticket belongs to only one
- * of them. Web Locks serializes the bootstrap across tabs and workers.
+ * of them. Web Locks serializes the bootstrap across tabs and workers, and the
+ * promise is shared by every upload started in this context.
  */
 export function ensureUploadSession() {
   if (sessionBootstrap)
