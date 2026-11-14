@@ -784,20 +784,74 @@ fn player_kind(page: &PreviewPage) -> Option<PlayerKind> {
     }
 }
 
+fn needs_file_load(page: &PreviewPage) -> bool {
+    let extension = page.extension.to_ascii_lowercase();
+    is_midi_extension(&extension) || is_tracker_extension(&extension)
+}
+
 fn player_stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
+    // MIDI and tracker modules are pattern programs, not audio streams: the
+    // player must fetch the bytes and hand them to loadFile() so it can run
+    // FluidSynth / libopenmpt. A remote src goes straight to the HTML or
+    // codek decoder, which cannot open either format.
+    let (src_attr, data_attr) = if needs_file_load(page) {
+        (
+            String::new(),
+            format!(
+                " data-src=\"{raw}\" data-filename=\"{}\"",
+                escape_html(&page.filename)
+            ),
+        )
+    } else {
+        (format!(" src=\"{raw}\""), String::new())
+    };
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\" src=\"{raw}\" worker-url=\"/api/player/decoder.worker.js?v=20261114a\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} worker-url=\"/api/player/decoder.worker.js?v=20261114a\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
         label = author_attr(page, "aria-label"),
     )
 }
 
-fn player_script_html(page: &PreviewPage) -> &'static str {
-    if player_kind(page).is_some() {
-        "<script type=\"module\" src=\"/api/player/index.js?v=20261114a\"></script>"
-    } else {
-        ""
+fn player_script_html(page: &PreviewPage) -> String {
+    if player_kind(page).is_none() {
+        return String::new();
     }
+    let mut html =
+        String::from("<script type=\"module\" src=\"/api/player/index.js?v=20261114a\"></script>");
+    if needs_file_load(page) {
+        // Some uploads named .mid are actually WAV renders. Sniff the RIFF
+        // header and let the ordinary audio path play those; only real SMF
+        // data goes through parseMidi/FluidSynth.
+        html.push_str(
+            r#"<script type="module">
+(async () => {
+  const p = document.querySelector('juice-player#media[data-src]');
+  if (!p) return;
+  try {
+    const res = await fetch(p.dataset.src);
+    if (!res.ok) throw new Error('Could not load the file (' + res.status + ')');
+    const blob = await res.blob();
+    let name = p.dataset.filename || 'file';
+    const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+    const wav = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 &&
+      head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x41 &&
+      head[10] === 0x56 && head[11] === 0x45;
+    if (wav) name = name.replace(/\.[^.\/]+$/, '') + '.wav';
+    await p.loadFile(new File([blob], name, { type: wav ? 'audio/wav' : (blob.type || '') }));
+  } catch (e) {
+    const stage = p.parentElement;
+    if (stage) {
+      const note = document.createElement('p');
+      note.className = 'fallback-note';
+      note.textContent = String((e && e.message) || e);
+      stage.appendChild(note);
+    }
+  }
+})();
+</script>"#,
+        );
+    }
+    html
 }
 
 fn stage_html(page: &PreviewPage) -> String {
@@ -927,7 +981,7 @@ fn render_preview(
         .replace("__RAW_URL__", &escape_html(&page.raw_url))
         .replace("__DOWNLOAD_URL__", &escape_html(&page.download_url))
         .replace("__STAGE__", &stage_html(page))
-        .replace("__PLAYER_SCRIPT__", player_script_html(page))
+        .replace("__PLAYER_SCRIPT__", &player_script_html(page))
         .replace("__UPLOAD_HIDDEN__", &upload_hidden)
         .replace("__UPLOAD_LABEL__", &escape_html(&upload_label))
         .replace("__UPLOAD_WIDTH__", &upload_width)
