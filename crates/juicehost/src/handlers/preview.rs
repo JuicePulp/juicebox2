@@ -807,12 +807,38 @@ fn native_fallback_kind(page: &PreviewPage) -> &'static str {
     }
 }
 
+fn player_noscript_html(page: &PreviewPage, raw: &str) -> String {
+    let fallback = match native_fallback_kind(page) {
+        "video" => format!(
+            "<video id=\"media\" controls playsinline preload=\"metadata\" src=\"{raw}\"{label}></video>",
+            label = author_attr(page, "aria-label"),
+        ),
+        "audio" => format!(
+            "<div class=\"audio-hero\" aria-hidden=\"true\">{}</div><audio id=\"media\" controls preload=\"metadata\" src=\"{raw}\"></audio>",
+            juiceutils::icons::AUDIO,
+        ),
+        "image" => format!(
+            "<img id=\"media\" src=\"{raw}\"{label} loading=\"eager\">",
+            label = author_attr(page, "alt"),
+        ),
+        _ => format!(
+            "<p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (this format needs JavaScript).</p>",
+        ),
+    };
+    // Without JavaScript the custom element never upgrades, so hide it and
+    // render the browser's own player directly.
+    format!(
+        "<noscript><style>juice-player#media{{display:none!important}}</style>{fallback}</noscript>",
+    )
+}
+
 fn player_stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
     let fallback_kind = native_fallback_kind(page);
     let fallback_label = page.author.as_deref().map_or(String::new(), |author| {
         format!(" data-fallback-label=\"{}\"", escape_html(author))
     });
+    let fallback_noscript = player_noscript_html(page, &raw);
     // MIDI and tracker modules are pattern programs, not audio streams: the
     // player must fetch the bytes and hand them to loadFile() so it can run
     // FluidSynth / libopenmpt. A remote src goes straight to the HTML or
@@ -829,7 +855,7 @@ fn player_stage_html(page: &PreviewPage) -> String {
         (format!(" src=\"{raw}\""), String::new())
     };
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} data-fallback-kind=\"{fallback_kind}\" data-fallback-src=\"{raw}\"{fallback_label} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} data-fallback-kind=\"{fallback_kind}\" data-fallback-src=\"{raw}\"{fallback_label} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player>{fallback_noscript}",
         label = author_attr(page, "aria-label"),
     )
 }
@@ -900,7 +926,8 @@ fn player_script_html(page: &PreviewPage) -> String {
     mountNative();
   });
   setTimeout(function () {
-    if (!window.customElements || !customElements.get('juice-player')) mountNative();
+    var defined = window.customElements && customElements.get('juice-player');
+    if (!defined || !player.shadowRoot) mountNative();
   }, 12000);
 })();
 </script>"#,
@@ -1873,6 +1900,10 @@ mod tests {
         assert!(html.contains("data-fallback-kind=\"video\""));
         assert!(html.contains("data-fallback-src=\"/f/a.mp4\""));
         assert!(html.contains("__juiceHostFallback"));
+        assert!(
+            html.contains("<noscript><style>juice-player#media{display:none!important}</style>")
+        );
+        assert!(html.contains("<video id=\"media\" controls playsinline"));
         assert!(html.contains("/f/a.mp4"));
         assert!(!html.contains("preview-card"));
         assert!(html.contains("discord:component-embed"));
