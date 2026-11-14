@@ -807,7 +807,7 @@ fn player_stage_html(page: &PreviewPage) -> String {
         (format!(" src=\"{raw}\""), String::new())
     };
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} worker-url=\"/api/player/decoder.worker.js?v=20261114a\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
         label = author_attr(page, "aria-label"),
     )
 }
@@ -817,7 +817,7 @@ fn player_script_html(page: &PreviewPage) -> String {
         return String::new();
     }
     let mut html =
-        String::from("<script type=\"module\" src=\"/api/player/index.js?v=20261114a\"></script>");
+        String::from("<script type=\"module\" src=\"/api/player/index.js?v=20261114b\"></script>");
     if needs_file_load(page) {
         // Some uploads named .mid are actually WAV renders. Sniff the RIFF
         // header and let the ordinary audio path play those; only real SMF
