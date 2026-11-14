@@ -65,6 +65,10 @@
     // The storage host caps a single range response (max_range_response_mb),
     // so large ciphertext reads must be assembled from several requests.
     var RANGE_CHUNK_MAX = 8 * 1024 * 1024;
+    function cacheBusted(url) {
+      var sep = url.indexOf("?") >= 0 ? "&" : "?";
+      return url + sep + "_=" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
     async function fetchRange(url, start, len, extraHeaders) {
       if (len === 0) return new Uint8Array(0);
       var out = new Uint8Array(len);
@@ -79,7 +83,7 @@
           }
         }
         headers["Range"] = "bytes=" + chunkStart + "-" + chunkEnd;
-        var res = await fetch(url, { headers: headers, cache: "no-store" });
+        var res = await fetch(cacheBusted(url), { headers: headers, cache: "no-store" });
         if (res.status === 206) {
           var bytes = new Uint8Array(await res.arrayBuffer());
           if (bytes.length === 0) throw new Error("ciphertext truncated");
@@ -148,10 +152,47 @@
     async function importDek(b64) {
       return crypto.subtle.importKey("raw", b64ToBytes(b64), { name: "AES-GCM" }, false, ["decrypt"]);
     }
-    function showBlob(blob, kind) {
-      var url = URL.createObjectURL(blob);
+    var TRACKER_EXTENSIONS = " mod xm s3m it mptm mtm stm med 669 far okt ult mo3 amf dsm dbm umx mt2 psm j2b gdm imf stx ptm sfx wow ";
+    var playerModule = null;
+    function extensionOf(name) {
+      var dot = (name || "").lastIndexOf(".");
+      return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+    }
+    function loadJuicePlayer() {
+      if (window.customElements && customElements.get("juice-player")) return Promise.resolve();
+      if (!playerModule) {
+        playerModule = import("/api/player/index.js").catch(function (err) {
+          playerModule = null;
+          throw err;
+        });
+      }
+      return playerModule;
+    }
+    async function showBlob(blob, kind) {
       card.hidden = true;
-      if (kind === "image") {
+      if (kind === "video" || kind === "audio" || kind === "flash" || kind === "midi" || kind === "tracker" || kind === "animation") {
+        try {
+          await loadJuicePlayer();
+          var player = document.createElement("juice-player");
+          player.id = "media";
+          player.className = "juice-player";
+          player.setAttribute("worker-url", "/api/player/decoder.worker.js");
+          player.setAttribute("soundfont-url", "/api/player/gm.sf2");
+          player.setAttribute("ruffle-url", "/api/player/ruffle/ruffle.js");
+          player.setAttribute("hide-empty", "");
+          player.hideEmpty = true;
+          stage.appendChild(player);
+          var file = new File([blob], CFG.filename || "file", { type: blob.type || CFG.mime });
+          await player.loadFile(file);
+          return;
+        } catch (e) {
+          var failed = document.getElementById("media");
+          if (failed) failed.remove();
+          if (kind === "flash" || kind === "midi" || kind === "tracker") throw e;
+        }
+      }
+      var url = URL.createObjectURL(blob);
+      if (kind === "image" || kind === "animation") {
         var img = document.createElement("img");
         img.id = "media"; img.src = url; img.alt = CFG.filename;
         stage.appendChild(img);
@@ -179,7 +220,12 @@
     function showRawBlob(blob) {
       window.location.replace(URL.createObjectURL(blob));
     }
-    function kindOf(mime) {
+    function kindOf(mime, filename) {
+      var ext = extensionOf(filename || CFG.filename || "");
+      if (ext === "swf") return "flash";
+      if (ext === "mid" || ext === "midi" || ext === "rmi" || ext === "kar") return "midi";
+      if (TRACKER_EXTENSIONS.indexOf(" " + ext + " ") >= 0) return "tracker";
+      if (ext === "gif" || ext === "apng" || ext === "webp" || ext === "avif") return "animation";
       var base = (mime || "").split(";")[0].trim();
       if (base.indexOf("video/") === 0) return "video";
       if (base.indexOf("audio/") === 0) return "audio";
@@ -357,7 +403,7 @@
     
     
     
-    function renderNative(blob, kind, withDownload) {
+    async function renderNative(blob, kind, withDownload) {
       card.hidden = true;
       if (topbar && !withDownload) topbar.style.display = "none";
       document.title = CFG.filename + " - Juicebox²";
@@ -374,7 +420,7 @@
         }).catch(function () { say("Could not render the file.", true); });
         return;
       }
-      showBlob(blob, kind);
+      await showBlob(blob, kind);
       var media = document.getElementById("media");
       if (media) { media.style.width = "100%"; media.style.height = "100%"; }
       if (withDownload) addFloatDl(withDownload);
@@ -416,18 +462,18 @@
       if (h.v1) {
         if (h.plainLen > 512 * 1024 * 1024) throw new Error("File is too large to open in the browser.");
         say("Decrypting...");
-        renderNative(await decryptFull(h.key, h.plainLen), kindOf(CFG.mime), false);
+        await renderNative(await decryptFull(h.key, h.plainLen), kindOf(CFG.mime, CFG.filename), false);
         return;
       }
       say("Opening...");
       var res = await fetch(CFG.contentUrl, { headers: { "X-File-Password": h.password }, cache: "no-store" });
       if (res.status === 403) throw new Error("Wrong password.");
       if (!res.ok) throw new Error("Open failed (" + res.status + ").");
-      renderNative(await res.blob(), kindOf(CFG.mime), false);
+      await renderNative(await res.blob(), kindOf(CFG.mime, CFG.filename), false);
     }
 
     async function v1Preview(key, plainLen) {
-      var kind = kindOf(CFG.mime);
+      var kind = kindOf(CFG.mime, CFG.filename);
       if (kind === "text") {
         var end = Math.min(plainLen, TEXT_PREVIEW_MAX);
         if (end === 0) { showText(""); say(""); return; }
@@ -456,7 +502,7 @@
         return;
       }
       say("Decrypting...");
-      showBlob(await decryptFull(key, plainLen), kind);
+      await showBlob(await decryptFull(key, plainLen), kind);
       say("");
     }
 
@@ -481,7 +527,7 @@
         downloadComplete();
         return;
       }
-      var kind = kindOf(CFG.mime);
+      var kind = kindOf(CFG.mime, CFG.filename);
       if (CFG.mode === "view") {
         say("Opening...");
         var r0 = await fetch(CFG.contentUrl, { headers: headers, cache: "no-store" });
@@ -518,7 +564,7 @@
           return downloadHeld(held);
         });
       } else {
-        showBlob(blob2, kind);
+        await showBlob(blob2, kind);
         say("");
       }
     }

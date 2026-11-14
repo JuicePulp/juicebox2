@@ -143,7 +143,7 @@ pub async fn add_security_headers(
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
                 HeaderValue::from_static(
-                    "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-ancestors 'none'",
+                    "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' http: https:; frame-ancestors 'none'",
                 ),
             );
         }

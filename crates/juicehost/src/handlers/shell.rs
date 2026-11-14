@@ -305,7 +305,7 @@ fn render_shell(
         .header(header::CACHE_CONTROL, NO_STORE)
         .header(
             header::CONTENT_SECURITY_POLICY,
-            "default-src 'none'; script-src 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob:; frame-src blob:; connect-src http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            "default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; frame-src blob:; connect-src 'self' http: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         )
         .body(Body::from(html))
         .unwrap_or_else(|_| not_found_html().into_response())

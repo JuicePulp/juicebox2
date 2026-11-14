@@ -202,10 +202,8 @@ pub(crate) async fn serve_stored_bytes_inline(
     id: &str,
 ) -> Result<Response<Body>, JuicehostError> {
     let mut response = serve_stored_bytes(state, headers, id).await?;
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
+    // Keep the ciphertext as opaque bytes: a `text/plain` label makes Caddy's
+    // encoder collapse range responses into a compressed 200.
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         header::HeaderValue::from_static("inline"),

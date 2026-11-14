@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -11,7 +11,7 @@ use axum::{
 };
 use juiceutils::{add_security_headers, shutdown_signal};
 use sentry::integrations::tower::NewSentryLayer;
-use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
+use tower_http::{cors::CorsLayer, services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 
 use crate::{api_doc::ApiDoc, config::Config, error::JuicehostError, handlers, state::AppState};
@@ -161,7 +161,25 @@ async fn openapi_json_handler() -> (axum::http::header::HeaderMap, String) {
     (headers, json)
 }
 
+/// Served from the deployment's `static/juiceplayer` next to `bin/`.
+fn player_assets_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("JUICEHOST_PLAYER_DIR") {
+        return PathBuf::from(dir);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+        .and_then(|bin| {
+            bin.parent()
+                .map(|root| root.join("static").join("juiceplayer"))
+        })
+        .unwrap_or_else(|| PathBuf::from("static/juiceplayer"))
+}
+
 pub fn build_router(state: Arc<AppState>) -> Router {
+    let player_assets =
+        Router::new().nest_service("/api/player", ServeDir::new(player_assets_dir()));
+
     let concat = Router::new()
         .route("/internal/file/concat", post(handlers::concat_files))
         .layer(DefaultBodyLimit::max(64 * 1024));
@@ -253,6 +271,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/", get(handlers::index_handler))
         .merge(public)
         .merge(files_router)
+        .merge(player_assets)
         .merge(internal)
         .merge(capability_internal)
         .merge(ticket_upload)

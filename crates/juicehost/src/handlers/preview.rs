@@ -745,7 +745,65 @@ fn author_attr(page: &PreviewPage, attr: &str) -> String {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayerKind {
+    Video,
+    Audio,
+    Image,
+    Flash,
+}
+
+const TRACKER_EXTENSIONS: &[&str] = &[
+    "mod", "xm", "s3m", "it", "mptm", "mtm", "stm", "med", "669", "far", "okt", "ult", "mo3",
+    "amf", "dsm", "dbm", "umx", "mt2", "psm", "j2b", "gdm", "imf", "stx", "ptm", "sfx", "wow",
+];
+
+fn is_tracker_extension(extension: &str) -> bool {
+    TRACKER_EXTENSIONS.contains(&extension)
+}
+
+fn is_midi_extension(extension: &str) -> bool {
+    matches!(extension, "mid" | "midi" | "rmi" | "kar")
+}
+
+/// Which previews move to JuicePlayer instead of the native stage elements.
+fn player_kind(page: &PreviewPage) -> Option<PlayerKind> {
+    let extension = page.extension.to_ascii_lowercase();
+    if extension == "swf" {
+        return Some(PlayerKind::Flash);
+    }
+    if is_midi_extension(&extension) || is_tracker_extension(&extension) {
+        return Some(PlayerKind::Audio);
+    }
+    match page.kind {
+        PreviewKind::Video => Some(PlayerKind::Video),
+        PreviewKind::Audio => Some(PlayerKind::Audio),
+        PreviewKind::Image => matches!(extension.as_str(), "gif" | "apng" | "webp" | "avif")
+            .then_some(PlayerKind::Image),
+        _ => None,
+    }
+}
+
+fn player_stage_html(page: &PreviewPage) -> String {
+    let raw = escape_html(&page.raw_url);
+    format!(
+        "<juice-player id=\"media\" class=\"juice-player\" src=\"{raw}\" worker-url=\"/api/player/decoder.worker.js\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        label = author_attr(page, "aria-label"),
+    )
+}
+
+fn player_script_html(page: &PreviewPage) -> &'static str {
+    if player_kind(page).is_some() {
+        "<script type=\"module\" src=\"/api/player/index.js\"></script>"
+    } else {
+        ""
+    }
+}
+
 fn stage_html(page: &PreviewPage) -> String {
+    if player_kind(page).is_some() {
+        return player_stage_html(page);
+    }
     let raw = escape_html(&page.raw_url);
     match page.kind {
         PreviewKind::Video => format!(
@@ -869,6 +927,7 @@ fn render_preview(
         .replace("__RAW_URL__", &escape_html(&page.raw_url))
         .replace("__DOWNLOAD_URL__", &escape_html(&page.download_url))
         .replace("__STAGE__", &stage_html(page))
+        .replace("__PLAYER_SCRIPT__", player_script_html(page))
         .replace("__UPLOAD_HIDDEN__", &upload_hidden)
         .replace("__UPLOAD_LABEL__", &escape_html(&upload_label))
         .replace("__UPLOAD_WIDTH__", &upload_width)
@@ -1627,6 +1686,17 @@ mod tests {
     }
 
     #[test]
+    fn player_extensions() {
+        assert!(is_tracker_extension("mod"));
+        assert!(is_tracker_extension("xm"));
+        assert!(is_tracker_extension("mptm"));
+        assert!(is_midi_extension("mid"));
+        assert!(is_midi_extension("midi"));
+        assert!(!is_tracker_extension("mp3"));
+        assert!(!is_midi_extension("mp4"));
+    }
+
+    #[test]
     fn sizes_are_human() {
         assert_eq!(human_size(0), "0 B");
         assert_eq!(human_size(512), "512 B");
@@ -1654,7 +1724,8 @@ mod tests {
             uploading: None,
         };
         let html = render_preview(&page, &HeaderMap::new(), None);
-        assert!(html.contains("<video"));
+        assert!(html.contains("<juice-player"));
+        assert!(html.contains("/api/player/index.js"));
         assert!(html.contains("/f/a.mp4"));
         assert!(!html.contains("preview-card"));
         assert!(html.contains("discord:component-embed"));
@@ -1684,7 +1755,7 @@ mod tests {
             uploading: None,
         };
         let html = render_preview(&page, &HeaderMap::new(), None);
-        assert!(html.contains("<video"));
+        assert!(html.contains("<juice-player"));
         assert!(!html.contains("aria-label"));
         assert!(!html.contains("\"description\":"));
     }

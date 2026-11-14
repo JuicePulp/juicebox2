@@ -72,6 +72,16 @@
     }
     video#media{width:100%;height:100%}
     img#media{width:auto;height:auto}
+    juice-player#media{
+      display:block;
+      width:100%;
+      height:100%;
+      min-height:0;
+      flex:1 1 auto;
+      border-radius:.5rem;
+      overflow:hidden;
+      background:#000;
+    }
     .pdf-frame{width:100%;height:100%;border:0;border-radius:.5rem;background:#fff}
     .audio-hero{
       font-size:5rem;
@@ -168,7 +178,7 @@
       .fsize{display:none}
       .topbar .btn{padding:.45rem .7rem;font-size:.85rem}
       .stage{padding:.5rem;gap:.6rem}
-      video#media,img#media{width:100%;max-height:calc(100dvh - 8rem)}
+      video#media,img#media,juice-player#media{width:100%;max-height:calc(100dvh - 8rem)}
       iframe.pdf-frame{min-height:calc(100dvh - 8rem)}
       .dl-icon{width:5rem;height:5rem}
       #unlockcard{width:100%;max-width:none;flex:1;border:0;border-radius:0;justify-content:center}
