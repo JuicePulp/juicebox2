@@ -3,6 +3,7 @@
 #
 # Pinned inputs:
 #   JuicePlayer    5396d9a56516eb5f7c216fef9cb5073e5348c8a3 (1.0.0 + main fixes)
+#                  (0267e21 is skipped: its codek load() never resolves)
 #   Ruffle         0.7.1
 #   @ffmpeg/core   0.12.10
 #   GeneralUser GS 1.471 (8fe2798d527f1dfa2d58baf78ac7b1820a575703)
