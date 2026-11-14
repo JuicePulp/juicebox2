@@ -168,29 +168,7 @@
       }
       return playerModule;
     }
-    async function showBlob(blob, kind) {
-      card.hidden = true;
-      if (kind === "video" || kind === "audio" || kind === "flash" || kind === "midi" || kind === "tracker" || kind === "animation") {
-        try {
-          await loadJuicePlayer();
-          var player = document.createElement("juice-player");
-          player.id = "media";
-          player.className = "juice-player";
-          player.setAttribute("worker-url", "/api/player/decoder.worker.js?v=20261114b");
-          player.setAttribute("soundfont-url", "/api/player/gm.sf2");
-          player.setAttribute("ruffle-url", "/api/player/ruffle/ruffle.js");
-          player.setAttribute("hide-empty", "");
-          player.hideEmpty = true;
-          stage.appendChild(player);
-          var file = new File([blob], CFG.filename || "file", { type: blob.type || CFG.mime });
-          await player.loadFile(file);
-          return;
-        } catch (e) {
-          var failed = document.getElementById("media");
-          if (failed) failed.remove();
-          if (kind === "flash" || kind === "midi" || kind === "tracker") throw e;
-        }
-      }
+    function mountNativeBlob(blob, kind) {
       var url = URL.createObjectURL(blob);
       if (kind === "image" || kind === "animation") {
         var img = document.createElement("img");
@@ -198,17 +176,62 @@
         stage.appendChild(img);
       } else if (kind === "video") {
         var video = document.createElement("video");
-        video.id = "media"; video.controls = true; video.src = url;
+        video.id = "media"; video.controls = true; video.preload = "metadata"; video.src = url;
         stage.appendChild(video);
       } else if (kind === "audio") {
         var audio = document.createElement("audio");
-        audio.id = "media"; audio.controls = true; audio.src = url;
+        audio.id = "media"; audio.controls = true; audio.preload = "metadata"; audio.src = url;
         stage.appendChild(audio);
       } else if (kind === "pdf") {
         var frame = document.createElement("iframe");
         frame.id = "media"; frame.className = "pdf-frame"; frame.src = url; frame.title = CFG.filename;
         stage.appendChild(frame);
       }
+    }
+    async function showBlob(blob, kind) {
+      card.hidden = true;
+      if (kind === "video" || kind === "audio" || kind === "flash" || kind === "midi" || kind === "tracker" || kind === "animation") {
+        var player = null;
+        var nativeMounted = false;
+        var mountNative = function () {
+          if (nativeMounted) return;
+          nativeMounted = true;
+          if (player && player.isConnected) player.remove();
+          mountNativeBlob(blob, kind);
+        };
+        try {
+          await Promise.race([
+            loadJuicePlayer(),
+            new Promise(function (_, reject) {
+              setTimeout(function () { reject(new Error("JuicePlayer did not load.")); }, 15000);
+            })
+          ]);
+          player = document.createElement("juice-player");
+          player.id = "media";
+          player.className = "juice-player";
+          player.setAttribute("worker-url", "/api/player/decoder.worker.js?v=20261114b");
+          player.setAttribute("soundfont-url", "/api/player/gm.sf2");
+          player.setAttribute("ruffle-url", "/api/player/ruffle/ruffle.js");
+          player.setAttribute("hide-empty", "");
+          player.hideEmpty = true;
+          player.addEventListener("error", function (event) {
+            var detail = event && event.detail;
+            if (detail && detail.fatal === false) return;
+            if (kind === "flash" || kind === "midi" || kind === "tracker") return;
+            mountNative();
+          });
+          stage.appendChild(player);
+          var file = new File([blob], CFG.filename || "file", { type: blob.type || CFG.mime });
+          await player.loadFile(file);
+          return;
+        } catch (e) {
+          if (player && player.isConnected) player.remove();
+          if (kind === "flash" || kind === "midi" || kind === "tracker") throw e;
+          mountNative();
+          return;
+        }
+      }
+      mountNativeBlob(blob, kind);
     }
     function showText(text) {
       card.hidden = true;

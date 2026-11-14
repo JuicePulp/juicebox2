@@ -789,8 +789,30 @@ fn needs_file_load(page: &PreviewPage) -> bool {
     is_midi_extension(&extension) || is_tracker_extension(&extension)
 }
 
+/// The native element to swap in when JuicePlayer cannot start. MIDI, tracker
+/// modules and Flash have no native browser player, so they keep their player
+/// error panel instead of silently turning into a broken media element.
+fn native_fallback_kind(page: &PreviewPage) -> &'static str {
+    let extension = page.extension.to_ascii_lowercase();
+    match player_kind(page) {
+        Some(PlayerKind::Video) => "video",
+        Some(PlayerKind::Image) => "image",
+        Some(PlayerKind::Audio)
+            if is_midi_extension(&extension) || is_tracker_extension(&extension) =>
+        {
+            "none"
+        }
+        Some(PlayerKind::Audio) => "audio",
+        Some(PlayerKind::Flash) | None => "none",
+    }
+}
+
 fn player_stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
+    let fallback_kind = native_fallback_kind(page);
+    let fallback_label = page.author.as_deref().map_or(String::new(), |author| {
+        format!(" data-fallback-label=\"{}\"", escape_html(author))
+    });
     // MIDI and tracker modules are pattern programs, not audio streams: the
     // player must fetch the bytes and hand them to loadFile() so it can run
     // FluidSynth / libopenmpt. A remote src goes straight to the HTML or
@@ -807,7 +829,7 @@ fn player_stage_html(page: &PreviewPage) -> String {
         (format!(" src=\"{raw}\""), String::new())
     };
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} data-fallback-kind=\"{fallback_kind}\" data-fallback-src=\"{raw}\"{fallback_label} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
         label = author_attr(page, "aria-label"),
     )
 }
@@ -816,8 +838,76 @@ fn player_script_html(page: &PreviewPage) -> String {
     if player_kind(page).is_none() {
         return String::new();
     }
-    let mut html =
-        String::from("<script type=\"module\" src=\"/api/player/index.js?v=20261114b\"></script>");
+    // The fallback is deliberately a classic inline script: it must register
+    // before the module starts fetching so a network, parse or custom-element
+    // failure always ends in the browser's own player rather than a blank box.
+    let mut html = String::from(
+        r#"<script>
+(function () {
+  var player = document.querySelector('juice-player#media');
+  if (!player) return;
+  var kind = player.getAttribute('data-fallback-kind') || '';
+  var src = player.getAttribute('data-fallback-src') || '';
+  var label = player.getAttribute('data-fallback-label') || '';
+  var nativeMounted = false;
+  function note(message) {
+    var stage = document.getElementById('stage');
+    if (!stage || stage.querySelector('[data-player-fallback]')) return;
+    var p = document.createElement('p');
+    p.className = 'fallback-note';
+    p.setAttribute('data-player-fallback', '1');
+    p.textContent = message + ' ';
+    var a = document.createElement('a');
+    a.href = src;
+    a.textContent = 'Open the raw file';
+    p.appendChild(a);
+    stage.appendChild(p);
+  }
+  function mountNative() {
+    if (nativeMounted || !kind || kind === 'none' || !src) return false;
+    if (document.getElementById('media') !== player) return false;
+    var el;
+    if (kind === 'video') {
+      el = document.createElement('video');
+      el.controls = true;
+      el.playsInline = true;
+      el.preload = 'metadata';
+    } else if (kind === 'audio') {
+      el = document.createElement('audio');
+      el.controls = true;
+      el.preload = 'metadata';
+    } else if (kind === 'image') {
+      el = document.createElement('img');
+      el.loading = 'eager';
+    } else {
+      return false;
+    }
+    nativeMounted = true;
+    el.id = 'media';
+    el.src = src;
+    if (kind === 'image') el.alt = label;
+    else if (label) el.setAttribute('aria-label', label);
+    el.addEventListener('error', function () {
+      note('The native player could not play this file.');
+    });
+    player.replaceWith(el);
+    return true;
+  }
+  window.__juiceHostFallback = mountNative;
+  player.addEventListener('error', function (event) {
+    var detail = event && event.detail;
+    if (detail && detail.fatal === false) return;
+    mountNative();
+  });
+  setTimeout(function () {
+    if (!window.customElements || !customElements.get('juice-player')) mountNative();
+  }, 12000);
+})();
+</script>"#,
+    );
+    html.push_str(
+        "<script type=\"module\" src=\"/api/player/index.js?v=20261114b\" onerror=\"window.__juiceHostFallback&&window.__juiceHostFallback()\"></script><script nomodule>window.__juiceHostFallback&&window.__juiceHostFallback()</script>",
+    );
     if needs_file_load(page) {
         // Some uploads named .mid are actually WAV renders. Sniff the RIFF
         // header and let the ordinary audio path play those; only real SMF
@@ -1780,6 +1870,9 @@ mod tests {
         let html = render_preview(&page, &HeaderMap::new(), None);
         assert!(html.contains("<juice-player"));
         assert!(html.contains("/api/player/index.js"));
+        assert!(html.contains("data-fallback-kind=\"video\""));
+        assert!(html.contains("data-fallback-src=\"/f/a.mp4\""));
+        assert!(html.contains("__juiceHostFallback"));
         assert!(html.contains("/f/a.mp4"));
         assert!(!html.contains("preview-card"));
         assert!(html.contains("discord:component-embed"));
