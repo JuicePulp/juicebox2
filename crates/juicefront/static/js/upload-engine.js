@@ -97,6 +97,39 @@ async function fetchWithRetry(input, init, maxRetries = 3, baseDelayMs = 1000, t
   throw lastErr;
 }
 const FETCH_TIMEOUT_MS = 30000;
+let sessionBootstrap = null;
+
+/**
+ * Establish the anonymous session cookie before any upload starts. Two tabs
+ * (or two files) that reserve at the same time otherwise get different
+ * one-off anonymous identities, and the completion ticket belongs to only one
+ * of them. Web Locks serializes the bootstrap across tabs and workers.
+ */
+export function ensureUploadSession() {
+  if (sessionBootstrap)
+    return sessionBootstrap;
+  const bootstrap = async () => {
+    try {
+      const res = await fetchWithTimeout("/api/client-files", {
+        method: "HEAD",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+        credentials: "same-origin"
+      }, 15000);
+      if (!res.ok)
+        throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // Best effort: an existing cookie still lets uploads work, and a failed
+      // bootstrap must not be the reason an upload cannot start.
+      sessionBootstrap = null;
+    }
+  };
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  sessionBootstrap = locks?.request
+    ? locks.request("juicebox-upload-session", bootstrap)
+    : bootstrap();
+  return sessionBootstrap;
+}
 /** `fetch` bounded by `ms` and linked to the caller's signal; caller abort wins. */
 function fetchWithTimeout(input, init, ms) {
   const ctrl = new AbortController;
@@ -394,6 +427,7 @@ function startDirectUpload(item, file, controls) {
   const waitCtrl = new AbortController;
   let xhr = null;
   const run = (async () => {
+    await ensureUploadSession();
     let reserveId = item.reserveId || "";
     let reserveUrl = item.reserveUrl || "";
     let reserveRawUrl = item.reserveRawUrl || "";
@@ -630,6 +664,7 @@ function startDirectTicketUpload(item, file, controls) {
   const safe = !!item.safeUpload;
   const xhrRef = { current: null };
   const run = (async () => {
+    await ensureUploadSession();
     const attempt = async (isRetry) => {
       const reserveRes = await fetchWithTimeout(DIRECT_RESERVE_URL, {
         method: "POST",
@@ -813,6 +848,7 @@ function startDirectParallelUpload(item, file, controls) {
   const liveXhrs = new Set;
   let fallback = null;
   const run = (async () => {
+    await ensureUploadSession();
     const partTarget = Math.min(DIRECT_PART_TARGET, DIRECT_MAX_PART_BYTES);
     const numParts = Math.max(2, Math.min(DIRECT_MAX_PARTS, Math.ceil(file.size / partTarget)));
     const reserveRes = await fetchWithTimeout(DIRECT_PARALLEL_RESERVE_URL, {
@@ -1488,6 +1524,7 @@ function startTusStreamUpload(item, file, controls) {
   let healthTimer = null;
 
   (async () => {
+    await ensureUploadSession();
     const resumeProgress = Math.max(0, Math.min(99.4, Number(item.progress) || 0));
     update({ id: item.id, state: "uploading", progress: resumeProgress });
 
@@ -1933,6 +1970,7 @@ function startTusUpload(item, file, controls) {
   const controller = new AbortController;
   const signal = controller.signal;
   const run = (async () => {
+    await ensureUploadSession();
     const sessionId = item.tusSessionId || generateId();
     const probeState = { done: false, use: false };
     let curGzip = null;
