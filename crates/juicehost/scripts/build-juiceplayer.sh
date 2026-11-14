@@ -2,7 +2,7 @@
 # Build the JuicePlayer bundle served by juicehost at /api/player/*.
 #
 # Pinned inputs:
-#   JuicePlayer    ee1cf718892d159676779b722bd03376b4ea8164 (1.0.0 + main fixes)
+#   JuicePlayer    5396d9a56516eb5f7c216fef9cb5073e5348c8a3 (1.0.0 + main fixes)
 #   Ruffle         0.7.1
 #   @ffmpeg/core   0.12.10
 #   GeneralUser GS 1.471 (8fe2798d527f1dfa2d58baf78ac7b1820a575703)
@@ -18,7 +18,7 @@ WORK="${JUICE_WORKDIR:-/tmp/juiceplayer-build}"
 ASSETS="${JUICE_ASSETS_WORKDIR:-/tmp/juiceplayer-assets}"
 
 JUICE_REPO="${JUICE_REPO:-https://github.com/JuicePulp/juiceplayer.git}"
-JUICE_COMMIT="${JUICE_COMMIT:-ee1cf718892d159676779b722bd03376b4ea8164}"
+JUICE_COMMIT="${JUICE_COMMIT:-5396d9a56516eb5f7c216fef9cb5073e5348c8a3}"
 RUFFLE_VERSION="${RUFFLE_VERSION:-0.7.1}"
 FFMPEG_CORE_VERSION="${FFMPEG_CORE_VERSION:-0.12.10}"
 SOUNDFONT_COMMIT="${SOUNDFONT_COMMIT:-8fe2798d527f1dfa2d58baf78ac7b1820a575703}"

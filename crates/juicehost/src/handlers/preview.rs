@@ -855,7 +855,7 @@ fn player_stage_html(page: &PreviewPage) -> String {
         (format!(" src=\"{raw}\""), String::new())
     };
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} data-fallback-kind=\"{fallback_kind}\" data-fallback-src=\"{raw}\"{fallback_label} worker-url=\"/api/player/decoder.worker.js?v=20261114b\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player>{fallback_noscript}",
+        "<juice-player id=\"media\" class=\"juice-player\"{src_attr}{data_attr} data-fallback-kind=\"{fallback_kind}\" data-fallback-src=\"{raw}\"{fallback_label} worker-url=\"/api/player/decoder.worker.js?v=20261114c\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player>{fallback_noscript}",
         label = author_attr(page, "aria-label"),
     )
 }
@@ -933,7 +933,7 @@ fn player_script_html(page: &PreviewPage) -> String {
 </script>"#,
     );
     html.push_str(
-        "<script type=\"module\" src=\"/api/player/index.js?v=20261114b\" onerror=\"window.__juiceHostFallback&&window.__juiceHostFallback()\"></script><script nomodule>window.__juiceHostFallback&&window.__juiceHostFallback()</script>",
+        "<script type=\"module\" src=\"/api/player/index.js?v=20261114c\" onerror=\"window.__juiceHostFallback&&window.__juiceHostFallback()\"></script><script nomodule>window.__juiceHostFallback&&window.__juiceHostFallback()</script>",
     );
     if needs_file_load(page) {
         // Some uploads named .mid are actually WAV renders. Sniff the RIFF

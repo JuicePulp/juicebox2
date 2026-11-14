@@ -15,7 +15,7 @@ directory can be overridden with `JUICEHOST_PLAYER_DIR`.
 
 Pinned upstream inputs are documented in the script:
 
-- [JuicePulp/juiceplayer](https://github.com/JuicePulp/juiceplayer) `ee1cf718892d159676779b722bd03376b4ea8164`
+- [JuicePulp/juiceplayer](https://github.com/JuicePulp/juiceplayer) `5396d9a56516eb5f7c216fef9cb5073e5348c8a3`
   (GPL-3.0-or-later)
 - [Ruffle](https://ruffle.rs) `0.7.1` (MIT / Apache-2.0), self-hosted
 - [@ffmpeg/core](https://www.npmjs.com/package/@ffmpeg/core) `0.12.10`
