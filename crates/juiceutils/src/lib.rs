@@ -112,6 +112,7 @@ pub async fn add_security_headers(
 
     let is_file_route = req.uri().path().starts_with("/f/");
     let is_preview_route = req.uri().path().starts_with("/v/");
+    let is_player_route = req.uri().path().starts_with("/api/player/");
 
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
@@ -143,10 +144,20 @@ pub async fn add_security_headers(
             headers.insert(
                 header::CONTENT_SECURITY_POLICY,
                 HeaderValue::from_static(
-                    "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' http: https:; frame-ancestors 'none'",
+                    "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' http: https:; frame-ancestors 'none'",
                 ),
             );
         }
+    } else if is_player_route {
+        // Workers inherit this response's policy, so it must be able to
+        // instantiate the FFmpeg/WebCodecs WebAssembly fallbacks.
+        headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' http: https:; frame-ancestors 'none'",
+            ),
+        );
     } else {
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(

@@ -80,7 +80,20 @@
       flex:1 1 auto;
       border-radius:.5rem;
       overflow:hidden;
-      background:#000;
+      background:#1a1613;
+      --jp-bg:#1a1613;
+      --jp-bg-raised:#241d17;
+      --jp-bg-hover:#2e251d;
+    }
+    /* The player paints letterbox gutters with the video surface's black
+       backing; match the Juicebox frame instead. */
+    juice-player#media::part(stage),
+    juice-player#media::part(video),
+    juice-player#media::part(canvas),
+    juice-player#media::part(still),
+    juice-player#media::part(anim-canvas),
+    juice-player#media::part(swf){
+      background:#1a1613;
     }
     .pdf-frame{width:100%;height:100%;border:0;border-radius:.5rem;background:#fff}
     .audio-hero{

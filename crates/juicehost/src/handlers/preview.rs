@@ -787,14 +787,14 @@ fn player_kind(page: &PreviewPage) -> Option<PlayerKind> {
 fn player_stage_html(page: &PreviewPage) -> String {
     let raw = escape_html(&page.raw_url);
     format!(
-        "<juice-player id=\"media\" class=\"juice-player\" src=\"{raw}\" worker-url=\"/api/player/decoder.worker.js\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
+        "<juice-player id=\"media\" class=\"juice-player\" src=\"{raw}\" worker-url=\"/api/player/decoder.worker.js?v=20261114a\" soundfont-url=\"/api/player/gm.sf2\" ruffle-url=\"/api/player/ruffle/ruffle.js\" hide-empty{label}></juice-player><noscript><p class=\"fallback-note\"><a href=\"{raw}\">Open the file</a> (media playback needs JavaScript).</p></noscript>",
         label = author_attr(page, "aria-label"),
     )
 }
 
 fn player_script_html(page: &PreviewPage) -> &'static str {
     if player_kind(page).is_some() {
-        "<script type=\"module\" src=\"/api/player/index.js\"></script>"
+        "<script type=\"module\" src=\"/api/player/index.js?v=20261114a\"></script>"
     } else {
         ""
     }
