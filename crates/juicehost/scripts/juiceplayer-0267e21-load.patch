@@ -1,0 +1,59 @@
+diff --git a/packages/codek/src/codek-backend.ts b/packages/codek/src/codek-backend.ts
+index d0ac1a0..c3a139d 100644
+--- a/packages/codek/src/codek-backend.ts
++++ b/packages/codek/src/codek-backend.ts
+@@ -83,6 +83,16 @@ export class CodekBackend extends EventTarget implements MediaBackend {
+   private loadResolve: ((info: MediaInfo) => void) | null = null;
+   private loadReject: ((reason?: any) => void) | null = null;
+ 
++  /** Settles the pending load()/loadUrl() promise exactly once. */
++  private settleLoad(info: MediaInfo | null, reason?: unknown): void {
++    const resolve = this.loadResolve;
++    const reject = this.loadReject;
++    this.loadResolve = null;
++    this.loadReject = null;
++    if (info) resolve?.(info);
++    else if (resolve || reject) reject?.(reason ?? new Error("media load failed"));
++  }
++
+   /**
+    * Every main -> worker message goes through here: `WorkerInbound` (core)
+    * is the single declaration of that protocol, so a mismatched payload
+@@ -339,6 +349,7 @@ export class CodekBackend extends EventTarget implements MediaBackend {
+         this.currentTime = 0;
+         this.clock.seek(0);
+         this.setState("ready");
++        this.settleLoad(msg.info);
+         this.emit("ready", msg.info);
+         // Honest decode-efficiency probe for the prerender engine (see
+         // the table above); fire-and-forget, never gates the load.
+@@ -662,6 +673,10 @@ export class CodekBackend extends EventTarget implements MediaBackend {
+         { code: "no-webcodecs" },
+       );
+     }
++    this.settleLoad(
++      null,
++      Object.assign(new Error("media load superseded"), { code: "load-superseded" }),
++    );
+     this.ensureWorker();
+     this.send({ type: "quality", mode: this.qualityMode });
+     this.pendingSeekTime = null;
+@@ -710,6 +725,10 @@ export class CodekBackend extends EventTarget implements MediaBackend {
+         { code: "no-webcodecs" },
+       );
+     }
++    this.settleLoad(
++      null,
++      Object.assign(new Error("media load superseded"), { code: "load-superseded" }),
++    );
+     this.ensureWorker();
+     this.send({ type: "quality", mode: this.qualityMode });
+     this.pendingSeekTime = null;
+@@ -1125,6 +1144,7 @@ export class CodekBackend extends EventTarget implements MediaBackend {
+ 
+   private setError(message: string, code?: string): void {
+     this.lastError = { message, fatal: true, code };
++    this.settleLoad(null, Object.assign(new Error(message), { code }));
+     this.stopSyncLoop();
+     this.setState("error");
+     this.emit("error", this.lastError);

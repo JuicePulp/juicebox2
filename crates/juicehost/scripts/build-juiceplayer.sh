@@ -2,8 +2,9 @@
 # Build the JuicePlayer bundle served by juicehost at /api/player/*.
 #
 # Pinned inputs:
-#   JuicePlayer    5396d9a56516eb5f7c216fef9cb5073e5348c8a3 (1.0.0 + main fixes)
-#                  (0267e21 is skipped: its codek load() never resolves)
+#   JuicePlayer    0267e21ca0dcfbce84a8ad0c122675bba913f150 (remote media URLs)
+#                  plus juiceplayer-0267e21-load.patch, which settles the
+#                  codek load()/loadUrl() promise on ready/error
 #   Ruffle         0.7.1
 #   @ffmpeg/core   0.12.10
 #   GeneralUser GS 1.471 (8fe2798d527f1dfa2d58baf78ac7b1820a575703)
@@ -19,7 +20,7 @@ WORK="${JUICE_WORKDIR:-/tmp/juiceplayer-build}"
 ASSETS="${JUICE_ASSETS_WORKDIR:-/tmp/juiceplayer-assets}"
 
 JUICE_REPO="${JUICE_REPO:-https://github.com/JuicePulp/juiceplayer.git}"
-JUICE_COMMIT="${JUICE_COMMIT:-5396d9a56516eb5f7c216fef9cb5073e5348c8a3}"
+JUICE_COMMIT="${JUICE_COMMIT:-0267e21ca0dcfbce84a8ad0c122675bba913f150}"
 RUFFLE_VERSION="${RUFFLE_VERSION:-0.7.1}"
 FFMPEG_CORE_VERSION="${FFMPEG_CORE_VERSION:-0.12.10}"
 SOUNDFONT_COMMIT="${SOUNDFONT_COMMIT:-8fe2798d527f1dfa2d58baf78ac7b1820a575703}"
@@ -33,6 +34,7 @@ done
 rm -rf "$WORK"
 git clone "$JUICE_REPO" "$WORK"
 git -C "$WORK" checkout --detach "$JUICE_COMMIT"
+git -C "$WORK" apply "$SCRIPT_DIR/juiceplayer-0267e21-load.patch"
 (cd "$WORK" && npm ci --no-audit --no-fund && npm run build)
 
 rm -rf "$OUT" "$ASSETS"
