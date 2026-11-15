@@ -269,6 +269,19 @@ fn live_body_stream(
     Body::from_stream(stream)
 }
 
+/// Media documents fetch their own source from the media element. An opaque
+/// sandbox origin turns that into a cross-origin request, which browsers block
+/// without CORS. `allow-same-origin` keeps the request same-origin; scripts are
+/// still disabled because `allow-scripts` is absent.
+pub(crate) fn raw_content_security_policy(mime: &str) -> &'static str {
+    let base = mime.split(';').next().unwrap_or(mime).trim();
+    if base.starts_with("video/") || base.starts_with("audio/") || base == "application/ogg" {
+        "sandbox allow-downloads allow-same-origin"
+    } else {
+        "sandbox allow-downloads"
+    }
+}
+
 async fn serve_live_upload(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -299,7 +312,10 @@ async fn serve_live_upload(
     let with_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, NO_STORE);
         builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-        builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
+        builder = builder.header(
+            header::CONTENT_SECURITY_POLICY,
+            raw_content_security_policy(&mime),
+        );
         builder = builder.header(juiceproto::headers::UPLOADING, "1");
         builder = builder.header(juiceproto::headers::UPLOADED, snapshot.uploaded.to_string());
         builder = builder.header(juiceproto::headers::TOTAL, snapshot.total_size.to_string());
@@ -447,7 +463,10 @@ async fn serve_r2_response(
     let with_cache_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, &cache_control);
         builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-        builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
+        builder = builder.header(
+            header::CONTENT_SECURITY_POLICY,
+            raw_content_security_policy(&mime_str),
+        );
         if let Some(tag) = &cache_tag {
             builder = builder.header(header::HeaderName::from_static("cache-tag"), tag);
         }
@@ -720,11 +739,15 @@ pub(crate) async fn serve_file_inner(
     } else {
         Some(format!("juicebox:{id}"))
     };
+    let mime_str = storage::guess_mime(&file_meta.extension);
     let with_cache_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, &cache_control);
 
         builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-        builder = builder.header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads");
+        builder = builder.header(
+            header::CONTENT_SECURITY_POLICY,
+            raw_content_security_policy(&mime_str),
+        );
         if let Some(tag) = &cache_tag {
             builder = builder.header(header::HeaderName::from_static("cache-tag"), tag);
         }
@@ -765,7 +788,6 @@ pub(crate) async fn serve_file_inner(
         .map_err(|_| JuicehostError::Internal);
     }
 
-    let mime_str = storage::guess_mime(&file_meta.extension);
     let total_size = file_meta.size;
     let download_name = download_filename(&id, &file_meta.extension, backend_meta.as_ref());
     let with_disposition = |mut builder: axum::http::response::Builder| {
