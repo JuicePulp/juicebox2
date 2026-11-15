@@ -131,7 +131,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
 }
 
 .upload-page main {
@@ -140,18 +140,18 @@ body {
 
 .upload-card {
   width: 100%;
-  max-width: 42rem;
+  max-width: 46rem;
   background-color: var(--juice-900);
   border-radius: 1rem;
   border: 1px solid var(--juice-800);
-  padding: clamp(2rem, 4vw, 3rem);
+  padding: clamp(1.25rem, 3vw, 2rem);
   margin: 0 auto;
   position: relative;
   z-index: 1;
 }
 
 .upload-header {
-  margin: 0 0 2rem;
+  margin: 0 0 1.25rem;
   text-align: center;
   overflow: hidden;
 }
@@ -173,7 +173,7 @@ body {
   border: 2px dashed var(--orange-600);
   background-color: var(--orange-500-10);
   border-radius: 0.5rem;
-  padding: 3rem 2rem;
+  padding: 2.5rem 1.5rem;
   margin-bottom: 0.75rem;
   transition:
     border-color 0.2s ease,
@@ -1597,7 +1597,7 @@ html[data-banned] .upload-tabs {
     border: none;
     box-shadow: none;
     margin: 0;
-    padding: 2rem 1.5rem 2.5rem;
+    padding: 1.5rem 1rem 2rem;
     min-height: 100vh;
   }
 
