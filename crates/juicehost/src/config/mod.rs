@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use juiceutils::file_validation::ProtectionLevel;
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,9 @@ pub struct Config {
     pub min_free_space_bytes: u64,
 
     pub max_file_size_bytes: u64,
+
+    /// Empty unless the time-weighted size experiment is enabled.
+    pub max_file_size_by_ttl_hours: BTreeMap<String, u64>,
 
     pub max_range_response_bytes: u64,
 
@@ -384,6 +387,9 @@ pub struct LimitsFile {
     #[serde(default = "default_max_file_size_mb")]
     pub max_file_size_mb: u64,
 
+    #[serde(default)]
+    pub size_scale: SizeScaleFile,
+
     #[serde(default = "default_max_range_response_mb")]
     pub max_range_response_mb: u64,
 
@@ -417,6 +423,7 @@ impl Default for LimitsFile {
         Self {
             min_free_space_gb: default_min_free_space_gb(),
             max_file_size_mb: default_max_file_size_mb(),
+            size_scale: SizeScaleFile::default(),
             max_range_response_mb: default_max_range_response_mb(),
             max_concurrent_uploads: default_max_concurrent_uploads(),
             max_concurrent_downloads: default_max_concurrent_downloads(),
@@ -426,6 +433,38 @@ impl Default for LimitsFile {
             tcp_max_concurrent_requests: default_tcp_max_concurrent(),
         }
     }
+}
+
+/// Time-weighted file-size caps. Disabled by default so existing deployments
+/// keep one global limit.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SizeScaleFile {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "default_size_scale_budget_gib_hours")]
+    pub budget_gib_hours: f64,
+
+    #[serde(default = "default_size_scale_min_file_size_mb")]
+    pub min_file_size_mb: u64,
+}
+
+impl Default for SizeScaleFile {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            budget_gib_hours: default_size_scale_budget_gib_hours(),
+            min_file_size_mb: default_size_scale_min_file_size_mb(),
+        }
+    }
+}
+
+const fn default_size_scale_budget_gib_hours() -> f64 {
+    juiceutils::size_scale::DEFAULT_BUDGET_GIB_HOURS
+}
+
+const fn default_size_scale_min_file_size_mb() -> u64 {
+    256
 }
 
 const fn default_min_free_space_gb() -> u64 {
@@ -555,8 +594,8 @@ impl Config {
         let security = SecuritySettings::load(&file.security, &directories)?;
         let s3 = S3Settings::load(&file.s3)?;
         let r2 = R2Settings::load(&file.r2)?;
-        let limits = LimitsSettings::load(&file.limits)?;
         let features = FeatureSettings::load(&file.features)?;
+        let limits = LimitsSettings::load(&file.limits, features.allowed_ttl_hours())?;
         let secrets = SecretSettings::load(&security)?;
         let ban = BanSettings::load(&file.ban);
         let audio_embed = AudioEmbedSettings::load(&file.audio_embed)?;
@@ -595,6 +634,7 @@ impl Config {
             r2_secret_key: r2.secret_key().map(str::to_owned),
             min_free_space_bytes: limits.min_free_space_bytes(),
             max_file_size_bytes: limits.max_file_size_bytes(),
+            max_file_size_by_ttl_hours: limits.max_file_size_by_ttl_hours().clone(),
             max_range_response_bytes: limits.max_range_response_bytes(),
             max_concurrent_uploads: limits.max_concurrent_uploads(),
             max_concurrent_downloads: limits.max_concurrent_downloads(),
@@ -731,6 +771,57 @@ mod tests {
         assert!(!cfg.quick_link);
         assert!(!cfg.custom_id);
         assert_eq!(cfg.default_ttl_hours, 6.0);
+    }
+
+    #[test]
+    fn size_scale_builds_caps_from_allowed_ttls() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
+        let file: FileConfig = toml::from_str(
+            "[limits]\nmax_file_size_mb = 10240\n[limits.size_scale]\nenabled = true\nbudget_gib_hours = 360.0\n[features]\ndefault_ttl_hours = 72.0\nallowed_ttl_hours = [0.5, 72.0, 168.0, 336.0]\n",
+        )
+        .unwrap();
+        let cfg = Config::try_load_from(&file).unwrap();
+        unsafe {
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
+        assert_eq!(cfg.max_file_size_bytes, 10 * 1024 * 1024 * 1024);
+        assert_eq!(
+            cfg.max_file_size_by_ttl_hours.get("0.5"),
+            Some(&(10 * 1024 * 1024 * 1024))
+        );
+        assert_eq!(
+            cfg.max_file_size_by_ttl_hours.get("72"),
+            Some(&(5 * 1024 * 1024 * 1024))
+        );
+        assert_eq!(
+            cfg.max_file_size_by_ttl_hours.get("168"),
+            Some(&(2 * 1024 * 1024 * 1024))
+        );
+        assert_eq!(
+            cfg.max_file_size_by_ttl_hours.get("336"),
+            Some(&(1024 * 1024 * 1024))
+        );
+    }
+
+    #[test]
+    fn size_scale_disabled_keeps_one_cap() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
+        }
+        let file: FileConfig = toml::from_str(
+            "[limits]\nmax_file_size_mb = 8192\n[features]\ndefault_ttl_hours = 72.0\nallowed_ttl_hours = [72.0, 336.0]\n",
+        )
+        .unwrap();
+        let cfg = Config::try_load_from(&file).unwrap();
+        unsafe {
+            std::env::remove_var("TICKET_JWT_SECRET");
+        }
+        assert!(cfg.max_file_size_by_ttl_hours.is_empty());
+        assert_eq!(cfg.max_file_size_bytes, 8 * 1024 * 1024 * 1024);
     }
 
     #[test]

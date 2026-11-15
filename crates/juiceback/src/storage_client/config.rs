@@ -1,13 +1,32 @@
+use std::collections::BTreeMap;
+
 use super::target::require_juicehost_url;
 
 #[derive(Debug, Clone)]
 pub struct JuicehostConfig {
+    /// Legacy/default-retention cap.
     pub max_file_size_bytes: u64,
+    /// Hard cap used for body limits and storage.
+    pub hard_max_file_size_bytes: u64,
+    /// Per-retention caps keyed by TTL in hours; empty when disabled.
+    pub max_file_size_by_ttl_hours: BTreeMap<String, u64>,
     pub default_ttl_hours: f64,
     pub allowed_ttl_hours: Vec<f64>,
     pub danger_level: crate::file_validation::ProtectionLevel,
     pub quick_link: bool,
     pub custom_id_enabled: bool,
+}
+
+impl JuicehostConfig {
+    /// Cap for a TTL that has already been snapped to an allowed value.
+    #[must_use]
+    pub fn max_file_size_for_ttl(&self, ttl_hours: f64) -> u64 {
+        self.max_file_size_by_ttl_hours
+            .get(&juiceutils::size_scale::ttl_key(ttl_hours))
+            .copied()
+            .unwrap_or(self.max_file_size_bytes)
+            .min(self.hard_max_file_size_bytes)
+    }
 }
 
 /// Missing fields fall back to compiled defaults.
@@ -43,6 +62,22 @@ pub async fn fetch_juicehost_config(
         .get("max_file_size_bytes")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
+    let hard_max_file_size_bytes = cfg
+        .get("max_file_size_hard_bytes")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(max_file_size_bytes)
+        .max(max_file_size_bytes);
+    let max_file_size_by_ttl_hours = cfg
+        .get("max_file_size_by_ttl_hours")
+        .and_then(serde_json::Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(ttl, size)| {
+                    size.as_u64().map(|size| (ttl.clone(), size))
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
 
     let default_ttl_hours = cfg
         .get("default_ttl_hours")
@@ -76,8 +111,10 @@ pub async fn fetch_juicehost_config(
         .unwrap_or(true);
 
     tracing::debug!(
-        "juicehost config: max_file_size={}MB default_ttl={}h danger={} quick_link={} custom_id={}",
+        "juicehost config: max_file_size={}MB hard={}MB scaled_ttls={} default_ttl={}h danger={} quick_link={} custom_id={}",
         max_file_size_bytes / (1024 * 1024),
+        hard_max_file_size_bytes / (1024 * 1024),
+        max_file_size_by_ttl_hours.len(),
         default_ttl_hours,
         danger_level_str,
         quick_link,
@@ -86,6 +123,8 @@ pub async fn fetch_juicehost_config(
 
     Ok(JuicehostConfig {
         max_file_size_bytes,
+        hard_max_file_size_bytes,
+        max_file_size_by_ttl_hours,
         default_ttl_hours,
         allowed_ttl_hours,
         danger_level,

@@ -15,6 +15,7 @@ import {
 import {
   UPLOAD_URL,
   readMaxFileSize,
+  readDefaultTtlHours,
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
@@ -27,6 +28,7 @@ import {
   readQuickLinkEnabled,
   readDangerLevel,
   initHostGlow,
+  updateDropMaxSize,
 } from "./enhance-host.js?v=2.2.0-r2";
 import { connectPresence } from "./presence.js?v=2.2.0-r2";
 import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r2";
@@ -133,7 +135,13 @@ function urlMatchesCobaltService(raw) {
 function ttlHours() {
   var form = getFormRef();
   var checked = form ? form.querySelector('input[name="ttl_hours"]:checked') : null;
-  return Number(checked ? checked.value : 0) || 24;
+  var value = Number(checked ? checked.value : NaN);
+  if (Number.isFinite(value) && value > 0) return value;
+  return readDefaultTtlHours();
+}
+
+function refreshDropMax() {
+  updateDropMaxSize(readMaxFileSize(ttlHours()));
 }
 
 function cobaltFetchUrls() {
@@ -899,8 +907,17 @@ async function uploadItem(file, item, fingerprint) {
   if (!fingerprint)
     fingerprint = await fileFingerprint(file);
 
-  if (file.size > readMaxFileSize()) {
-    failItem(item, pill, fill, status, "FILE_TOO_LARGE", t(LOCALE, "error.file_too_large"));
+  var itemTtlHours = ttlHours();
+  var maxFileSize = readMaxFileSize(itemTtlHours);
+  if (file.size > maxFileSize) {
+    failItem(
+      item,
+      pill,
+      fill,
+      status,
+      "FILE_TOO_LARGE",
+      t(LOCALE, "error.file_too_large") + " " + t(LOCALE, "upload.drop_max", { size: formatSize(maxFileSize) })
+    );
     return;
   }
   var validation = validateFileClient(file.name, readDangerLevel());
@@ -923,7 +940,7 @@ async function uploadItem(file, item, fingerprint) {
   try {
     id = enqueueUpload({
       file: file,
-      ttlHours: ttlHours(),
+      ttlHours: itemTtlHours,
       customHost: readSelectedHost() || await resolveUploadHost(),
       quickLink: readQuickLinkEnabled(),
       safeUpload: readSafeUploadEnabled(),
@@ -1244,6 +1261,10 @@ export function initUploadCard() {
   var retentionDestroy;
   retentionDestroy = enhanceRetention(card, LOCALE);
   if (retentionDestroy && retentionDestroy.destroy) retentionDestroy = retentionDestroy.destroy;
+  refreshDropMax();
+  card.addEventListener("change", function (e) {
+    if (e.target && e.target.name === "ttl_hours") refreshDropMax();
+  });
   enhanceHostSelector(LOCALE);
   initHostSelector();
   connectPresence();
@@ -1252,6 +1273,7 @@ export function initUploadCard() {
   window.addEventListener("juicehost-config-updated", function () {
     retentionDestroy = rebuildRetention(card, LOCALE, retentionDestroy);
     if (retentionDestroy && retentionDestroy.destroy) retentionDestroy = retentionDestroy.destroy;
+    refreshDropMax();
   });
 
   try {

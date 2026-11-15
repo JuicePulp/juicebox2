@@ -8,6 +8,9 @@ pub enum ConfigError {
     #[error("TTL values must be finite, positive, and include DEFAULT_TTL_HOURS")]
     InvalidTtlConfiguration,
 
+    #[error("size_scale budget must be finite and positive, and min_file_size_mb must not exceed max_file_size_mb")]
+    InvalidSizeScaleConfiguration,
+
     #[error("invalid audio embed configuration")]
     InvalidAudioEmbedConfiguration,
 

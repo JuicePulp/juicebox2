@@ -12,8 +12,8 @@ use utoipa::ToSchema;
 use super::{
     common::{UploadResponse, enforce_mint_limit, region_host, upload_json_response},
     ticket::{
-        clamp_ttl_seconds, encrypted_client_ip, insert_owned_pending, mint_ticket, public_urls_for,
-        reject_blocked_filename, ticket_ttl_secs,
+        clamp_ttl_hours, clamp_ttl_seconds, encrypted_client_ip, insert_owned_pending, mint_ticket,
+        public_urls_for, reject_blocked_filename, ticket_ttl_secs,
     },
 };
 use crate::{
@@ -34,7 +34,7 @@ pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
 /// Kept below the edge proxy's body limit so a part is never rejected early.
 pub(crate) const DIRECT_MAX_PART_BYTES: u64 = 96 * 1024 * 1024;
 /// More parts buys no throughput and multiplies overhead.
-pub(crate) const DIRECT_MAX_PARTS: usize = 64;
+pub(crate) const DIRECT_MAX_PARTS: usize = 128;
 
 // Compile-time guard; the build fails if the constant is raised.
 const _: () = assert!(DIRECT_MAX_PART_BYTES < 100 * 1024 * 1024);
@@ -96,24 +96,14 @@ pub async fn direct_parallel_reserve_handler(
     headers: HeaderMap,
     Json(body): Json<DirectParallelReserveRequest>,
 ) -> Result<Json<DirectParallelReserveResponse>, AppError> {
-    let (
-        default_ttl,
-        allowed_ttl,
-        danger,
-        max_file_size,
-        public_juicehost_url,
-        default_storage_host,
-    ) = {
-        let jh = state.juicehost_config_or_refresh().await?;
-        (
-            jh.default_ttl_hours,
-            jh.allowed_ttl_hours.clone(),
-            jh.danger_level,
-            jh.max_file_size_bytes,
-            state.config.public_juicehost_url.clone(),
-            state.config.default_storage_host.clone(),
-        )
-    };
+    let jh = state.juicehost_config_or_refresh().await?;
+    let default_ttl = jh.default_ttl_hours;
+    let allowed_ttl = jh.allowed_ttl_hours.clone();
+    let danger = jh.danger_level;
+    let public_juicehost_url = state.config.public_juicehost_url.clone();
+    let default_storage_host = state.config.default_storage_host.clone();
+    let ttl_hours = clamp_ttl_hours(&allowed_ttl, default_ttl, body.ttl_hours);
+    let max_file_size = jh.max_file_size_for_ttl(ttl_hours);
 
     if body.file_size == 0 || body.file_size > max_file_size {
         return Err(AppError::PayloadTooLarge);
@@ -431,11 +421,11 @@ mod tests {
 
     #[test]
     fn part_sizes_stay_under_edge_body_limit() {
-        let max = 5 * 1024 * 1024 * 1024_u64;
+        let max = 10 * 1024 * 1024 * 1024_u64;
         let parts = (max.div_ceil(DIRECT_MAX_PART_BYTES) as usize).max(2);
         assert!(
             parts <= DIRECT_MAX_PARTS,
-            "5 GiB needs {parts} parts, cap is {DIRECT_MAX_PARTS}"
+            "10 GiB needs {parts} parts, cap is {DIRECT_MAX_PARTS}"
         );
         for size in direct_part_sizes(max, parts) {
             assert!(size <= DIRECT_MAX_PART_BYTES, "part of {size} bytes");

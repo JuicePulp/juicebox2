@@ -56,6 +56,8 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
                 "status": "ok",
                 "version": env!("CARGO_PKG_VERSION"),
                 "max_file_size_bytes": cfg.max_file_size_bytes,
+                "max_file_size_hard_bytes": cfg.hard_max_file_size_bytes,
+                "max_file_size_by_ttl_hours": cfg.max_file_size_by_ttl_hours,
                 "default_ttl_hours": cfg.default_ttl_hours,
                 "allowed_ttl_hours": cfg.allowed_ttl_hours,
                 "danger_level": danger_level_str,

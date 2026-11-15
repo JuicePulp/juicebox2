@@ -48,19 +48,9 @@ pub async fn create_upload_handler(
         .and_then(|v| v.parse::<u64>().ok())
         .ok_or_else(|| AppError::TusMissingLength)?;
 
-    let (max_size, default_ttl, allowed_ttl, _danger) = {
-        let jh = state.juicehost_config_or_refresh().await?;
-        (
-            jh.max_file_size_bytes,
-            jh.default_ttl_hours,
-            jh.allowed_ttl_hours.clone(),
-            jh.danger_level,
-        )
-    };
-
-    if total_length > max_size {
-        return Err(AppError::PayloadTooLarge);
-    }
+    let jh = state.juicehost_config_or_refresh().await?;
+    let default_ttl = jh.default_ttl_hours;
+    let allowed_ttl = jh.allowed_ttl_hours.clone();
 
     if state.tus.len() >= crate::constants::MAX_TUS_SESSIONS {
         return Err(AppError::RateLimited);
@@ -92,6 +82,10 @@ pub async fn create_upload_handler(
     let declared_file_size = find_meta(&metadata, "file_size")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
+    let max_size = jh.max_file_size_for_ttl(ttl_hours);
+    if total_length > max_size || declared_file_size > max_size {
+        return Err(AppError::PayloadTooLarge);
+    }
     let mut storage_host = match find_meta(&metadata, "host")
         .filter(|v| !v.is_empty())
         .map(ToString::to_string)

@@ -188,6 +188,7 @@ struct ModalsTpl {
     upload_mode: String,
     danger_level: String,
     max_bytes: u64,
+    max_bytes_by_ttl: String,
     allowed_ttl: String,
     default_ttl: String,
     asset_version: &'static str,
@@ -264,6 +265,20 @@ fn modals_html(
             }
         })
         .collect();
+    let default_ttl_hours = config
+        .default_ttl_hours
+        .unwrap_or(retention::DEFAULT_TTL_HOURS);
+    let max_bytes_by_ttl_map = config
+        .max_file_size_by_ttl_hours
+        .clone()
+        .unwrap_or_default();
+    let max_bytes = max_bytes_by_ttl_map
+        .get(&juiceutils::size_scale::ttl_key(default_ttl_hours))
+        .copied()
+        .or(config.max_file_size_bytes)
+        .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
+    let max_bytes_by_ttl = serde_json::to_string(&max_bytes_by_ttl_map)
+        .unwrap_or_else(|_| "{}".to_string());
     ModalsTpl {
         cx: cx.clone(),
         flags: ServerFlags {
@@ -276,9 +291,8 @@ fn modals_html(
             .clone()
             .unwrap_or_else(|| "standard".to_owned()),
         danger_level: danger.to_owned(),
-        max_bytes: config
-            .max_file_size_bytes
-            .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES),
+        max_bytes,
+        max_bytes_by_ttl,
         allowed_ttl: serde_json::to_string(
             &config
                 .allowed_ttl_hours
@@ -1011,7 +1025,11 @@ pub async fn index(
     let max_bytes = data
         .eff
         .config
-        .max_file_size_bytes
+        .max_file_size_by_ttl_hours
+        .as_ref()
+        .and_then(|caps| caps.get(&juiceutils::size_scale::ttl_key(default_ttl)))
+        .copied()
+        .or(data.eff.config.max_file_size_bytes)
         .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
     let cobalt = data.eff.config.cobalt.unwrap_or(false);
     let services = if cobalt {

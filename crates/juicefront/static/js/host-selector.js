@@ -28,6 +28,11 @@ function syncConfigBits(cfg) {
   if (serverCfg) {
     if (typeof cfg.max_file_size_bytes === "number")
       serverCfg.setAttribute("data-max-file-size-bytes", String(cfg.max_file_size_bytes));
+    if (cfg.max_file_size_by_ttl_hours && typeof cfg.max_file_size_by_ttl_hours === "object") {
+      serverCfg.setAttribute("data-max-file-size-by-ttl-hours", JSON.stringify(cfg.max_file_size_by_ttl_hours));
+    } else {
+      serverCfg.removeAttribute("data-max-file-size-by-ttl-hours");
+    }
     if (Array.isArray(cfg.allowed_ttl_hours))
       serverCfg.setAttribute("data-allowed-ttl-hours", JSON.stringify(cfg.allowed_ttl_hours));
     if (typeof cfg.default_ttl_hours === "number")

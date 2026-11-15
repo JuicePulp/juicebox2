@@ -1,28 +1,56 @@
 /** Empty means same-origin; the page and worker share this base. */
 export const UPLOAD_URL = "";
-/** Server cap in bytes; the 500 MB fallback matches a stock juicehost when the DOM is unavailable. */
-export function readMaxFileSize() {
+const FALLBACK_MAX_FILE_SIZE = 524288000;
+const FALLBACK_TTLS = [0.5, 1, 6, 12, 24, 72, 168, 336];
+function readMaxFileSizeMap() {
   if (typeof document === "undefined")
-    return 524288000;
+    return {};
+  const el = document.getElementById("server-config");
+  const raw = el?.getAttribute("data-max-file-size-by-ttl-hours");
+  if (!raw)
+    return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    const out = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const hours = Number(key);
+      if (Number.isFinite(hours) && typeof value === "number" && value > 0)
+        out[String(hours)] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+/** Server cap in bytes for a retention choice; falls back to the global cap. */
+export function readMaxFileSize(ttlHours) {
+  if (typeof document === "undefined")
+    return FALLBACK_MAX_FILE_SIZE;
   const el = document.getElementById("server-config");
   const val = el?.getAttribute("data-max-file-size-bytes");
-  const n = val ? Number(val) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : 524288000;
+  const fallback = val ? Number(val) : NaN;
+  const globalMax = Number.isFinite(fallback) && fallback > 0 ? fallback : FALLBACK_MAX_FILE_SIZE;
+  if (ttlHours == null)
+    return globalMax;
+  const map = readMaxFileSizeMap();
+  return map[String(Number(ttlHours))] || globalMax;
 }
 /** Allowed TTL values in hours; the fallback list mirrors juicehost defaults for the worker. */
 export function readAllowedTtlHours() {
   if (typeof document === "undefined")
-    return [0.5, 1, 6, 12, 24, 72, 168];
+    return FALLBACK_TTLS.slice();
   const el = document.getElementById("server-config");
   const val = el?.getAttribute("data-allowed-ttl-hours");
   if (!val)
-    return [0.5, 1, 6, 12, 24, 72, 168];
+    return FALLBACK_TTLS.slice();
   try {
     const arr = JSON.parse(val);
     if (Array.isArray(arr) && arr.length > 0)
       return arr;
   } catch {}
-  return [0.5, 1, 6, 12, 24, 72, 168];
+  return FALLBACK_TTLS.slice();
 }
 export function readDefaultTtlHours() {
   if (typeof document === "undefined")
@@ -155,7 +183,7 @@ export const STREAM_TARGET_SECS = 8;
 export const STREAM_PREFER_MAX_BPS = 25 * 1024 * 1024;
 export const DIRECT_PART_TARGET = 32 * 1024 * 1024;
 export const DIRECT_MAX_PART_BYTES = 96 * 1024 * 1024;
-export const DIRECT_MAX_PARTS = 32;
+export const DIRECT_MAX_PARTS = 128;
 export const TEXT_LIKE_RE = /\.(txt|json|csv|tsv|xml|html|css|js|ts|jsx|tsx|md|yaml|yml|toml|ini|conf|sh|bash|zsh|fish|py|rb|pl|php|java|c|h|cpp|hpp|rs|go|swift|kt|sql|log|diff|patch|srt|vtt|sub|cfg|env|gitignore|dockerignore|editorconfig|prettierrc|eslintrc|babelrc|Makefile|CMakeLists|Gemfile|Podfile|Dockerfile|svg|wasm|epub|tex|rst|graphql|proto)$/i;
 const TEXT_MIME_RE = /^text\/|application\/(json|xml|javascript|x-yaml|yaml|svg\+xml|wasm)/i;
 export function gzipEligible(filename, mimeType) {

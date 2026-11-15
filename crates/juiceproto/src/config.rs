@@ -1,11 +1,20 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// `/api/config` as served by juicehost. Every field is optional because older
 /// hosts omit newer settings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HostConfigResponse {
+    /// Legacy/default-retention cap. Older clients still read this field.
     #[serde(default)]
     pub max_file_size_bytes: Option<u64>,
+    /// Hard cap used for request-body limits and storage.
+    #[serde(default)]
+    pub max_file_size_hard_bytes: Option<u64>,
+    /// Per-retention caps keyed by the TTL in hours, e.g. `"72": 5368709120`.
+    #[serde(default)]
+    pub max_file_size_by_ttl_hours: Option<BTreeMap<String, u64>>,
     #[serde(default)]
     pub max_ttl_hours: Option<f64>,
     #[serde(default)]

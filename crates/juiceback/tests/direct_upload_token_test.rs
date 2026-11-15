@@ -140,6 +140,61 @@ async fn direct_reserve_returns_its_persisted_delete_token() {
 }
 
 #[tokio::test]
+async fn direct_reserve_uses_the_per_ttl_cap() {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    let mut jh = common::test_jh_config();
+    jh.max_file_size_bytes = 5 * GIB;
+    jh.hard_max_file_size_bytes = 10 * GIB;
+    jh.allowed_ttl_hours = vec![24.0, 72.0, 336.0];
+    jh.max_file_size_by_ttl_hours = [
+        ("24".to_string(), 10 * GIB),
+        ("72".to_string(), 5 * GIB),
+        ("336".to_string(), GIB),
+    ]
+    .into_iter()
+    .collect();
+    let state = common::state_from_config_with_jh(common::test_config(), jh);
+    let app = common::mock_router(Arc::clone(&state));
+
+    let allowed = send(
+        &app,
+        "POST",
+        "/upload/direct/reserve",
+        Some(json!({
+            "filename": "short.bin",
+            "mime_type": "application/octet-stream",
+            "file_size": 6 * GIB,
+            "ttl_hours": 24,
+        })),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(allowed.status, StatusCode::OK, "{:?}", allowed.body);
+
+    let rejected = send(
+        &app,
+        "POST",
+        "/upload/direct/reserve",
+        Some(json!({
+            "filename": "long.bin",
+            "mime_type": "application/octet-stream",
+            "file_size": 6 * GIB,
+            "ttl_hours": 336,
+        })),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        rejected.status,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "{:?}",
+        rejected.body
+    );
+}
+
+#[tokio::test]
 async fn parallel_reserve_returns_the_parent_delete_token() {
     let server = MockServer::start().await;
     mock_live_registration(&server).await;

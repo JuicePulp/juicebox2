@@ -80,7 +80,10 @@ pub(crate) async fn run_fetch_job_inner(
             .juicehost_config_or_refresh()
             .await
             .map_err(|e| format!("{e:?}"))?;
-        (jh.max_file_size_bytes, jh.default_ttl_hours)
+        (
+            jh.max_file_size_for_ttl(jh.default_ttl_hours),
+            jh.default_ttl_hours,
+        )
     };
 
     // Reserve the tail of the timeout for transfer and finalize; rescue retries get

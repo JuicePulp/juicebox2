@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::config::{ConfigError, LimitsFile};
 
 /// Byte sizes are already converted from GB and MB.
@@ -5,6 +7,7 @@ use crate::config::{ConfigError, LimitsFile};
 pub struct LimitsSettings {
     min_free_space_bytes: u64,
     max_file_size_bytes: u64,
+    max_file_size_by_ttl_hours: BTreeMap<String, u64>,
     max_range_response_bytes: u64,
     max_concurrent_uploads: usize,
     max_concurrent_downloads: usize,
@@ -23,6 +26,11 @@ impl LimitsSettings {
     #[must_use]
     pub const fn max_file_size_bytes(&self) -> u64 {
         self.max_file_size_bytes
+    }
+
+    #[must_use]
+    pub fn max_file_size_by_ttl_hours(&self) -> &BTreeMap<String, u64> {
+        &self.max_file_size_by_ttl_hours
     }
 
     #[must_use]
@@ -60,9 +68,27 @@ impl LimitsSettings {
         self.tcp_max_concurrent_requests
     }
 
-    pub fn load(file: &LimitsFile) -> Result<Self, ConfigError> {
+    pub fn load(file: &LimitsFile, allowed_ttl_hours: &[f64]) -> Result<Self, ConfigError> {
         let min_free_space_bytes = file.min_free_space_gb * 1024 * 1024 * 1024;
         let max_file_size_bytes = file.max_file_size_mb * 1024 * 1024;
+        let min_file_size_bytes = file.size_scale.min_file_size_mb * 1024 * 1024;
+        if file.size_scale.enabled
+            && (!file.size_scale.budget_gib_hours.is_finite()
+                || file.size_scale.budget_gib_hours <= 0.0
+                || min_file_size_bytes > max_file_size_bytes)
+        {
+            return Err(ConfigError::InvalidSizeScaleConfiguration);
+        }
+        let max_file_size_by_ttl_hours = if file.size_scale.enabled {
+            juiceutils::size_scale::build_caps(
+                allowed_ttl_hours,
+                file.size_scale.budget_gib_hours,
+                max_file_size_bytes,
+                min_file_size_bytes,
+            )
+        } else {
+            BTreeMap::new()
+        };
         let max_range_response_bytes = file.max_range_response_mb * 1024 * 1024;
         let max_concurrent_uploads = file.max_concurrent_uploads;
         let max_concurrent_downloads = file.max_concurrent_downloads;
@@ -73,6 +99,7 @@ impl LimitsSettings {
         Ok(Self {
             min_free_space_bytes,
             max_file_size_bytes,
+            max_file_size_by_ttl_hours,
             max_range_response_bytes,
             max_concurrent_uploads,
             max_concurrent_downloads,

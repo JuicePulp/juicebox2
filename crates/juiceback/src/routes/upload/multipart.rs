@@ -63,15 +63,12 @@ pub async fn reserve_upload_handler(
     headers: HeaderMap,
     Json(body): Json<ReserveUploadRequest>,
 ) -> Result<(StatusCode, Json<ReserveResponse>), AppError> {
-    let (default_ttl, allowed_ttl, danger, max_file_size) = {
-        let jh = state.juicehost_config_or_refresh().await?;
-        (
-            jh.default_ttl_hours,
-            jh.allowed_ttl_hours.clone(),
-            jh.danger_level,
-            jh.max_file_size_bytes,
-        )
-    };
+    let jh = state.juicehost_config_or_refresh().await?;
+    let default_ttl = jh.default_ttl_hours;
+    let allowed_ttl = jh.allowed_ttl_hours.clone();
+    let danger = jh.danger_level;
+    let ttl_hours = super::ticket::clamp_ttl_hours(&allowed_ttl, default_ttl, body.ttl_hours);
+    let max_file_size = jh.max_file_size_for_ttl(ttl_hours);
 
     let now = chrono::Utc::now().timestamp();
     let delete_token = uuid::Uuid::new_v4().to_string();

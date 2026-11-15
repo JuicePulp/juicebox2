@@ -12,8 +12,9 @@ use utoipa::ToSchema;
 use super::{
     common::{UploadResponse, enforce_mint_limit, region_host, upload_json_response},
     ticket::{
-        clamp_ttl_seconds, device_connected, encrypted_client_ip, insert_owned_pending,
-        mint_ticket, notify_device, public_urls_for, reject_blocked_filename, ticket_ttl_secs,
+        clamp_ttl_hours, clamp_ttl_seconds, device_connected, encrypted_client_ip,
+        insert_owned_pending, mint_ticket, notify_device, public_urls_for,
+        reject_blocked_filename, ticket_ttl_secs,
     },
 };
 use crate::{
@@ -79,24 +80,14 @@ pub async fn direct_upload_reserve_handler(
     headers: HeaderMap,
     Json(body): Json<DirectUploadReserveRequest>,
 ) -> Result<Json<DirectUploadReserveResponse>, AppError> {
-    let (
-        default_ttl,
-        allowed_ttl,
-        danger,
-        max_file_size,
-        public_juicehost_url,
-        default_storage_host,
-    ) = {
-        let jh = state.juicehost_config_or_refresh().await?;
-        (
-            jh.default_ttl_hours,
-            jh.allowed_ttl_hours.clone(),
-            jh.danger_level,
-            jh.max_file_size_bytes,
-            state.config.public_juicehost_url.clone(),
-            state.config.default_storage_host.clone(),
-        )
-    };
+    let jh = state.juicehost_config_or_refresh().await?;
+    let default_ttl = jh.default_ttl_hours;
+    let allowed_ttl = jh.allowed_ttl_hours.clone();
+    let danger = jh.danger_level;
+    let public_juicehost_url = state.config.public_juicehost_url.clone();
+    let default_storage_host = state.config.default_storage_host.clone();
+    let ttl_hours = clamp_ttl_hours(&allowed_ttl, default_ttl, body.ttl_hours);
+    let max_file_size = jh.max_file_size_for_ttl(ttl_hours);
 
     if body.file_size == 0 || body.file_size > max_file_size {
         return Err(AppError::PayloadTooLarge);

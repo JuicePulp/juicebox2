@@ -110,7 +110,7 @@ function updateDangerLevelDisplay(level, locale) {
   const text = BLOCKED_TYPES_I18N[lang][level] || BLOCKED_TYPES_I18N[lang].high;
   el.textContent = text;
 }
-function updateDropMaxSize(bytes) {
+export function updateDropMaxSize(bytes) {
   const el = document.querySelector("[data-drop-max-template]");
   if (!el)
     return;
@@ -355,6 +355,11 @@ export function enhanceHostSelector(locale) {
     if (serverCfg) {
       if (typeof cfg.max_file_size_bytes === "number")
         serverCfg.setAttribute("data-max-file-size-bytes", String(cfg.max_file_size_bytes));
+      if (cfg.max_file_size_by_ttl_hours && typeof cfg.max_file_size_by_ttl_hours === "object") {
+        serverCfg.setAttribute("data-max-file-size-by-ttl-hours", JSON.stringify(cfg.max_file_size_by_ttl_hours));
+      } else {
+        serverCfg.removeAttribute("data-max-file-size-by-ttl-hours");
+      }
       if (Array.isArray(cfg.allowed_ttl_hours))
         serverCfg.setAttribute("data-allowed-ttl-hours", JSON.stringify(cfg.allowed_ttl_hours));
       if (typeof cfg.default_ttl_hours === "number")
@@ -365,7 +370,10 @@ export function enhanceHostSelector(locale) {
         serverCfg.setAttribute("data-quick-link", String(cfg.quick_link));
     }
     if (typeof cfg.max_file_size_bytes === "number") {
-      updateDropMaxSize(cfg.max_file_size_bytes);
+      const checked = document.querySelector('input[name="ttl_hours"]:checked');
+      const hours = Number(checked ? checked.value : cfg.default_ttl_hours);
+      const scaled = cfg.max_file_size_by_ttl_hours && cfg.max_file_size_by_ttl_hours[String(hours)];
+      updateDropMaxSize(typeof scaled === "number" ? scaled : cfg.max_file_size_bytes);
     }
     if (cfg.danger_level) {
       const dl = String(cfg.danger_level);

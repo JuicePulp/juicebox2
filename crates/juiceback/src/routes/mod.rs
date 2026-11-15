@@ -228,7 +228,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .read()
         .unwrap()
         .as_ref()
-        .map(|c| c.max_file_size_bytes as usize)
+        .map(|c| c.hard_max_file_size_bytes as usize)
         .unwrap_or_else(|| {
             usize::try_from(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES).unwrap_or(usize::MAX)
         });

@@ -47,6 +47,7 @@ fn test_config(ticket_secret: &str, frontend_url: Option<String>) -> Config {
         r2_secret_key: None,
         min_free_space_bytes: 0,
         max_file_size_bytes: 10 * 1024 * 1024,
+        max_file_size_by_ttl_hours: std::collections::BTreeMap::new(),
         max_range_response_bytes: 16 * 1024 * 1024,
         max_concurrent_uploads: 16,
         max_concurrent_downloads: 64,

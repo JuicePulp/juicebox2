@@ -251,6 +251,8 @@ pub fn fetch_config_with_delay(
 pub fn test_jh_config() -> JuicehostConfig {
     JuicehostConfig {
         max_file_size_bytes: 524_288_000,
+        hard_max_file_size_bytes: 524_288_000,
+        max_file_size_by_ttl_hours: std::collections::BTreeMap::new(),
         default_ttl_hours: 72.0,
         allowed_ttl_hours: vec![0.5, 1.0, 6.0, 12.0, 24.0, 72.0, 168.0],
         danger_level: juiceback::file_validation::ProtectionLevel::High,

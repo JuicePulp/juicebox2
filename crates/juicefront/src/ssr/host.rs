@@ -30,6 +30,8 @@ fn sanitize(mut config: HostConfig) -> Option<HostConfig> {
         config.allowed_ttl_hours = if kept.is_empty() { None } else { Some(kept) };
     }
     if config.max_file_size_bytes.is_none()
+        && config.max_file_size_hard_bytes.is_none()
+        && config.max_file_size_by_ttl_hours.is_none()
         && config.allowed_ttl_hours.is_none()
         && config.default_ttl_hours.is_none()
     {

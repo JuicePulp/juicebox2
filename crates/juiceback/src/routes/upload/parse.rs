@@ -8,7 +8,7 @@ use super::{
         stream_gzip_upload_to_juicehost, stream_protected_gzip_upload_to_juicehost,
         stream_protected_upload_to_juicehost, stream_upload_to_juicehost,
     },
-    ticket::clamp_ttl_seconds,
+    ticket::{clamp_ttl_hours, clamp_ttl_seconds},
 };
 use crate::{db::FileRecord, error::AppError, state::AppState};
 
@@ -36,12 +36,16 @@ pub async fn parse_multipart(
     reservation_token: Option<&str>,
     default_capability: String,
 ) -> Result<UploadParams, AppError> {
-    let (default_ttl, allowed_ttl, max_size, danger) = {
+    let (default_ttl, allowed_ttl, mut max_size, danger) = {
         let jh = state.juicehost_config_or_refresh().await?;
         (
             jh.default_ttl_hours,
             jh.allowed_ttl_hours.clone(),
-            jh.max_file_size_bytes,
+            jh.max_file_size_for_ttl(clamp_ttl_hours(
+                &jh.allowed_ttl_hours,
+                jh.default_ttl_hours,
+                None,
+            )),
             jh.danger_level,
         )
     };
@@ -66,7 +70,10 @@ pub async fn parse_multipart(
         if name == "ttl_hours" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;
             if let Ok(val) = text.parse::<f64>() {
+                let ttl_hours = clamp_ttl_hours(&allowed_ttl, default_ttl, Some(val));
                 ttl_seconds = clamp_ttl_seconds(&allowed_ttl, default_ttl, Some(val));
+                let jh = state.juicehost_config_or_refresh().await?;
+                max_size = jh.max_file_size_for_ttl(ttl_hours);
             }
         } else if name == "host" {
             let text = field.text().await.map_err(|_| AppError::InvalidMultipart)?;

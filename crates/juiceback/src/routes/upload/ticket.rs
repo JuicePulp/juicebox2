@@ -9,18 +9,27 @@ use crate::{
     state::AppState,
 };
 
+/// Snaps to the nearest allowed value or the default.
+#[must_use]
+pub fn clamp_ttl_hours(
+    allowed_ttl: &[f64],
+    default_ttl_hours: f64,
+    ttl_hours: Option<f64>,
+) -> f64 {
+    ttl_hours
+        .map(|hours| crate::constants::clamp_to_nearest(hours, allowed_ttl))
+        .unwrap_or(default_ttl_hours)
+}
+
 /// Snaps to the nearest allowed value or the default; returns seconds.
 pub fn clamp_ttl_seconds(
     allowed_ttl: &[f64],
     default_ttl_hours: f64,
     ttl_hours: Option<f64>,
 ) -> i64 {
-    ttl_hours
-        .map(|hours| crate::constants::clamp_to_nearest(hours, allowed_ttl))
-        .map(|hours| (hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64)
-        .unwrap_or_else(|| {
-            (default_ttl_hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64
-        })
+    (clamp_ttl_hours(allowed_ttl, default_ttl_hours, ttl_hours)
+        * crate::constants::SECONDS_PER_HOUR_F64)
+        .round() as i64
 }
 
 pub fn reject_blocked_filename(

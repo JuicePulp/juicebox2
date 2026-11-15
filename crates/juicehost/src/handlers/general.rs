@@ -111,8 +111,15 @@ pub async fn storage_handler(State(state): State<Arc<AppState>>) -> Json<storage
 )]
 pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let danger_level_str = state.danger_level.as_str();
+    let default_max_file_size_bytes = state
+        .max_file_size_by_ttl_hours
+        .get(&juiceutils::size_scale::ttl_key(state.default_ttl_hours))
+        .copied()
+        .unwrap_or(state.max_file_size_bytes);
     Json(serde_json::json!({
-        "max_file_size_bytes": state.max_file_size_bytes,
+        "max_file_size_bytes": default_max_file_size_bytes,
+        "max_file_size_hard_bytes": state.max_file_size_bytes,
+        "max_file_size_by_ttl_hours": &state.max_file_size_by_ttl_hours,
         "version": env!("CARGO_PKG_VERSION"),
         "default_ttl_hours": state.default_ttl_hours,
         "allowed_ttl_hours": state.allowed_ttl_hours,

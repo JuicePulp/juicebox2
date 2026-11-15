@@ -32,6 +32,9 @@ pub struct AppState {
 
     pub max_file_size_bytes: u64,
 
+    /// Per-retention caps; empty when the experiment is disabled.
+    pub max_file_size_by_ttl_hours: std::collections::BTreeMap<String, u64>,
+
     pub backend_url: Option<String>,
 
     pub frontend_url: Option<String>,
@@ -101,6 +104,7 @@ impl AppState {
             allowed_origins: config.allowed_origins.clone(),
             min_free_space_bytes: config.min_free_space_bytes,
             max_file_size_bytes: config.max_file_size_bytes,
+            max_file_size_by_ttl_hours: config.max_file_size_by_ttl_hours.clone(),
             backend_url: config.backend_url.clone(),
             frontend_url: config.frontend_url.clone(),
             danger_level: config.danger_level,
