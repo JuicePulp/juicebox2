@@ -1,6 +1,6 @@
 .content {
     display: grid;
-    grid-template-columns: 160px minmax(0, 42rem) 160px;
+    grid-template-columns: 160px minmax(0, 46rem) 160px;
     column-gap: 1rem;
     row-gap: 1rem;
     align-items: start;
