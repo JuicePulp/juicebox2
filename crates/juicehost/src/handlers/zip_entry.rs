@@ -11,6 +11,7 @@ use futures::StreamExt;
 
 use super::{
     common::{NO_STORE, RangeResult, parse_range},
+    serve::raw_content_security_policy,
     shell::{GateDecision, ShellMode, gate_decision},
     stats::ViewerIp,
     zip_index::{self, IndexedEntry, Resolved, ZipIndex},
@@ -325,7 +326,10 @@ async fn serve_entry(
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, NO_STORE)
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            raw_content_security_policy(&mime),
+        )
         .body(Body::from(bytes))
         .map_err(|_| JuicehostError::Internal)
 }
@@ -380,7 +384,10 @@ async fn serve_stored(
                     .header(header::CONTENT_DISPOSITION, disposition)
                     .header(header::CACHE_CONTROL, NO_STORE)
                     .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-                    .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads")
+                    .header(
+                        header::CONTENT_SECURITY_POLICY,
+                        raw_content_security_policy(mime),
+                    )
                     .body(Body::from_stream(stream))
                     .map_err(|_| JuicehostError::Internal);
             }
@@ -413,7 +420,10 @@ async fn serve_stored(
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, NO_STORE)
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-downloads")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            raw_content_security_policy(mime),
+        )
         .body(Body::from_stream(stream))
         .map_err(|_| JuicehostError::Internal)
 }
