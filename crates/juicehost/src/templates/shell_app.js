@@ -161,7 +161,7 @@
     function loadJuicePlayer() {
       if (window.customElements && customElements.get("juice-player")) return Promise.resolve();
       if (!playerModule) {
-        playerModule = import("/api/player/index.js?v=20261114c").catch(function (err) {
+        playerModule = import("/api/player/index.js?v=20261115a").catch(function (err) {
           playerModule = null;
           throw err;
         });
@@ -209,7 +209,7 @@
           player = document.createElement("juice-player");
           player.id = "media";
           player.className = "juice-player";
-          player.setAttribute("worker-url", "/api/player/decoder.worker.js?v=20261114c");
+          player.setAttribute("worker-url", "/api/player/decoder.worker.js?v=20261115a");
           player.setAttribute("soundfont-url", "/api/player/gm.sf2");
           player.setAttribute("ruffle-url", "/api/player/ruffle/ruffle.js");
           player.setAttribute("hide-empty", "");
