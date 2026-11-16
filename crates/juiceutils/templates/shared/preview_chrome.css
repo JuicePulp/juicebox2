@@ -60,8 +60,8 @@
       flex-direction:column;
       align-items:center;
       justify-content:center;
-      padding:1rem;
-      gap:1rem;
+      padding:.35rem;
+      gap:.6rem;
     }
     video#media,img#media{
       max-width:100%;
@@ -190,7 +190,7 @@
       .fname{display:none}
       .fsize{display:none}
       .topbar .btn{padding:.45rem .7rem;font-size:.85rem}
-      .stage{padding:.5rem;gap:.6rem}
+      .stage{padding:.25rem;gap:.4rem}
       video#media,img#media,juice-player#media{width:100%;max-height:calc(100dvh - 8rem)}
       iframe.pdf-frame{min-height:calc(100dvh - 8rem)}
       .dl-icon{width:5rem;height:5rem}

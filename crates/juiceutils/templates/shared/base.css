@@ -13,7 +13,7 @@
       display:flex;
       align-items:center;
       gap:.75rem;
-      padding:.6rem 1rem;
+      padding:.5rem .75rem;
       border-bottom:1px solid #2e2620;
       flex:none;
     }
