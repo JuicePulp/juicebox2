@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
 
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -11,7 +15,45 @@ use super::{
     common::{safe_extension, valid_component},
     freeze::ensure_not_frozen,
 };
-use crate::error::StorageError;
+use crate::{error::StorageError, live::LiveUploads};
+
+/// An upload is abandoned when it has not been touched for this long. This
+/// matches `LiveUploads::STALE_AFTER`; a published part group with no live
+/// registration and no completed target is safe to remove.
+const ABANDONED_AFTER: Duration = Duration::from_secs(6 * 60 * 60);
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CleanupStats {
+    pub files: u64,
+    pub bytes: u64,
+    pub kept_targets: u64,
+    pub skipped_groups: u64,
+}
+
+impl CleanupStats {
+    fn add_removed(&mut self, size: Option<u64>) {
+        if let Some(size) = size {
+            self.files += 1;
+            self.bytes += size;
+        }
+    }
+}
+
+#[derive(Debug)]
+struct StoredFile {
+    id: String,
+    path: PathBuf,
+    size: u64,
+    mtime: SystemTime,
+    capability: Option<String>,
+}
+
+#[derive(Debug)]
+struct Sidecar {
+    id: String,
+    path: PathBuf,
+    mtime: SystemTime,
+}
 
 pub struct LocalBackend {
     files_dir: PathBuf,
@@ -98,6 +140,213 @@ impl LocalBackend {
             self.extensions.len()
         );
         Ok(())
+    }
+
+    /// Removes abandoned upload artifacts older than [`ABANDONED_AFTER`].
+    ///
+    /// Parts are identified by their capability sidecar: every part and the
+    /// final target of one multipart upload share a capability hash. A group is
+    /// only touched when it is old and no member is registered as a live
+    /// upload. If one member is exactly the sum of the others it is the
+    /// completed target and only the parts are removed. If a newer, larger
+    /// possible target exists but the sum does not match (for example some
+    /// parts were already deleted), the group is left alone for inspection.
+    pub async fn cleanup_stale(&self, live: &LiveUploads) -> Result<CleanupStats, std::io::Error> {
+        let cutoff = SystemTime::now()
+            .checked_sub(ABANDONED_AFTER)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        self.cleanup_stale_before(live, cutoff).await
+    }
+
+    /// Testable form of [`Self::cleanup_stale`] with an explicit cutoff.
+    pub async fn cleanup_stale_before(
+        &self,
+        live: &LiveUploads,
+        cutoff: SystemTime,
+    ) -> Result<CleanupStats, std::io::Error> {
+        let mut entries = tokio::fs::read_dir(&self.files_dir).await?;
+        let mut files: Vec<StoredFile> = Vec::new();
+        let mut live_temps: Vec<Sidecar> = Vec::new();
+        let mut reserves: Vec<Sidecar> = Vec::new();
+        let mut capabilities: HashMap<String, (PathBuf, SystemTime)> = HashMap::new();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let file_type = entry.file_type().await?;
+            if file_type.is_symlink() || !file_type.is_file() {
+                continue;
+            }
+            let meta = entry.metadata().await?;
+            let mtime = meta.modified()?;
+            let path = entry.path();
+
+            if let Some(id) = name.strip_prefix(".cap.") {
+                capabilities.insert(id.to_string(), (path, mtime));
+                continue;
+            }
+            if let Some(id) = name
+                .strip_prefix(".live.")
+                .and_then(|rest| rest.strip_suffix(".tmp"))
+            {
+                live_temps.push(Sidecar {
+                    id: id.to_string(),
+                    path,
+                    mtime,
+                });
+                continue;
+            }
+            if let Some(id) = name
+                .strip_prefix('.')
+                .and_then(|rest| rest.strip_suffix(".reserve"))
+            {
+                reserves.push(Sidecar {
+                    id: id.to_string(),
+                    path,
+                    mtime,
+                });
+                continue;
+            }
+            if name.starts_with('.') {
+                continue;
+            }
+            let Some(dot) = name.rfind('.') else {
+                continue;
+            };
+            let id = name[..dot].to_string();
+            if !valid_component(&id) {
+                continue;
+            }
+            let capability = match capabilities.get(&id) {
+                Some((cap_path, _)) => tokio::fs::read_to_string(cap_path)
+                    .await
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
+                None => None,
+            };
+            files.push(StoredFile {
+                id,
+                path,
+                size: meta.len(),
+                mtime,
+                capability,
+            });
+        }
+
+        let data_ids: HashSet<&str> = files.iter().map(|file| file.id.as_str()).collect();
+        let mut stats = CleanupStats::default();
+
+        for sidecar in &live_temps {
+            if sidecar.mtime < cutoff
+                && !data_ids.contains(sidecar.id.as_str())
+                && !live.is_active(&sidecar.id)
+            {
+                if let Ok(()) = tokio::fs::remove_file(&sidecar.path).await {
+                    stats.files += 1;
+                }
+            }
+        }
+        for sidecar in &reserves {
+            if sidecar.mtime < cutoff && !live.is_active(&sidecar.id) {
+                if let Ok(()) = tokio::fs::remove_file(&sidecar.path).await {
+                    stats.files += 1;
+                }
+            }
+        }
+        // A capability without its data file is a half-published upload.
+        for (id, (path, mtime)) in &capabilities {
+            if *mtime < cutoff && !data_ids.contains(id.as_str()) && !live.is_active(id) {
+                if let Ok(()) = tokio::fs::remove_file(path).await {
+                    stats.files += 1;
+                }
+            }
+        }
+
+        let mut groups: HashMap<&str, Vec<&StoredFile>> = HashMap::new();
+        for file in &files {
+            let Some(capability) = file.capability.as_deref() else {
+                continue;
+            };
+            if file.mtime < cutoff && !live.is_active(&file.id) {
+                groups.entry(capability).or_default().push(file);
+            }
+        }
+
+        for group in groups.values() {
+            if group.len() < 2 || group.iter().any(|file| live.is_active(&file.id)) {
+                continue;
+            }
+            let total = group.iter().map(|file| file.size).sum::<u64>();
+            let exact_targets: Vec<&&StoredFile> = group
+                .iter()
+                .filter(|file| file.size > 0 && file.size == total - file.size)
+                .collect();
+            if exact_targets.len() == 1 {
+                let target = exact_targets[0];
+                stats.kept_targets += 1;
+                for file in group.iter().filter(|file| file.id != target.id) {
+                    stats.add_removed(self.remove_stale_file(file).await);
+                }
+                continue;
+            }
+
+            let mut by_mtime = group.clone();
+            by_mtime.sort_by_key(|file| file.mtime);
+            let newest = by_mtime[by_mtime.len() - 1];
+            let second_newest = by_mtime[by_mtime.len() - 2];
+            let largest_other = group
+                .iter()
+                .filter(|file| file.id != newest.id)
+                .map(|file| file.size)
+                .max()
+                .unwrap_or(0);
+            let possible_target = newest.size > largest_other
+                && newest
+                    .mtime
+                    .duration_since(second_newest.mtime)
+                    .is_ok_and(|gap| gap > Duration::from_secs(5));
+            if possible_target {
+                stats.skipped_groups += 1;
+                continue;
+            }
+
+            for file in group {
+                stats.add_removed(self.remove_stale_file(file).await);
+            }
+        }
+
+        if stats.files > 0 {
+            tracing::info!(
+                "storage cleanup removed {} files ({:.2} MiB), kept {} completed targets, skipped {} possible targets",
+                stats.files,
+                stats.bytes as f64 / (1024.0 * 1024.0),
+                stats.kept_targets,
+                stats.skipped_groups,
+            );
+        }
+        Ok(stats)
+    }
+
+    async fn remove_stale_file(&self, file: &StoredFile) -> Option<u64> {
+        if self.frozen_marker_exists(&file.id).await.unwrap_or(true) {
+            return None;
+        }
+        match tokio::fs::remove_file(&file.path).await {
+            Ok(()) => {
+                self.extensions.remove(&file.id);
+                self.meta_cache.remove(&file.id);
+                capability::remove(self, &file.id).await;
+                Some(file.size)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                tracing::warn!(
+                    "storage cleanup could not remove {}: {error}",
+                    file.path.display()
+                );
+                None
+            }
+        }
     }
 
     fn resolve_path(&self, id: &str) -> Option<PathBuf> {

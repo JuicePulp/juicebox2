@@ -492,3 +492,134 @@ async fn link_or_rename_publishes_when_destination_is_free() {
     assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
     assert!(!tokio::fs::try_exists(&src).await.unwrap());
 }
+
+#[tokio::test]
+async fn cleanup_removes_abandoned_parts_and_keeps_completed_target() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("part1", "a.mp4", Bytes::from_static(b"abc"), Some("cap"))
+        .await
+        .unwrap();
+    backend
+        .put("part2", "b.mp4", Bytes::from_static(b"defg"), Some("cap"))
+        .await
+        .unwrap();
+    backend
+        .put(
+            "target",
+            "c.mp4",
+            Bytes::from_static(b"abcdefg"),
+            Some("cap"),
+        )
+        .await
+        .unwrap();
+
+    let live = crate::live::LiveUploads::default();
+    let stats = backend
+        .cleanup_stale_before(
+            &live,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stats.files, 2);
+    assert_eq!(stats.kept_targets, 1);
+    assert!(matches!(
+        backend.stat("part1").await,
+        Err(StorageError::NotFound)
+    ));
+    assert!(matches!(
+        backend.stat("part2").await,
+        Err(StorageError::NotFound)
+    ));
+    assert_eq!(
+        backend.get("target").await.unwrap().data.as_ref(),
+        b"abcdefg"
+    );
+}
+
+#[tokio::test]
+async fn cleanup_removes_a_group_that_never_completed() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("chunk1", "a.mp4", Bytes::from_static(b"abc"), Some("cap"))
+        .await
+        .unwrap();
+    backend
+        .put("chunk2", "b.mp4", Bytes::from_static(b"defg"), Some("cap"))
+        .await
+        .unwrap();
+
+    let live = crate::live::LiveUploads::default();
+    let stats = backend
+        .cleanup_stale_before(
+            &live,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stats.files, 2);
+    assert!(matches!(
+        backend.stat("chunk1").await,
+        Err(StorageError::NotFound)
+    ));
+    assert!(matches!(
+        backend.stat("chunk2").await,
+        Err(StorageError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn cleanup_skips_active_live_uploads() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("part1", "a.mp4", Bytes::from_static(b"abc"), Some("cap"))
+        .await
+        .unwrap();
+    backend
+        .put("part2", "b.mp4", Bytes::from_static(b"defg"), Some("cap"))
+        .await
+        .unwrap();
+
+    let live = crate::live::LiveUploads::default();
+    live.register_parts(
+        "target",
+        "c.mp4",
+        "video/mp4",
+        7,
+        &[("part1".to_string(), 0, 3), ("part2".to_string(), 3, 4)],
+    );
+    let stats = backend
+        .cleanup_stale_before(
+            &live,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stats.files, 0);
+    assert!(backend.stat("part1").await.is_ok());
+    assert!(backend.stat("part2").await.is_ok());
+}
+
+#[tokio::test]
+async fn cleanup_removes_stale_live_temp_and_orphan_capability() {
+    let (dir, backend) = setup_local_backend().await;
+    tokio::fs::write(dir.path().join(".live.gone.tmp"), b"partial")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join(".cap.gone"), b"hash")
+        .await
+        .unwrap();
+
+    let live = crate::live::LiveUploads::default();
+    let stats = backend
+        .cleanup_stale_before(
+            &live,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stats.files, 2);
+    assert!(!dir.path().join(".live.gone.tmp").exists());
+    assert!(!dir.path().join(".cap.gone").exists());
+}

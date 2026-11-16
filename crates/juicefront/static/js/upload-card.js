@@ -941,7 +941,7 @@ async function uploadItem(file, item, fingerprint) {
     id = enqueueUpload({
       file: file,
       ttlHours: itemTtlHours,
-      customHost: readSelectedHost() || await resolveUploadHost(),
+      customHost: readSelectedHost() || await resolveUploadHost(file.size, itemTtlHours),
       quickLink: readQuickLinkEnabled(),
       safeUpload: readSafeUploadEnabled(),
       password: readUploadPassword(),

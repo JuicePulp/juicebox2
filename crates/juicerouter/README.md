@@ -26,7 +26,7 @@ proxies (`local_mode = "proxy"`).
 | `GET /health` | `{status, healthy, nodes[]}` — probe state per node |
 | `GET /hosts` | Node list with region, URL and health |
 | `GET /route/{id}?route=v&path=v/{id}.mp4` | Routing decision as JSON (debug) |
-| `GET /upload-target?region=us1` | Best writable node for an upload |
+| `GET /upload-target?region=us1&size=6442450944&ttl_hours=24` | Best writable node for an upload, optionally capacity- and TTL-aware |
 | `GET /v/{path}` etc. | `302` to the owning node / R2, `404`, or `425` |
 
 ## Health
@@ -53,6 +53,14 @@ share the key.
 `unknown` nodes are not upload candidates until the first probe succeeds.
 Until then `/upload-target` returns `503`, and clients omit `host` so
 juiceback uses its configured default storage node.
+
+Healthy nodes are also probed for `GET /api/storage` and `GET /api/config`.
+When `/upload-target` includes `size` (and optionally `ttl_hours`), a node is
+skipped if it lacks two copies of the file (parts plus concatenated target),
+exceeds its hard maximum, or exceeds its per-TTL cap. If the caller's preferred
+region cannot fit the upload, the router falls back to another healthy storage
+node that can; if none can, it returns `503` instead of selecting a node that
+would fail mid-upload. `/health` exposes the cached `capacity` for each node.
 
 ## Configuration
 

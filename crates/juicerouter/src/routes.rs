@@ -49,6 +49,7 @@ struct NodeView {
     region: String,
     url: String,
     health: NodeHealth,
+    capacity: Option<crate::state::NodeCapacity>,
 }
 
 #[derive(Serialize)]
@@ -68,6 +69,7 @@ fn node_views(state: &AppState) -> Vec<NodeView> {
             region: node.region.clone(),
             url: node.url.clone(),
             health: node.health(),
+            capacity: node.capacity(),
         })
         .collect()
 }
@@ -120,6 +122,13 @@ async fn route_info(
 struct UploadTargetQuery {
     #[serde(default)]
     region: Option<String>,
+    /// Declared file size in bytes. When present, nodes that cannot hold both
+    /// the parts and the concatenated target are skipped.
+    #[serde(default)]
+    size: Option<u64>,
+    /// Retention choice, used to respect per-TTL caps during selection.
+    #[serde(default)]
+    ttl_hours: Option<f64>,
 }
 
 // `cf-ipcountry` carries the country; the `cf-ray` suffix carries the colo.
@@ -137,12 +146,21 @@ async fn upload_target(
         .and_then(|value| value.split('-').nth(1));
     let selection = state
         .registry
-        .select(&state.config.geo, query.region.as_deref(), country, colo)
+        .select_for(
+            &state.config.geo,
+            query.region.as_deref(),
+            country,
+            colo,
+            query.size,
+            query.ttl_hours,
+        )
         .ok_or(ApiError::Unavailable)?;
     tracing::info!(
-        "upload-target region={} reason={} country={:?} colo={:?}",
+        "upload-target region={} reason={} size={:?} ttl={:?} country={:?} colo={:?}",
         selection.region,
         selection.reason,
+        query.size,
+        query.ttl_hours,
         country,
         colo
     );

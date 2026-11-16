@@ -241,6 +241,16 @@ impl LiveUploads {
         self.parts.contains_key(id)
     }
 
+    /// True while `id` belongs to a live upload that has not gone stale.
+    /// A stale target is evicted here so cleanup never keeps a dead upload.
+    #[must_use]
+    pub fn is_active(&self, id: &str) -> bool {
+        if let Some(target) = self.parts.get(id).map(|entry| entry.value().clone()) {
+            return self.snapshot(&target).is_some();
+        }
+        self.snapshot(id).is_some()
+    }
+
     #[must_use]
     pub fn track(&self, id: &str) -> Option<LiveWriter> {
         let known = self.parts.contains_key(id) || self.uploads.contains_key(id);
