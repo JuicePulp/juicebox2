@@ -1,4 +1,4 @@
-import { esc } from "./util.js?v=2.2.0-r5";
+import { esc } from "./util.js?v=2.2.0-r6";
     var PAGE = 50;
     var allReports = [];
     var displayedCount = 0;

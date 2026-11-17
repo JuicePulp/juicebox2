@@ -1,9 +1,9 @@
-import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.2.0-r5";
-import { ttlLabel } from "./i18n.js?v=2.2.0-r5";
-import { playSound } from "./sounds.js?v=2.2.0-r5";
-import { soundEnabled } from "./sounds.js?v=2.2.0-r5";
-import { play } from "./vendor/cuelume/index.js?v=2.2.0-r5";
-import { haptic } from "./haptics.js?v=2.2.0-r5";
+import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.2.0-r6";
+import { ttlLabel } from "./i18n.js?v=2.2.0-r6";
+import { playSound } from "./sounds.js?v=2.2.0-r6";
+import { soundEnabled } from "./sounds.js?v=2.2.0-r6";
+import { play } from "./vendor/cuelume/index.js?v=2.2.0-r6";
+import { haptic } from "./haptics.js?v=2.2.0-r6";
 
 function scrubTick(direction) {
   if (!soundEnabled()) return;
@@ -220,7 +220,7 @@ export function enhanceRetention(card, locale = "en") {
   if (lastIndex < 0) lastIndex = 0;
   let cleanupTimer = 0;
 
-  const setValue = (i) => {
+  const setValue = (i, animate = true) => {
     if (!valueWrap) return;
     const nw = splitRetentionLabel(labels[i] || "");
 
@@ -258,7 +258,9 @@ export function enhanceRetention(card, locale = "en") {
     const baseChanged = old.base !== nw.base;
     const suffixChanges = old.hasS !== nw.hasS || old.base !== nw.base;
 
-    if (prefersReducedMotion()) {
+    if (!animate || prefersReducedMotion()) {
+      clearTimeout(cleanupTimer);
+      wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
       numberEl.textContent = nw.number;
       numberEl.className = "rttnumber";
       baseEl.textContent = nw.base;
@@ -440,10 +442,10 @@ export function enhanceRetention(card, locale = "en") {
     previewIndex = index;
     const radio = radios[index];
     if (radio) {
-      setValue(index);
+      setValue(index, false);
     } else {
       const checked = radios.findIndex((r) => r.checked);
-      if (checked >= 0) setValue(checked);
+      if (checked >= 0) setValue(checked, false);
     }
     card.dispatchEvent(new CustomEvent("juicebox-retention-preview", {
       bubbles: true,

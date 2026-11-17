@@ -1,5 +1,5 @@
-import { formatSize, esc } from "./util.js?v=2.2.0-r5";
-import { publicFileInfo } from "./api.js?v=2.2.0-r5";
+import { formatSize, esc } from "./util.js?v=2.2.0-r6";
+import { publicFileInfo } from "./api.js?v=2.2.0-r6";
 
     var PAGE = 200;
     var allFiles = [];

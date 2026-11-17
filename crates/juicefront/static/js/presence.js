@@ -1,5 +1,5 @@
-import { apiPresence } from "./api.js?v=2.2.0-r5";
-import { hasCookie } from "./util.js?v=2.2.0-r5";
+import { apiPresence } from "./api.js?v=2.2.0-r6";
+import { hasCookie } from "./util.js?v=2.2.0-r6";
 let eventSource = null;
 let connected = false;
 let devices = [];

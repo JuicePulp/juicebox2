@@ -1,6 +1,6 @@
-import { resolveSound, } from "../sounds/recipes.js?v=2.2.0-r5";
-import { arrangement, contextFrom, layerFactors, resolveEmphasis, shapeFor, } from "../sounds/context.js?v=2.2.0-r5";
-import { THEMES, isThemeName } from "../sounds/themes.js?v=2.2.0-r5";
+import { resolveSound, } from "../sounds/recipes.js?v=2.2.0-r6";
+import { arrangement, contextFrom, layerFactors, resolveEmphasis, shapeFor, } from "../sounds/context.js?v=2.2.0-r6";
+import { THEMES, isThemeName } from "../sounds/themes.js?v=2.2.0-r6";
 const SOURCE_STOP_PADDING = 0.05;
 const CLEANUP_MARGIN = 0.05;
 const OUTPUT_GAIN = 4;
