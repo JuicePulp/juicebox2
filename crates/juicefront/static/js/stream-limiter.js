@@ -1,4 +1,4 @@
-import { PARALLEL_STREAMS } from "./upload-config.js?v=2.2.0-r2";
+import { PARALLEL_STREAMS } from "./upload-config.js?v=2.2.0-r5";
 let inUse = 0;
 export function tryAcquireStream() {
   if (inUse >= PARALLEL_STREAMS)

@@ -1,8 +1,8 @@
-import { formatMaxSize, readCookie, writeCookie } from "./util.js?v=2.2.0-r2";
-import { clearHostGlow, shouldGlowHost } from "./presence.js?v=2.2.0-r2";
-import { setSoundEnabled } from "./sounds.js?v=2.2.0-r2";
-import { hapticsEnabled, setHapticsEnabled } from "./haptics.js?v=2.2.0-r2";
-import { paintDitherOverlay, clearDitherOverlay, repaintDitherOverlay } from "./dither.js?v=2.2.0-r2";
+import { formatMaxSize, readCookie, writeCookie } from "./util.js?v=2.2.0-r5";
+import { clearHostGlow, shouldGlowHost } from "./presence.js?v=2.2.0-r5";
+import { setSoundEnabled } from "./sounds.js?v=2.2.0-r5";
+import { hapticsEnabled, setHapticsEnabled } from "./haptics.js?v=2.2.0-r5";
+import { paintDitherOverlay, clearDitherOverlay, repaintDitherOverlay } from "./dither.js?v=2.2.0-r5";
 
 var MOTION_KEY = "juicebox_reduce_motion";
 var SOUND_KEY = "juicebox_sound";
@@ -56,7 +56,7 @@ export function initHostGlow() {
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["hash"] });
   btn.addEventListener("click", clearHostGlow);
   if (shouldGlowHost()) {
-    import("./presence.js?v=2.2.0-r2").then(({ isAppMode }) => {
+    import("./presence.js?v=2.2.0-r5").then(({ isAppMode }) => {
       if (isAppMode()) {
         btn.classList.add("host-btn--glow");
       }
@@ -121,6 +121,9 @@ export function updateDropMaxSize(bytes) {
   const [before, after] = tpl.split("{size}");
   el.textContent = "";
   el.append(before ?? "", size, after ?? "");
+  el.classList.remove("is-previewing");
+  void el.offsetWidth;
+  el.classList.add("is-previewing");
 }
 const HOST_CHECK_FAILURES = {
   empty: "[X] Enter an address",

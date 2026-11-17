@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-/// Default byte-hour budget: the old 5 GiB cap held for the default 72 hours.
-pub const DEFAULT_BUDGET_GIB_HOURS: f64 = 360.0;
+/// Default byte-hour budget: 10 GiB for a day, then a gradual taper through
+/// longer retention choices (6.5 GiB at 72 hours, 2.75 GiB at a week).
+pub const DEFAULT_BUDGET_GIB_HOURS: f64 = 480.0;
 
 /// Floor so a very long retention still leaves a usable upload limit.
 pub const DEFAULT_MIN_FILE_SIZE_BYTES: u64 = 256 * 1024 * 1024;
@@ -70,28 +71,48 @@ mod tests {
     const GIB: u64 = 1024 * 1024 * 1024;
 
     #[test]
-    fn default_budget_preserves_three_day_cap() {
-        assert_eq!(cap_bytes(72.0, 360.0, 10 * GIB, 256 * 1024 * 1024), 5 * GIB);
+    fn default_budget_keeps_three_day_uploads_generous() {
+        assert_eq!(
+            cap_bytes(72.0, DEFAULT_BUDGET_GIB_HOURS, 10 * GIB, 256 * 1024 * 1024),
+            13 * GIB / 2
+        );
     }
 
     #[test]
     fn short_retention_hits_the_hard_cap() {
-        assert_eq!(cap_bytes(0.5, 360.0, 10 * GIB, 256 * 1024 * 1024), 10 * GIB);
-        assert_eq!(cap_bytes(24.0, 360.0, 10 * GIB, 256 * 1024 * 1024), 10 * GIB);
+        assert_eq!(
+            cap_bytes(0.5, DEFAULT_BUDGET_GIB_HOURS, 10 * GIB, 256 * 1024 * 1024),
+            10 * GIB
+        );
+        assert_eq!(
+            cap_bytes(24.0, DEFAULT_BUDGET_GIB_HOURS, 10 * GIB, 256 * 1024 * 1024),
+            10 * GIB
+        );
     }
 
     #[test]
     fn long_retention_is_lowered_and_rounded_down() {
-        assert_eq!(cap_bytes(168.0, 360.0, 10 * GIB, 256 * 1024 * 1024), 2 * GIB);
-        assert_eq!(cap_bytes(336.0, 360.0, 10 * GIB, 256 * 1024 * 1024), GIB);
+        assert_eq!(
+            cap_bytes(168.0, DEFAULT_BUDGET_GIB_HOURS, 10 * GIB, 256 * 1024 * 1024),
+            11 * GIB / 4
+        );
+        assert_eq!(
+            cap_bytes(336.0, DEFAULT_BUDGET_GIB_HOURS, 10 * GIB, 256 * 1024 * 1024),
+            5 * GIB / 4
+        );
     }
 
     #[test]
     fn map_uses_retention_keys() {
-        let map = build_caps(&[0.5, 1.0, 72.0, 336.0], 360.0, 10 * GIB, 0);
+        let map = build_caps(
+            &[0.5, 1.0, 72.0, 336.0],
+            DEFAULT_BUDGET_GIB_HOURS,
+            10 * GIB,
+            0,
+        );
         assert_eq!(map.get("0.5"), Some(&(10 * GIB)));
         assert_eq!(map.get("1"), Some(&(10 * GIB)));
-        assert_eq!(map.get("72"), Some(&(5 * GIB)));
-        assert_eq!(map.get("336"), Some(&GIB));
+        assert_eq!(map.get("72"), Some(&(13 * GIB / 2)));
+        assert_eq!(map.get("336"), Some(&(5 * GIB / 4)));
     }
 }

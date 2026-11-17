@@ -1,4 +1,4 @@
-import { esc } from "./util.js?v=2.2.0-r2";
+import { esc } from "./util.js?v=2.2.0-r5";
     var PAGE = 50;
     var allBans = [];
     var displayedCount = 0;

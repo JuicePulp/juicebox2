@@ -423,6 +423,33 @@ html[data-banned] .upload-tabs {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
+.drop-text-meta [data-drop-max-size] {
+  display: inline-block;
+  transform-origin: center;
+}
+
+.drop-text-meta.is-previewing [data-drop-max-size] {
+  color: var(--orange-400);
+  animation: drop-max-pop 0.22s ease-out;
+}
+
+@keyframes drop-max-pop {
+  from {
+    opacity: 0.65;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-text-meta.is-previewing [data-drop-max-size] {
+    animation: none;
+  }
+}
+
 .tab-radio {
   position: absolute;
   width: 1px;

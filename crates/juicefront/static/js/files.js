@@ -1,10 +1,10 @@
-import { announce, esc, formatSize } from "./util.js?v=2.2.0-r2";
-import { playSound } from "./sounds.js?v=2.2.0-r2";
-import { iconHTML, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.2.0-r2";
-import { publicFile, publicFileRename, publicFileRenew } from "./api.js?v=2.2.0-r2";
-import { openQrModal } from "./qr.js?v=2.2.0-r2";
-import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js?v=2.2.0-r2";
-import { t } from "./i18n.js?v=2.2.0-r2";
+import { announce, esc, formatSize } from "./util.js?v=2.2.0-r5";
+import { playSound } from "./sounds.js?v=2.2.0-r5";
+import { iconHTML, makeUrlVariantToggle, urlVariantLabels, applyVariantUrl } from "./copy.js?v=2.2.0-r5";
+import { publicFile, publicFileRename, publicFileRenew } from "./api.js?v=2.2.0-r5";
+import { openQrModal } from "./qr.js?v=2.2.0-r5";
+import { onFileDeleted, emitFileDeleted, removeLocalFile } from "./file-events.js?v=2.2.0-r5";
+import { t } from "./i18n.js?v=2.2.0-r5";
 
 function loc() {
   return document.documentElement.lang || "en";
