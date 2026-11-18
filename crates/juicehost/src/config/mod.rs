@@ -442,11 +442,8 @@ pub struct SizeScaleFile {
     #[serde(default)]
     pub enabled: bool,
 
-    #[serde(default = "default_size_scale_half_life_hours")]
-    pub half_life_hours: f64,
-
     /// Deprecated linear-budget setting. Kept only so older configs parse
-    /// cleanly; the exponential curve uses `half_life_hours`.
+    /// cleanly; caps now follow a cubic curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_gib_hours: Option<f64>,
 
@@ -458,15 +455,10 @@ impl Default for SizeScaleFile {
     fn default() -> Self {
         Self {
             enabled: false,
-            half_life_hours: default_size_scale_half_life_hours(),
             budget_gib_hours: None,
             min_file_size_mb: default_size_scale_min_file_size_mb(),
         }
     }
-}
-
-const fn default_size_scale_half_life_hours() -> f64 {
-    juiceutils::size_scale::DEFAULT_HALF_LIFE_HOURS
 }
 
 const fn default_size_scale_min_file_size_mb() -> u64 {
@@ -786,7 +778,7 @@ mod tests {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
         let file: FileConfig = toml::from_str(
-            "[limits]\nmax_file_size_mb = 10240\n[limits.size_scale]\nenabled = true\nhalf_life_hours = 112.0\n[features]\ndefault_ttl_hours = 72.0\nallowed_ttl_hours = [0.5, 72.0, 168.0, 336.0]\n",
+            "[limits]\nmax_file_size_mb = 10240\n[limits.size_scale]\nenabled = true\nmin_file_size_mb = 1280\n[features]\ndefault_ttl_hours = 72.0\nallowed_ttl_hours = [0.5, 72.0, 168.0, 336.0]\n",
         )
         .unwrap();
         let cfg = Config::try_load_from(&file).unwrap();
@@ -800,11 +792,11 @@ mod tests {
         );
         assert_eq!(
             cfg.max_file_size_by_ttl_hours.get("72"),
-            Some(&(25 * 1024 * 1024 * 1024 / 4))
+            Some(&(11 * 1024 * 1024 * 1024 / 2))
         );
         assert_eq!(
             cfg.max_file_size_by_ttl_hours.get("168"),
-            Some(&(7 * 1024 * 1024 * 1024 / 2))
+            Some(&(9 * 1024 * 1024 * 1024 / 4))
         );
         assert_eq!(
             cfg.max_file_size_by_ttl_hours.get("336"),
