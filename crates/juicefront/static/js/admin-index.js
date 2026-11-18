@@ -1,4 +1,4 @@
-import { esc } from "./util.js?v=2.2.0-r7";
+import { esc } from "./util.js?v=2.2.0-r8";
     async function init() {
         const statusEl = document.getElementById("admin-status");
         if (!statusEl) return;

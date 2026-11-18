@@ -101,6 +101,8 @@
   "retention.24h": "24 часа",
   "retention.3d": "3 дня",
   "retention.7d": "7 дней",
+  "retention.1w": "1 неделя",
+  "retention.2w": "2 недели",
   "retention.30d": "1 месяц",
   "retention.minute": "1 минута",
   "retention.minutes": "{count} минут",

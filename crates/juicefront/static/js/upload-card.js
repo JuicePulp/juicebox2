@@ -1,6 +1,6 @@
-import { t } from "./i18n.js?v=2.2.0-r7";
-import { announce, formatSize } from "./util.js?v=2.2.0-r7";
-import { playSound } from "./sounds.js?v=2.2.0-r7";
+import { t } from "./i18n.js?v=2.2.0-r8";
+import { announce, formatSize } from "./util.js?v=2.2.0-r8";
+import { playSound } from "./sounds.js?v=2.2.0-r8";
 import {
   iconHTML,
   iconForMime,
@@ -11,7 +11,7 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js?v=2.2.0-r7";
+} from "./copy.js?v=2.2.0-r8";
 import {
   UPLOAD_URL,
   readMaxFileSize,
@@ -19,9 +19,9 @@ import {
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
-} from "./upload-config.js?v=2.2.0-r7";
-import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r7";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r7";
+} from "./upload-config.js?v=2.2.0-r8";
+import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r8";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r8";
 import {
   enhanceHostSelector,
   readSelectedHost,
@@ -29,11 +29,11 @@ import {
   readDangerLevel,
   initHostGlow,
   updateDropMaxSize,
-} from "./enhance-host.js?v=2.2.0-r7";
-import { connectPresence } from "./presence.js?v=2.2.0-r7";
-import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r7";
-import { validateFileClient } from "./file-validation.js?v=2.2.0-r7";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r7";
+} from "./enhance-host.js?v=2.2.0-r8";
+import { connectPresence } from "./presence.js?v=2.2.0-r8";
+import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r8";
+import { validateFileClient } from "./file-validation.js?v=2.2.0-r8";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r8";
 import {
   enqueueUpload,
   cancelUpload,
@@ -44,9 +44,9 @@ import {
   connectUploads,
   findPausedUpload,
   resumeUpload,
-} from "./upload-client-loader.js?v=2.2.0-r7";
-import { extractServerId } from "./upload-engine.js?v=2.2.0-r7";
-import { initHostSelector } from "./host-selector.js?v=2.2.0-r7";
+} from "./upload-client-loader.js?v=2.2.0-r8";
+import { extractServerId } from "./upload-engine.js?v=2.2.0-r8";
+import { initHostSelector } from "./host-selector.js?v=2.2.0-r8";
 
 var assetVersion = (() => {
   try {

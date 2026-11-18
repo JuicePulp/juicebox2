@@ -90,6 +90,8 @@
   "retention.24h": "24 horas",
   "retention.3d": "3 días",
   "retention.7d": "7 días",
+  "retention.1w": "1 semana",
+  "retention.2w": "2 semanas",
   "retention.30d": "1 mes",
   "retention.minute": "1 minuto",
   "retention.minutes": "{count} minutos",
