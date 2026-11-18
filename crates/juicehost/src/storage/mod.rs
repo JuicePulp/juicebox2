@@ -15,7 +15,7 @@ pub(crate) use common::valid_component;
 pub use common::{extract_extension, guess_mime};
 pub use freeze::FreezeStore;
 use futures::Stream;
-pub use local::LocalBackend;
+pub use local::{CleanupStats, LocalBackend};
 pub use r2::R2Store;
 pub use s3::S3Backend;
 use serde::Serialize;

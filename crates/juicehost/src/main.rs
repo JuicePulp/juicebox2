@@ -65,6 +65,7 @@ fn main() {
         .expect("tokio runtime creation failed");
 
     runtime.block_on(async {
+        let mut local_backend: Option<Arc<LocalBackend>> = None;
         let storage: Arc<dyn StorageBackend> = if config.is_s3_mode() {
             let bucket = config
                 .s3_bucket
@@ -94,10 +95,16 @@ fn main() {
                 tracing::info!("created files directory {}", config.files_dir.display());
             }
 
-            let backend = LocalBackend::new(config.files_dir.clone(), config.min_free_space_bytes)
-                .expect("invalid files directory");
-            backend.init_cache().await.expect("invalid files directory entry");
-            Arc::new(backend)
+            let backend = Arc::new(
+                LocalBackend::new(config.files_dir.clone(), config.min_free_space_bytes)
+                    .expect("invalid files directory"),
+            );
+            backend
+                .init_cache()
+                .await
+                .expect("invalid files directory entry");
+            local_backend = Some(Arc::clone(&backend));
+            backend
         };
 
         if config.audio_embed.enabled() {
@@ -118,6 +125,25 @@ fn main() {
         let state = Arc::new(AppState::new(&config, storage));
         juicehost::handlers::stats::start_flusher(Arc::clone(&state));
         juicehost::handlers::audio_embed::spawn_pruner(Arc::clone(&state));
+
+        if let Some(local) = local_backend {
+            let live = state.live_uploads.clone();
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(60 * 60));
+                loop {
+                    ticker.tick().await;
+                    match local.cleanup_stale(&live).await {
+                        Ok(stats) if stats.files > 0 => tracing::info!(
+                            "stale upload cleanup removed {} files ({:.2} MiB)",
+                            stats.files,
+                            stats.bytes as f64 / (1024.0 * 1024.0)
+                        ),
+                        Ok(_) => {}
+                        Err(error) => tracing::warn!("stale upload cleanup failed: {error}"),
+                    }
+                }
+            });
+        }
 
         // without a pepper or a local file the ban list stays disabled, so skip the fetch
         if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {

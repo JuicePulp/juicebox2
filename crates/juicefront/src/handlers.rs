@@ -8,7 +8,7 @@ use std::{
 use askama::Template;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Json, Path, Query, State},
+    extract::{ConnectInfo, Json, Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -923,6 +923,7 @@ struct IndexTpl {
 pub async fn upload_target_proxy(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    RawQuery(query): RawQuery,
 ) -> Response<Body> {
     let Some(router_url) = state
         .config
@@ -933,7 +934,11 @@ pub async fn upload_target_proxy(
     else {
         return (StatusCode::SERVICE_UNAVAILABLE, "router not configured").into_response();
     };
-    let url = format!("{}/upload-target", router_url.trim_end_matches('/'));
+    let mut url = format!("{}/upload-target", router_url.trim_end_matches('/'));
+    if let Some(query) = query.as_deref().filter(|query| !query.is_empty()) {
+        url.push('?');
+        url.push_str(query);
+    }
     let mut request = state.http.get(url).timeout(Duration::from_millis(1_500));
     for name in ["cf-ipcountry", "cf-ray", "cf-connecting-ip"] {
         if let Some(value) = headers.get(name) {

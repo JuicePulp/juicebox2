@@ -1,9 +1,9 @@
-import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.2.0-r2";
-import { ttlLabel } from "./i18n.js?v=2.2.0-r2";
-import { playSound } from "./sounds.js?v=2.2.0-r2";
-import { soundEnabled } from "./sounds.js?v=2.2.0-r2";
-import { play } from "./vendor/cuelume/index.js?v=2.2.0-r2";
-import { haptic } from "./haptics.js?v=2.2.0-r2";
+import { readAllowedTtlHours, readDefaultTtlHours } from "./upload-config.js?v=2.2.0-r8";
+import { ttlLabel } from "./i18n.js?v=2.2.0-r8";
+import { playSound } from "./sounds.js?v=2.2.0-r8";
+import { soundEnabled } from "./sounds.js?v=2.2.0-r8";
+import { play } from "./vendor/cuelume/index.js?v=2.2.0-r8";
+import { haptic } from "./haptics.js?v=2.2.0-r8";
 
 function scrubTick(direction) {
   if (!soundEnabled()) return;
@@ -220,7 +220,7 @@ export function enhanceRetention(card, locale = "en") {
   if (lastIndex < 0) lastIndex = 0;
   let cleanupTimer = 0;
 
-  const setValue = (i) => {
+  const setValue = (i, animate = true) => {
     if (!valueWrap) return;
     const nw = splitRetentionLabel(labels[i] || "");
 
@@ -258,7 +258,9 @@ export function enhanceRetention(card, locale = "en") {
     const baseChanged = old.base !== nw.base;
     const suffixChanges = old.hasS !== nw.hasS || old.base !== nw.base;
 
-    if (prefersReducedMotion()) {
+    if (!animate || prefersReducedMotion()) {
+      clearTimeout(cleanupTimer);
+      wrapper.querySelectorAll("[data-exit-clone]").forEach((el) => el.remove());
       numberEl.textContent = nw.number;
       numberEl.className = "rttnumber";
       baseEl.textContent = nw.base;
@@ -387,6 +389,7 @@ export function enhanceRetention(card, locale = "en") {
     lastTicked = radio.value;
     storeTtl(radio.value);
     setValue(i);
+    preview(i);
     scrubTick(lastDirection);
     retentionTick();
   };
@@ -399,7 +402,10 @@ export function enhanceRetention(card, locale = "en") {
       playSound("select", { emphasis: "subtle", direction });
       retentionTick();
       const i = radios.findIndex((r) => r.value === target.value);
-      if (i >= 0) setValue(i);
+      if (i >= 0) {
+        setValue(i);
+        preview(i);
+      }
     }
   };
   fieldset.addEventListener("change", onChange);
@@ -429,6 +435,26 @@ export function enhanceRetention(card, locale = "en") {
       }
     }
     return { index: best, label: best >= 0 ? labelOf.get(radios[best]) : null };
+  };
+  let previewIndex = -1;
+  const preview = (index) => {
+    if (index === previewIndex) return;
+    previewIndex = index;
+    const radio = radios[index];
+    if (radio) {
+      setValue(index, false);
+    } else {
+      const checked = radios.findIndex((r) => r.checked);
+      if (checked >= 0) setValue(checked, false);
+    }
+    card.dispatchEvent(new CustomEvent("juicebox-retention-preview", {
+      bubbles: true,
+      detail: { hours: radio ? Number(radio.value) : null },
+    }));
+  };
+  const previewAtPoint = (clientX, clientY) => {
+    const hit = optionFromPoint(clientX, clientY);
+    if (hit.index >= 0) preview(hit.index);
   };
   const onPointerDown = (e) => {
     if (drag) return;
@@ -484,8 +510,14 @@ export function enhanceRetention(card, locale = "en") {
     thumb.style.top = "";
     thumb.style.left = (x - fieldRect.left) + "px";
   };
+  let lastPointer = null;
   const onPointerMove = (e) => {
-    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag) {
+      lastPointer = { x: e.clientX, y: e.clientY };
+      previewAtPoint(e.clientX, e.clientY);
+      return;
+    }
+    if (e.pointerId !== drag.id) return;
     if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 8) return;
     if (!drag.moved) {
       drag.moved = true;
@@ -539,19 +571,79 @@ export function enhanceRetention(card, locale = "en") {
   const blockTouchMove = (e) => {
     if (drag && drag.moved) e.preventDefault();
   };
+  const onPointerLeave = () => {
+    lastPointer = null;
+    if (!drag) preview(-1);
+  };
+  const onFocusIn = (e) => {
+    const target = e.target;
+    if (!target || target.name !== "ttl_hours") return;
+    const i = radios.indexOf(target);
+    if (i >= 0) preview(i);
+  };
+  const onFocusOut = () => {
+    if (drag) return;
+    window.setTimeout(() => {
+      if (!fieldset.contains(document.activeElement)) preview(-1);
+    }, 0);
+  };
+  let scrollFrame = 0;
+  const onScroll = () => {
+    if (drag) return;
+    cancelAnimationFrame(scrollFrame);
+    scrollFrame = requestAnimationFrame(() => {
+      const rect = fieldset.getBoundingClientRect();
+      previewAtPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    });
+  };
+  const onWheel = (e) => {
+    if (fieldset.scrollWidth <= fieldset.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    fieldset.scrollLeft += e.deltaY;
+    lastPointer = { x: e.clientX, y: e.clientY };
+    previewAtPoint(e.clientX, e.clientY);
+  };
+  let windowScrollFrame = 0;
+  const onWindowScroll = () => {
+    if (drag || !lastPointer) return;
+    cancelAnimationFrame(windowScrollFrame);
+    windowScrollFrame = requestAnimationFrame(() => {
+      if (!lastPointer) return;
+      const el = document.elementFromPoint(lastPointer.x, lastPointer.y);
+      if (!el || !fieldset.contains(el)) {
+        preview(-1);
+        return;
+      }
+      previewAtPoint(lastPointer.x, lastPointer.y);
+    });
+  };
   fieldset.addEventListener("pointerdown", onPointerDown);
   fieldset.addEventListener("pointermove", onPointerMove);
+  fieldset.addEventListener("pointerleave", onPointerLeave);
   fieldset.addEventListener("pointerup", endDrag);
   fieldset.addEventListener("pointercancel", endDrag);
   fieldset.addEventListener("touchmove", blockTouchMove, { passive: false });
+  fieldset.addEventListener("focusin", onFocusIn);
+  fieldset.addEventListener("focusout", onFocusOut);
+  fieldset.addEventListener("scroll", onScroll, { passive: true });
+  fieldset.addEventListener("wheel", onWheel, { passive: false });
+  window.addEventListener("scroll", onWindowScroll, { passive: true });
   return {
     destroy() {
       fieldset.removeEventListener("change", onChange);
       fieldset.removeEventListener("pointerdown", onPointerDown);
       fieldset.removeEventListener("pointermove", onPointerMove);
+      fieldset.removeEventListener("pointerleave", onPointerLeave);
       fieldset.removeEventListener("pointerup", endDrag);
       fieldset.removeEventListener("pointercancel", endDrag);
       fieldset.removeEventListener("touchmove", blockTouchMove);
+      fieldset.removeEventListener("focusin", onFocusIn);
+      fieldset.removeEventListener("focusout", onFocusOut);
+      fieldset.removeEventListener("scroll", onScroll);
+      fieldset.removeEventListener("wheel", onWheel);
+      window.removeEventListener("scroll", onWindowScroll);
+      cancelAnimationFrame(scrollFrame);
+      cancelAnimationFrame(windowScrollFrame);
       unlockPageScroll();
       drag = null;
       fieldset.classList.remove("rtt-dragging");

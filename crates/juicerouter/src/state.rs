@@ -1,6 +1,7 @@
 //! Region registry and node health. The router stores no file data.
 
 use std::{
+    collections::BTreeMap,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
@@ -56,12 +57,44 @@ impl Default for NodeHealth {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeCapacity {
+    pub free_bytes: u64,
+    pub min_free_bytes: u64,
+    /// Free bytes above the node's own reserve.
+    pub usable_bytes: u64,
+    pub max_file_size_bytes: Option<u64>,
+    pub max_file_size_by_ttl_hours: BTreeMap<String, u64>,
+    pub checked_secs_ago: Option<u64>,
+}
+
+impl NodeCapacity {
+    /// A multipart concat holds every part plus the target at the same time, so
+    /// require two copies of the upload size.
+    fn fits(&self, size_bytes: u64, ttl_hours: Option<f64>) -> bool {
+        if size_bytes > self.max_file_size_bytes.unwrap_or(u64::MAX) {
+            return false;
+        }
+        if let Some(ttl) = ttl_hours
+            && let Some(cap) = self
+                .max_file_size_by_ttl_hours
+                .get(&juiceutils::size_scale::ttl_key(ttl))
+            && size_bytes > *cap
+        {
+            return false;
+        }
+        size_bytes.saturating_mul(2) <= self.usable_bytes
+    }
+}
+
 #[derive(Debug)]
 pub struct Node {
     pub region: String,
     pub url: String,
     health: RwLock<NodeHealth>,
     checked_at: RwLock<Option<Instant>>,
+    capacity: RwLock<Option<NodeCapacity>>,
+    capacity_at: RwLock<Option<Instant>>,
 }
 
 impl Node {
@@ -71,7 +104,59 @@ impl Node {
             url: url.trim_end_matches('/').to_string(),
             health: RwLock::new(NodeHealth::default()),
             checked_at: RwLock::new(None),
+            capacity: RwLock::new(None),
+            capacity_at: RwLock::new(None),
         }
+    }
+
+    #[must_use]
+    pub fn capacity(&self) -> Option<NodeCapacity> {
+        let mut capacity = self
+            .capacity
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()?;
+        capacity.checked_secs_ago = self
+            .capacity_at
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .map(|at| at.elapsed().as_secs());
+        Some(capacity)
+    }
+
+    pub fn set_capacity(
+        &self,
+        free_bytes: u64,
+        min_free_bytes: u64,
+        max_file_size_bytes: Option<u64>,
+        max_file_size_by_ttl_hours: BTreeMap<String, u64>,
+    ) {
+        *self
+            .capacity
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(NodeCapacity {
+            free_bytes,
+            min_free_bytes,
+            usable_bytes: free_bytes.saturating_sub(min_free_bytes),
+            max_file_size_bytes,
+            max_file_size_by_ttl_hours,
+            checked_secs_ago: None,
+        });
+        *self
+            .capacity_at
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
+    }
+
+    pub fn clear_capacity(&self) {
+        *self
+            .capacity
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *self
+            .capacity_at
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     #[must_use]
@@ -99,6 +184,15 @@ impl Node {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     }
+
+    fn can_accept(&self, size_bytes: Option<u64>, ttl_hours: Option<f64>) -> bool {
+        match size_bytes {
+            Some(size) => self
+                .capacity()
+                .is_some_and(|capacity| capacity.fits(size, ttl_hours)),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -124,24 +218,31 @@ impl Registry {
         Self { nodes }
     }
 
-    fn best_in<'a>(&'a self, region: &str) -> Option<&'a Node> {
+    fn best_in<'a>(
+        &'a self,
+        region: &str,
+        size_bytes: Option<u64>,
+        ttl_hours: Option<f64>,
+    ) -> Option<&'a Node> {
         if region == HOME_REGION {
             return None;
         }
         self.nodes
             .iter()
-            .filter(|node| node.region == region)
+            .filter(|node| node.region == region && node.can_accept(size_bytes, ttl_hours))
             .min_by_key(|node| {
                 let health = node.health();
                 (health.state.rank(), health.latency_ms.unwrap_or(u64::MAX))
             })
     }
 
-    fn best_overall(&self) -> Option<&Node> {
+    fn best_overall(&self, size_bytes: Option<u64>, ttl_hours: Option<f64>) -> Option<&Node> {
         self.nodes
             .iter()
             .filter(|node| {
-                node.region != HOME_REGION && node.health().state == HealthState::Healthy
+                node.region != HOME_REGION
+                    && node.health().state == HealthState::Healthy
+                    && node.can_accept(size_bytes, ttl_hours)
             })
             .min_by_key(|node| {
                 let health = node.health();
@@ -149,14 +250,18 @@ impl Registry {
             })
     }
 
-    /// The home node is never an upload target.
+    /// Capacity-aware selection. When `size_bytes` is known, nodes without a
+    /// recent capacity probe, without enough room for both parts and target, or
+    /// whose per-TTL cap is too small are skipped.
     #[must_use]
-    pub fn select(
+    pub fn select_for(
         &self,
         geo: &GeoSettings,
         requested: Option<&str>,
         country: Option<&str>,
         colo: Option<&str>,
+        size_bytes: Option<u64>,
+        ttl_hours: Option<f64>,
     ) -> Option<Selection> {
         let mut candidates: Vec<(&str, &str)> = Vec::new();
         if let Some(region) = requested.map(str::trim).filter(|value| !value.is_empty()) {
@@ -179,25 +284,16 @@ impl Registry {
         }
 
         for (region, reason) in candidates {
-            if let Some(node) = self.best_in(region) {
+            if let Some(node) = self.best_in(region, size_bytes, ttl_hours) {
                 let health = node.health();
                 if health.state == HealthState::Healthy {
-                    return Some(Selection {
-                        region: node.region.clone(),
-                        url: node.url.clone(),
-                        reason: reason.to_string(),
-                        health,
-                    });
+                    return Some(Selection::from_node(node, reason, health));
                 }
             }
         }
 
-        self.best_overall().map(|node| Selection {
-            region: node.region.clone(),
-            url: node.url.clone(),
-            reason: "fallback".to_string(),
-            health: node.health(),
-        })
+        self.best_overall(size_bytes, ttl_hours)
+            .map(|node| Selection::from_node(node, "fallback", node.health()))
     }
 }
 
@@ -207,6 +303,19 @@ pub struct Selection {
     pub url: String,
     pub reason: String,
     pub health: NodeHealth,
+    pub capacity: Option<NodeCapacity>,
+}
+
+impl Selection {
+    fn from_node(node: &Node, reason: &str, health: NodeHealth) -> Self {
+        Self {
+            region: node.region.clone(),
+            url: node.url.clone(),
+            reason: reason.to_string(),
+            health,
+            capacity: node.capacity(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,6 +449,11 @@ impl AppState {
         let latency = health.latency_ms;
         let error = health.error.clone();
         node.set_health(health);
+        if current == HealthState::Healthy {
+            self.probe_capacity(node).await;
+        } else {
+            node.clear_capacity();
+        }
         if previous == current {
             return;
         }
@@ -363,6 +477,91 @@ impl AppState {
                 error.as_deref().unwrap_or("no details")
             ),
         }
+    }
+
+    /// Reads `/api/storage` and `/api/config` from the node. A failed probe
+    /// clears capacity, so sized uploads will not be routed there.
+    async fn probe_capacity(&self, node: &Node) {
+        let timeout = Duration::from_millis(self.config.router.probe_timeout_ms.max(100));
+        let storage = self
+            .client
+            .get(format!("{}/api/storage", node.url))
+            .timeout(timeout)
+            .send();
+        let config = self
+            .client
+            .get(format!("{}/api/config", node.url))
+            .timeout(timeout)
+            .send();
+        let (storage, config) = tokio::join!(storage, config);
+
+        let storage = match storage {
+            Ok(response) if response.status().is_success() => {
+                match response.json::<serde_json::Value>().await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::debug!("node {} storage probe body invalid: {error}", node.region);
+                        node.clear_capacity();
+                        return;
+                    }
+                }
+            }
+            Ok(response) => {
+                tracing::debug!(
+                    "node {} storage probe returned {}",
+                    node.region,
+                    response.status()
+                );
+                node.clear_capacity();
+                return;
+            }
+            Err(error) => {
+                tracing::debug!("node {} storage probe failed: {error}", node.region);
+                node.clear_capacity();
+                return;
+            }
+        };
+
+        let Some(free_bytes) = storage
+            .get("free_bytes")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            node.clear_capacity();
+            return;
+        };
+        let min_free_bytes = storage
+            .get("min_free_bytes")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        let mut max_file_size_bytes = None;
+        let mut max_file_size_by_ttl_hours = BTreeMap::new();
+        if let Ok(response) = config
+            && response.status().is_success()
+            && let Ok(config) = response.json::<serde_json::Value>().await
+        {
+            max_file_size_bytes = config
+                .get("max_file_size_hard_bytes")
+                .or_else(|| config.get("max_file_size_bytes"))
+                .and_then(serde_json::Value::as_u64);
+            if let Some(map) = config
+                .get("max_file_size_by_ttl_hours")
+                .and_then(serde_json::Value::as_object)
+            {
+                for (key, value) in map {
+                    if let Some(value) = value.as_u64() {
+                        max_file_size_by_ttl_hours.insert(key.clone(), value);
+                    }
+                }
+            }
+        }
+
+        node.set_capacity(
+            free_bytes,
+            min_free_bytes,
+            max_file_size_bytes,
+            max_file_size_by_ttl_hours,
+        );
     }
 
     /// In-progress uploads get a 2s TTL; successes cache normally.
@@ -524,7 +723,7 @@ mod tests {
         let mut geo = GeoSettings::default();
         geo.countries.insert("US".to_string(), "us1".to_string());
         let selection = registry
-            .select(&geo, None, Some("US"), None)
+            .select_for(&geo, None, Some("US"), None, None, None)
             .expect("selection");
         assert_eq!(selection.region, "us1");
         assert_eq!(selection.reason, "country");
@@ -538,7 +737,7 @@ mod tests {
         let mut geo = GeoSettings::default();
         geo.countries.insert("US".to_string(), "us1".to_string());
         let selection = registry
-            .select(&geo, Some("eu1"), Some("US"), None)
+            .select_for(&geo, Some("eu1"), Some("US"), None, None, None)
             .expect("selection");
         assert_eq!(selection.region, "eu1");
         assert_eq!(selection.reason, "requested");
@@ -551,7 +750,7 @@ mod tests {
         mark_storage_nodes_healthy(&registry);
         let geo = GeoSettings::default();
         let selection = registry
-            .select(&geo, None, Some("ZZ"), None)
+            .select_for(&geo, None, Some("ZZ"), None, None, None)
             .expect("selection");
         assert_eq!(selection.reason, "fallback");
         assert_ne!(selection.region, "home");
@@ -564,9 +763,86 @@ mod tests {
         mark_storage_nodes_healthy(&registry);
         let geo = GeoSettings::default();
         let selection = registry
-            .select(&geo, Some("home"), None, None)
+            .select_for(&geo, Some("home"), None, None, None, None)
             .expect("selection");
         assert_ne!(selection.region, "home");
+    }
+
+    #[test]
+    fn sized_upload_skips_a_full_region() {
+        let config = config();
+        let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
+        for node in &registry.nodes {
+            match node.region.as_str() {
+                "eu1" => node.set_capacity(
+                    9 * 1024 * 1024 * 1024,
+                    5 * 1024 * 1024 * 1024,
+                    Some(10 * 1024 * 1024 * 1024),
+                    BTreeMap::new(),
+                ),
+                "us1" => node.set_capacity(
+                    100 * 1024 * 1024 * 1024,
+                    5 * 1024 * 1024 * 1024,
+                    Some(10 * 1024 * 1024 * 1024),
+                    BTreeMap::new(),
+                ),
+                _ => {}
+            }
+        }
+        let mut geo = GeoSettings::default();
+        geo.countries.insert("FR".to_string(), "eu1".to_string());
+        let selection = registry
+            .select_for(
+                &geo,
+                None,
+                Some("FR"),
+                None,
+                Some(3 * 1024 * 1024 * 1024),
+                Some(72.0),
+            )
+            .expect("selection");
+        assert_eq!(selection.region, "us1");
+        assert_eq!(selection.reason, "fallback");
+    }
+
+    #[test]
+    fn sized_upload_respects_per_ttl_cap() {
+        let config = config();
+        let registry = Registry::new(&config);
+        mark_storage_nodes_healthy(&registry);
+        let mut caps = BTreeMap::new();
+        caps.insert("72".to_string(), 5 * 1024 * 1024 * 1024);
+        for node in &registry.nodes {
+            match node.region.as_str() {
+                "eu1" => node.set_capacity(
+                    100 * 1024 * 1024 * 1024,
+                    5 * 1024 * 1024 * 1024,
+                    Some(10 * 1024 * 1024 * 1024),
+                    caps.clone(),
+                ),
+                "us1" => node.set_capacity(
+                    100 * 1024 * 1024 * 1024,
+                    5 * 1024 * 1024 * 1024,
+                    Some(10 * 1024 * 1024 * 1024),
+                    BTreeMap::new(),
+                ),
+                _ => {}
+            }
+        }
+        let mut geo = GeoSettings::default();
+        geo.countries.insert("FR".to_string(), "eu1".to_string());
+        let selection = registry
+            .select_for(
+                &geo,
+                None,
+                Some("FR"),
+                None,
+                Some(6 * 1024 * 1024 * 1024),
+                Some(72.0),
+            )
+            .expect("selection");
+        assert_eq!(selection.region, "us1");
     }
 
     #[test]

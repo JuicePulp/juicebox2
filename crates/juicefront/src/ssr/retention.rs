@@ -17,13 +17,18 @@ fn known_key(hours: f64) -> Option<&'static str> {
     } else if hours == 72.0 {
         Some("retention.3d")
     } else if hours == 168.0 {
-        Some("retention.7d")
+        Some("retention.1w")
+    } else if hours == 336.0 {
+        Some("retention.2w")
+    } else if hours == 720.0 {
+        Some("retention.30d")
     } else {
         None
     }
 }
 
-/// Groups TTLs for visual separators: 0 sub-day, 1 hour-based, 2 whole days.
+/// Groups TTLs for visual separators: 0 sub-day, 1 hour-based, 2 day-based,
+/// 3 week-based, 4 month-based.
 pub fn ttl_tier(hours: f64) -> u8 {
     let hours = if hours.is_finite() {
         hours
@@ -32,6 +37,12 @@ pub fn ttl_tier(hours: f64) -> u8 {
     };
     if hours < 1.0 {
         return 0;
+    }
+    if hours >= 720.0 {
+        return 4;
+    }
+    if hours >= 168.0 {
+        return 3;
     }
 
     #[allow(clippy::float_cmp)]

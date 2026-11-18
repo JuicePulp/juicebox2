@@ -72,17 +72,15 @@ impl LimitsSettings {
         let min_free_space_bytes = file.min_free_space_gb * 1024 * 1024 * 1024;
         let max_file_size_bytes = file.max_file_size_mb * 1024 * 1024;
         let min_file_size_bytes = file.size_scale.min_file_size_mb * 1024 * 1024;
-        if file.size_scale.enabled
-            && (!file.size_scale.budget_gib_hours.is_finite()
-                || file.size_scale.budget_gib_hours <= 0.0
-                || min_file_size_bytes > max_file_size_bytes)
-        {
+        if file.size_scale.budget_gib_hours.is_some() {
+            tracing::warn!("[limits.size_scale].budget_gib_hours is deprecated; caps are cubic");
+        }
+        if file.size_scale.enabled && min_file_size_bytes > max_file_size_bytes {
             return Err(ConfigError::InvalidSizeScaleConfiguration);
         }
         let max_file_size_by_ttl_hours = if file.size_scale.enabled {
             juiceutils::size_scale::build_caps(
                 allowed_ttl_hours,
-                file.size_scale.budget_gib_hours,
                 max_file_size_bytes,
                 min_file_size_bytes,
             )

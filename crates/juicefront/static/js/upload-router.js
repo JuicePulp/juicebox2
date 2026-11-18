@@ -1,4 +1,3 @@
-
 const ENDPOINT = "/router/upload-target";
 // The home host is the default route; callers treat it as "use the current origin".
 const HOME_HOST = "https://f.juicey.dev";
@@ -6,22 +5,33 @@ const SUCCESS_TTL_MS = 60_000;
 const FAILURE_TTL_MS = 15_000;
 const TIMEOUT_MS = 1_200;
 
-let cache = { host: "", at: 0, ttl: FAILURE_TTL_MS };
-let pending = null;
+let cache = new Map();
+let pending = new Map();
 
-export function clearUploadHostCache() {
-  cache = { host: "", at: 0, ttl: FAILURE_TTL_MS };
+function cacheKey(sizeBytes, ttlHours) {
+  const size = Number(sizeBytes);
+  const ttl = Number(ttlHours);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  return `${size}:${Number.isFinite(ttl) && ttl > 0 ? ttl : ""}`;
 }
 
-/** Returns a host origin, or `""` for the current origin; concurrent callers share one request. */
-export async function resolveUploadHost() {
-  if (Date.now() - cache.at < cache.ttl) {
-    return cache.host;
+export function clearUploadHostCache() {
+  cache = new Map();
+  pending = new Map();
+}
+
+/** Returns a host origin, or `""` for the current origin; concurrent callers with the same size share one request. */
+export async function resolveUploadHost(sizeBytes, ttlHours) {
+  const key = cacheKey(sizeBytes, ttlHours);
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < cached.ttl) {
+    return cached.host;
   }
-  if (pending) {
-    return pending;
+  const inFlight = pending.get(key);
+  if (inFlight) {
+    return inFlight;
   }
-  pending = (async () => {
+  const request = (async () => {
     let host = "";
     let ttl = FAILURE_TTL_MS;
     try {
@@ -29,7 +39,13 @@ export async function resolveUploadHost() {
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
       let response;
       try {
-        response = await fetch(ENDPOINT, {
+        const params = new URLSearchParams();
+        const size = Number(sizeBytes);
+        const hours = Number(ttlHours);
+        if (Number.isFinite(size) && size > 0) params.set("size", String(Math.ceil(size)));
+        if (Number.isFinite(hours) && hours > 0) params.set("ttl_hours", String(hours));
+        const url = params.toString() ? `${ENDPOINT}?${params}` : ENDPOINT;
+        response = await fetch(url, {
           signal: controller.signal,
           credentials: "same-origin",
           headers: { accept: "application/json" },
@@ -47,9 +63,10 @@ export async function resolveUploadHost() {
       }
     } catch {
     }
-    cache = { host, at: Date.now(), ttl };
-    pending = null;
+    cache.set(key, { host, at: Date.now(), ttl });
+    pending.delete(key);
     return host;
   })();
-  return pending;
+  pending.set(key, request);
+  return request;
 }
