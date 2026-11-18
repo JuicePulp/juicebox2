@@ -1,6 +1,6 @@
-import { UPLOAD_URL } from "./upload-config.js?v=2.2.0-r8";
-import { playSound } from "./sounds.js?v=2.2.0-r8";
-import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api.js?v=2.2.0-r8";
+import { UPLOAD_URL } from "./upload-config.js?v=2.2.0-r9";
+import { playSound } from "./sounds.js?v=2.2.0-r9";
+import { apiPairDevices, apiPairDevice, apiPairGenerate } from "./api.js?v=2.2.0-r9";
 let countdownInterval = null;
 let pollInterval = null;
 export function initPairModal() {

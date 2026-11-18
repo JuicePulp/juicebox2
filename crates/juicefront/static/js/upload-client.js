@@ -2,23 +2,23 @@ import {
   startUpload,
   generateId,
   extractServerId
-} from "./upload-engine.js?v=2.2.0-r8";
+} from "./upload-engine.js?v=2.2.0-r9";
 import {
   UPLOAD_URL,
   readUploadMode,
   uploadMethodFor,
   lastUploadBps
-} from "./upload-config.js?v=2.2.0-r8";
-import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r8";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r8";
+} from "./upload-config.js?v=2.2.0-r9";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r9";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r9";
 import {
   loadQueueItems,
   queueItem,
   queueItemNow,
   removeQueueItem,
   flushQueue
-} from "./upload-store.js?v=2.2.0-r8";
-import { announce, isTerminal } from "./util.js?v=2.2.0-r8";
+} from "./upload-store.js?v=2.2.0-r9";
+import { announce, isTerminal } from "./util.js?v=2.2.0-r9";
 const listeners = new Set;
 let items = [];
 const persistedIds = new Set;

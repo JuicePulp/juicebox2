@@ -1,7 +1,7 @@
-import { initPairModal } from "./pair.js?v=2.2.0-r8";
-import { playSound } from "./sounds.js?v=2.2.0-r8";
-import { setTweakEngineEnabled, tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r8";
-import { announce, readCookie, writeCookie } from "./util.js?v=2.2.0-r8";
+import { initPairModal } from "./pair.js?v=2.2.0-r9";
+import { playSound } from "./sounds.js?v=2.2.0-r9";
+import { setTweakEngineEnabled, tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r9";
+import { announce, readCookie, writeCookie } from "./util.js?v=2.2.0-r9";
 
 (function () {
   var cfg = document.querySelector("[data-i18n-config]");
