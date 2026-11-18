@@ -18,6 +18,8 @@ fn known_key(hours: f64) -> Option<&'static str> {
         Some("retention.3d")
     } else if hours == 168.0 {
         Some("retention.7d")
+    } else if hours == 720.0 {
+        Some("retention.30d")
     } else {
         None
     }

@@ -96,6 +96,7 @@
   "retention.24h": "24 Hours",
   "retention.3d": "3 Days",
   "retention.7d": "7 Days",
+  "retention.30d": "1 Month",
   "retention.minute": "1 Minute",
   "retention.minutes": "{count} Minutes",
   "retention.hour": "1 Hour",

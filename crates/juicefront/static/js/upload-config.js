@@ -1,7 +1,7 @@
 /** Empty means same-origin; the page and worker share this base. */
 export const UPLOAD_URL = "";
 const FALLBACK_MAX_FILE_SIZE = 524288000;
-const FALLBACK_TTLS = [0.5, 1, 6, 12, 24, 72, 168, 336];
+const FALLBACK_TTLS = [1, 6, 12, 24, 72, 168, 336, 720];
 function readMaxFileSizeMap() {
   if (typeof document === "undefined")
     return {};

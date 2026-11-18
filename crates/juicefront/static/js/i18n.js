@@ -38,6 +38,7 @@ var KNOWN_TTL = {
   12: "retention.12h",
   72: "retention.3d",
   168: "retention.7d",
+  720: "retention.30d",
 };
 
 /** Formats hours as a retention label, defaulting invalid values to 24h. */
