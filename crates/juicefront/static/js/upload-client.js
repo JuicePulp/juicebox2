@@ -2,23 +2,23 @@ import {
   startUpload,
   generateId,
   extractServerId
-} from "./upload-engine.js?v=2.2.0-r9";
+} from "./upload-engine.js?v=2.2.0-r10";
 import {
   UPLOAD_URL,
   readUploadMode,
   uploadMethodFor,
   lastUploadBps
-} from "./upload-config.js?v=2.2.0-r9";
-import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r9";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r9";
+} from "./upload-config.js?v=2.2.0-r10";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r10";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r10";
 import {
   loadQueueItems,
   queueItem,
   queueItemNow,
   removeQueueItem,
   flushQueue
-} from "./upload-store.js?v=2.2.0-r9";
-import { announce, isTerminal } from "./util.js?v=2.2.0-r9";
+} from "./upload-store.js?v=2.2.0-r10";
+import { announce, isTerminal } from "./util.js?v=2.2.0-r10";
 const listeners = new Set;
 let items = [];
 const persistedIds = new Set;
@@ -144,17 +144,24 @@ const workerAcked = new Set;
 const WORKER_ACK_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 8000;
 const PONG_TIMEOUT_MS = 6000;
+const WORKER_PROBE_TIMEOUT_MS = 4000;
 // A failed handshake disables the worker only briefly; another tab may have fixed it.
 const WORKER_RETRY_MS = 30000;
-const WORKER_INSTANCE_NAME = (() => {
+let workerGeneration = 0;
+const workerProbes = new Map();
+function workerVersion() {
   try {
-    const version = document.getElementById("server-config")?.getAttribute("data-version") || "";
-    if (version)
-      return "juicebox-uploads-" + version;
-  } catch {}
-  return "juicebox-uploads";
-})();
+    return document.getElementById("server-config")?.getAttribute("data-version") || "";
+  } catch {
+    return "";
+  }
+}
+function workerInstanceName() {
+  const version = workerVersion() || "dev";
+  return "juicebox-uploads-" + version + (workerGeneration ? "-g" + workerGeneration : "");
+}
 let heartbeatTimer = null;
+let workerHelloTimer = null;
 let pingStartedAt = 0;
 
 function clearWorkerTimer(id) {
@@ -178,6 +185,26 @@ function forgetWorkerItem(id) {
   clearWorkerTimer(id);
   workerInputs.delete(id);
   workerAcked.delete(id);
+}
+function probeWorker(workerPort, timeoutMs) {
+  return new Promise((resolve) => {
+    const nonce = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    let timer = 0;
+    const done = (ok) => {
+      if (!workerProbes.has(nonce))
+        return;
+      workerProbes.delete(nonce);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    workerProbes.set(nonce, done);
+    timer = setTimeout(() => done(false), timeoutMs);
+    try {
+      workerPort.postMessage({ type: "probe", nonce });
+    } catch {
+      done(false);
+    }
+  });
 }
 function startHeartbeat() {
   if (heartbeatTimer)
@@ -210,6 +237,10 @@ function startHeartbeat() {
 // Worker-acked items restart as paused; that transfer may still be running.
 function restartWithoutWorker() {
   pingStartedAt = 0;
+  if (workerHelloTimer) {
+    clearTimeout(workerHelloTimer);
+    workerHelloTimer = null;
+  }
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -226,6 +257,9 @@ function restartWithoutWorker() {
     }
     try { port.close(); } catch {}
   }
+  for (const done of workerProbes.values())
+    done(false);
+  workerProbes.clear();
   port = null;
   workerDead = true;
   workerRetryAt = Date.now() + WORKER_RETRY_MS;
@@ -259,6 +293,13 @@ function onWorkerMessage(e) {
   workerValidating = false;
   pingStartedAt = 0;
   const msg = e.data || {};
+  if (msg.type === "probe-ok" && msg.nonce) {
+    const done = workerProbes.get(msg.nonce);
+    const expected = workerVersion();
+    if (done)
+      done(!expected || !msg.version || msg.version === expected);
+    return;
+  }
   if (msg.type === "snapshot" && Array.isArray(msg.items)) {
     const active = [];
     for (const it of msg.items) {
@@ -293,11 +334,11 @@ function onWorkerMessage(e) {
 // Cache-busts the worker module after a deploy so a stale upload engine cannot persist.
 function workerScriptUrl() {
   const url = new URL("./upload-worker.js", import.meta.url);
-  try {
-    const version = document.getElementById("server-config")?.getAttribute("data-version") || "";
-    if (version)
-      url.searchParams.set("v", version);
-  } catch {}
+  const version = workerVersion();
+  if (version)
+    url.searchParams.set("v", version);
+  if (workerGeneration)
+    url.searchParams.set("g", String(workerGeneration));
   return url;
 }
 // One SharedWorker per version; no hello within 4 s means upload locally.
@@ -312,7 +353,7 @@ function ensurePort() {
   try {
     if (typeof SharedWorker === "undefined") return null;
     var sw = new SharedWorker(workerScriptUrl(), {
-      name: WORKER_INSTANCE_NAME,
+      name: workerInstanceName(),
       type: "module",
     });
     sw.port.onmessage = onWorkerMessage;
@@ -324,7 +365,10 @@ function ensurePort() {
     startHeartbeat();
     workerValidating = true;
     workerHeard = false;
-    setTimeout(() => {
+    if (workerHelloTimer)
+      clearTimeout(workerHelloTimer);
+    workerHelloTimer = setTimeout(() => {
+      workerHelloTimer = null;
       if (!workerHeard)
         restartWithoutWorker();
       else
@@ -334,6 +378,58 @@ function ensurePort() {
     port = null;
   }
   return port;
+}
+function retireWorker() {
+  pingStartedAt = 0;
+  if (workerHelloTimer) {
+    clearTimeout(workerHelloTimer);
+    workerHelloTimer = null;
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  for (const id of workerInputs.keys())
+    clearWorkerTimer(id);
+  workerInputs.clear();
+  workerAcked.clear();
+  for (const done of workerProbes.values())
+    done(false);
+  workerProbes.clear();
+  if (port) {
+    try { port.close(); } catch {}
+  }
+  port = null;
+  workerDead = false;
+  workerRetryAt = 0;
+  workerGeneration += 1;
+}
+async function checkWorker() {
+  let p = ensurePort();
+  if (!p)
+    return null;
+  if (await probeWorker(p, WORKER_PROBE_TIMEOUT_MS))
+    return p;
+  // Do not replace a worker that may still be carrying this tab's uploads.
+  if (workerInputs.size > 0 || workerAcked.size > 0)
+    return null;
+  retireWorker();
+  p = ensurePort();
+  if (p && await probeWorker(p, WORKER_PROBE_TIMEOUT_MS))
+    return p;
+  retireWorker();
+  workerDead = true;
+  workerRetryAt = Date.now() + WORKER_RETRY_MS;
+  return null;
+}
+let workerCheck = null;
+function ensureHealthyPort() {
+  if (!workerCheck) {
+    workerCheck = checkWorker().finally(() => {
+      workerCheck = null;
+    });
+  }
+  return workerCheck;
 }
 const localItems = new Map;
 const localHandles = new Map;
@@ -402,7 +498,7 @@ export function findPausedUpload(file, fingerprint) {
   return items.find((item) => matchesPausedFile(item, file, fingerprint)) || null;
 }
 /** Starts an upload and returns its queue id; an active duplicate of the same file is reused. */
-export function enqueueUpload(input) {
+export async function enqueueUpload(input) {
   const duplicate = findActiveDuplicate(input.file);
   if (duplicate) {
     try {
@@ -434,7 +530,9 @@ export function enqueueUpload(input) {
   };
   upsertItem({ ...item });
   queueItemNow(item);
-  const p = ensurePort();
+  const p = await ensureHealthyPort();
+  if (removedIds.has(id))
+    return id;
   if (p) {
     try {
       const options = {
@@ -477,7 +575,7 @@ export function enqueueUpload(input) {
 }
 
 /** Resumes a paused item; returns `""` when the file, fingerprint, or required password does not match. */
-export function resumeUpload(id, file, options = {}, fingerprint = "") {
+export async function resumeUpload(id, file, options = {}, fingerprint = "") {
   const current = items.find((item) => item.id === id);
   if (!current || !file)
     return "";
@@ -511,7 +609,9 @@ export function resumeUpload(id, file, options = {}, fingerprint = "") {
     safeUpload: !!next.safeUpload,
     password: next.password || ""
   };
-  const p = ensurePort();
+  const p = await ensureHealthyPort();
+  if (removedIds.has(id))
+    return id;
   if (p) {
     try {
       p.postMessage({
@@ -545,7 +645,7 @@ export function resumeUpload(id, file, options = {}, fingerprint = "") {
   return id;
 }
 export function connectUploads() {
-  ensurePort();
+  void ensureHealthyPort();
 }
 export function cancelUpload(id) {
   const p = ensurePort();

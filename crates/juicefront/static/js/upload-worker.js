@@ -1,14 +1,21 @@
 import {
   startUpload
-} from "./upload-engine.js?v=2.2.0-r9";
-import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0-r9";
-import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r9";
+} from "./upload-engine.js?v=2.2.0-r10";
+import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0-r10";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r10";
 import {
   queueItem,
   queueItemNow,
   removeQueueItem
-} from "./upload-store.js?v=2.2.0-r9";
+} from "./upload-store.js?v=2.2.0-r10";
 const ctx = self;
+const WORKER_VERSION = (() => {
+  try {
+    return new URL(import.meta.url).searchParams.get("v") || "";
+  } catch {
+    return "";
+  }
+})();
 const entries = new Map;
 // A removed id must stay gone even if a late engine callback still reports it.
 const dismissed = new Set;
@@ -170,7 +177,11 @@ ctx.onconnect = (event) => {
   ports.add(port);
   port.onmessage = (e) => {
     const msg = e.data || {};
-    if (msg.type === "enqueue") {
+    if (msg.type === "probe" && msg.nonce) {
+      try {
+        port.postMessage({ type: "probe-ok", nonce: msg.nonce, version: WORKER_VERSION });
+      } catch {}
+    } else if (msg.type === "enqueue") {
       handleEnqueue(msg, port);
     } else if (msg.type === "cancel" && msg.id) {
       handleCancel(msg.id);

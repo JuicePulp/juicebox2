@@ -1,6 +1,6 @@
-import { t } from "./i18n.js?v=2.2.0-r9";
-import { announce, formatSize } from "./util.js?v=2.2.0-r9";
-import { playSound } from "./sounds.js?v=2.2.0-r9";
+import { t } from "./i18n.js?v=2.2.0-r10";
+import { announce, formatSize } from "./util.js?v=2.2.0-r10";
+import { playSound } from "./sounds.js?v=2.2.0-r10";
 import {
   iconHTML,
   iconForMime,
@@ -11,7 +11,7 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js?v=2.2.0-r9";
+} from "./copy.js?v=2.2.0-r10";
 import {
   UPLOAD_URL,
   readMaxFileSize,
@@ -19,9 +19,9 @@ import {
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
-} from "./upload-config.js?v=2.2.0-r9";
-import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r9";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r9";
+} from "./upload-config.js?v=2.2.0-r10";
+import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r10";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r10";
 import {
   enhanceHostSelector,
   readSelectedHost,
@@ -29,11 +29,11 @@ import {
   readDangerLevel,
   initHostGlow,
   updateDropMaxSize,
-} from "./enhance-host.js?v=2.2.0-r9";
-import { connectPresence } from "./presence.js?v=2.2.0-r9";
-import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r9";
-import { validateFileClient } from "./file-validation.js?v=2.2.0-r9";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r9";
+} from "./enhance-host.js?v=2.2.0-r10";
+import { connectPresence } from "./presence.js?v=2.2.0-r10";
+import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r10";
+import { validateFileClient } from "./file-validation.js?v=2.2.0-r10";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r10";
 import {
   enqueueUpload,
   cancelUpload,
@@ -44,9 +44,9 @@ import {
   connectUploads,
   findPausedUpload,
   resumeUpload,
-} from "./upload-client-loader.js?v=2.2.0-r9";
-import { extractServerId } from "./upload-engine.js?v=2.2.0-r9";
-import { initHostSelector } from "./host-selector.js?v=2.2.0-r9";
+} from "./upload-client-loader.js?v=2.2.0-r10";
+import { extractServerId } from "./upload-engine.js?v=2.2.0-r10";
+import { initHostSelector } from "./host-selector.js?v=2.2.0-r10";
 
 var assetVersion = (() => {
   try {
@@ -310,7 +310,7 @@ async function resumePausedItem(item, file, fingerprint) {
     return;
   }
   resumeMessages.delete(item.id);
-  var id = resumeUpload(item.id, file, {
+  var id = await resumeUpload(item.id, file, {
     password: item.requiresPassword ? readUploadPassword() : ""
   }, fingerprint);
   if (!id) {
@@ -947,7 +947,7 @@ async function uploadItem(file, item, fingerprint) {
   suppressAdopt++;
   var id;
   try {
-    id = enqueueUpload({
+    id = await enqueueUpload({
       file: file,
       ttlHours: itemTtlHours,
       customHost: readSelectedHost() || await resolveUploadHost(file.size, itemTtlHours),
