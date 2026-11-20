@@ -1,9 +1,9 @@
-import { iconHTML } from "./copy.js?v=2.2.0-r8";
-import { announce } from "./util.js?v=2.2.0-r8";
+import { iconHTML } from "./copy.js?v=2.2.0-r10";
+import { announce } from "./util.js?v=2.2.0-r10";
 
 // The qrcode module is loaded only when a QR is opened to keep first paint light.
 async function qrFactory() {
-  const mod = await import("./vendor/qrcode.mjs?v=2.2.0-r8");
+  const mod = await import("./vendor/qrcode.mjs?v=2.2.0-r10");
   return mod.default ?? mod.qrcode ?? globalThis.qrcode;
 }
 
@@ -41,22 +41,26 @@ function releaseFullBrightness() {
   wakeLock = null;
 }
 
-/** Drops the scheme and file extension so the code needs fewer modules and scans farther; the scheme is assumed on decode. */
+/**
+ * Keeps the scheme so iOS Camera recognizes the payload as a URL, but drops
+ * the file extension so the code needs fewer modules and scans farther.
+ */
 export function compactQrPayload(url) {
   const trimmed = String(url || "").trim();
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
   try {
-    const u = new URL(trimmed);
+    const u = new URL(withScheme);
     const seg = u.pathname.split("/").pop() ?? "";
     const dot = seg.lastIndexOf(".");
     const path =
       dot > 0
         ? u.pathname.slice(0, u.pathname.length - seg.length) + seg.slice(0, dot)
         : u.pathname;
-    return `${u.host}${path}${u.search}${u.hash}`;
+    return `${u.protocol}//${u.host}${path}${u.search}${u.hash}`;
   } catch {
-    return trimmed
-      .replace(/^https?:\/\//, "")
-      .replace(/\.[A-Za-z0-9]{2,5}([?#]|$)/, "$1");
+    return withScheme.replace(/\.[A-Za-z0-9]{2,5}([?#]|$)/, "$1");
   }
 }
 

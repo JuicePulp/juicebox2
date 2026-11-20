@@ -35,13 +35,13 @@ import {
   readUploadMode,
   uploadMethodFor,
   preferStream
-} from "./upload-config.js?v=2.2.0-r8";
-import { tryAcquireStream, releaseStream } from "./stream-limiter.js?v=2.2.0-r8";
-import { tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r8";
-import { announce } from "./util.js?v=2.2.0-r8";
-import { publicFileInfo } from "./api.js?v=2.2.0-r8";
-import { compressFile } from "./compress.js?v=2.2.0-r8";
-import { encodeTusMeta } from "./tus.js?v=2.2.0-r8";
+} from "./upload-config.js?v=2.2.0-r10";
+import { tryAcquireStream, releaseStream } from "./stream-limiter.js?v=2.2.0-r10";
+import { tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r10";
+import { announce } from "./util.js?v=2.2.0-r10";
+import { publicFileInfo } from "./api.js?v=2.2.0-r10";
+import { compressFile } from "./compress.js?v=2.2.0-r10";
+import { encodeTusMeta } from "./tus.js?v=2.2.0-r10";
 export function extractServerId(url) {
   const m = url.match(/\/f\/([A-Za-z0-9_-]+)/);
   return m ? m[1] : "";

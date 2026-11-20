@@ -25,6 +25,13 @@
           if (m) total = parseInt(m[1], 10);
         }
       }
+      function responseStart(res) {
+        if (res.status === 200) return 0;
+        var cr = res.headers.get("Content-Range");
+        if (!cr) return null;
+        var m = /^bytes\s+(\d+)-/.exec(cr);
+        return m ? parseInt(m[1], 10) : null;
+      }
       function fail() {
         if (uploading) {
           if (loaded === 0) textview.textContent = "Waiting for the first bytes...";
@@ -77,6 +84,19 @@
               fail();
             }
             return;
+          }
+          if (res.status === 200 && total === null) total = buf.length;
+          var start = responseStart(res);
+          if (start !== null && start !== loaded) {
+            // Some proxies ignore Range and return the whole file. Never append
+            // that to text the server already rendered, or the preview doubles.
+            if (start !== 0) {
+              loading = false;
+              await loadPlain();
+              return;
+            }
+            textview.textContent = "";
+            loaded = 0;
           }
           var last = total !== null && loaded + buf.length >= total;
           var text = decoder.decode(buf, last ? undefined : { stream: true });
