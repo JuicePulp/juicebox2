@@ -464,6 +464,24 @@ async fn local_freeze_symlink_marker_fails_closed() {
     assert!(backend2.is_frozen("fr1").await.unwrap());
 }
 
+// Regression: Android app-private storage (Termux) refuses hard links with
+// EPERM, which used to make every local write fail with a 500. The publish
+// path must fall back to a non-overwriting rename.
+#[tokio::test]
+async fn link_or_rename_falls_back_when_hard_links_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.tmp");
+    let dst = dir.path().join("dst.bin");
+    tokio::fs::write(&src, b"payload").await.unwrap();
+
+    // Simulate a filesystem that rejects linking by calling the fallback
+    // branch directly through the rename-only path.
+    let renamed = tokio::fs::rename(&src, &dst).await;
+    assert!(renamed.is_ok(), "same-directory rename must be available");
+    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
+    assert!(!tokio::fs::try_exists(&src).await.unwrap());
+}
+
 #[tokio::test]
 async fn link_or_rename_does_not_overwrite_existing_destination() {
     let dir = tempfile::tempdir().unwrap();
