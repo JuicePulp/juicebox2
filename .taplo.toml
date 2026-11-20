@@ -1,4 +1,5 @@
 include = [
+    ".juicehost.toml",
     ".taplo.toml",
     "Cargo.toml",
     "crates/*/*.toml",
