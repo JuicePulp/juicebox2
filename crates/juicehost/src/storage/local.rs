@@ -826,6 +826,34 @@ async fn copy_part_fast(
     .map_err(|e| StorageError::Io(format!("copy part {part_id} task failed: {e}")))?
 }
 
+#[cfg(unix)]
+fn read_part_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.read_at(buf, offset)
+}
+
+#[cfg(not(unix))]
+fn read_part_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = file;
+    file.seek(SeekFrom::Start(offset))?;
+    file.read(buf)
+}
+
+#[cfg(unix)]
+fn write_part_at(file: &std::fs::File, buf: &[u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.write_at(buf, offset)
+}
+
+#[cfg(not(unix))]
+fn write_part_at(file: &std::fs::File, buf: &[u8], offset: u64) -> std::io::Result<usize> {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut file = file;
+    file.seek(SeekFrom::Start(offset))?;
+    file.write(buf)
+}
+
 fn copy_part_blocking(
     part: &std::fs::File,
     target: &std::fs::File,
@@ -833,15 +861,13 @@ fn copy_part_blocking(
     mut dst_off: u64,
     part_id: &str,
 ) -> Result<u64, StorageError> {
-    use std::os::unix::fs::FileExt;
-    const CHUNK: u64 = 32 * 1024 * 1024;
-
     let mut src_off = 0u64;
     let mut remaining = part_len;
 
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
+        const CHUNK: u64 = 32 * 1024 * 1024;
         while remaining > 0 {
             let want = remaining.min(CHUNK) as libc::size_t;
             let mut in_off = src_off as libc::off_t;
@@ -891,8 +917,7 @@ fn copy_part_blocking(
     let mut buf = vec![0u8; 1 << 20];
     while remaining > 0 {
         let want = remaining.min(buf.len() as u64) as usize;
-        let n = part
-            .read_at(&mut buf[..want], src_off)
+        let n = read_part_at(part, &mut buf[..want], src_off)
             .map_err(|e| StorageError::Io(format!("read part {part_id} failed: {e}")))?;
         if n == 0 {
             return Err(StorageError::Io(format!(
@@ -901,8 +926,7 @@ fn copy_part_blocking(
         }
         let mut written = 0;
         while written < n {
-            let w = target
-                .write_at(&buf[written..n], dst_off + written as u64)
+            let w = write_part_at(target, &buf[written..n], dst_off + written as u64)
                 .map_err(|e| StorageError::Io(format!("write target failed: {e}")))?;
             if w == 0 {
                 return Err(StorageError::Io("write target made no progress".into()));

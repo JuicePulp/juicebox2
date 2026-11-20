@@ -114,7 +114,16 @@ fn candidate_paths(env_var: &str, names: &[&str]) -> Vec<PathBuf> {
     }
     for name in names {
         paths.push(PathBuf::from(name));
+        #[cfg(not(windows))]
         paths.push(PathBuf::from("/etc/juicebox").join(name.trim_start_matches('.')));
+        #[cfg(windows)]
+        if let Ok(program_data) = std::env::var("ProgramData") {
+            paths.push(
+                PathBuf::from(program_data)
+                    .join("juicebox")
+                    .join(name.trim_start_matches('.')),
+            );
+        }
     }
     paths
 }

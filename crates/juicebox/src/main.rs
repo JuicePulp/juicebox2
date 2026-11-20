@@ -287,7 +287,12 @@ fn host_backend_default() -> Option<String> {
 }
 
 fn spawn(name: &str) -> std::io::Result<Child> {
-    let mut cmd = Command::new(sibling_dir().join(name));
+    let binary = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    let mut cmd = Command::new(sibling_dir().join(binary));
 
     if name == "juicehost"
         && let Some(default) = host_backend_default()
