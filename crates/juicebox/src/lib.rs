@@ -35,6 +35,22 @@ use tokio::{
 /// Services managed by the default supervisor.
 pub const SERVICES: &[&str] = &["juicehost", "juiceback", "juicefront"];
 
+/// Optional peer-hosting service. The relay serves files that stay on the
+/// announcing device, linking the local stack to `juicepeer`. It is opt-in via
+/// `JUICEBOX_PEER=1` because it needs its own JWT/API secrets.
+pub const PEER_RELAY_SERVICE: &str = "juicepeer-relay";
+
+/// Default services plus the peer relay. Use with
+/// [`Supervisor::with_services`].
+pub fn services_with_peer() -> Vec<String> {
+    SERVICES
+        .iter()
+        .copied()
+        .chain(std::iter::once(PEER_RELAY_SERVICE))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Minimum uptime after which a service exit is considered a clean run rather
 /// than a crash.
 pub const MIN_HEALTHY_SECS: u64 = 10;
@@ -87,6 +103,12 @@ pub enum BuildOutcome {
 
 /// `JUICEBOX_NO_BUILD=1` skips the build and expects binaries to exist.
 pub async fn ensure_services_built() -> BuildOutcome {
+    let services: Vec<String> = SERVICES.iter().map(|name| (*name).to_string()).collect();
+    ensure_built(&services).await
+}
+
+/// Build a specific set of services (see [`Supervisor::with_services`]).
+pub async fn ensure_built(services: &[String]) -> BuildOutcome {
     if juiceutils::config::optional_secret("JUICEBOX_NO_BUILD")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
     {
@@ -105,7 +127,7 @@ pub async fn ensure_services_built() -> BuildOutcome {
     if !cfg!(debug_assertions) {
         cmd.arg("--release");
     }
-    cmd.args(SERVICES.iter().flat_map(|name| ["-p", name]))
+    cmd.args(services.iter().flat_map(|name| ["-p", name.as_str()]))
         .current_dir(&root)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -411,6 +433,8 @@ pub enum StartupError {
     Juiceback(String),
     #[error("juicehost: {0}")]
     Juicehost(String),
+    #[error("juicepeer-relay: {0}")]
+    PeerRelay(String),
     #[error("{0}")]
     Spawn(String),
 }
@@ -452,11 +476,43 @@ fn check_juicehost_config() -> Result<(), StartupError> {
     Ok(())
 }
 
+/// The relay needs a JWT secret matching juiceback's device-token secret and
+/// an API key accepted by juiceback's `/internal/peer/authorize`.
+pub fn check_peer_relay_config() -> Result<(), StartupError> {
+    let jwt = ["JUICEPEER_JWT_SECRET", "TICKET_JWT_SECRET", "JWT_SECRET"]
+        .iter()
+        .find_map(|key| juiceutils::config::optional_secret(key))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            StartupError::PeerRelay(
+                "no JWT secret set (JUICEPEER_JWT_SECRET, TICKET_JWT_SECRET or JWT_SECRET)"
+                    .to_string(),
+            )
+        })?;
+    juiceutils::config::validate_jwt_secret(&jwt)
+        .map_err(|e| StartupError::PeerRelay(e.to_string()))?;
+
+    let api_key = ["JUICEPEER_API_KEY", "JUICEHOST_API_KEY"]
+        .iter()
+        .find_map(|key| juiceutils::config::optional_secret(key))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            StartupError::PeerRelay(
+                "no API key set (JUICEPEER_API_KEY or JUICEHOST_API_KEY)".to_string(),
+            )
+        })?;
+    if api_key.trim().is_empty() {
+        return Err(StartupError::PeerRelay("empty API key".to_string()));
+    }
+    Ok(())
+}
+
 /// Check the configuration required by a single named service.
 pub fn check_service_config(name: &str) -> Result<(), StartupError> {
     match name {
         "juiceback" => check_juiceback_config(),
         "juicehost" => check_juicehost_config(),
+        PEER_RELAY_SERVICE => check_peer_relay_config(),
         _ => Ok(()),
     }
 }
@@ -560,7 +616,7 @@ impl Supervisor {
             return Err(SupervisorError::Config(e));
         }
 
-        if self.build && ensure_services_built().await == BuildOutcome::Failed {
+        if self.build && ensure_built(&self.services).await == BuildOutcome::Failed {
             return Err(SupervisorError::Build);
         }
 
@@ -605,7 +661,7 @@ impl Supervisor {
             if sources_changed {
                 tracing::info!("sources changed, rebuilding services for live reload");
                 if *shutdown_rx.borrow() {
-                } else if ensure_services_built().await != BuildOutcome::Failed {
+                } else if ensure_built(&self.services).await != BuildOutcome::Failed {
                     for (name, child) in &mut children {
                         tracing::info!("stopping {name} for live reload");
                         graceful_stop(child).await;
@@ -944,5 +1000,41 @@ mod tests {
             std::env::set_var("JUICEHOST_API_KEY", "key");
         }
         assert!(check_juicehost_config().is_ok());
+    }
+
+    #[test]
+    fn peer_relay_is_an_opt_in_service() {
+        let services = services_with_peer();
+        assert_eq!(services.len(), SERVICES.len() + 1);
+        assert_eq!(services.last().map(String::as_str), Some(PEER_RELAY_SERVICE));
+        assert!(Supervisor::with_services(services.clone())
+            .services()
+            .contains(&PEER_RELAY_SERVICE.to_string()));
+        assert!(!Supervisor::new().services().contains(&PEER_RELAY_SERVICE.to_string()));
+    }
+
+    #[test]
+    fn peer_relay_requires_secrets() {
+        let vars = [
+            "JUICEPEER_JWT_SECRET",
+            "TICKET_JWT_SECRET",
+            "JUICEPEER_API_KEY",
+            "JUICEHOST_API_KEY",
+            "JWT_SECRET",
+        ];
+        let (_lock, _guard) = EnvGuard::lock(&vars);
+
+        unsafe {
+            for key in vars {
+                std::env::remove_var(key);
+            }
+        }
+        assert!(check_peer_relay_config().is_err());
+
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-secret");
+            std::env::set_var("JUICEHOST_API_KEY", "key");
+        }
+        assert!(check_peer_relay_config().is_ok());
     }
 }

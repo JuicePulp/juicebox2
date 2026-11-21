@@ -18,7 +18,18 @@ async fn main() {
         let _ = shutdown_tx.send(true);
     });
 
-    if let Err(e) = juicebox::Supervisor::new().run(shutdown_rx).await {
+    // `JUICEBOX_PEER=1` adds the peer relay to the supervised set, linking the
+    // local stack to juicepeer so files that stay on this device can be shared.
+    let peer = juiceutils::config::optional_secret("JUICEBOX_PEER")
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let supervisor = if peer {
+        tracing::info!("peer hosting enabled; supervising {}", juicebox::PEER_RELAY_SERVICE);
+        juicebox::Supervisor::with_services(juicebox::services_with_peer())
+    } else {
+        juicebox::Supervisor::new()
+    };
+
+    if let Err(e) = supervisor.run(shutdown_rx).await {
         tracing::error!("{e}");
         sig_task.abort();
         std::process::exit(1);
