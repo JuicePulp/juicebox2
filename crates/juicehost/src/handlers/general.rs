@@ -6,6 +6,7 @@ use axum::{
     http::{HeaderMap, header},
     response::{IntoResponse, Json, Redirect, Response},
 };
+use juiceproto::config::HostConfigResponse;
 use serde_json::json;
 
 use super::common::{BackendStatus, RangeResult, parse_range};
@@ -109,29 +110,29 @@ pub async fn storage_handler(State(state): State<Arc<AppState>>) -> Json<storage
     ),
     tag = "General",
 )]
-pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let danger_level_str = state.danger_level.as_str();
+pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<HostConfigResponse> {
     let default_max_file_size_bytes = state
         .max_file_size_by_ttl_hours
         .get(&juiceutils::size_scale::ttl_key(state.default_ttl_hours))
         .copied()
         .unwrap_or(state.max_file_size_bytes);
-    Json(serde_json::json!({
-        "max_file_size_bytes": default_max_file_size_bytes,
-        "max_file_size_hard_bytes": state.max_file_size_bytes,
-        "max_file_size_by_ttl_hours": &state.max_file_size_by_ttl_hours,
-        "version": env!("CARGO_PKG_VERSION"),
-        "default_ttl_hours": state.default_ttl_hours,
-        "allowed_ttl_hours": state.allowed_ttl_hours,
-        "danger_level": danger_level_str,
-        "quick_link": state.quick_link,
-        "custom_id": state.custom_id,
-        "backend_url": state.backend_url,
-        "frontend_url": state.frontend_url,
-        "password_links": true,
-        "at_rest_via_juiceback": true,
-        "encrypted": true,
-    }))
+    Json(HostConfigResponse {
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        max_file_size_bytes: Some(default_max_file_size_bytes),
+        max_file_size_hard_bytes: Some(state.max_file_size_bytes),
+        max_file_size_by_ttl_hours: Some(state.max_file_size_by_ttl_hours.clone()),
+        default_ttl_hours: Some(state.default_ttl_hours),
+        allowed_ttl_hours: Some(state.allowed_ttl_hours.clone()),
+        danger_level: Some(state.danger_level.as_str().to_owned()),
+        quick_link: Some(state.quick_link),
+        custom_id: Some(state.custom_id),
+        backend_url: state.backend_url.clone(),
+        frontend_url: state.frontend_url.clone(),
+        password_links: Some(true),
+        at_rest_via_juiceback: Some(true),
+        encrypted: Some(true),
+        ..Default::default()
+    })
 }
 
 #[utoipa::path(

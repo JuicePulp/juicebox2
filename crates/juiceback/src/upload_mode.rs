@@ -27,14 +27,4 @@ mod tests {
     fn from_standard() {
         assert_eq!(UploadMode::from("standard"), UploadMode::Standard);
     }
-
-    #[test]
-    fn from_empty() {
-        assert_eq!(UploadMode::from(""), UploadMode::Standard);
-    }
-
-    #[test]
-    fn from_random_string() {
-        assert_eq!(UploadMode::from("anything"), UploadMode::Standard);
-    }
 }

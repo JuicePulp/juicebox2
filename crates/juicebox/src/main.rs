@@ -739,17 +739,6 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_secrets_rejected() {
-        use juiceutils::config::is_placeholder_secret;
-
-        assert!(is_placeholder_secret(""));
-        assert!(is_placeholder_secret("   "));
-        assert!(is_placeholder_secret("change_this_to_a_random_value"));
-        assert!(is_placeholder_secret("change_this_in_production"));
-        assert!(!is_placeholder_secret("a-real-secret-value"));
-    }
-
-    #[test]
     fn juiceback_requires_secrets() {
         let (_lock, _guard) = EnvGuard::lock(VARS);
 

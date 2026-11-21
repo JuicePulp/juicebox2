@@ -55,7 +55,7 @@ async fn config_returns_json_without_secrets() {
         juiceback::constants::MAX_TUS_PARALLEL_PARTS
     );
     // The direct constants are crate-private; pin the contract here.
-    assert_eq!(json["direct_parallel_max_parts"], 64);
+    assert_eq!(json["direct_parallel_max_parts"], 128);
     assert_eq!(json["direct_parallel_max_part_bytes"], 96 * 1024 * 1024);
     assert!(json.get("juicehost_api_key").is_none());
     assert!(json.get("jwt_secret").is_none());

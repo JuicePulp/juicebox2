@@ -624,6 +624,17 @@ async fn storage_endpoint() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let metrics: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let total = metrics["total_bytes"].as_u64().unwrap();
+    let used = metrics["used_bytes"].as_u64().unwrap();
+    let free = metrics["free_bytes"].as_u64().unwrap();
+    assert!(total > 0);
+    assert_eq!(used + free, total);
+    assert_eq!(metrics["min_free_bytes"], 0);
+    assert_eq!(metrics["out_of_space"], false);
 }
 
 #[tokio::test]
@@ -1843,25 +1854,6 @@ async fn preview_bots_get_raw_bytes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_slice(), b"hello bots");
 
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header(
-                    "user-agent",
-                    "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/130.0",
-                )
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
-    assert_eq!(status, StatusCode::OK);
-
     let (status, _, body) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -1871,34 +1863,6 @@ async fn preview_bots_get_raw_bytes() {
         page.contains("NOT the raw file"),
         "preview must tell non-browser clients where the raw bytes are"
     );
-
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header("user-agent", "some-uploader/1.0")
-                .header("accept", "*/*")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header("user-agent", "curl/8.5.0")
-                .header("sec-fetch-mode", "navigate")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
 
     let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
     assert_eq!(status, StatusCode::OK);

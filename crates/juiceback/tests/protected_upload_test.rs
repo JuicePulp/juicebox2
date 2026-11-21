@@ -737,9 +737,6 @@ async fn unlock_page_and_cookie_flow() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let no_auth_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
 
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -781,7 +778,6 @@ async fn unlock_page_and_cookie_flow() {
 
     let (status, _, _) = post_unlock_json(&app, &id, "wrong password").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let _ = no_auth_body;
 }
 
 #[tokio::test]

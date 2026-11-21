@@ -7,6 +7,7 @@ use std::{
 };
 
 use dashmap::DashMap;
+use juiceproto::config::HostConfigResponse;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -538,21 +539,13 @@ impl AppState {
         let mut max_file_size_by_ttl_hours = BTreeMap::new();
         if let Ok(response) = config
             && response.status().is_success()
-            && let Ok(config) = response.json::<serde_json::Value>().await
+            && let Ok(config) = response.json::<HostConfigResponse>().await
         {
             max_file_size_bytes = config
-                .get("max_file_size_hard_bytes")
-                .or_else(|| config.get("max_file_size_bytes"))
-                .and_then(serde_json::Value::as_u64);
-            if let Some(map) = config
-                .get("max_file_size_by_ttl_hours")
-                .and_then(serde_json::Value::as_object)
-            {
-                for (key, value) in map {
-                    if let Some(value) = value.as_u64() {
-                        max_file_size_by_ttl_hours.insert(key.clone(), value);
-                    }
-                }
+                .max_file_size_hard_bytes
+                .or(config.max_file_size_bytes);
+            if let Some(map) = config.max_file_size_by_ttl_hours {
+                max_file_size_by_ttl_hours = map;
             }
         }
 

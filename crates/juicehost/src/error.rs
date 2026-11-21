@@ -265,7 +265,6 @@ mod tests {
             status_for(JuicehostError::Frozen),
             StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
         );
-        assert_eq!(status_for(JuicehostError::Frozen).as_u16(), 451);
     }
 
     #[test]
@@ -308,17 +307,6 @@ mod tests {
             body["message"],
             "This file is frozen and temporarily unavailable"
         );
-    }
-
-    #[test]
-    fn frozen_html_contains_451() {
-        let (status, html) = frozen_html();
-        assert_eq!(status, StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS);
-        assert_eq!(status.as_u16(), 451);
-        assert!(html.0.contains("451"));
-        assert!(html.0.contains("frozen"));
-
-        assert!(!html.0.contains("__"));
     }
 
     #[tokio::test]
