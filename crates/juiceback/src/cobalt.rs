@@ -4,6 +4,9 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchOptions {
+    /// Storage node selected by the client; `None` uses the server default.
+    pub storage_host: Option<String>,
+
     pub audio_only: bool,
 
     pub video_quality: String,
@@ -20,6 +23,7 @@ pub struct FetchOptions {
 impl Default for FetchOptions {
     fn default() -> Self {
         Self {
+            storage_host: None,
             audio_only: false,
             video_quality: "1080".to_string(),
             youtube_video_container: "auto".to_string(),
@@ -76,6 +80,7 @@ impl FetchOptions {
             _ => "h264".to_string(),
         };
         Self {
+            storage_host: None,
             audio_only,
             video_quality,
             youtube_video_container,
