@@ -49,7 +49,8 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("promo_state.embed_attempt", m16_promo_state_embed_attempt),
     ("files.video_meta", m17_files_video_meta),
     ("fetch_jobs.total_bytes", m18_fetch_jobs_total_bytes),
-    ("files.peer_metadata", m19_files_peer_metadata),
+    ("host_nodes", m19_host_nodes),
+    ("files.peer_metadata", m20_files_peer_metadata),
 ];
 
 fn m14_ip_geolocation(conn: &Connection) -> Result<()> {
@@ -194,7 +195,42 @@ fn m18_fetch_jobs_total_bytes(conn: &Connection) -> Result<()> {
 
 /// Peer rows need an owner device id and a liveness timestamp. Both columns are
 /// added defensively so existing databases migrate in place without a rewrite.
-fn m19_files_peer_metadata(conn: &Connection) -> Result<()> {
+fn m19_host_nodes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS host_nodes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            url        TEXT NOT NULL UNIQUE,
+            region     TEXT NOT NULL DEFAULT '',
+            kind       TEXT NOT NULL DEFAULT 'storage',
+            official   INTEGER NOT NULL DEFAULT 0,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_host_nodes_order
+            ON host_nodes(enabled, official DESC, name);",
+    )?;
+    for (name, url, region, kind) in [
+        ("Europe-1", "https://f-eu1.juicey.dev", "Europe", "storage"),
+        ("Europe-2", "https://f-eu2.juicey.dev", "Europe", "storage"),
+        (
+            "US-1",
+            "https://f-us1.juicey.dev",
+            "United States",
+            "storage",
+        ),
+    ] {
+        conn.execute(
+            "INSERT OR IGNORE INTO host_nodes (name, url, region, kind, official, enabled)
+             VALUES (?1, ?2, ?3, ?4, 1, 1)",
+            params![name, url, region, kind],
+        )?;
+    }
+    Ok(())
+}
+
+fn m20_files_peer_metadata(conn: &Connection) -> Result<()> {
     if !has_column(conn, "files", "peer_device_id")? {
         conn.execute(
             "ALTER TABLE files ADD COLUMN peer_device_id TEXT NOT NULL DEFAULT ''",
