@@ -2,6 +2,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Serde skip predicate: omit the default-false peer flag from older payloads.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Public `/api/config` payload, shared by both services.
 ///
 /// juicehost emits the host-owned fields; juiceback emits the same fields plus
@@ -74,6 +79,13 @@ pub struct HostConfigResponse {
     pub direct_parallel_max_parts: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direct_parallel_max_part_bytes: Option<u64>,
+
+    /// Public relay URL advertised to native peers by juiceback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_relay_url: Option<String>,
+    /// Whether peer-to-peer serving is enabled on this deployment.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub peer_enabled: bool,
 }
 
 /// Joins a base URL with the internal file-status path.
@@ -106,5 +118,19 @@ mod tests {
         assert_eq!(cfg.danger_level.as_deref(), Some("medium"));
         assert_eq!(cfg.quick_link, None);
         assert_eq!(serde_json::to_value(cfg).unwrap(), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+    }
+
+    #[test]
+    fn peer_fields_default_and_round_trip() {
+        let raw = r#"{"peer_relay_url":"wss://ff.juicey.dev/peer/ws","peer_enabled":true}"#;
+        let cfg: HostConfigResponse = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.peer_relay_url.as_deref(), Some("wss://ff.juicey.dev/peer/ws"));
+        assert!(cfg.peer_enabled);
+        assert_eq!(serde_json::to_value(&cfg).unwrap(), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+
+        let legacy: HostConfigResponse = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.peer_relay_url, None);
+        assert!(!legacy.peer_enabled);
+        assert_eq!(serde_json::to_value(legacy).unwrap(), serde_json::json!({}));
     }
 }

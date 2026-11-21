@@ -42,6 +42,8 @@ pub struct Config {
 
     pub public_juicehost_url: String,
     pub default_storage_host: Option<String>,
+    /// Peer relay base URL; `None` disables peer features in `/api/config`.
+    pub peer_relay_url: Option<String>,
     pub juiceback_origin: String,
     pub router_base_url: Option<String>,
     pub jwt_secret: String,
@@ -160,6 +162,7 @@ impl std::fmt::Debug for Config {
             .field("juicehost_api_key", &"[REDACTED]")
             .field("juicehost_url", &self.juicehost_url)
             .field("public_juicehost_url", &self.public_juicehost_url)
+            .field("peer_relay_url", &self.peer_relay_url)
             .field("juiceback_origin", &self.juiceback_origin)
             .field("jwt_secret", &"[REDACTED]")
             .field("ip_encryption_key", &"[REDACTED]")
@@ -320,6 +323,15 @@ impl Config {
                     .map(|value| value.trim().trim_end_matches('/').to_string())
                     .filter(|value| !value.is_empty())
             });
+        // An explicitly empty value (env or TOML) disables peer features.
+        let peer_relay_url = std::env::var("PEER_RELAY_URL")
+            .ok()
+            .unwrap_or_else(|| file.urls.peer_relay_url.clone())
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
+        let peer_relay_url = (!peer_relay_url.is_empty()).then_some(peer_relay_url);
+
         let juiceback_origin = file
             .urls
             .juiceback_origin
@@ -497,6 +509,7 @@ impl Config {
             juicehost_url,
             public_juicehost_url,
             default_storage_host,
+            peer_relay_url,
             juiceback_origin,
             router_base_url,
             jwt_secret,

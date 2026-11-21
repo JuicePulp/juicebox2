@@ -1,0 +1,31 @@
+[package]
+name = "juicepeer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native peer client and public relay for Juicebox peer-to-peer file serving"
+publish = false
+
+[dependencies]
+axum.workspace = true
+futures.workspace = true
+jsonwebtoken.workspace = true
+juiceproto = { path = "../juiceproto" }
+juiceutils = { path = "../juiceutils" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Full runtime: TCP/WebSocket I/O, HTTP server, timers, signals, tasks.
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+
+[[bin]]
+name = "juicepeer-relay"
+path = "src/relay/main.rs"
+
+[lints]
+workspace = true

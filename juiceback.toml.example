@@ -21,6 +21,11 @@ juicehost_url = "http://127.0.0.1:6402"
 # Env override: DEFAULT_STORAGE_HOST
 # default_storage_host = "https://f-us1.juicey.dev"
 
+# Public base URL of the juicepeer relay. Peer files are metadata-only rows in
+# juiceback; their {v,f,d} share links are minted on this host. Set to an empty
+# string to disable peer features. Env override: PEER_RELAY_URL
+peer_relay_url = "https://ff.juicey.dev"
+
 # Single link domain (Cloudflare Worker router). When set, share links for
 # official regional hosts are minted under this host instead of the region,
 # e.g. https://f.juicey.dev/v/abc123.gif. Custom third-party hosts keep theirs.

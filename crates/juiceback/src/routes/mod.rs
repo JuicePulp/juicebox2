@@ -29,6 +29,7 @@ pub mod identity;
 pub mod manage;
 pub mod noscript;
 pub mod pairing;
+pub mod peer;
 pub mod presence;
 pub mod register;
 pub mod stats;
@@ -293,6 +294,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(manage::put_client_files_handler),
         )
         .route("/api/register", post(register::register_handler))
+        .route("/api/peer/register", post(peer::register_handler))
+        .route("/api/peer/revoke/{id}", post(peer::revoke_handler))
+        .route("/api/peer/heartbeat", post(peer::heartbeat_handler))
         .merge(abuse_routes)
         .layer(DefaultBodyLimit::max(64 * 1024));
 
@@ -335,6 +339,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(upload::file_status_handler),
         )
         .route("/internal/resolve/{id}", get(upload::resolve_file_handler))
+        .route("/internal/peer/authorize", post(peer::authorize_handler))
         .route(
             "/internal/alias/{old_id}",
             get(manage::resolve_alias_handler),

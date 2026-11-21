@@ -69,6 +69,9 @@ pub struct UrlsFile {
     pub public_juicehost_url: Option<String>,
     #[serde(default)]
     pub default_storage_host: Option<String>,
+    /// Public base URL of the juicepeer relay that serves peer-owned files.
+    #[serde(default = "default_peer_relay_url")]
+    pub peer_relay_url: String,
     #[serde(default)]
     pub juiceback_origin: Option<String>,
     #[serde(default)]
@@ -271,6 +274,10 @@ fn default_juicehost_url() -> String {
     format!("http://127.0.0.1:{}", juiceutils::config::ports::HOST)
 }
 
+fn default_peer_relay_url() -> String {
+    String::from("https://ff.juicey.dev")
+}
+
 fn default_cors_origins() -> Vec<String> {
     let frontend = juiceutils::config::ports::FRONTEND;
     let host = juiceutils::config::ports::HOST;
@@ -429,6 +436,7 @@ impl Default for UrlsFile {
             juicehost_url: default_juicehost_url(),
             public_juicehost_url: None,
             default_storage_host: None,
+            peer_relay_url: default_peer_relay_url(),
             juiceback_origin: None,
             router_base_url: None,
         }

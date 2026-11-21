@@ -50,6 +50,11 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<HostConf
         Err(_) => state.refresh_juicehost_config().await.ok(),
     };
 
+    // Peer capabilities are backend-owned, so they must survive both the
+    // healthy and degraded config paths.
+    let peer_relay_url = state.config.peer_relay_url.clone();
+    let peer_enabled = peer_relay_url.is_some();
+
     match jh.as_ref() {
         Some(cfg) => {
             let direct_upload =
@@ -89,12 +94,16 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<HostConf
                 rate_limit_per_minute: Some(state.config.rate_limit_per_minute),
                 quic: Some(cfg!(feature = "quic")),
                 juicehost_url: Some(state.config.juicehost_url.clone()),
+                peer_relay_url,
+                peer_enabled,
                 ..Default::default()
             })
         }
         None => Json(HostConfigResponse {
             status: Some("degraded".to_owned()),
             error: Some("juicehost config unavailable".to_owned()),
+            peer_relay_url,
+            peer_enabled,
             ..Default::default()
         }),
     }

@@ -1,0 +1,33 @@
+# juicepeer-relay — public WebSocket relay for Juicebox peer files.
+#
+# Non-secret settings only. Secrets are NEVER read from this file; supply them
+# via environment variables so they cannot be committed by accident:
+#
+#   JUICEPEER_JWT_SECRET   device-JWT signing secret (shared with juiceback)
+#                          falls back to TICKET_JWT_SECRET, then JWT_SECRET
+#   JUICEPEER_API_KEY      key for POST /internal/peer/authorize
+#                          falls back to JUICEHOST_API_KEY
+#
+# Both a JWT secret and an API key are required; startup fails without them.
+# Resolution order is: CLI flags, environment, this TOML file, code defaults.
+
+# Listener (defaults: 0.0.0.0:6410).
+host = "0.0.0.0"
+port = 6410
+
+# Public base URL of this relay and the juiceback it authorizes IDs against.
+relay_base_url = "https://ff.juicey.dev"
+juiceback_url = "http://127.0.0.1:6401"
+
+# Limits and timeouts (values shown are the defaults).
+max_sessions = 1024
+max_frame_bytes = 1048576        # max WS binary frame payload; minimum 1024
+max_concurrent_requests = 128    # in-flight browser requests
+request_timeout_secs = 60
+heartbeat_interval_secs = 30
+
+# Equivalent CLI flags: --config/-c, --listen, --host, --port,
+# --relay-base-url, --juiceback-url, --jwt-secret, --api-key,
+# --max-sessions, --max-frame-bytes, --max-concurrent-requests,
+# --request-timeout-secs, --heartbeat-interval-secs.
+# Config file is discovered via JUICEPEER_CONFIG or ./.juicepeer.toml / ./juicepeer.toml.

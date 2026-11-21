@@ -48,7 +48,7 @@ pub fn finish_reservation(
 pub(crate) const FILE_COLUMNS: &str = "id, filename, mime_type, size_bytes, storage_path, \
     delete_token, uploaded_at, expires_at, uploader_ip, storage_host, status, \
     password_hash, is_encrypted, enc_header, dek_wrapped, dek_salt, dek_escrow, key_version, \
-    tier, r2_key, tier_pinned, title, author";
+    tier, r2_key, tier_pinned, title, author, peer_device_id, last_seen";
 
 /// Missing values from older rows fall back to ready/standard/0.
 pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRecord> {
@@ -86,13 +86,15 @@ pub(crate) fn row_to_file_record(row: &rusqlite::Row) -> rusqlite::Result<FileRe
         tier_pinned: row.get::<_, i64>(20).unwrap_or(0) != 0,
         title: row.get(21).unwrap_or_default(),
         author: row.get(22).unwrap_or_default(),
+        peer_device_id: row.get(23).unwrap_or_default(),
+        last_seen: row.get(24).unwrap_or(0),
     })
 }
 
 pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
     conn.execute(
         &format!(
-            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
+            "INSERT INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"
         ),
         params![
             record.id,
@@ -118,6 +120,8 @@ pub fn insert_file(conn: &Connection, record: &FileRecord) -> Result<()> {
             i64::from(record.tier_pinned),
             record.title,
             record.author,
+            record.peer_device_id,
+            record.last_seen,
         ],
     )?;
     Ok(())
@@ -332,11 +336,121 @@ pub fn list_expired_batch(
     after_id: &str,
     limit: usize,
 ) -> Result<Vec<FileRecord>> {
+    // Peer rows hold no bytes on a storage host; the host-deletion cleanup path
+    // must never see them. They are purged by `delete_expired_peer_files`.
     let mut stmt = conn.prepare(&format!(
-        "SELECT {FILE_COLUMNS} FROM files WHERE expires_at < unixepoch() AND status != 'uploading' AND id > ?1 ORDER BY id LIMIT ?2"
+        "SELECT {FILE_COLUMNS} FROM files WHERE expires_at < unixepoch() AND status != 'uploading' \
+         AND tier != ?3 AND id > ?1 ORDER BY id LIMIT ?2"
     ))?;
-    let rows = stmt.query_map(params![after_id, limit as i64], row_to_file_record)?;
+    let rows = stmt.query_map(
+        params![after_id, limit as i64, FileRecord::TIER_PEER],
+        row_to_file_record,
+    )?;
     rows.collect()
+}
+
+/// Removes expired peer rows without any storage-host interaction. Called
+/// opportunistically by peer endpoints since the host cleanup skips them.
+pub fn delete_expired_peer_files(conn: &Connection, now: i64) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM files WHERE tier = ?1 AND expires_at < ?2",
+        params![FileRecord::TIER_PEER, now],
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerRevokeResult {
+    Revoked,
+    NotFound,
+    NotOwner,
+}
+
+/// Deletes a peer row only for the device that announced it.
+pub fn revoke_peer_file(conn: &Connection, id: &str, device_id: &str) -> Result<PeerRevokeResult> {
+    let owner: Option<String> = conn
+        .query_row(
+            "SELECT peer_device_id FROM files WHERE id = ?1 AND tier = ?2",
+            params![id, FileRecord::TIER_PEER],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(owner) = owner else {
+        return Ok(PeerRevokeResult::NotFound);
+    };
+    if !crate::utils::constant_time_eq(&owner, device_id) {
+        return Ok(PeerRevokeResult::NotOwner);
+    }
+    conn.execute("DELETE FROM files WHERE id = ?1", params![id])?;
+    Ok(PeerRevokeResult::Revoked)
+}
+
+/// Refreshes `last_seen` for a device's peer rows, optionally limited to ids.
+pub fn touch_peer_files(
+    conn: &Connection,
+    device_id: &str,
+    ids: Option<&[String]>,
+    now: i64,
+) -> Result<usize> {
+    if let Some(ids) = ids {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        // Fixed params occupy ?1..?3, so the id list starts at ?4.
+        let placeholders: String = (4..=ids.len() + 3)
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "UPDATE files SET last_seen = ?1 WHERE tier = ?2 AND peer_device_id = ?3 AND id IN ({placeholders})"
+        );
+        let tier = FileRecord::TIER_PEER.to_string();
+        let device = device_id.to_string();
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&now, &tier, &device];
+        params.extend(ids.iter().map(|id| id as &dyn rusqlite::ToSql));
+        return conn.execute(&sql, params.as_slice());
+    }
+    conn.execute(
+        "UPDATE files SET last_seen = ?1 WHERE tier = ?2 AND peer_device_id = ?3",
+        params![now, FileRecord::TIER_PEER, device_id],
+    )
+}
+
+/// Metadata-only replacement for a device's peer row. `INSERT OR REPLACE`
+/// keeps re-registration idempotent without ever touching storage.
+pub fn replace_peer_file(conn: &Connection, record: &FileRecord) -> Result<()> {
+    conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO files ({FILE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"
+        ),
+        params![
+            record.id,
+            record.filename,
+            record.mime_type,
+            record.size_bytes,
+            record.storage_path,
+            record.delete_token,
+            record.uploaded_at,
+            record.expires_at,
+            record.uploader_ip,
+            record.storage_host.as_deref().unwrap_or(""),
+            record.status,
+            record.password_hash.as_deref(),
+            i64::from(record.is_encrypted),
+            record.enc_header.as_deref(),
+            record.dek_wrapped.as_deref(),
+            record.dek_salt.as_deref(),
+            record.dek_escrow.as_deref(),
+            record.key_version,
+            record.tier,
+            record.r2_key,
+            i64::from(record.tier_pinned),
+            record.title,
+            record.author,
+            record.peer_device_id,
+            record.last_seen,
+        ],
+    )?;
+    Ok(())
 }
 
 pub fn list_abandoned_uploads_batch(

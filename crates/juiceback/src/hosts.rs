@@ -30,6 +30,11 @@ impl DeploymentHosts {
         if let Some(host) = config.router_base_url.as_deref().and_then(trimmed) {
             official.insert(host);
         }
+        // Peer share links live on the relay; treat it as an official host so
+        // host validation and share-link routing keep working for peer rows.
+        if let Some(host) = config.peer_relay_url.as_deref().and_then(trimmed) {
+            official.insert(host);
+        }
 
         let mut ban_targets = Vec::new();
         if let Some(host) = trimmed(&config.juicehost_url) {

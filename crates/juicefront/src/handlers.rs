@@ -1185,6 +1185,7 @@ struct FileRow {
     short_id: String,
     index: usize,
     protected: bool,
+    status: String,
 }
 
 fn extract_short_id(url: &str) -> String {
@@ -1282,6 +1283,7 @@ fn file_rows(
                 storage_host: host,
                 index,
                 protected: file.protected,
+                status: file.status,
             }
         })
         .collect()
