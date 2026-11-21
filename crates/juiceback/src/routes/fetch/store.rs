@@ -59,6 +59,10 @@ pub(crate) async fn download_and_store(
     let delete_token = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
     let expires_at = now + (ttl_hours * crate::constants::SECONDS_PER_HOUR_F64).round() as i64;
+    let storage_host = opts
+        .storage_host
+        .clone()
+        .or_else(|| state.config.default_storage_host.clone());
 
     let mut record = FileRecord::new(
         file_id.clone(),
@@ -69,7 +73,7 @@ pub(crate) async fn download_and_store(
         now,
         expires_at,
         encrypted_ip,
-        state.config.default_storage_host.clone(),
+        storage_host.clone(),
     );
     record.title = meta
         .title
@@ -108,7 +112,7 @@ pub(crate) async fn download_and_store(
         state: Arc::clone(state),
         file_id: file_id.clone(),
         delete_token: delete_token.clone(),
-        host: state.config.default_storage_host.clone(),
+        host: storage_host.clone(),
         active: true,
     };
 
@@ -138,6 +142,7 @@ pub(crate) async fn download_and_store(
         &filename,
         &mime_type,
         &delete_token,
+        storage_host.as_deref(),
         source_url,
         byte_source,
         max_size,
@@ -500,6 +505,7 @@ async fn transfer_to_juicehost(
     filename: &str,
     mime_type: &str,
     capability: &str,
+    storage_host: Option<&str>,
     source_url: &str,
     byte_source: ByteSource,
     max_size: u64,
@@ -586,6 +592,7 @@ async fn transfer_to_juicehost(
             filename,
             mime_type,
             capability,
+            storage_host,
             &mut stream,
             max_size,
             source_url,
@@ -613,7 +620,9 @@ async fn transfer_to_juicehost(
     let push_filename = filename.to_string();
     let push_mime = mime_type.to_string();
     let push_capability = capability.to_string();
-    let push_host = state.config.default_storage_host.clone();
+    let push_host = storage_host
+        .map(str::to_string)
+        .or_else(|| state.config.default_storage_host.clone());
     let push_task = tokio::spawn(async move {
         crate::storage_client::push_file_streaming(
             &push_state,
@@ -707,6 +716,7 @@ async fn transfer_protected_to_juicehost(
     filename: &str,
     mime_type: &str,
     capability: &str,
+    storage_host: Option<&str>,
     stream: &mut std::pin::Pin<
         Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>,
     >,
@@ -789,7 +799,7 @@ async fn transfer_protected_to_juicehost(
         file_id,
         filename,
         mime_type,
-        state.config.default_storage_host.as_deref(),
+        storage_host.or(state.config.default_storage_host.as_deref()),
         capability,
         spool_file.path(),
         total,

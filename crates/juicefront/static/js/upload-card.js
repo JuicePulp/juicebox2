@@ -667,6 +667,8 @@ function startCobaltFetch(url) {
   var betterAudio = betterEl ? betterEl.value === "enhanced" : false;
 
   var payload = { url: url, audio_only: audioOnly };
+  var selectedHost = readSelectedHost();
+  if (selectedHost) payload.host = selectedHost;
   var _pw = readUploadPassword();
   if (_pw) payload.password = _pw;
   if (audioOnly) {

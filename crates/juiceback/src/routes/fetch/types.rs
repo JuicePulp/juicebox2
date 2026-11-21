@@ -27,6 +27,10 @@ pub struct FetchStartRequest {
 
     #[serde(default)]
     pub password: Option<String>,
+
+    /// Storage node chosen in the host picker; validated like upload `host`.
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

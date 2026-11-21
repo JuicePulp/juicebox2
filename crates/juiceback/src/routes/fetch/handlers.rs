@@ -51,7 +51,7 @@ pub async fn fetch_start_handler(
     }
 
     let source_url = validate_source_url(&body.url, state.config.allow_private_fetch).await?;
-    let opts = FetchOptions::sanitized(
+    let mut opts = FetchOptions::sanitized(
         body.audio_only,
         body.video_quality.as_deref(),
         body.video_container.as_deref(),
@@ -59,6 +59,22 @@ pub async fn fetch_start_handler(
         body.better_audio,
         body.youtube_video_codec.as_deref(),
     );
+
+    // Honor the host picker exactly like normal uploads do; an empty value
+    // keeps the existing server/region default behavior.
+    opts.storage_host = match body
+        .host
+        .as_deref()
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+    {
+        Some(host) => Some(
+            crate::storage_client::check_storage_host(host, state.config.allow_private_fetch)
+                .await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?,
+        ),
+        None => None,
+    };
 
     let raw_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
     let encrypted_ip = crate::utils::encrypt_ip(&raw_ip, &state.config.ip_encryption_key);
