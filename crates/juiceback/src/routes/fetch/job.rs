@@ -5,11 +5,12 @@ use super::{
     bundle::{bundle_picker, picker_item_filename},
     meta,
     store::download_and_store,
+    twitter,
     types::{ByteSource, FetchMeta, FetchResult},
     ytdlp::{run_ytdlp_tier, ytdlp_enabled},
 };
 use crate::{
-    cobalt::{self, CobaltResponse, FetchOptions},
+    cobalt::{self, CobaltPickerItem, CobaltResponse, FetchOptions},
     db,
     state::AppState,
 };
@@ -202,6 +203,53 @@ pub(crate) async fn run_fetch_job_inner(
     last
 }
 
+/// Downloads one picker item directly, or bundles multiple items into a ZIP.
+async fn store_picker_items(
+    state: &Arc<AppState>,
+    job_id: &str,
+    user_id: &str,
+    source_url: &str,
+    items: &[CobaltPickerItem],
+    opts: &FetchOptions,
+    max_size: u64,
+    default_ttl_hours: f64,
+    encrypted_ip: Option<String>,
+    password: Option<String>,
+) -> FetchResult {
+    if items.len() == 1 {
+        let item = &items[0];
+        download_and_store(
+            state,
+            user_id,
+            job_id,
+            source_url,
+            ByteSource::Tunnel(item.url.clone()),
+            Some(picker_item_filename(item)),
+            FetchMeta::default(),
+            opts,
+            max_size,
+            default_ttl_hours,
+            encrypted_ip,
+            password,
+        )
+        .await
+    } else {
+        bundle_picker(
+            state,
+            user_id,
+            job_id,
+            source_url,
+            items,
+            opts,
+            max_size,
+            default_ttl_hours,
+            encrypted_ip,
+            password,
+        )
+        .await
+    }
+}
+
 /// An empty-stream instance is excluded and the race restarts against the rest.
 pub(crate) async fn fetch_via(
     state: &Arc<AppState>,
@@ -234,6 +282,29 @@ pub(crate) async fn fetch_via(
 
         let result = match response {
             CobaltResponse::Error { code } => {
+                // Cobalt reports several different codes for image-only X
+                // posts (empty fetch, post unavailable, auth failures). Any
+                // error on a status URL is worth resolving through the public
+                // X media APIs instead of failing the job.
+                if twitter::status_id(source_url).is_some() {
+                    tracing::info!(
+                        "fetch job {job_id}: cobalt error {code}; trying the X/Twitter media fallback"
+                    );
+                    let items = twitter::fetch_media(state, source_url).await?;
+                    return store_picker_items(
+                        state,
+                        job_id,
+                        user_id,
+                        source_url,
+                        &items,
+                        opts,
+                        max_size,
+                        default_ttl_hours,
+                        encrypted_ip.clone(),
+                        password.clone(),
+                    )
+                    .await;
+                }
                 if cobalt::is_instance_error_code(&code) {
                     tracing::warn!(
                         "fetch job {job_id}: cobalt instance {} failed for this fetch; trying another tier",
@@ -269,38 +340,19 @@ pub(crate) async fn fetch_via(
                 return Err(cobalt::friendly_error(&code));
             }
             CobaltResponse::Picker { items } => {
-                if items.len() == 1 {
-                    let item = &items[0];
-                    download_and_store(
-                        state,
-                        user_id,
-                        job_id,
-                        source_url,
-                        ByteSource::Tunnel(item.url.clone()),
-                        Some(picker_item_filename(item)),
-                        FetchMeta::default(),
-                        opts,
-                        max_size,
-                        default_ttl_hours,
-                        encrypted_ip.clone(),
-                        password.clone(),
-                    )
-                    .await
-                } else {
-                    bundle_picker(
-                        state,
-                        user_id,
-                        job_id,
-                        source_url,
-                        &items,
-                        opts,
-                        max_size,
-                        default_ttl_hours,
-                        encrypted_ip.clone(),
-                        password.clone(),
-                    )
-                    .await
-                }
+                store_picker_items(
+                    state,
+                    job_id,
+                    user_id,
+                    source_url,
+                    &items,
+                    opts,
+                    max_size,
+                    default_ttl_hours,
+                    encrypted_ip.clone(),
+                    password.clone(),
+                )
+                .await
             }
             CobaltResponse::LocalProcessing { service } => {
                 return Err(format!(
