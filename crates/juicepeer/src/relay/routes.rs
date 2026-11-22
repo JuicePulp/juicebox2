@@ -22,9 +22,11 @@ use crate::relay::{
 const CHUNK_QUEUE: usize = 32;
 const REQUEST_HEADERS: &[&str] = &["range", "if-none-match", "accept", "user-agent"];
 const RESPONSE_HEADERS: &[&str] = &[
-    // `content-length`/`content-range` are deliberately omitted: the peer
-    // controls them, and `Body` computes the real length for the browser.
+    // `content-length` is deliberately omitted: `Body` computes the real
+    // length for the browser. `content-range` is required on 206 responses so
+    // media players can seek correctly.
     "content-type",
+    "content-range",
     "accept-ranges",
     "etag",
     "cache-control",
@@ -333,6 +335,9 @@ mod tests {
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert!(!response.headers().contains_key("set-cookie"));
         assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
-        assert!(!response.headers().contains_key("content-range"));
+        assert_eq!(
+            response.headers()["content-range"],
+            "bytes 0-1/999999"
+        );
     }
 }

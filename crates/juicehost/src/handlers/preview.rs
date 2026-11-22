@@ -1920,7 +1920,9 @@ mod tests {
         };
         let html = render_preview(&page, &HeaderMap::new(), None);
         assert!(html.contains("<juice-player"));
-        assert!(!html.contains("aria-label"));
+        // The player fallback script mentions aria-label, but no author label
+        // attribute should be emitted when the file has no author.
+        assert!(!html.contains("aria-label=\""));
         assert!(!html.contains("\"description\":"));
     }
 
