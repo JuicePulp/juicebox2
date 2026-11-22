@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -11,6 +14,33 @@ use super::{
     freeze::{FreezeStore, ensure_not_frozen},
 };
 use crate::error::StorageError;
+
+/// A reservation older than this was almost certainly left by a crashed
+/// writer; the local backend uses the same abandonment window.
+const RESERVATION_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Deterministic fallback validator for S3-compatible stores that omit `ETag`.
+/// It is derived only from immutable object metadata, so repeated reads of the
+/// same object return the same quoted validator and `If-None-Match` can match.
+fn etag_from_object_meta(meta: &object_store::ObjectMeta) -> String {
+    if let Some(etag) = &meta.e_tag {
+        return etag.clone();
+    }
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(meta.location.as_ref().as_bytes());
+    hasher.update(meta.size.to_le_bytes());
+    hasher.update(
+        meta.last_modified
+            .timestamp_nanos_opt()
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
+    if let Some(version) = &meta.version {
+        hasher.update(version.as_bytes());
+    }
+    format!("\"{}\"", hex::encode(hasher.finalize()))
+}
 
 pub struct S3Backend {
     client: Arc<dyn object_store::ObjectStore>,
@@ -79,6 +109,60 @@ impl S3Backend {
 
     fn reservation_key(id: &str) -> object_store::path::Path {
         object_store::path::Path::from(format!("files/.reservations/{id}"))
+    }
+
+    fn now_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
+    /// Deletes ID reservations older than [`RESERVATION_TTL`] whose target was
+    /// never published. Safe to run periodically: the ID is only reusable once
+    /// the target has been confirmed absent.
+    pub async fn sweep_stale_reservations(&self) -> Result<u64, StorageError> {
+        let prefix = object_store::path::Path::from("files/.reservations/");
+        let cutoff = Self::now_secs().saturating_sub(RESERVATION_TTL.as_secs());
+        let mut list = self.client.list(Some(&prefix));
+        let mut removed = 0u64;
+        while let Some(obj) = list.next().await {
+            let obj =
+                obj.map_err(|e| StorageError::Io(format!("S3 reservation list failed: {e}")))?;
+            let Ok(data) = self.client.get(&obj.location).await else {
+                continue;
+            };
+            let Ok(bytes) = data.bytes().await else {
+                continue;
+            };
+            let Some(raw) = bytes.get(..8) else { continue };
+            let created = u64::from_le_bytes(
+                raw.try_into()
+                    .expect("slice of exactly eight bytes is a u64 array"),
+            );
+            if created > cutoff {
+                continue;
+            }
+            let Some(id) = obj.location.as_ref().rsplit('/').next() else {
+                continue;
+            };
+            if !valid_component(id) {
+                continue;
+            }
+            // A writer that finished after the timestamp was written may have
+            // published the object; never free an ID that is actually in use.
+            if !matches!(self.stat(id).await, Err(StorageError::NotFound)) {
+                continue;
+            }
+            match self.client.delete(&obj.location).await {
+                Ok(()) => removed += 1,
+                Err(e) => tracing::warn!(
+                    "failed to remove stale S3 reservation {}: {e}",
+                    obj.location
+                ),
+            }
+        }
+        Ok(removed)
     }
 
     fn capability_key(id: &str) -> object_store::path::Path {
@@ -181,11 +265,13 @@ impl S3Backend {
         }
         let reservation = Self::reservation_key(id);
         // Create mode makes the claim atomic; a second writer gets a precondition
-        // failure.
+        // failure. The timestamp lets the periodic sweep reclaim this ID if we
+        // crash before releasing it.
+        let payload = Bytes::from(Self::now_secs().to_le_bytes().to_vec());
         self.client
             .put_opts(
                 &reservation,
-                object_store::PutPayload::from(Bytes::new()),
+                object_store::PutPayload::from(payload),
                 object_store::PutOptions {
                     mode: object_store::PutMode::Create,
                     ..Default::default()
@@ -457,17 +543,8 @@ impl StorageBackend for S3Backend {
             .await
             .map_err(|e| StorageError::Io(format!("S3 get failed: {e}")))?;
 
-        let obj_meta = get_result.meta.clone();
-        // Some S3-compatible stores omit an ETag; use a timestamp so clients still get
-        // a validator.
-        let etag = obj_meta.e_tag.clone().unwrap_or_else(|| {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            format!("\"{ts:x}\"")
-        });
+        let etag = etag_from_object_meta(&get_result.meta);
+        let size = get_result.meta.size;
 
         let data = get_result
             .bytes()
@@ -480,7 +557,7 @@ impl StorageBackend for S3Backend {
         Ok(FileData {
             data,
             meta: FileMetadata {
-                size: obj_meta.size,
+                size,
                 etag,
                 extension: ext,
             },
@@ -538,14 +615,7 @@ impl StorageBackend for S3Backend {
 
         let key_str = obj.location.as_ref();
         let ext = key_str.rsplit('.').next().unwrap_or("bin").to_string();
-        let etag = obj.e_tag.clone().unwrap_or_else(|| {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            format!("\"{ts:x}\"")
-        });
+        let etag = etag_from_object_meta(&obj);
 
         Ok(FileMetadata {
             size: obj.size as u64,

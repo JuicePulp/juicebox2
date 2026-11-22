@@ -1,4 +1,4 @@
-use crate::config::{ConfigError, S3File};
+use crate::config::{ConfigError, S3File, secret::SecretString};
 
 /// A bucket must be present to select S3 mode.
 #[derive(Debug)]
@@ -8,8 +8,8 @@ pub struct S3Settings {
     endpoint: Option<String>,
     /// Needed only for local S3 emulators.
     allow_http: bool,
-    access_key: Option<String>,
-    secret_key: Option<String>,
+    access_key: Option<SecretString>,
+    secret_key: Option<SecretString>,
 }
 
 impl S3Settings {
@@ -51,8 +51,10 @@ impl S3Settings {
         let region = file.region.clone();
         let endpoint = file.endpoint.clone();
         let allow_http = file.allow_http;
-        let access_key = juiceutils::config::optional_secret("S3_ACCESS_KEY");
-        let secret_key = juiceutils::config::optional_secret("S3_SECRET_KEY");
+        let access_key =
+            juiceutils::config::optional_secret("S3_ACCESS_KEY").map(SecretString::from);
+        let secret_key =
+            juiceutils::config::optional_secret("S3_SECRET_KEY").map(SecretString::from);
         Ok(Self {
             bucket,
             region,

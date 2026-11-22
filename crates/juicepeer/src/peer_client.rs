@@ -29,7 +29,7 @@ use juiceproto::peer::{PEER_PROTOCOL_VERSION, PeerClientMessage, PeerFileSpec, P
 use reqwest::header::{HeaderName, HeaderValue};
 use tokio::{
     net::TcpStream,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, watch},
     task::JoinHandle,
 };
 use tokio_tungstenite::{
@@ -50,6 +50,8 @@ const MAX_ID_LENGTH: usize = 128;
 const MAX_EXT_LENGTH: usize = 16;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const CONTROL_QUEUE: usize = 16;
+const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
+const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 
 const FORWARDED_REQUEST_HEADERS: &[&str] = &["range", "if-none-match", "accept", "user-agent"];
 const RESPONSE_HEADERS: &[&str] = &[
@@ -379,6 +381,69 @@ pub async fn connect(
         control_tx,
         control_rx,
     })
+}
+
+/// Keeps a peer online across relay restarts and transient network failures.
+///
+/// Each attempt re-runs [`connect`], so the Hello/Announce handshake (and with
+/// it the full `files` list) is repeated on every reconnect. Transient failures
+/// are retried with exponential backoff capped at 30 seconds; the delay resets
+/// after a successful connection. Configuration errors are fatal.
+///
+/// `shutdown` is the caller's cancellation signal: pass a
+/// [`tokio::sync::watch::Receiver<bool>`] that yields `true` (or whose senders
+/// are all dropped) to stop the loop. Callers with no other shutdown token can
+/// create one with `tokio::sync::watch::channel(false)`. Note that a
+/// [`PeerControl`] belongs to one connection only and is not carried over.
+///
+/// # Errors
+///
+/// Returns immediately when the local base, relay URL or token is invalid,
+/// since retrying cannot fix those. Otherwise returns `Ok(())` on shutdown.
+pub async fn run_with_reconnect(
+    relay_ws_url: impl Into<String>,
+    token: String,
+    local_base: String,
+    files: Vec<PeerFileSpec>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), PeerClientError> {
+    let relay_ws_url = relay_ws_url.into();
+    let mut delay = RECONNECT_BASE_DELAY;
+    loop {
+        if *shutdown.borrow() {
+            return Ok(());
+        }
+        match connect(
+            relay_ws_url.clone(),
+            token.clone(),
+            local_base.clone(),
+            files.clone(),
+        )
+        .await
+        {
+            Ok(client) => {
+                delay = RECONNECT_BASE_DELAY;
+                if let Err(error) = client.run().await {
+                    tracing::warn!(%error, "peer connection lost; reconnecting");
+                }
+            }
+            Err(
+                error @ (PeerClientError::InvalidLocalBase(_)
+                | PeerClientError::InvalidConfiguration(_)),
+            ) => return Err(error),
+            Err(error) => tracing::warn!(%error, "peer connect failed; retrying"),
+        }
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            result = shutdown.changed() => {
+                // A closed channel (all senders dropped) also means shutdown.
+                if result.is_err() || *shutdown.borrow() {
+                    return Ok(());
+                }
+            }
+        }
+        delay = delay.saturating_mul(2).min(RECONNECT_MAX_DELAY);
+    }
 }
 
 async fn send_json(

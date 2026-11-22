@@ -68,13 +68,19 @@ pub fn admin_routes(trusted_proxy_cidrs: &[juiceutils::proxy::IpCidr]) -> Router
         .route("/api/admin/login", axum::routing::post(login_handler))
         .layer(GovernorLayer::new(Arc::clone(&conf)));
 
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(120));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            ticker.tick().await;
-            conf.limiter().retain_recent();
-        }
+    // The router may be built more than once (e.g. in tests); keep a single
+    // sweeper for the shared limiter configuration.
+    static SWEEPER_STARTED: std::sync::Once = std::sync::Once::new();
+    let sweeper_conf = Arc::clone(&conf);
+    SWEEPER_STARTED.call_once(|| {
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(120));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                sweeper_conf.limiter().retain_recent();
+            }
+        });
     });
 
     Router::new()

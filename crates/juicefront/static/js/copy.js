@@ -2,6 +2,7 @@ import { announce } from "./util.js?v=2.2.0-r10";
 import { publicFile } from "./api.js?v=2.2.0-r10";
 import { t } from "./i18n.js?v=2.2.0-r10";
 import { playSound } from "./sounds.js?v=2.2.0-r10";
+import { formatError } from "./upload-errors.js?v=2.2.0-r13";
 
 var iconCache = null;
 var iconCounter = 0;
@@ -51,28 +52,15 @@ export function extIcon(name) {
   return "file-text";
 }
 
-var VANITY_KEYS = {
-  FILE_TOO_LARGE: "error.file_too_large",
-  EXPIRED: "error.expired",
-  INVALID_ID: "error.invalid_id",
-  NOT_FOUND: "error.not_found",
-  RATE_LIMITED: "error.rate_limited",
-  UPSTREAM_ERROR: "error.upstream",
-  STORAGE_FULL: "error.storage_full",
-  NETWORK_ERROR: "error.network",
-  UPLOAD_FAILED: "error.upload_failed",
-  UPLOAD_TIMEOUT: "error.upload_timeout",
-  TUS_ERROR: "error.tus",
-  INVALID_REQUEST: "error.invalid_request",
-  UNAUTHORIZED: "error.unauthorized",
-  UNKNOWN: "error.unknown",
-};
-
-/** A raw server message wins; otherwise the code is mapped to a translated string. */
+/**
+ * Display an upload failure with its specific message AND INTEGER code visible.
+ * `locale` is ignored on purpose: the shared taxonomy is always specific and
+ * the numeric code is appended by `formatError` as `message [1234]`, so nothing
+ * collapses into a generic "network error". formatError accepts numbers, digit
+ * strings and legacy names, so callers may pass any of those.
+ */
 export function vanityMsg(locale, errorCode, rawMessage) {
-  if (rawMessage) return rawMessage;
-  if (errorCode && VANITY_KEYS[errorCode]) return t(locale, VANITY_KEYS[errorCode]);
-  return t(locale, "error.upload_failed");
+  return formatError(errorCode, rawMessage);
 }
 
 export function copyBarStrings(locale) {

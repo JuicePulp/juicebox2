@@ -168,7 +168,6 @@ impl BanList {
             pepper
         };
 
-        let mut added = hashes.len();
         let mut skipped = 0usize;
         for ip in &raw_ips {
             if pepper.is_empty() {
@@ -179,14 +178,20 @@ impl BanList {
                 );
             } else if let Ok(ip) = ip.parse::<IpAddr>() {
                 hashes.push(hash_ip_for_ban(&ip.to_string(), &pepper));
-                added += 1;
             } else {
                 skipped += 1;
                 tracing::warn!("ban list file {}: invalid IP {ip}", path.display());
             }
         }
 
-        self.merge_hashes(hashes);
+        // Count what was actually inserted: duplicates and already-banned
+        // hashes must not inflate the reported total.
+        let mut added = 0usize;
+        for hash in hashes {
+            if self.add_hash(&hash) {
+                added += 1;
+            }
+        }
         if added > 0 {
             tracing::info!(
                 "loaded {} bans from {} (skipped {skipped})",
@@ -204,7 +209,14 @@ fn collect_ban_entries(
     raw_ips: &mut Vec<String>,
 ) {
     match value {
-        serde_json::Value::String(s) => hashes.push(s.clone()),
+        serde_json::Value::String(s) => {
+            // Bare export entries can be raw IPs as well as precomputed hashes.
+            if s.parse::<IpAddr>().is_ok() {
+                raw_ips.push(s.clone());
+            } else {
+                hashes.push(s.clone());
+            }
+        }
         serde_json::Value::Array(items) => {
             for item in items {
                 collect_ban_entries(item, hashes, raw_ips);
@@ -304,6 +316,18 @@ mod tests {
         let (added, _) = list.load_file(&path, "pepper");
         assert_eq!(added, 2);
         assert!(list.is_banned("10.0.0.1"));
+    }
+
+    #[test]
+    fn load_file_hashes_raw_bare_array_ips_and_counts_unique_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bans.json");
+        std::fs::write(&path, r#"["1.2.3.4", "h1", "1.2.3.4"]"#).unwrap();
+        let list = BanList::new("pepper");
+        let (added, skipped) = list.load_file(&path, "pepper");
+        assert_eq!(added, 2);
+        assert_eq!(skipped, 0);
+        assert!(list.is_banned("1.2.3.4"));
     }
 
     #[test]

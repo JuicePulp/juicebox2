@@ -49,7 +49,8 @@ fn hashed_filename(filename: &str) -> String {
     let mut input = Vec::with_capacity(32 + filename.len());
     input.extend_from_slice(b"juicebox-filename-v1:");
     input.extend_from_slice(filename.as_bytes());
-    blake3::hash(&input).to_hex().to_string()[..16].to_string()
+    let hex = blake3::hash(&input).to_hex();
+    hex[..16].to_string()
 }
 
 fn ciphertext_url_for(state: &Arc<AppState>, id: &str) -> String {
@@ -163,6 +164,12 @@ pub async fn unlock_handler(
     if !record.is_protected() {
         return Err(AppError::NotFound);
     }
+    let ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
+    if !state.unlock_limiter.allow(&ip) {
+        return Err(AppError::TooManyRequests(
+            "Too many unlock attempts. Please wait and try again.".into(),
+        ));
+    }
     if !record.uses_per_file_key() {
         let password = body.password.clone();
         let hash = record.password_hash.clone().unwrap_or_default();
@@ -188,13 +195,6 @@ pub async fn unlock_handler(
             header::HeaderValue::from_static("no-store"),
         );
         return Ok(resp);
-    }
-
-    let ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
-    if !state.unlock_limiter.allow(&ip) {
-        return Err(AppError::TooManyRequests(
-            "Too many unlock attempts. Please wait and try again.".into(),
-        ));
     }
 
     let password = body.password.clone();

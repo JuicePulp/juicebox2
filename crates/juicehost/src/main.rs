@@ -8,7 +8,6 @@ use juicehost::{
 };
 #[cfg(feature = "quic")]
 use tokio::sync::Notify;
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -23,31 +22,13 @@ fn main() {
         Err(error) => juiceutils::exit_on_config_error("juicehost", error),
     };
     // the guard must live for the whole process; dropping it early stops reporting
-    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEHOST")
-        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
-        .map(|dsn| {
-            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|rate| rate.clamp(0.0, 1.0))
-                .unwrap_or(0.05);
-            sentry::init((
-                dsn.as_str(),
-                sentry::ClientOptions::default()
-                    .maybe_release(sentry::release_name!())
-                    .environment(config.sentry.environment.clone())
-                    .traces_sample_rate(traces_sample_rate)
-                    .send_default_pii(false),
-            ))
-        });
+    let _sentry_guard = juiceutils::bootstrap::init_sentry(
+        "SENTRY_DSN_JUICEHOST",
+        &config.sentry.environment,
+        sentry::release_name!(),
+    );
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
-        .with(sentry_tracing::layer())
-        .init();
+    juiceutils::bootstrap::init_tracing("info", true, true);
 
     tracing::info!("juicehost v{} starting", env!("CARGO_PKG_VERSION"));
 
@@ -66,6 +47,7 @@ fn main() {
 
     runtime.block_on(async {
         let mut local_backend: Option<Arc<LocalBackend>> = None;
+        let mut s3_backend: Option<Arc<S3Backend>> = None;
         let storage: Arc<dyn StorageBackend> = if config.is_s3_mode() {
             let bucket = config
                 .s3_bucket
@@ -78,16 +60,19 @@ fn main() {
 
             tracing::debug!("initialising S3 storage: bucket={bucket}, region={region}");
 
-            let backend = S3Backend::new(
-                bucket,
-                region,
-                endpoint,
-                access_key,
-                secret_key,
-                config.s3_allow_http,
-            )
-                .expect("Failed to create S3 storage backend");
-            Arc::new(backend)
+            let backend = Arc::new(
+                S3Backend::new(
+                    bucket,
+                    region,
+                    endpoint,
+                    access_key,
+                    secret_key,
+                    config.s3_allow_http,
+                )
+                .expect("Failed to create S3 storage backend"),
+            );
+            s3_backend = Some(Arc::clone(&backend));
+            backend
         } else {
             if !config.files_dir.exists() {
                 std::fs::create_dir_all(&config.files_dir)
@@ -145,6 +130,26 @@ fn main() {
             });
         }
 
+        if let Some(backend) = s3_backend {
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(60 * 60));
+                loop {
+                    ticker.tick().await;
+                    // Reclaim ID reservations leaked by writers that crashed
+                    // mid-upload; the sweep only frees IDs with no published object.
+                    match backend.sweep_stale_reservations().await {
+                        Ok(removed) if removed > 0 => tracing::info!(
+                            "stale S3 reservation sweep removed {removed} IDs"
+                        ),
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!("stale S3 reservation sweep failed: {error}")
+                        }
+                    }
+                }
+            });
+        }
+
         // without a pepper or a local file the ban list stays disabled, so skip the fetch
         if !config.ip_pepper.is_empty() || config.ban_list_file.is_some() {
             let ban_state = Arc::clone(&state);
@@ -189,7 +194,14 @@ fn main() {
                         idle_timeout: Duration::from_secs(config.quic_idle_seconds),
                         request_timeout: Duration::from_secs(config.quic_request_total_seconds),
                     };
-                    tokio::spawn(juiceutils::start_quic_server_with_limits(quic_router, quic_addr, quic_shutdown, "juicehost", quic_cert, quic_limits));
+                    let quic_handle = tokio::spawn(juiceutils::start_quic_server_with_limits(quic_router, quic_addr, quic_shutdown, "juicehost", quic_cert, quic_limits));
+                    tokio::spawn(async move {
+                        match quic_handle.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => tracing::error!("QUIC server failed: {error}"),
+                            Err(error) => tracing::error!("QUIC server task panicked: {error}"),
+                        }
+                    });
                     print_startup_banner(&config);
                     start_server(app, addr, config.tcp_max_concurrent_requests).await;
                 } => {}

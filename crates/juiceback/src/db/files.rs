@@ -200,19 +200,28 @@ pub fn get_file(conn: &Connection, id: &str) -> Result<Option<FileRecord>> {
 }
 
 pub fn get_files_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileRecord>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for chunk in ids.chunks(crate::constants::SQL_PARAM_CHUNK_SIZE) {
+        let unique: Vec<&String> = chunk.iter().filter(|id| seen.insert(id.as_str())).collect();
+        if unique.is_empty() {
+            continue;
+        }
+        let placeholders: String = (1..=unique.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {FILE_COLUMNS} FROM files WHERE id IN ({placeholders})"
+        ))?;
+        let params: Vec<&dyn rusqlite::ToSql> =
+            unique.iter().map(|s| *s as &dyn rusqlite::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), row_to_file_record)?;
+        for row in rows {
+            out.push(row?);
+        }
     }
-    let placeholders: String = (1..=ids.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {FILE_COLUMNS} FROM files WHERE id IN ({placeholders})"
-    ))?;
-    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    let rows = stmt.query_map(params.as_slice(), row_to_file_record)?;
-    rows.collect()
+    Ok(out)
 }
 
 /// No shared transaction; orphaned stats are pruned later.

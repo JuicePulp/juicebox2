@@ -114,14 +114,17 @@ pub(crate) async fn download_and_store(
 
     let (byte_source, _flac_guard) = if transcode_flac {
         let input = spool_for_transcode(state, job_id, source_url, byte_source, max_size).await?;
-        let _ = state
+        if let Err(e) = state
             .db_call("update_fetch_job_progress", {
                 let job_id = job_id.to_string();
                 move |db| {
                     db::update_fetch_job_progress(db, &job_id, "converting", "processing", 0, 0)
                 }
             })
-            .await;
+            .await
+        {
+            tracing::warn!("fetch job {job_id}: failed to record converting progress: {e:?}");
+        }
         let output = transcode_to_flac(input.path(), max_size).await?;
         (
             ByteSource::LocalFile(output.path().to_path_buf()),
@@ -179,12 +182,23 @@ struct CleanupOnDrop {
 
 impl Drop for CleanupOnDrop {
     fn drop(&mut self) {
-        if self.active {
-            let state = Arc::clone(&self.state);
-            let file_id = self.file_id.clone();
-            let token = self.delete_token.clone();
-            let host = self.host.clone();
-            tokio::spawn(async move {
+        if !self.active {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!("fetch cleanup: no tokio runtime; pending file left for the sweeper");
+            return;
+        };
+        let state = Arc::clone(&self.state);
+        let file_id = self.file_id.clone();
+        let token = self.delete_token.clone();
+        let host = self.host.clone();
+        // `Drop` cannot await, so spawn the rollback; a closed runtime must be
+        // reported instead of silently leaking the pending row and object.
+        let spawned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle.spawn(async move {
+                // Best-effort rollback: the original transfer error is the one
+                // surfaced to the client, so cleanup must not mask it.
                 let _ = db::delete_pending_file(&state, file_id.clone()).await;
                 let _ = crate::storage_client::delete_file_on_juicehost(
                     &state,
@@ -194,6 +208,9 @@ impl Drop for CleanupOnDrop {
                 )
                 .await;
             });
+        }));
+        if spawned.is_err() {
+            tracing::warn!("fetch cleanup: failed to spawn rollback (runtime shutting down)");
         }
     }
 }
@@ -220,14 +237,20 @@ fn tunnel_url_host_port(url: &str) -> Option<(String, u16)> {
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return None;
     }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
     Some((
         parsed.host_str()?.to_ascii_lowercase(),
         parsed.port_or_known_default()?,
     ))
 }
 
-/// Redirects are followed by hand so every hop passes the SSRF check; cobalt
-/// hosts are trusted because tunnels point at localhost.
+/// Redirects are followed by hand so every hop passes the SSRF check. Each URL
+/// is validated and its client pinned to the exact resolved addresses, closing
+/// the rebind gap between validation and the actual connection. Only the
+/// configured cobalt host gets an initial unvalidated pass (its tunnels point
+/// at localhost); redirects are always validated.
 pub(crate) async fn fetch_tunnel_response(
     client: &reqwest::Client,
     state: &Arc<AppState>,
@@ -235,17 +258,16 @@ pub(crate) async fn fetch_tunnel_response(
     allow_private: bool,
 ) -> Result<reqwest::Response, String> {
     let trusted_cobalt = tunnel_url_host_port(initial_url)
-        .map(|hp| configured_cobalt_hosts(&state.config).contains(&hp))
-        .unwrap_or(false);
-    let mut url = if trusted_cobalt {
-        initial_url.trim().to_string()
+        .is_some_and(|hp| configured_cobalt_hosts(&state.config).contains(&hp));
+    let (mut url, mut hop_client) = if trusted_cobalt {
+        (initial_url.trim().to_string(), client.clone())
     } else {
-        crate::storage_client::check_outbound_url(initial_url, allow_private)
+        crate::storage_client::target::validated_outbound_client(initial_url, allow_private)
             .await
             .map_err(|e| format!("refusing to fetch media from unsafe URL: {e}"))?
     };
     for _ in 0..=5 {
-        let resp = client
+        let resp = hop_client
             .get(&url)
             .timeout(std::time::Duration::from_secs(
                 crate::constants::FETCH_JOB_TIMEOUT_SECS,
@@ -271,9 +293,10 @@ pub(crate) async fn fetch_tunnel_response(
             .map_err(|_| "media redirect from invalid URL".to_string())?
             .join(location)
             .map_err(|_| "media redirect to invalid URL".to_string())?;
-        url = crate::storage_client::check_outbound_url(next.as_str(), allow_private)
-            .await
-            .map_err(|e| format!("refusing to follow media redirect: {e}"))?;
+        (url, hop_client) =
+            crate::storage_client::target::validated_outbound_client(next.as_str(), allow_private)
+                .await
+                .map_err(|e| format!("refusing to follow media redirect: {e}"))?;
     }
     Err("media redirect limit exceeded".into())
 }
@@ -380,7 +403,7 @@ async fn spool_response(
         }
     }
 
-    let _ = state
+    if let Err(e) = state
         .db_call("update_fetch_job_progress", {
             let job_id = job_id.to_string();
             let total = total_hint.unwrap_or(0) as i64;
@@ -388,7 +411,10 @@ async fn spool_response(
                 db::update_fetch_job_progress(db, &job_id, "transcode", "downloading", 0, total)
             }
         })
-        .await;
+        .await
+    {
+        tracing::warn!("fetch job {job_id}: failed to record transcode start: {e:?}");
+    }
 
     let temp = tempfile::NamedTempFile::new()
         .map_err(|e| format!("audio conversion spool failed: {e}"))?;
@@ -415,7 +441,7 @@ async fn spool_response(
             last_progress = std::time::Instant::now();
             let job_id_owned = job_id.to_string();
             let total_bytes = total_hint.unwrap_or(0);
-            let _ = state
+            if let Err(e) = state
                 .db_call("update_fetch_job_progress", move |db| {
                     db::update_fetch_job_progress(
                         db,
@@ -426,7 +452,10 @@ async fn spool_response(
                         total_bytes as i64,
                     )
                 })
-                .await;
+                .await
+            {
+                tracing::warn!("fetch job {job_id}: failed to record transcode progress: {e:?}");
+            }
         }
     }
 
@@ -667,7 +696,7 @@ async fn transfer_to_juicehost(
     {
         let job_id_owned = job_id.to_string();
         let total_bytes = total_hint.unwrap_or(0);
-        let _ = state
+        if let Err(e) = state
             .db_call("update_fetch_job_progress_final", move |db| {
                 db::update_fetch_job_progress(
                     db,
@@ -678,7 +707,10 @@ async fn transfer_to_juicehost(
                     total_bytes as i64,
                 )
             })
-            .await;
+            .await
+        {
+            tracing::warn!("fetch job {job_id}: failed to record final transfer progress: {e:?}");
+        }
     }
 
     if total == 0 {
@@ -771,7 +803,7 @@ async fn transfer_protected_to_juicehost(
     {
         let job_id_owned = job_id.to_string();
         let total_bytes = total_hint.unwrap_or(0);
-        let _ = state
+        if let Err(e) = state
             .db_call("update_fetch_job_progress_final", move |db| {
                 db::update_fetch_job_progress(
                     db,
@@ -782,7 +814,10 @@ async fn transfer_protected_to_juicehost(
                     total_bytes as i64,
                 )
             })
-            .await;
+            .await
+        {
+            tracing::warn!("fetch job {job_id}: failed to record final transfer progress: {e:?}");
+        }
     }
     let header = crate::routes::upload::protected::push_encrypted_file(
         state,

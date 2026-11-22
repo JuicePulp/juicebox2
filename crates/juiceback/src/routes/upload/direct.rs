@@ -13,16 +13,11 @@ use super::{
     common::{UploadResponse, enforce_mint_limit, region_host, upload_json_response},
     ticket::{
         clamp_ttl_hours, clamp_ttl_seconds, device_connected, encrypted_client_ip,
-        insert_owned_pending, mint_ticket, notify_device, public_urls_for,
-        reject_blocked_filename, ticket_ttl_secs,
+        insert_owned_pending, mint_ticket, notify_device, public_urls_for, reject_blocked_filename,
+        ticket_ttl_secs, verify_ticket_and_ownership,
     },
 };
-use crate::{
-    db::{self, FileRecord},
-    error::AppError,
-    routes::UserId,
-    state::AppState,
-};
+use crate::{db::FileRecord, error::AppError, routes::UserId, state::AppState};
 
 #[derive(Serialize, ToSchema)]
 pub struct DirectUploadReserveResponse {
@@ -223,32 +218,17 @@ pub async fn direct_upload_complete_handler(
     headers: HeaderMap,
     Json(body): Json<DirectUploadCompleteRequest>,
 ) -> Result<Response, AppError> {
-    let claims = juiceproto::ticket::verify(&body.ticket, &state.config.ticket_jwt_secret)
-        .map_err(|_| AppError::Unauthorized("Invalid upload ticket".into()))?;
-    if claims.file_id != body.file_id || claims.user_id != user_id {
-        return Err(AppError::Unauthorized(
-            "Upload ticket does not match session".into(),
-        ));
-    }
+    let file = verify_ticket_and_ownership(
+        &state,
+        &body.ticket,
+        &body.file_id,
+        &user_id,
+        "get_direct_upload",
+        "verify_direct_upload_owner",
+    )
+    .await?;
 
     let file_id = body.file_id;
-    let lookup_id = file_id.clone();
-    let file = state
-        .db_call("get_direct_upload", move |db| db::get_file(db, &lookup_id))
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let owner_id = user_id.clone();
-    let owned_id = file_id.clone();
-    let owned = state
-        .db_call("verify_direct_upload_owner", move |db| {
-            db::client_owns_file(db, &owner_id, &owned_id)
-        })
-        .await?;
-    if !owned {
-        return Err(AppError::Unauthorized(
-            "Upload is not owned by this session".into(),
-        ));
-    }
     if file.status != FileRecord::STATUS_UPLOADING {
         return Err(AppError::Conflict("upload is already complete".into()));
     }

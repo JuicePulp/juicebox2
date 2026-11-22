@@ -6,7 +6,7 @@ use axum::{
 use juiceutils::text::escape_html;
 
 use super::common::{BackendStatus, NO_STORE, backend_file_status};
-use crate::{error::not_found_html, state::AppState};
+use crate::{error::not_found_html, state::AppState, storage::R2Store};
 
 const SHELL_TEMPLATE: &str = include_str!("../templates/unlock_shell.html");
 const SHELL_APP_JS: &str = include_str!("../templates/shell_app.js");
@@ -30,7 +30,7 @@ fn ttl_from_expires_at(expires_at: i64) -> u64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
-    (expires_at - now).max(0) as u64
+    u64::try_from(expires_at.saturating_sub(now)).unwrap_or(0)
 }
 
 #[derive(Clone, Copy)]
@@ -102,19 +102,7 @@ fn hot_r2_key(body: &serde_json::Value) -> Option<String> {
         return None;
     }
     let key = body.get("r2_key").and_then(|v| v.as_str()).unwrap_or("");
-    if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
-        return None;
-    }
-    if !key.starts_with("hot/") {
-        return None;
-    }
-    if !key.split('/').all(|seg| {
-        !seg.is_empty()
-            && seg.len() <= 128
-            && seg
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    }) {
+    if !key.starts_with("hot/") || !R2Store::valid_hot_key(key) {
         return None;
     }
     Some(key.to_string())

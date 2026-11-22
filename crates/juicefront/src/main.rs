@@ -23,7 +23,6 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod admin;
 mod config;
@@ -109,30 +108,13 @@ fn main() {
     juiceutils::config::load_dotenv();
 
     let config = config::Config::load();
-    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEFRONT")
-        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
-        .map(|dsn| {
-            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map_or(0.05, |rate| rate.clamp(0.0, 1.0));
-            sentry::init((
-                dsn.as_str(),
-                sentry::ClientOptions::default()
-                    .maybe_release(sentry::release_name!())
-                    .environment(config.sentry_environment.clone())
-                    .traces_sample_rate(traces_sample_rate)
-                    .send_default_pii(false),
-            ))
-        });
+    let _sentry_guard = juiceutils::bootstrap::init_sentry(
+        "SENTRY_DSN_JUICEFRONT",
+        &config.sentry_environment,
+        sentry::release_name!(),
+    );
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
-        .with(sentry_tracing::layer())
-        .init();
+    juiceutils::bootstrap::init_tracing("info", true, true);
 
     tracing::info!("juicefront v{} starting", env!("CARGO_PKG_VERSION"));
 

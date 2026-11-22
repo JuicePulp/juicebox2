@@ -278,14 +278,8 @@ impl Config {
         let cobalt_api_key =
             juiceutils::config::optional_secret("COBALT_API_KEY").unwrap_or_default();
         let cobalt_session_api_key = juiceutils::config::optional_secret("COBALT_SESSION_API_KEY");
-        let bun_fetch_url = std::env::var("BUN_FETCH_URL")
-            .ok()
-            .map(|v| v.trim().trim_end_matches('/').to_string())
-            .filter(|v| !v.is_empty());
-        let bun_fetch_key = std::env::var("BUN_FETCH_KEY")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+        let bun_fetch_url = juiceutils::config::optional_env_url("BUN_FETCH_URL");
+        let bun_fetch_key = juiceutils::config::optional_secret("BUN_FETCH_KEY");
         let cf_api_token = juiceutils::config::optional_secret("CF_API_TOKEN");
 
         juiceutils::config::validate_ip_encryption_key(&ip_encryption_key)?;
@@ -293,10 +287,14 @@ impl Config {
         let storage_encryption_key = juiceutils::config::required_secret("STORAGE_ENCRYPTION_KEY")?;
         juiceutils::config::validate_hex_key("STORAGE_ENCRYPTION_KEY", &storage_encryption_key)?;
 
-        let password_min_len = parse_env_usize("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
-        let password_try_limit = parse_env_u32("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
-        let password_try_window_secs =
-            parse_env_u64("PASSWORD_TRY_WINDOW_SECS", DEFAULT_PASSWORD_TRY_WINDOW_SECS)?;
+        let password_min_len =
+            juiceutils::config::env_parsed("PASSWORD_MIN_LEN", DEFAULT_PASSWORD_MIN_LEN)?;
+        let password_try_limit =
+            juiceutils::config::env_parsed("PASSWORD_TRY_LIMIT", DEFAULT_PASSWORD_TRY_LIMIT)?;
+        let password_try_window_secs = juiceutils::config::env_parsed(
+            "PASSWORD_TRY_WINDOW_SECS",
+            DEFAULT_PASSWORD_TRY_WINDOW_SECS,
+        )?;
         let encrypted_force_relay = juiceutils::config::env_bool("ENCRYPTED_FORCE_RELAY")?
             .unwrap_or(DEFAULT_ENCRYPTED_FORCE_RELAY);
 
@@ -312,10 +310,7 @@ impl Config {
             .unwrap_or_else(|| public_base_url.clone())
             .trim_end_matches('/')
             .to_string();
-        let default_storage_host = std::env::var("DEFAULT_STORAGE_HOST")
-            .ok()
-            .map(|value| value.trim().trim_end_matches('/').to_string())
-            .filter(|value| !value.is_empty())
+        let default_storage_host = juiceutils::config::optional_env_url("DEFAULT_STORAGE_HOST")
             .or_else(|| {
                 file.urls
                     .default_storage_host
@@ -449,10 +444,11 @@ impl Config {
             juiceutils::config::optional_secret("R2_ACCESS_KEY").unwrap_or_default();
         let r2_secret_key =
             juiceutils::config::optional_secret("R2_SECRET_KEY").unwrap_or_default();
-        let r2_max_bytes = parse_env_u64("R2_MAX_BYTES", file.r2.max_bytes)?;
-        let r2_max_hot_files = parse_env_u64("R2_MAX_HOT_FILES", file.r2.max_hot_files)?;
+        let r2_max_bytes = juiceutils::config::env_parsed("R2_MAX_BYTES", file.r2.max_bytes)?;
+        let r2_max_hot_files =
+            juiceutils::config::env_parsed("R2_MAX_HOT_FILES", file.r2.max_hot_files)?;
         let r2_max_promote_bytes =
-            parse_env_u64("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
+            juiceutils::config::env_parsed("R2_MAX_PROMOTE_BYTES", file.r2.max_promote_bytes)?;
 
         // One-minute floor so a misconfigured promoter cannot spin.
         let promo_interval_secs = file.promo.interval_secs.max(60);
@@ -605,39 +601,6 @@ pub const PASSWORD_MAX_LEN: usize = 256;
 const DEFAULT_PASSWORD_TRY_LIMIT: u32 = 10;
 const DEFAULT_PASSWORD_TRY_WINDOW_SECS: u64 = 600;
 const DEFAULT_ENCRYPTED_FORCE_RELAY: bool = true;
-
-fn parse_env_usize(name: &str, default: usize) -> Result<usize, ConfigError> {
-    match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => {
-            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
-                name: name.to_owned(),
-            })
-        }
-        _ => Ok(default),
-    }
-}
-
-fn parse_env_u32(name: &str, default: u32) -> Result<u32, ConfigError> {
-    match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => {
-            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
-                name: name.to_owned(),
-            })
-        }
-        _ => Ok(default),
-    }
-}
-
-fn parse_env_u64(name: &str, default: u64) -> Result<u64, ConfigError> {
-    match std::env::var(name) {
-        Ok(raw) if !raw.trim().is_empty() => {
-            raw.trim().parse().map_err(|_| ConfigError::InvalidInteger {
-                name: name.to_owned(),
-            })
-        }
-        _ => Ok(default),
-    }
-}
 
 pub fn validate_upload_password(password: &str, min_len: usize) -> Result<(), ConfigError> {
     if password.len() < min_len {

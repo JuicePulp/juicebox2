@@ -1,4 +1,5 @@
 pub mod ban;
+pub mod bootstrap;
 pub mod config;
 pub mod file_validation;
 pub mod host;
@@ -6,6 +7,7 @@ pub mod icons;
 pub mod ids;
 pub mod ip_crypt;
 pub mod proxy;
+pub mod size;
 pub mod size_scale;
 pub mod text;
 pub mod urls;

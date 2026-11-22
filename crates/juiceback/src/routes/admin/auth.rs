@@ -101,7 +101,8 @@ pub async fn login_handler(
 
     if failed_count >= MAX_FAILURES {
         tracing::warn!(
-            "admin login: account '{username}' is locked out ({failed_count} failures in {LOCKOUT_SECS}s)"
+            "admin login: account (username len={}) is locked out ({failed_count} failures in {LOCKOUT_SECS}s)",
+            username.len()
         );
         return Err(AppError::TooManyRequests(
             "account temporarily locked due to too many failed attempts".into(),

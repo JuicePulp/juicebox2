@@ -41,12 +41,15 @@ pub(crate) async fn run_fetch_job(
         Ok(Ok(file_id)) => {
             let job_id_for_db = job_id.clone();
             let file_id_for_db = file_id.clone();
-            let _ = state
+            if let Err(e) = state
                 .db_call("finish_fetch_job_done", move |db| {
                     db::finish_fetch_job(db, &job_id_for_db, "done", "", &file_id_for_db)
                         .map(|_: bool| ())
                 })
-                .await;
+                .await
+            {
+                tracing::warn!("fetch job {job_id}: failed to mark job done: {e:?}");
+            }
             tracing::info!("fetch job {job_id} done: {file_id}");
         }
         Ok(Err(msg)) => fail_fetch_job(&state, &job_id, &msg).await,
@@ -58,11 +61,14 @@ async fn fail_fetch_job(state: &Arc<AppState>, job_id: &str, msg: &str) {
     tracing::warn!("fetch job {job_id} failed: {msg}");
     let job_id_owned = job_id.to_string();
     let msg_owned = msg.to_string();
-    let _ = state
+    if let Err(e) = state
         .db_call("finish_fetch_job_failed", move |db| {
             db::finish_fetch_job(db, &job_id_owned, "failed", &msg_owned, "").map(|_: bool| ())
         })
-        .await;
+        .await
+    {
+        tracing::warn!("fetch job {job_id}: failed to mark job as failed: {e:?}");
+    }
 }
 
 /// Bounded retries, then bun-fetch, then yt-dlp, in that order.
@@ -223,7 +229,7 @@ pub(crate) async fn fetch_via(
                 .map_err(|err| cobalt::instance_failure_from_error(&err))?;
         tracing::debug!(
             "fetch job {job_id}: cobalt instance {} answered first",
-            endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+            endpoints.get(winner).map_or("?", |e| e.url.as_str())
         );
 
         if response.is_client_refused() {
@@ -237,7 +243,7 @@ pub(crate) async fn fetch_via(
                 if cobalt::is_instance_error_code(&code) {
                     tracing::warn!(
                         "fetch job {job_id}: cobalt instance {} failed for this fetch; trying another tier",
-                        endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+                        endpoints.get(winner).map_or("?", |e| e.url.as_str())
                     );
                     return Err(cobalt::instance_failure_message(&code));
                 }
@@ -343,7 +349,7 @@ pub(crate) async fn fetch_via(
             Err(err) if is_empty_stream_error(&err) && excluded.len() + 1 < endpoints.len() => {
                 tracing::info!(
                     "fetch job {job_id}: cobalt instance {} returned an empty stream; trying another instance",
-                    endpoints.get(winner).map(|e| e.url.as_str()).unwrap_or("?")
+                    endpoints.get(winner).map_or("?", |e| e.url.as_str())
                 );
                 excluded.push(winner);
                 let _ = state

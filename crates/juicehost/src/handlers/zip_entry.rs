@@ -3,14 +3,16 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{
     body::Body,
     extract::{Extension, Path, Query, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::Response,
 };
 use bytes::Bytes;
 use futures::StreamExt;
 
 use super::{
-    common::{NO_STORE, RangeResult, parse_range},
+    common::{
+        ByteResponseHeaders, NO_STORE, RangeResult, apply_byte_response_headers, parse_range,
+    },
     serve::raw_content_security_policy,
     shell::{GateDecision, ShellMode, gate_decision},
     stats::ViewerIp,
@@ -23,7 +25,8 @@ use crate::{
     storage::{self, FileMetadata, valid_component},
 };
 
-/// Cap on both compressed and decompressed entry size for deflated entries.
+/// Cap on both compressed and decompressed entry size, applied to stored
+/// (method 0) entries as well as deflated ones.
 const MAX_ENTRY_BYTES: u64 = 32 * 1024 * 1024;
 
 fn valid_entry_path(path: &str) -> bool {
@@ -101,7 +104,7 @@ pub async fn zip_entry_file(
     };
 
     match resolved {
-        Resolved::File(entry) => serve_entry(&state, &id, &meta, &entry, false, None).await,
+        Resolved::File(entry) => serve_entry(&state, &id, &meta, &entry, false, None, false).await,
         Resolved::Ambiguous(entries) => Ok(ambiguous_response(&entries, &index_data)),
         _ => Err(JuicehostError::NotFound),
     }
@@ -215,8 +218,16 @@ pub(crate) async fn zip_entry_bytes(
         .ok_or(JuicehostError::NotFound)?;
     match zip_index::resolve(&index, selector) {
         Resolved::File(entry) => {
-            let _ = method;
-            serve_entry(state, id, &meta, &entry, force_download, Some(headers)).await
+            serve_entry(
+                state,
+                id,
+                &meta,
+                &entry,
+                force_download,
+                Some(headers),
+                method == Method::HEAD,
+            )
+            .await
         }
         Resolved::Ambiguous(entries) => Ok(ambiguous_response(&entries, &index)),
         _ => Err(JuicehostError::NotFound),
@@ -227,7 +238,26 @@ fn is_zip(meta: &FileMetadata) -> bool {
     meta.extension.eq_ignore_ascii_case("zip")
 }
 
+/// Builds the full entry response, then drops the body for HEAD requests so the
+/// headers stay identical to GET without streaming any entry bytes.
 async fn serve_entry(
+    state: &Arc<AppState>,
+    id: &str,
+    meta: &FileMetadata,
+    entry: &IndexedEntry,
+    force_download: bool,
+    headers: Option<&HeaderMap>,
+    is_head: bool,
+) -> Result<Response<Body>, JuicehostError> {
+    let response = serve_entry_inner(state, id, meta, entry, force_download, headers).await?;
+    if is_head {
+        let (parts, _) = response.into_parts();
+        return Ok(Response::from_parts(parts, Body::empty()));
+    }
+    Ok(response)
+}
+
+async fn serve_entry_inner(
     state: &Arc<AppState>,
     id: &str,
     meta: &FileMetadata,
@@ -248,6 +278,11 @@ async fn serve_entry(
         ));
     }
     let uncomp_size = entry.entry.size.ok_or(JuicehostError::NotFound)?;
+    // A stored entry is served directly from a range read, so it needs the same
+    // size cap as the deflate path before any bytes are streamed to the client.
+    if uncomp_size > MAX_ENTRY_BYTES || entry.entry.comp_size > MAX_ENTRY_BYTES {
+        return Err(JuicehostError::PayloadTooLarge);
+    }
     let data_start = local_data_start(state, id, &entry.entry, meta.size)
         .await
         .ok_or(JuicehostError::NotFound)?;
@@ -283,9 +318,6 @@ async fn serve_entry(
         .await;
     }
 
-    if uncomp_size > MAX_ENTRY_BYTES || entry.entry.comp_size > MAX_ENTRY_BYTES {
-        return Err(JuicehostError::PayloadTooLarge);
-    }
     if entry.entry.comp_size == 0 {
         return Response::builder()
             .status(StatusCode::OK)
@@ -392,10 +424,18 @@ async fn serve_stored(
                     .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Unsatisfiable => {
-                return Response::builder()
-                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(header::CONTENT_RANGE, format!("bytes */{total}"))
-                    .header(header::ACCEPT_RANGES, "bytes")
+                let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(mime),
+                        etag: None,
+                        content_range: Some(format!("bytes */{total}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
+                return builder
                     .body(Body::empty())
                     .map_err(|_| JuicehostError::Internal);
             }

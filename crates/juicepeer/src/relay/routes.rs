@@ -22,9 +22,9 @@ use crate::relay::{
 const CHUNK_QUEUE: usize = 32;
 const REQUEST_HEADERS: &[&str] = &["range", "if-none-match", "accept", "user-agent"];
 const RESPONSE_HEADERS: &[&str] = &[
+    // `content-length`/`content-range` are deliberately omitted: the peer
+    // controls them, and `Body` computes the real length for the browser.
     "content-type",
-    "content-length",
-    "content-range",
     "accept-ranges",
     "etag",
     "cache-control",
@@ -61,6 +61,7 @@ async fn health(State(state): State<Arc<RelayState>>) -> Response {
 
 async fn peer_ws(ws: WebSocketUpgrade, State(state): State<Arc<RelayState>>) -> Response {
     ws.max_frame_size(state.config.max_frame_bytes)
+        .max_message_size(state.config.max_frame_bytes)
         .on_upgrade(move |socket| serve_peer_socket(socket, state))
 }
 
@@ -184,20 +185,23 @@ async fn fetch(
 }
 
 fn chunk_body(receiver: mpsc::Receiver<ChunkItem>, guard: StreamGuard, timeout: Duration) -> Body {
+    // One deadline for the whole stream: a peer that trickles one byte per
+    // chunk must not pin a browser request slot forever.
+    let deadline = tokio::time::Instant::now() + timeout;
     let stream = futures::stream::unfold(
-        (receiver, guard, timeout, false),
-        move |(mut receiver, mut guard, timeout, done)| async move {
+        (receiver, guard, deadline, false),
+        move |(mut receiver, mut guard, deadline, done)| async move {
             if done {
                 return None;
             }
-            match tokio::time::timeout(timeout, receiver.recv()).await {
+            match tokio::time::timeout_at(deadline, receiver.recv()).await {
                 Ok(Some(ChunkItem::Data(bytes))) => {
-                    Some((Ok(bytes), (receiver, guard, timeout, false)))
+                    Some((Ok(bytes), (receiver, guard, deadline, false)))
                 }
                 Ok(Some(ChunkItem::Fail(reason))) => {
                     guard.abandon();
                     let error = axum::Error::new(std::io::Error::other(reason));
-                    Some((Err(error), (receiver, guard, timeout, true)))
+                    Some((Err(error), (receiver, guard, deadline, true)))
                 }
                 Ok(None) => {
                     guard.complete();
@@ -209,7 +213,7 @@ fn chunk_body(receiver: mpsc::Receiver<ChunkItem>, guard: StreamGuard, timeout: 
                         ErrorKind::TimedOut,
                         "peer chunk timed out",
                     ));
-                    Some((Err(error), (receiver, guard, timeout, true)))
+                    Some((Err(error), (receiver, guard, deadline, true)))
                 }
             }
         },
@@ -315,6 +319,8 @@ mod tests {
                 ("content-type".to_owned(), "video/mp4".to_owned()),
                 ("etag".to_owned(), "\"v1\"".to_owned()),
                 ("cache-control".to_owned(), "public, max-age=999".to_owned()),
+                ("content-length".to_owned(), "999999".to_owned()),
+                ("content-range".to_owned(), "bytes 0-1/999999".to_owned()),
                 ("set-cookie".to_owned(), "a=b".to_owned()),
             ],
         );
@@ -326,5 +332,7 @@ mod tests {
         assert_eq!(response.headers()[header::ETAG], "\"v1\"");
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert!(!response.headers().contains_key("set-cookie"));
+        assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
+        assert!(!response.headers().contains_key("content-range"));
     }
 }

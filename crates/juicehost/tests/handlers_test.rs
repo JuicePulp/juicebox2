@@ -845,6 +845,104 @@ async fn internal_endpoints_open_when_no_api_key_configured() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn freeze_unfreeze_accept_key_or_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
+    backend
+        .put(
+            "frz-key",
+            "f.txt",
+            Bytes::from_static(b"data"),
+            Some("cap-key"),
+        )
+        .await
+        .unwrap();
+    backend
+        .put(
+            "frz-cap",
+            "f.txt",
+            Bytes::from_static(b"data"),
+            Some("cap-only"),
+        )
+        .await
+        .unwrap();
+
+    let post = |uri: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // With a shared key the freeze routes are reachable and the handler sees the
+    // key (its capability branch would otherwise be dead behind require_api_key).
+    let app = build_router(Arc::new(AppState::new(
+        &test_config("", None),
+        Arc::clone(&backend) as Arc<dyn juicehost::storage::StorageBackend>,
+    )));
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-key/freeze")
+                .header(api_key_header().0, api_key_header().1)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-key/unfreeze")
+                .header(api_key_header().0, api_key_header().1)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // With no shared key, a file capability must work on the same routes.
+    let app = build_router(capability_state(dir.path()).await);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-cap/freeze")
+                .header("x-juicehost-file-capability", "cap-only")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(post("/internal/file/frz-cap/unfreeze"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-cap/unfreeze")
+                .header("x-juicehost-file-capability", "cap-only")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
 async fn capability_state(dir: &std::path::Path) -> Arc<AppState> {
     let mut config = test_config("", None);
     config.api_key.clear();

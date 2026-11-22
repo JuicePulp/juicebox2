@@ -14,6 +14,9 @@ use thiserror::Error;
 use crate::config::{Config, GeoSettings};
 
 const HOME_REGION: &str = "home";
+/// Missing files are cached briefly so a hot missing id cannot hammer juiceback.
+const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(10);
+const NOT_FOUND_STATUS: &str = "not_found";
 
 /// `RouteMissing` and `AuthError` are config faults, not transient failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -319,7 +322,7 @@ impl Selection {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolveRecord {
     #[serde(default)]
     pub status: String,
@@ -432,7 +435,9 @@ impl AppState {
                 };
                 NodeHealth {
                     state,
-                    latency_ms: Some(started.elapsed().as_millis() as u64),
+                    latency_ms: Some(
+                        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    ),
                     checked_secs_ago: None,
                     error: (state != HealthState::Healthy)
                         .then(|| format!("status {}", status.as_u16())),
@@ -560,13 +565,20 @@ impl AppState {
     /// In-progress uploads get a 2s TTL; successes cache normally.
     pub async fn resolve(&self, id: &str) -> Result<Option<ResolveRecord>, ResolveError> {
         if let Some(entry) = self.cache.get(id) {
-            let ttl = if entry.1.status == "uploading" {
+            let negative = entry.1.status == NOT_FOUND_STATUS;
+            let ttl = if negative {
+                NEGATIVE_CACHE_TTL
+            } else if entry.1.status == "uploading" {
                 Duration::from_secs(2)
             } else {
                 Duration::from_secs(self.config.router.resolve_cache_secs)
             };
             if entry.0.elapsed() < ttl {
-                return Ok(Some(entry.1.clone()));
+                return if negative {
+                    Ok(None)
+                } else {
+                    Ok(Some(entry.1.clone()))
+                };
             }
         }
         let url = format!(
@@ -582,6 +594,16 @@ impl AppState {
             ResolveError::Unavailable
         })?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
+            self.cache.insert(
+                id.to_owned(),
+                (
+                    Instant::now(),
+                    ResolveRecord {
+                        status: NOT_FOUND_STATUS.to_owned(),
+                        ..ResolveRecord::default()
+                    },
+                ),
+            );
             return Ok(None);
         }
         if !response.status().is_success() {
@@ -635,17 +657,22 @@ impl AppState {
             RouteKind::Local
         };
 
-        let relative = format!("{}/{}", route, path.trim_start_matches('/'));
+        let relative = safe_relative_path(route, id, path);
         let target = match kind {
             RouteKind::Uploading => None,
             RouteKind::R2 => r2_url.map(ToOwned::to_owned),
-            RouteKind::Remote => {
-                storage_host.map(|host| format!("{}/{relative}", host.trim_end_matches('/')))
-            }
-            RouteKind::Local => Some(format!(
-                "{}/{relative}",
-                self.config.router.home_url.trim_end_matches('/')
-            )),
+            RouteKind::Remote => match (storage_host, relative.as_deref()) {
+                (Some(host), Some(relative)) => {
+                    Some(format!("{}/{relative}", host.trim_end_matches('/')))
+                }
+                _ => None,
+            },
+            RouteKind::Local => relative.as_ref().map(|relative| {
+                format!(
+                    "{}/{relative}",
+                    self.config.router.home_url.trim_end_matches('/')
+                )
+            }),
         };
 
         RouteDecision {
@@ -668,6 +695,27 @@ pub enum ResolveError {
 
 fn is_http_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "http" || url.scheme() == "https")
+}
+
+/// Rebuilds `{route}/{id}.{ext}` from validated components. A wildcard request
+/// path must have exactly that shape, so it cannot inject separators, encoded
+/// characters or a second host into a redirect target.
+#[must_use]
+pub(crate) fn safe_relative_path(route: &str, id: &str, path: &str) -> Option<String> {
+    let filename = path.trim_start_matches('/');
+    if filename.contains('/') || filename.contains('\\') {
+        return None;
+    }
+    let (path_id, ext) = filename.rsplit_once('.')?;
+    if !juiceutils::ids::is_valid_id_component(path_id)
+        || path_id != id
+        || ext.is_empty()
+        || ext.len() > 16
+        || !ext.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return None;
+    }
+    Some(format!("{route}/{path_id}.{ext}"))
 }
 
 #[cfg(test)]
@@ -871,6 +919,30 @@ mod tests {
             decision.target.as_deref(),
             Some("https://f.example/f/abc12345.mp4")
         );
+    }
+
+    #[test]
+    fn redirect_paths_are_built_from_validated_components() {
+        assert_eq!(
+            safe_relative_path("v", "abc12345", "abc12345.mp4").as_deref(),
+            Some("v/abc12345.mp4")
+        );
+        assert!(safe_relative_path("v", "abc12345", "other.mp4").is_none());
+        assert!(safe_relative_path("v", "abc12345", "abc12345.mp4/../../x").is_none());
+        assert!(safe_relative_path("v", "abc12345", "abc12345.m%2fp4").is_none());
+    }
+
+    #[test]
+    fn hostile_path_yields_no_redirect_target() {
+        let state = AppState::new(config());
+        let record = ResolveRecord {
+            status: "ready".to_owned(),
+            storage_host: Some("https://f-us1.example".to_owned()),
+            ..ResolveRecord::default()
+        };
+        let decision = state.decision("abc12345", &record, "v", "abc12345.mp4/../evil");
+        assert_eq!(decision.kind, RouteKind::Remote);
+        assert!(decision.target.is_none());
     }
 
     #[test]

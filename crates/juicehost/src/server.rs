@@ -190,21 +190,25 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/internal/file/stream/{id}/{filename}",
             post(handlers::store_file_streaming),
         )
+        // Freeze/unfreeze accept either a shared key or a file capability; they
+        // must use the same middleware as delete/rename so both auth modes work.
+        .route("/internal/file/{id}/freeze", post(handlers::freeze_file))
+        .route(
+            "/internal/file/{id}/unfreeze",
+            post(handlers::unfreeze_file),
+        )
         .route("/internal/file/{id}", delete(handlers::delete_file))
         .route("/internal/file/{id}/rename", post(handlers::rename_file))
         .merge(concat)
-        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(DefaultBodyLimit::max(
+            usize::try_from(state.max_file_size_bytes).unwrap_or(usize::MAX),
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             require_api_key_or_capability,
         ));
 
     let internal = Router::new()
-        .route("/internal/file/{id}/freeze", post(handlers::freeze_file))
-        .route(
-            "/internal/file/{id}/unfreeze",
-            post(handlers::unfreeze_file),
-        )
         .route("/internal/file/{id}/stat", get(handlers::stat_file))
         .route(
             "/internal/file/{id}/ciphertext",
@@ -221,7 +225,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/internal/live/part/{id}", get(handlers::live_part_status))
         .route("/internal/live/{id}", delete(handlers::remove_live_upload))
-        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(DefaultBodyLimit::max(
+            usize::try_from(state.max_file_size_bytes).unwrap_or(usize::MAX),
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             require_api_key,
@@ -232,7 +238,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/internal/file/upload/{id}",
             post(handlers::store_file_ticket),
         )
-        .layer(DefaultBodyLimit::max(state.max_file_size_bytes as usize))
+        .layer(DefaultBodyLimit::max(
+            usize::try_from(state.max_file_size_bytes).unwrap_or(usize::MAX),
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             require_api_key_or_ticket,
@@ -313,6 +321,20 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                             juiceproto::headers::BACKEND_ORIGIN,
                         ),
                         axum::http::header::HeaderName::from_static(juiceproto::headers::MIME_TYPE),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::LIVE_TOTAL,
+                        ),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::FILE_ENCODING,
+                        ),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::DELETE_TOKEN,
+                        ),
+                        axum::http::header::HeaderName::from_static(
+                            juiceproto::headers::FILE_CAPABILITY,
+                        ),
+                        axum::http::header::HeaderName::from_static("upload-offset"),
+                        axum::http::header::HeaderName::from_static("tus-resumable"),
                     ])
             }
         })

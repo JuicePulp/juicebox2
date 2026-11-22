@@ -14,6 +14,8 @@ pub const TUS_PATCH_MAX_BYTES: usize = 96 * 1024 * 1024;
 pub const BYTES_PER_MIB: f64 = 1024.0 * 1024.0;
 pub const STALE_UPLOAD_TIMEOUT_SECS: i64 = 3600;
 pub const CLEANUP_BATCH_SIZE: usize = 500;
+/// Below SQLite's default bound-parameter limit (~999).
+pub const SQL_PARAM_CHUNK_SIZE: usize = 900;
 pub const SESSION_TOUCH_INTERVAL_SECS: i64 = 300;
 pub const DEVICE_SEEN_TOUCH_INTERVAL_SECS: u64 = 60;
 pub const ADMIN_RATE_LIMIT_WINDOW_SECS: u64 = 60;
@@ -53,14 +55,15 @@ pub const DTE_MINT_LIMIT: u32 = 60;
 pub const DTE_MINT_WINDOW_SECS: u64 = 600;
 pub const DTE_MINT_BURST: u32 = 15;
 
-/// Snaps to the nearest allowed value; panics on an empty list (a config bug).
+/// Snaps to the nearest allowed value; returns `value` unchanged when the list
+/// is empty (a broken remote config must not bring down the server).
 #[must_use]
 pub fn clamp_to_nearest(value: f64, allowed: &[f64]) -> f64 {
-    assert!(!allowed.is_empty(), "allowed_ttl_hours must not be empty");
-    *allowed
+    allowed
         .iter()
-        .min_by_key(|&&a| ((a - value).abs() * 1000.0) as u64)
-        .expect("allowed list is non-empty, so a minimum exists")
+        .copied()
+        .min_by(|a, b| (*a - value).abs().total_cmp(&(*b - value).abs()))
+        .unwrap_or(value)
 }
 
 #[cfg(test)]
@@ -77,8 +80,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "allowed_ttl_hours must not be empty")]
-    fn clamp_rejects_empty_allowed() {
-        let _ = clamp_to_nearest(24.0, &[]);
+    fn clamp_returns_value_for_empty_allowed() {
+        assert_eq!(clamp_to_nearest(24.0, &[]), 24.0);
     }
 }

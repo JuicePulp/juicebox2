@@ -237,20 +237,23 @@ pub fn spawn_refresh(state: Arc<AppState>) {
         tracing::debug!("page cache refresh started");
         let base = format!("http://127.0.0.1:{port}");
         let mut paths = Vec::new();
+        // Every locale needs every public page warmed, not just the root:
+        // `is_cacheable_path` keys localized pages separately from `/`.
         for locale in i18n::LOCALES {
             let prefix = i18n::locale_prefix(locale.code);
-            paths.push(if prefix.is_empty() {
-                "/".to_owned()
-            } else {
-                prefix.to_owned()
-            });
+            for page in PUBLIC_PAGES {
+                let path = if *page == "/" {
+                    if prefix.is_empty() {
+                        "/".to_owned()
+                    } else {
+                        prefix.to_owned()
+                    }
+                } else {
+                    format!("{prefix}{page}")
+                };
+                paths.push(path);
+            }
         }
-        paths.extend(
-            PUBLIC_PAGES
-                .iter()
-                .filter(|page| **page != "/")
-                .map(|page| (*page).to_owned()),
-        );
         let encodings = [
             "gzip, br",
             "gzip, deflate, br, zstd",

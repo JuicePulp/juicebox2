@@ -186,6 +186,16 @@ impl Config {
         assign_option(&mut self.port, cli.port);
         assign_str(&mut self.relay_base_url, cli.relay_base_url.as_deref());
         assign_str(&mut self.juiceback_url, cli.juiceback_url.as_deref());
+        if cli.jwt_secret.is_some() {
+            tracing::warn!(
+                "--jwt-secret is visible to other processes via /proc; prefer JUICEPEER_JWT_SECRET"
+            );
+        }
+        if cli.api_key.is_some() {
+            tracing::warn!(
+                "--api-key is visible to other processes via /proc; prefer JUICEPEER_API_KEY"
+            );
+        }
         assign_str(&mut self.jwt_secret, cli.jwt_secret.as_deref());
         assign_str(&mut self.api_key, cli.api_key.as_deref());
         assign_option(&mut self.max_sessions, cli.max_sessions);
@@ -335,14 +345,11 @@ fn parse_value<T: FromStr>(key: &str, value: &str) -> Result<T, String> {
 }
 
 fn env_string(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    juiceutils::config::optional_secret(name)
 }
 
 fn env_parsed<T: FromStr>(name: &str) -> Option<T> {
-    env_string(name).and_then(|value| value.parse::<T>().ok())
+    juiceutils::config::optional_env_parsed(name)
 }
 
 fn assign_env<T: FromStr + Copy>(target: &mut T, name: &str) {

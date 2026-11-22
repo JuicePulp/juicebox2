@@ -114,13 +114,18 @@ impl Default for QuicServerLimits {
     }
 }
 
+/// Starts QUIC with default limits.
+///
+/// # Errors
+///
+/// Returns a description when the QUIC server cannot be started.
 pub async fn start_quic_server(
     router: axum::Router,
     addr: std::net::SocketAddr,
     shutdown: Arc<Notify>,
     service_name: &str,
     cert_path: Option<std::path::PathBuf>,
-) {
+) -> Result<(), String> {
     start_quic_server_with_limits(
         router,
         addr,
@@ -129,10 +134,15 @@ pub async fn start_quic_server(
         cert_path,
         QuicServerLimits::default(),
     )
-    .await;
+    .await
 }
 
-/// Certificate problems are logged without failing the caller.
+/// Certificate and endpoint problems are returned instead of panicking.
+///
+/// # Errors
+///
+/// Returns a description when the certificate, TLS config or UDP endpoint
+/// cannot be created.
 pub async fn start_quic_server_with_limits(
     router: axum::Router,
     addr: std::net::SocketAddr,
@@ -140,41 +150,41 @@ pub async fn start_quic_server_with_limits(
     service_name: &str,
     cert_path: Option<std::path::PathBuf>,
     limits: QuicServerLimits,
-) {
+) -> Result<(), String> {
     let (cert_der, key_der) = match cert_path.as_deref() {
         Some(path) => match get_or_generate_cert(path) {
             Ok(pair) => pair,
             Err(e) => {
-                tracing::error!("QUIC certificate unavailable at {}: {e}", path.display());
-                return;
+                return Err(format!(
+                    "QUIC certificate unavailable at {}: {e}",
+                    path.display()
+                ));
             }
         },
         None => generate_self_signed_cert(),
     };
 
     let tls_config = {
-        static INSTALL_CRYPTO_PROVIDER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        INSTALL_CRYPTO_PROVIDER.get_or_init(|| {
+        static INSTALL_CRYPTO_PROVIDER: std::sync::OnceLock<Result<(), String>> =
+            std::sync::OnceLock::new();
+        let installed = INSTALL_CRYPTO_PROVIDER.get_or_init(|| {
             rustls::crypto::aws_lc_rs::default_provider()
                 .install_default()
-                .expect("failed to install default crypto provider");
+                .map_err(|_| "a default crypto provider is already installed".to_owned())
         });
-        let mut tls = match rustls::ServerConfig::builder()
+        if let Err(error) = installed {
+            return Err(error.as_str().to_owned());
+        }
+        let mut tls = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert_der], key_der)
-        {
-            Ok(tls) => tls,
-            Err(e) => {
-                tracing::error!("invalid QUIC cert/key pair: {e}");
-                return;
-            }
-        };
+            .map_err(|e| format!("invalid QUIC cert/key pair: {e}"))?;
         tls.alpn_protocols = vec![b"h3".to_vec()];
         tls
     };
 
     let quic_server_config = QuicServerConfig::try_from(Arc::new(tls_config))
-        .expect("valid TLS config converts to a QUIC server config");
+        .map_err(|e| format!("invalid QUIC server config: {e}"))?;
 
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(16u32.into());
@@ -186,23 +196,24 @@ pub async fn start_quic_server_with_limits(
         limits
             .idle_timeout
             .try_into()
-            .expect("bounded QUIC idle timeout"),
+            .map_err(|_| "QUIC idle timeout out of range".to_owned())?,
     ));
 
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server_config));
     server_config.transport_config(Arc::new(transport));
 
-    let socket = std::net::UdpSocket::bind(addr).expect("bind QUIC UDP socket");
+    let socket =
+        std::net::UdpSocket::bind(addr).map_err(|e| format!("bind QUIC UDP socket {addr}: {e}"))?;
     socket
         .set_nonblocking(true)
-        .expect("set QUIC socket nonblocking");
+        .map_err(|e| format!("set QUIC socket nonblocking: {e}"))?;
     let endpoint = Endpoint::new(
         quinn::EndpointConfig::default(),
         Some(server_config),
         socket,
         Arc::new(quinn::TokioRuntime),
     )
-    .expect("create QUIC endpoint from a bound socket");
+    .map_err(|e| format!("create QUIC endpoint from a bound socket: {e}"))?;
 
     tracing::info!("{service_name} QUIC listening on udp://{addr}");
 
@@ -218,6 +229,7 @@ pub async fn start_quic_server_with_limits(
             endpoint.wait_idle().await;
         }
     }
+    Ok(())
 }
 
 // Unvalidated addresses get a cheap Retry; past the limit, connections are

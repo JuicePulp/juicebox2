@@ -137,7 +137,7 @@ pub async fn file_info_handler(
     let id2 = id.clone();
     let record = state
         .db_call("resolve_file_info", move |db| {
-            let resolved = db::resolve_alias(db, &id2)?.unwrap_or(id2);
+            let resolved = db::resolve_alias(db, &id2)?.unwrap_or_else(|| id2.clone());
             db::get_file(db, &resolved)
         })
         .await?

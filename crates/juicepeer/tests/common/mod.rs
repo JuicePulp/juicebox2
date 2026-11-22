@@ -18,7 +18,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use juiceproto::peer::{ISS_DEVICE, PeerDeviceClaims};
+use juiceproto::{
+    headers::HOST_API_KEY,
+    peer::{ISS_DEVICE, PeerDeviceClaims},
+};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -98,7 +101,7 @@ async fn authorize_handler(
 ) -> Response {
     ctx.calls.lock().unwrap().push(json!({
         "api_key": headers
-            .get("x-juicehost-api-key")
+            .get(HOST_API_KEY)
             .and_then(|value| value.to_str().ok())
             .unwrap_or(""),
         "body": body,

@@ -91,19 +91,47 @@ pub struct HostConfigResponse {
 /// Joins a base URL with the internal file-status path.
 #[must_use]
 pub fn file_status_url(backend_url: &str, id: &str) -> String {
-    format!("{backend_url}/internal/file/{id}/status")
+    internal_file_url(backend_url, id, "status")
 }
 
 /// Joins a base URL with the internal file-resolution path.
 #[must_use]
 pub fn resolve_file_url(backend_url: &str, id: &str) -> String {
-    format!("{backend_url}/internal/resolve/{id}")
+    format!(
+        "{}/internal/resolve/{}",
+        backend_url.trim_end_matches('/'),
+        safe_id_component(id)
+    )
 }
 
 /// Joins a juicehost base URL with its config endpoint.
 #[must_use]
 pub fn config_url(juicehost_url: &str) -> String {
-    format!("{juicehost_url}/api/config")
+    format!("{}/api/config", juicehost_url.trim_end_matches('/'))
+}
+
+fn internal_file_url(backend_url: &str, id: &str, action: &str) -> String {
+    format!(
+        "{}/internal/file/{}/{}",
+        backend_url.trim_end_matches('/'),
+        safe_id_component(id),
+        action
+    )
+}
+
+/// `juiceproto` has no `juiceutils`/`url` dependency, so enforce the same
+/// single-component id rule locally. An invalid id becomes a harmless sentinel
+/// instead of being interpolated into a path (no separators or traversal).
+fn safe_id_component(id: &str) -> &str {
+    if !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        id
+    } else {
+        "invalid"
+    }
 }
 
 #[cfg(test)]
@@ -117,16 +145,42 @@ mod tests {
         assert_eq!(cfg.max_file_size_bytes, Some(123));
         assert_eq!(cfg.danger_level.as_deref(), Some("medium"));
         assert_eq!(cfg.quick_link, None);
-        assert_eq!(serde_json::to_value(cfg).unwrap(), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+        assert_eq!(
+            serde_json::to_value(cfg).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+    }
+
+    #[test]
+    fn internal_urls_trim_base_and_reject_unsafe_ids() {
+        assert_eq!(
+            file_status_url("http://box:6401/", "abc-1"),
+            "http://box:6401/internal/file/abc-1/status"
+        );
+        assert_eq!(
+            resolve_file_url("http://box:6401/", "abc-1"),
+            "http://box:6401/internal/resolve/abc-1"
+        );
+        assert_eq!(config_url("http://box:6402/"), "http://box:6402/api/config");
+        assert_eq!(
+            resolve_file_url("http://box:6401", "../admin"),
+            "http://box:6401/internal/resolve/invalid"
+        );
     }
 
     #[test]
     fn peer_fields_default_and_round_trip() {
         let raw = r#"{"peer_relay_url":"wss://ff.juicey.dev/peer/ws","peer_enabled":true}"#;
         let cfg: HostConfigResponse = serde_json::from_str(raw).unwrap();
-        assert_eq!(cfg.peer_relay_url.as_deref(), Some("wss://ff.juicey.dev/peer/ws"));
+        assert_eq!(
+            cfg.peer_relay_url.as_deref(),
+            Some("wss://ff.juicey.dev/peer/ws")
+        );
         assert!(cfg.peer_enabled);
-        assert_eq!(serde_json::to_value(&cfg).unwrap(), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+        assert_eq!(
+            serde_json::to_value(&cfg).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
 
         let legacy: HostConfigResponse = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.peer_relay_url, None);

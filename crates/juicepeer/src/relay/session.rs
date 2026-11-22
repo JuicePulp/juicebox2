@@ -18,9 +18,12 @@ use axum::{
     http::StatusCode,
 };
 use futures::{SinkExt, StreamExt, stream::SplitSink};
-use juiceproto::peer::{
-    PEER_PROTOCOL_VERSION, PeerClientMessage, PeerDeviceClaims, PeerRejection, PeerServerMessage,
-    verify_peer_token,
+use juiceproto::{
+    headers::HOST_API_KEY,
+    peer::{
+        PEER_PROTOCOL_VERSION, PeerClientMessage, PeerDeviceClaims, PeerRejection,
+        PeerServerMessage, verify_peer_token,
+    },
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -551,6 +554,19 @@ async fn handle_incoming(
 ) -> bool {
     match incoming {
         Some(Ok(Message::Text(text))) => {
+            if text.len() > state.config.max_frame_bytes {
+                tracing::debug!(
+                    "peer {} sent an oversized text message ({} bytes)",
+                    session.id,
+                    text.len()
+                );
+                let _ = send_json(
+                    sink,
+                    error("frame_too_large", "message exceeds the size limit"),
+                )
+                .await;
+                return true;
+            }
             let Ok(message) = serde_json::from_str::<PeerClientMessage>(&text) else {
                 tracing::debug!("peer {} sent malformed JSON", session.id);
                 return true;
@@ -639,10 +655,10 @@ async fn announce(
     session: &Arc<PeerSession>,
     files: Vec<juiceproto::peer::PeerFileSpec>,
 ) -> Control {
-    let ids = files.into_iter().map(|file| file.id).collect::<Vec<_>>();
-    if ids.len() > MAX_ANNOUNCE_IDS {
+    if files.len() > MAX_ANNOUNCE_IDS {
         return Control::Reply(error("too_many_files", "too many announced files"));
     }
+    let ids = files.into_iter().map(|file| file.id).collect::<Vec<_>>();
     if ids.is_empty() {
         return Control::Reply(PeerServerMessage::AnnounceOk {
             accepted: Vec::new(),
@@ -709,7 +725,7 @@ async fn authorize_files(
     let response = state
         .client
         .post(url)
-        .header("x-juicehost-api-key", &state.config.api_key)
+        .header(HOST_API_KEY, &state.config.api_key)
         .json(&body)
         .send()
         .await

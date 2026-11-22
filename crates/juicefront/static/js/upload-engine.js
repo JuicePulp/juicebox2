@@ -35,13 +35,14 @@ import {
   readUploadMode,
   uploadMethodFor,
   preferStream
-} from "./upload-config.js?v=2.2.0-r10";
-import { tryAcquireStream, releaseStream } from "./stream-limiter.js?v=2.2.0-r10";
-import { tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r10";
-import { announce } from "./util.js?v=2.2.0-r10";
-import { publicFileInfo } from "./api.js?v=2.2.0-r10";
-import { compressFile } from "./compress.js?v=2.2.0-r10";
-import { encodeTusMeta } from "./tus.js?v=2.2.0-r10";
+} from "./upload-config.js?v=2.2.0-r13";
+import { tryAcquireStream, releaseStream } from "./stream-limiter.js?v=2.2.0-r13";
+import { tweakEngineEnabled } from "./upload-tweaks.js?v=2.2.0-r13";
+import { announce } from "./util.js?v=2.2.0-r13";
+import { publicFileInfo } from "./api.js?v=2.2.0-r13";
+import { compressFile } from "./compress.js?v=2.2.0-r13";
+import { encodeTusMeta } from "./tus.js?v=2.2.0-r13";
+import { classifyFailure, parseServerError, ERROR_TEXT, E } from "./upload-errors.js?v=2.2.0-r13";
 export function extractServerId(url) {
   const m = url.match(/\/f\/([A-Za-z0-9_-]+)/);
   return m ? m[1] : "";
@@ -51,6 +52,15 @@ export function generateId() {
     return crypto.randomUUID();
   }
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+/**
+ * Turns a thrown upload error into a specific code/message via the shared
+ * taxonomy. Callers may pass `{status, body, code, message}` as `extra` when a
+ * server response is available. The original signature is kept for all
+ * existing call sites.
+ */
+function uploadFailure(phase, item, err, extra) {
+  return classifyFailure({ phase, item, err, ...(extra || {}) });
 }
 // 520-524 are Cloudflare origin failures and behave like 502-504 for retries.
 function isTransientStatus(status) {
@@ -109,6 +119,7 @@ let sessionBootstrap = null;
 export function ensureUploadSession() {
   if (sessionBootstrap)
     return sessionBootstrap;
+  let clearBootstrap;
   const bootstrap = async () => {
     try {
       const res = await fetchWithTimeout("/api/client-files", {
@@ -121,14 +132,29 @@ export function ensureUploadSession() {
         throw new Error(`HTTP ${res.status}`);
     } catch {
       // Best effort: an existing cookie still lets uploads work, and a failed
-      // bootstrap must not be the reason an upload cannot start.
-      sessionBootstrap = null;
+      // bootstrap must not be the reason an upload cannot start. Only clear the
+      // cache if a newer caller has not already replaced it.
+      clearBootstrap?.();
     }
   };
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-  sessionBootstrap = locks?.request
+  const thisPromise = locks?.request
     ? locks.request("juicebox-upload-session", bootstrap)
     : bootstrap();
+  // The cached promise never rejects: every awaiter sees a resolved result and
+  // a late failure cannot turn into an unhandled rejection in main or worker.
+  const cached = thisPromise.then(
+    () => ({ ok: true }),
+    () => {
+      clearBootstrap?.();
+      return { ok: false };
+    },
+  );
+  clearBootstrap = () => {
+    if (sessionBootstrap === cached)
+      sessionBootstrap = null;
+  };
+  sessionBootstrap = cached;
   return sessionBootstrap;
 }
 /** `fetch` bounded by `ms` and linked to the caller's signal; caller abort wins. */
@@ -575,28 +601,43 @@ function startDirectUpload(item, file, controls) {
     let code;
     let msg;
     try {
-      const err = JSON.parse(result?.body || "");
-      if (err.error)
-        code = err.error;
-      if (err.message)
-        msg = err.message;
+      const parsed = parseServerError(result?.body);
+      code = parsed.code || undefined;
+      msg = parsed.message || undefined;
     } catch {}
-    if (result?.timeout) {
-      code = code || "UPLOAD_TIMEOUT";
-      msg = msg || "Upload timed out. Try a smaller file.";
-    } else if (!result || result.status === 0) {
-      code = code || "NETWORK_ERROR";
-    } else if (result.status >= 520 && result.status <= 524) {
-      code = code || "UPLOAD_TIMEOUT";
-      msg = msg || "Connection timed out (Cloudflare). Try a smaller file or try again later.";
+    if (!code && result?.timeout) {
+      code = E.UPLOAD_TIMEOUT;
+      msg = msg || ERROR_TEXT[E.UPLOAD_TIMEOUT];
+    } else if (!code && result?.aborted) {
+      code = E.CLIENT_ABORTED;
+      msg = msg || ERROR_TEXT[E.CLIENT_ABORTED];
+    } else if (!code && (!result || result.status === 0)) {
+      // Status 0 is a transport failure, never a generic "network error"
+      // default. Only a genuinely interrupted connection earns NETWORK_ERROR (2001).
+      code = result?.network && !msg ? E.NETWORK_ERROR : E.TRANSPORT_ERROR;
+      msg = msg || ERROR_TEXT[code];
+    } else if (!code && result.status >= 520 && result.status <= 524) {
+      code = E.CLOUDFLARE_ERROR;
+      msg = msg || ERROR_TEXT[E.CLOUDFLARE_ERROR];
     }
+    const failure = classifyFailure({
+      phase: "direct-xhr",
+      status: result?.status,
+      body: result?.body,
+      code,
+      message: msg,
+      item
+    });
+    code = failure.errorCode;
+    msg = failure.errorMessage;
     update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
   })().catch((err) => {
+    const failure = uploadFailure("direct-xhr", item, err);
     update({
       id: item.id,
       state: runState.cancelled ? "cancelled" : "error",
-      errorCode: runState.cancelled ? undefined : "NETWORK_ERROR",
-      errorMessage: err?.message
+      errorCode: runState.cancelled ? undefined : failure.errorCode,
+      errorMessage: failure.errorMessage
     });
   });
   return {
@@ -645,14 +686,14 @@ function xhrSendBytes(uploadUrl, blob, ticket, onBytes, runState, xhrRef) {
     };
     request.onerror = () => {
       clearIdle();
-      reject(new Error("NETWORK_ERROR"));
+      reject(new Error("Connection to the server was interrupted. Check your connection and try again."));
     };
     request.onabort = () => {
       clearIdle();
       if (runState.cancelled)
         reject(new Error("Upload cancelled"));
       else
-        reject(new Error("NETWORK_ERROR"));
+        reject(new Error("Upload was interrupted before completion. Try again."));
     };
     armIdle();
     request.send(blob);
@@ -681,15 +722,26 @@ function startDirectTicketUpload(item, file, controls) {
       if (runState.cancelled)
         throw new Error("Upload cancelled");
       if (!reserveRes.ok) {
+        let body = "";
+        try { body = await reserveRes.text(); } catch {}
         let code;
         let msg;
         try {
-          const err = await reserveRes.json();
-          if (err.error)
-            code = err.error;
-          if (err.message)
-            msg = err.message;
+          const parsed = parseServerError(body);
+          code = parsed.code || undefined;
+          msg = parsed.message || undefined;
         } catch {}
+        const failure = classifyFailure({
+          phase: "reserve",
+          status: reserveRes.status,
+          statusText: reserveRes.statusText,
+          body,
+          code,
+          message: msg,
+          item
+        });
+        code = failure.errorCode;
+        msg = failure.errorMessage;
         update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
         return;
       }
@@ -701,7 +753,13 @@ function startDirectTicketUpload(item, file, controls) {
       const shareRawUrl = reserve.raw_url || "";
       const shareDownloadUrl = reserve.download_url || "";
       if (!ticket || !uploadUrl || !fileId) {
-        update({ id: item.id, errorCode: "RESERVE_FAILED", state: "error" });
+        const failure = classifyFailure({
+          phase: "reserve",
+          code: E.RESERVE_FAILED,
+          message: "The reservation response was missing a ticket, file id, or upload URL.",
+          item
+        });
+        update({ id: item.id, errorCode: failure.errorCode, errorMessage: failure.errorMessage, state: "error" });
         return;
       }
       if (shareUrl)
@@ -733,7 +791,8 @@ function startDirectTicketUpload(item, file, controls) {
             throw err;
           if (uploadTry === maxUploadTries - 1) {
             progress.destroy();
-            update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
+            const failure = uploadFailure("direct-ticket-upload", item, err);
+            update({ id: item.id, ...failure, state: "error" });
             return;
           }
           const health = await directPartHealth(uploadUrl, fileId, file.size);
@@ -758,12 +817,20 @@ function startDirectTicketUpload(item, file, controls) {
         let code;
         let msg;
         try {
-          const err = JSON.parse(uploadStatus.body);
-          if (err.error)
-            code = err.error;
-          if (err.message)
-            msg = err.message;
+          const parsed = parseServerError(uploadStatus.body);
+          code = parsed.code || undefined;
+          msg = parsed.message || undefined;
         } catch {}
+        const failure = classifyFailure({
+          phase: "direct-ticket-upload",
+          status: uploadStatus?.status,
+          body: uploadStatus?.body,
+          code,
+          message: msg,
+          item
+        });
+        code = failure.errorCode;
+        msg = failure.errorMessage;
         update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
         return;
       }
@@ -799,15 +866,26 @@ function startDirectTicketUpload(item, file, controls) {
         }
       }
       if (!completeRes.ok) {
+        let body = "";
+        try { body = await completeRes.text(); } catch {}
         let code;
         let msg;
         try {
-          const err = await completeRes.json();
-          if (err.error)
-            code = err.error;
-          if (err.message)
-            msg = err.message;
+          const parsed = parseServerError(body);
+          code = parsed.code || undefined;
+          msg = parsed.message || undefined;
         } catch {}
+        const failure = classifyFailure({
+          phase: "direct-ticket-complete",
+          status: completeRes.status,
+          statusText: completeRes.statusText,
+          body,
+          code,
+          message: msg,
+          item
+        });
+        code = failure.errorCode;
+        msg = failure.errorMessage;
         update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
         return;
       }
@@ -827,11 +905,12 @@ function startDirectTicketUpload(item, file, controls) {
     };
     await attempt(false);
   })().catch((err) => {
+    const failure = uploadFailure("direct-ticket", item, err);
     update({
       id: item.id,
       state: runState.cancelled ? "cancelled" : "error",
-      errorCode: runState.cancelled ? undefined : "NETWORK_ERROR",
-      errorMessage: err?.message
+      errorCode: runState.cancelled ? undefined : failure.errorCode,
+      errorMessage: failure.errorMessage
     });
   });
   return {
@@ -874,15 +953,26 @@ function startDirectParallelUpload(item, file, controls) {
         fallback = startTusUpload(item, file, controls);
         return;
       }
+      let body = "";
+      try { body = await reserveRes.text(); } catch {}
       let code;
       let msg;
       try {
-        const err = await reserveRes.json();
-        if (err.error)
-          code = err.error;
-        if (err.message)
-          msg = err.message;
+        const parsed = parseServerError(body);
+        code = parsed.code || undefined;
+        msg = parsed.message || undefined;
       } catch {}
+      const failure = classifyFailure({
+        phase: "reserve-parallel",
+        status: reserveRes.status,
+        statusText: reserveRes.statusText,
+        body,
+        code,
+        message: msg,
+        item
+      });
+      code = failure.errorCode;
+      msg = failure.errorMessage;
       update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
       return;
     }
@@ -905,7 +995,13 @@ function startDirectParallelUpload(item, file, controls) {
         splitSum += p.part_size;
     }
     if (!splitOk || splitSum !== file.size) {
-      update({ id: item.id, errorCode: "RESERVE_FAILED", state: "error" });
+      const failure = classifyFailure({
+        phase: "reserve-parallel",
+        code: E.RESERVE_FAILED,
+        message: "The reservation response did not contain a valid set of upload parts.",
+        item
+      });
+      update({ id: item.id, errorCode: failure.errorCode, errorMessage: failure.errorMessage, state: "error" });
       return;
     }
     if (shareUrl)
@@ -1070,15 +1166,26 @@ function startDirectParallelUpload(item, file, controls) {
             break;
           }
         }
+        let body = "";
+        try { body = await completeRes.text(); } catch {}
         let code;
         let msg;
         try {
-          const err = await completeRes.json();
-          if (err.error)
-            code = err.error;
-          if (err.message)
-            msg = err.message;
+          const parsed = parseServerError(body);
+          code = parsed.code || undefined;
+          msg = parsed.message || undefined;
         } catch {}
+        const failure = classifyFailure({
+          phase: "direct-parallel-complete",
+          status: completeRes.status,
+          statusText: completeRes.statusText,
+          body,
+          code,
+          message: msg,
+          item
+        });
+        code = failure.errorCode;
+        msg = failure.errorMessage;
         update({ id: item.id, errorCode: code, errorMessage: msg, state: "error" });
         return;
       } catch (err) {
@@ -1090,7 +1197,16 @@ function startDirectParallelUpload(item, file, controls) {
       }
     }
     if (!data) {
-      update({ id: item.id, errorCode: "NETWORK_ERROR", state: "error" });
+      try {
+        if (typeof console !== "undefined" && console.error)
+          console.error("upload failed", { phase: "direct-parallel-complete", item: item.id, err: "missing completion data" });
+      } catch {}
+      update({
+        id: item.id,
+        errorCode: E.UPLOAD_FAILED,
+        errorMessage: "The upload finished but the server did not return file details. Check your files before retrying.",
+        state: "error"
+      });
       return;
     }
     update({
@@ -1106,11 +1222,12 @@ function startDirectParallelUpload(item, file, controls) {
       progress: 100
     });
   })().catch((err) => {
+    const failure = uploadFailure("direct-parallel", item, err);
     update({
       id: item.id,
       state: runState.cancelled ? "cancelled" : "error",
-      errorCode: runState.cancelled ? undefined : "NETWORK_ERROR",
-      errorMessage: err?.message
+      errorCode: runState.cancelled ? undefined : failure.errorCode,
+      errorMessage: failure.errorMessage
     });
   });
   return {
@@ -1948,15 +2065,14 @@ function startTusStreamUpload(item, file, controls) {
         id: item.id,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: ""
       });
       return;
     }
     update({
       id: item.id,
-      errorCode: "NETWORK_ERROR",
-      errorMessage: err?.message,
+      ...uploadFailure("tus-stream", item, err),
       state: "error"
     });
   });
@@ -2417,14 +2533,14 @@ function startTusUpload(item, file, controls) {
         id: item.id,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: ""
       });
       return;
     }
     update({
       id: item.id,
-      errorCode: "UPLOAD_FAILED",
+      errorCode: E.UPLOAD_FAILED,
       errorMessage: "Upload finished but the server did not confirm the merge (part statuses: " + [...new Set(settled.map((r) => r && r.status))].join(",") + "). Check your files before retrying.",
       state: "error"
     });
@@ -2438,15 +2554,14 @@ function startTusUpload(item, file, controls) {
         id: item.id,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: ""
       });
       return;
     }
     update({
       id: item.id,
-      errorCode: "NETWORK_ERROR",
-      errorMessage: err?.message,
+      ...uploadFailure("tus", item, err),
       state: "error"
     });
   });

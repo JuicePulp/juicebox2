@@ -75,6 +75,7 @@ pub async fn fetch_juicehost_config(
 
     let allowed_ttl_hours = cfg
         .allowed_ttl_hours
+        .filter(|allowed| !allowed.is_empty())
         .unwrap_or_else(|| juiceutils::config::defaults::ALLOWED_TTL_HOURS.to_vec());
 
     let danger_level_str = cfg.danger_level.as_deref().unwrap_or("high");

@@ -8,6 +8,11 @@ pub trait CapStore: Send + Sync {
     async fn cap_read(&self, id: &str) -> Result<String, StorageError>;
 
     async fn cap_delete(&self, id: &str);
+
+    /// Best-effort synchronous removal for cancellation cleanup: an async
+    /// delete cannot run from `Drop`. Backends with filesystem sidecars
+    /// override this; remote object stores keep the no-op default.
+    fn cap_delete_blocking(&self, _id: &str) {}
 }
 
 #[must_use]
@@ -45,6 +50,30 @@ pub async fn remove<S: CapStore>(store: &S, id: &str) {
     store.cap_delete(id).await;
 }
 
+/// Removes a freshly minted capability on drop. When `op` is cancelled
+/// mid-await (aborted upload / body deadline) neither the success path nor the
+/// explicit error cleanup runs, so the sidecar must be reclaimed from `Drop`
+/// or a retry with the same ID fails at `mint` with `Conflict`.
+struct MintGuard<'a, S: CapStore> {
+    store: &'a S,
+    id: &'a str,
+    armed: bool,
+}
+
+impl<S: CapStore> MintGuard<'_, S> {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl<S: CapStore> Drop for MintGuard<'_, S> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.store.cap_delete_blocking(self.id);
+        }
+    }
+}
+
 /// Mints before running `op`, then removes the capability if `op` fails.
 pub async fn run_minted<S, T, F, Fut>(
     store: &S,
@@ -57,11 +86,20 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, StorageError>>,
 {
+    let mut guard = MintGuard {
+        store,
+        id,
+        armed: capability.is_some(),
+    };
     if let Some(cap) = capability {
         mint(store, id, cap).await?;
     }
     let result = op().await;
-    if result.is_err() && capability.is_some() {
+    if result.is_ok() {
+        guard.disarm();
+    } else if capability.is_some() {
+        // The async delete still handles remote backends and keeps the normal
+        // failure path observable to stores whose blocking hook is a no-op.
         remove(store, id).await;
     }
     result
@@ -113,6 +151,28 @@ mod tests {
         async fn cap_delete(&self, id: &str) {
             self.map.lock().unwrap().remove(id);
         }
+
+        fn cap_delete_blocking(&self, id: &str) {
+            self.map.lock().unwrap().remove(id);
+        }
+    }
+
+    #[test]
+    fn mint_guard_removes_sidecar_on_drop() {
+        let store = MapStore {
+            map: std::sync::Mutex::new(std::collections::HashMap::from([(
+                "x".to_string(),
+                hash("tok"),
+            )])),
+        };
+        {
+            let _guard = MintGuard {
+                store: &store,
+                id: "x",
+                armed: true,
+            };
+        }
+        assert!(!store.map.lock().unwrap().contains_key("x"));
     }
 
     #[tokio::test]

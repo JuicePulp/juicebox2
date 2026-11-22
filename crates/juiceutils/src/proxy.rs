@@ -14,6 +14,11 @@ pub struct IpCidr {
 impl IpCidr {
     #[must_use]
     pub fn contains(&self, ip: IpAddr) -> bool {
+        // A peer seen as `::ffff:1.2.3.4` must match a `1.2.3.0/24` entry.
+        let ip = match ip {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+            IpAddr::V4(_) => ip,
+        };
         match (self.network, ip) {
             (IpAddr::V4(network), IpAddr::V4(ip)) => {
                 let mask = if self.prefix == 0 {
@@ -58,6 +63,21 @@ impl FromStr for IpCidr {
         if prefix > max_prefix {
             return Err(format!("CIDR prefix is too large: {value}"));
         }
+        // Store IPv4-mapped IPv6 networks in their IPv4 form so `contains`
+        // compares like with like; the leading 96 bits are the mapping prefix.
+        // Only `::ffff:a.b.c.d` is collapsed, never an ordinary IPv6 network.
+        let (network, prefix) = match network {
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) if prefix >= 96 => (IpAddr::V4(v4), prefix - 96),
+                Some(_) => {
+                    return Err(format!(
+                        "CIDR prefix is too small for an IPv4-mapped address: {value}"
+                    ));
+                }
+                None => (IpAddr::V6(v6), prefix),
+            },
+            network => (network, prefix),
+        };
         Ok(Self { network, prefix })
     }
 }
@@ -158,6 +178,20 @@ mod tests {
             ),
             "203.0.113.9".parse::<IpAddr>().unwrap()
         );
+    }
+
+    #[test]
+    fn ipv4_mapped_cidrs_match_both_address_forms() {
+        let loopback = "::ffff:127.0.0.0/104".parse::<IpCidr>().unwrap();
+        assert!(loopback.contains("127.0.0.1".parse().unwrap()));
+        assert!(loopback.contains("::ffff:127.0.0.1".parse().unwrap()));
+        let host = "::ffff:10.0.0.1".parse::<IpCidr>().unwrap();
+        assert!(host.contains("10.0.0.1".parse().unwrap()));
+        assert!(!host.contains("10.0.0.2".parse().unwrap()));
+        assert!(is_trusted(
+            "::ffff:127.0.0.1".parse().unwrap(),
+            &trusted("::ffff:127.0.0.0/104")
+        ));
     }
 
     #[test]

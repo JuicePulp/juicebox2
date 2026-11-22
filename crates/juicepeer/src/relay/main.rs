@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use juicepeer::relay::{RelayState, config::Config, routes};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
@@ -18,12 +17,7 @@ async fn main() {
         return;
     }
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    juiceutils::bootstrap::init_tracing("info", false, false);
 
     let config = Config::try_load()
         .unwrap_or_else(|error| juiceutils::exit_on_config_error("juicepeer-relay", error));

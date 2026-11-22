@@ -58,9 +58,8 @@ pub fn is_peer_relay_host(config: &crate::config::Config, storage_host: Option<&
     let Some(relay) = config.peer_relay_url.as_deref() else {
         return false;
     };
-    storage_host.is_some_and(|host| {
-        host.trim().trim_end_matches('/') == relay.trim().trim_end_matches('/')
-    })
+    storage_host
+        .is_some_and(|host| host.trim().trim_end_matches('/') == relay.trim().trim_end_matches('/'))
 }
 
 #[must_use]
@@ -120,8 +119,9 @@ pub async fn client_ip_middleware(
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|value| value.0.ip())
-        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        .map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |value| {
+            value.0.ip()
+        });
     let ip = client_ip(req.headers(), peer, &state);
     req.extensions_mut().insert(ClientIp(ip));
     tracing::Span::current().record("client_ip", tracing::field::display(ip));

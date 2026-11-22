@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde_json::json;
@@ -58,7 +58,7 @@ pub enum AppError {
     #[error("filesystem error: {0}")]
     FilesystemError(#[from] std::io::Error),
     #[error("database error: {0}")]
-    DatabaseError(#[from] rusqlite::Error),
+    DatabaseError(rusqlite::Error),
 
     #[error("{0}")]
     DbPoolError(String),
@@ -137,37 +137,21 @@ impl IntoResponse for AppError {
                 reason.as_str(),
             ),
 
-            Self::JuicehostUnreachable(ref e) => {
-                let clean = juiceproto::error::service_error_message(e);
-                let clean = if clean.trim().is_empty() {
-                    "File storage backend is unreachable"
-                } else {
-                    clean
-                };
-                (StatusCode::BAD_GATEWAY, "STORAGE_UNREACHABLE", clean)
-            }
-            Self::JuicehostRejected(ref e) => {
-                let clean = juiceproto::error::service_error_message(e);
-                let clean = if clean.trim().is_empty() {
-                    "File storage backend rejected the upload"
-                } else {
-                    clean
-                };
-                (StatusCode::BAD_GATEWAY, "STORAGE_REJECTED", clean)
-            }
-            Self::InsufficientStorage(ref e) => {
-                let clean = juiceproto::error::service_error_message(e);
-                let clean = if clean.trim().is_empty() {
-                    "This instance is out of storage! Try again later."
-                } else {
-                    clean
-                };
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "INSUFFICIENT_STORAGE",
-                    clean,
-                )
-            }
+            Self::JuicehostUnreachable(_) => (
+                StatusCode::BAD_GATEWAY,
+                "STORAGE_UNREACHABLE",
+                "File storage backend is unreachable",
+            ),
+            Self::JuicehostRejected(_) => (
+                StatusCode::BAD_GATEWAY,
+                "STORAGE_REJECTED",
+                "File storage backend rejected the upload",
+            ),
+            Self::InsufficientStorage(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "INSUFFICIENT_STORAGE",
+                "This instance is out of storage! Try again later.",
+            ),
             Self::FilesystemError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "DISK_ERROR",
@@ -208,14 +192,28 @@ impl IntoResponse for AppError {
             ),
         };
 
-        (
+        // Every server error is logged exactly once here at the response
+        // boundary; upstream detail stays out of the client-facing JSON.
+        if status.is_server_error() {
+            self.log_error();
+        }
+
+        let mut response = (
             status,
             Json(json!({
                 "error": error_code,
                 "message": message,
             })),
         )
-            .into_response()
+            .into_response();
+        if status == StatusCode::SERVICE_UNAVAILABLE
+            && !response.headers().contains_key(header::RETRY_AFTER)
+        {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        }
+        response
     }
 }
 
@@ -231,13 +229,14 @@ impl AppError {
             Self::DbPoolError(e) => tracing::error!("database pool error: {e}"),
             Self::TaskPanicked(e) => tracing::error!("background task panicked: {e}"),
             Self::Internal(e) => tracing::error!("internal error: {e}"),
+            Self::ServiceUnavailable(e) => tracing::error!("service unavailable: {e}"),
             _ => {}
         }
     }
 
     #[must_use]
     pub fn from_juicehost_error(e: String) -> Self {
-        let err = if e.contains("error trying to connect")
+        if e.contains("error trying to connect")
             || e.contains("dns error")
             || e.contains("connection refused")
             || e.contains("error sending request")
@@ -249,10 +248,54 @@ impl AppError {
             Self::InsufficientStorage(e)
         } else {
             Self::JuicehostRejected(e)
-        };
-        err.log_error();
-        err
+        }
     }
+
+    /// Classifies a storage concat failure, preserving its HTTP status so the
+    /// browser can retry transient storage failures. Detail is kept for the
+    /// `log_error` call made by `into_response`.
+    #[must_use]
+    pub fn from_concat_error(e: String) -> Self {
+        if e.contains("status=503") || e.contains("status=502") || e.contains("status=504") {
+            Self::DbPoolError(format!("storage concat temporarily unavailable: {e}"))
+        } else if e.contains("status=409") {
+            Self::Conflict(format!("storage concat conflict: {e}"))
+        } else if e.contains("status=507") || e.contains("[INSUFFICIENT_STORAGE]") {
+            Self::InsufficientStorage(e)
+        } else if e.contains("error trying to connect")
+            || e.contains("dns error")
+            || e.contains("connection refused")
+            || e.contains("error sending request")
+            || e.contains("timed out")
+            || e.contains("QUIC handshake failed")
+            || e.contains("QUIC connect error")
+        {
+            Self::JuicehostUnreachable(e)
+        } else {
+            Self::JuicehostRejected(e)
+        }
+    }
+}
+
+/// Transient SQLite contention is retryable by the client; other database
+/// failures stay a plain 500.
+impl From<rusqlite::Error> for AppError {
+    fn from(err: rusqlite::Error) -> Self {
+        if is_retryable_db_error(&err) {
+            Self::DbPoolError(err.to_string())
+        } else {
+            Self::DatabaseError(err)
+        }
+    }
+}
+
+pub(crate) fn is_retryable_db_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(e, _)
+            if e.code == rusqlite::ErrorCode::DatabaseBusy
+                || e.code == rusqlite::ErrorCode::DatabaseLocked
+    )
 }
 
 #[cfg(test)]
@@ -388,6 +431,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn busy_and_locked_map_to_retryable_503() {
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let err = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+            assert!(is_retryable_db_error(&err));
+            let app: AppError = err.into();
+            assert!(matches!(app, AppError::DbPoolError(_)));
+            let resp: Response<Body> = app.into_response();
+            assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(resp.headers()[header::RETRY_AFTER], "1");
+        }
+    }
+
+    #[test]
+    fn concat_errors_keep_their_status() {
+        assert!(matches!(
+            AppError::from_concat_error("juicehost concat failed: status=503 body=".into()),
+            AppError::DbPoolError(_)
+        ));
+        assert!(matches!(
+            AppError::from_concat_error("juicehost concat failed: status=409 body=".into()),
+            AppError::Conflict(_)
+        ));
+        assert!(matches!(
+            AppError::from_concat_error("juicehost concat failed: status=507 body=".into()),
+            AppError::InsufficientStorage(_)
+        ));
+        assert!(matches!(
+            AppError::from_concat_error(
+                "juicehost concat request failed: error sending request".into()
+            ),
+            AppError::JuicehostUnreachable(_)
+        ));
+    }
+
     #[tokio::test]
     async fn bad_request_returns_400() {
         assert_eq!(
@@ -430,7 +508,7 @@ mod tests {
     fn extract_error_message_with_prefix() {
         let msg =
             juiceproto::error::service_error_message("[STORAGE_FULL] disk is full (status=507)");
-        assert_eq!(msg, " disk is full");
+        assert_eq!(msg, "disk is full");
     }
 
     #[test]

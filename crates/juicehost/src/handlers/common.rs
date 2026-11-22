@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header, response::Builder},
     response::Response,
 };
 use futures::StreamExt;
@@ -84,6 +84,23 @@ pub(crate) fn deadline_body(
     Body::from_stream(stream)
 }
 
+/// Recognises the `TimedOut` markers emitted by [`deadline_body`] through the
+/// `axum::Error`/`multer::Error` wrapping layers, so a stalled body becomes a
+/// retryable 408 instead of a permanent 400.
+pub(crate) fn body_is_timeout(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(err) = current {
+        if err
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut)
+        {
+            return true;
+        }
+        current = std::error::Error::source(err);
+    }
+    false
+}
+
 pub(crate) enum BackendStatus {
     Known(serde_json::Value),
 
@@ -165,6 +182,86 @@ pub(crate) fn prevent_file_caching(mut response: Response<Body>) -> Response<Bod
     response
 }
 
+/// Media documents fetch their own source from the media element. An opaque
+/// sandbox origin turns that into a cross-origin request, which browsers block
+/// without CORS. `allow-same-origin` keeps the request same-origin; scripts are
+/// still disabled because `allow-scripts` is absent.
+pub(crate) fn raw_content_security_policy(mime: &str) -> &'static str {
+    let base = mime.split(';').next().unwrap_or(mime).trim();
+    if base.starts_with("video/") || base.starts_with("audio/") || base == "application/ogg" {
+        "sandbox allow-downloads allow-same-origin"
+    } else {
+        "sandbox allow-downloads"
+    }
+}
+
+/// `true` when any `If-None-Match` candidate matches `etag`. Handles comma
+/// separated lists and weak (`W/`) validators in addition to plain quoted ones.
+#[must_use]
+pub(crate) fn if_none_matches(headers: &HeaderMap, etag: &str) -> bool {
+    let Some(value) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let normalized = etag.trim().trim_start_matches("W/").trim_matches('"');
+    value.split(',').any(|candidate| {
+        let candidate = candidate.trim();
+        if candidate == "*" {
+            return true;
+        }
+        let candidate = candidate.strip_prefix("W/").unwrap_or(candidate).trim();
+        candidate.trim_matches('"') == normalized
+    })
+}
+
+/// Headers shared by every ranged byte response, including 416 and 304. Keeping
+/// this in one place prevents handlers from dropping the validator or the
+/// security headers on error paths.
+pub(crate) struct ByteResponseHeaders<'a> {
+    /// MIME type used to choose the content security policy.
+    pub csp_mime: Option<&'a str>,
+    pub etag: Option<&'a str>,
+    pub content_range: Option<String>,
+    pub content_length: Option<u64>,
+    pub accept_ranges: bool,
+}
+
+pub(crate) fn apply_byte_response_headers(builder: &mut Builder, spec: ByteResponseHeaders<'_>) {
+    let Some(headers) = builder.headers_mut() else {
+        return;
+    };
+    if let Some(mime) = spec.csp_mime {
+        headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        );
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(raw_content_security_policy(mime)),
+        );
+    }
+    if let Some(etag) = spec.etag
+        && let Ok(value) = HeaderValue::from_str(etag)
+    {
+        headers.insert(header::ETAG, value);
+    }
+    if spec.accept_ranges {
+        headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    }
+    if let Some(range) = spec.content_range
+        && let Ok(value) = HeaderValue::from_str(&range)
+    {
+        headers.insert(header::CONTENT_RANGE, value);
+    }
+    if let Some(length) = spec.content_length
+        && let Ok(value) = HeaderValue::from_str(&length.to_string())
+    {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
+}
+
 /// `Ignore` means send the full body; `Unsatisfiable` is valid but outside the
 /// file and must map to 416.
 #[derive(Debug, PartialEq)]
@@ -191,6 +288,11 @@ pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> Ran
     if total_size == 0 {
         return RangeResult::Unsatisfiable;
     }
+    // A zero-byte cap cannot satisfy any range; compute the inclusive offset
+    // once so `max_len - 1` never underflows.
+    let Some(max_end_offset) = max_len.checked_sub(1) else {
+        return RangeResult::Unsatisfiable;
+    };
 
     if let Some((start_str, end_str)) = range_val.split_once('-') {
         let start_str = start_str.trim();
@@ -204,6 +306,9 @@ pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> Ran
                 return RangeResult::Unsatisfiable;
             }
             let suffix_len = suffix_len.min(total_size).min(max_len);
+            if suffix_len == 0 {
+                return RangeResult::Unsatisfiable;
+            }
             RangeResult::Satisfiable(total_size - suffix_len, total_size - 1)
         } else {
             let Ok(start) = start_str.parse::<u64>() else {
@@ -223,10 +328,59 @@ pub(crate) fn parse_range(range_val: &str, total_size: u64, max_len: u64) -> Ran
                 }
                 end.min(total_size - 1)
             };
-            let end = requested_end.min(start.saturating_add(max_len - 1));
+            let end = requested_end.min(start.saturating_add(max_end_offset));
             RangeResult::Satisfiable(start, end)
         }
     } else {
         RangeResult::Ignore
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderMap;
+
+    use super::{RangeResult, if_none_matches, parse_range};
+
+    fn headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("if-none-match", value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn if_none_matches_list_and_weak_validators() {
+        let etag = "\"abc123\"";
+        assert!(if_none_matches(&headers(etag), etag));
+        assert!(if_none_matches(&headers("\"other\", W/\"abc123\""), etag));
+        assert!(if_none_matches(&headers("W/\"abc123\""), etag));
+        assert!(if_none_matches(&headers("*"), etag));
+        assert!(!if_none_matches(&headers("\"different\""), etag));
+        assert!(!if_none_matches(&HeaderMap::new(), etag));
+    }
+
+    #[test]
+    fn parse_range_zero_max_len_is_unsatisfiable() {
+        // Would underflow `max_len - 1` before the fix (panic in debug builds).
+        assert_eq!(parse_range("bytes=0-3", 10, 0), RangeResult::Unsatisfiable);
+        assert_eq!(parse_range("bytes=-4", 10, 0), RangeResult::Unsatisfiable);
+    }
+
+    #[test]
+    fn parse_range_zero_suffix_is_unsatisfiable() {
+        assert_eq!(parse_range("bytes=-0", 10, 16), RangeResult::Unsatisfiable);
+    }
+
+    #[test]
+    fn parse_range_suffix_stays_within_file() {
+        assert_eq!(
+            parse_range("bytes=-4", 10, 16),
+            RangeResult::Satisfiable(6, 9)
+        );
+        // A suffix longer than the file must not produce start > end.
+        assert_eq!(
+            parse_range("bytes=-40", 10, 16),
+            RangeResult::Satisfiable(0, 9)
+        );
     }
 }

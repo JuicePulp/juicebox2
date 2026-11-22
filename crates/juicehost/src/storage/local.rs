@@ -403,6 +403,35 @@ impl Drop for LocalReservation {
     }
 }
 
+/// Removes a `.live.<id>.tmp` partial on drop. Futures cancelled mid-body (an
+/// aborted XHR, or the request-body deadline firing) never reach the explicit
+/// error cleanup, so the temp file must be reclaimed here or the ID stays
+/// poisoned until the hourly sweep.
+struct TempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    /// Keep the temp file after a successful publish: `link_or_rename` has
+    /// already consumed it, so there is nothing left to clean up.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 impl LocalBackend {
     fn path_for(&self, id: &str, ext: &str) -> Option<PathBuf> {
         if !valid_component(id) || !valid_component(ext) {
@@ -528,6 +557,12 @@ impl CapStore for LocalBackend {
             let _ = tokio::fs::remove_file(path).await;
         }
     }
+
+    fn cap_delete_blocking(&self, id: &str) {
+        if let Some(path) = self.capability_path(id) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 impl LocalBackend {
@@ -585,6 +620,9 @@ impl LocalBackend {
                         StorageError::Io(format!("create temp failed: {e}"))
                     }
                 })?;
+            // Armed only once the temp file exists, so a failed `create_new`
+            // cannot delete a concurrent writer's partial.
+            let mut guard = TempFileGuard::new(temp_path.clone());
             let mut file = BufWriter::with_capacity(512 * 1024, file);
             let mut total = 0u64;
             let mut visible = 0u64;
@@ -608,12 +646,11 @@ impl LocalBackend {
                 .map_err(|e| StorageError::Io(format!("flush failed: {e}")))?;
             drop(file);
             publish_new_file(&temp_path, &path).await?;
+            guard.disarm();
             Ok(total)
         }
         .await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(&temp_path).await;
-        } else {
+        if result.is_ok() {
             self.extensions.insert(id.to_string(), ext);
             self.meta_cache.remove(id);
         }
@@ -646,6 +683,7 @@ impl LocalBackend {
                 .open(&temp_path)
                 .await
                 .map_err(|e| StorageError::Io(format!("create target failed: {e}")))?;
+            let mut guard = TempFileGuard::new(temp_path.clone());
 
             let mut dst_off = 0u64;
             for part_id in part_ids {
@@ -670,13 +708,12 @@ impl LocalBackend {
                 .await
                 .map_err(|e| StorageError::Io(format!("flush failed: {e}")))?;
             drop(target_file);
-            publish_new_file(&temp_path, &target_path).await
+            publish_new_file(&temp_path, &target_path).await?;
+            guard.disarm();
+            Ok(())
         }
         .await;
-        if let Err(e) = result {
-            let _ = tokio::fs::remove_file(&temp_path).await;
-            return Err(e);
-        }
+        result?;
         self.extensions.insert(target_id.to_string(), ext);
 
         tracing::debug!(
@@ -780,6 +817,8 @@ fn try_reflink_range(
         src_length: part_len,
         dest_offset: dst_off,
     };
+    // SAFETY: `range` is a valid, initialized `file_clone_range` and both file
+    // descriptors are owned, open files; the kernel only reads the struct.
     let rc = unsafe { libc::ioctl(target_file.as_raw_fd(), FICLONERANGE, &raw const range) };
     if rc == 0 {
         return Ok(true);
@@ -872,6 +911,8 @@ fn copy_part_blocking(
             let want = remaining.min(CHUNK) as libc::size_t;
             let mut in_off = src_off as libc::off_t;
             let mut out_off = dst_off as libc::off_t;
+            // SAFETY: both file descriptors are open and valid for the duration
+            // of the call, and the offset pointers reference initialized locals.
             let rc = unsafe {
                 libc::copy_file_range(
                     part.as_raw_fd(),
@@ -1027,8 +1068,9 @@ impl StorageBackend for LocalBackend {
         let path = self.resolve_path(id).ok_or(StorageError::NotFound)?;
         ensure_not_frozen(self, id).await?;
 
-        if start > meta.size || end >= meta.size {
-            // `end` is inclusive, so it must stay strictly below the file size.
+        if start > end || end >= meta.size {
+            // `end` is inclusive, so it must stay strictly below the file size,
+            // and `start > end` would underflow the length computation below.
             return Err(StorageError::Io(format!(
                 "range {}-{} out of bounds for {} byte file",
                 start, end, meta.size
@@ -1205,6 +1247,7 @@ impl LocalBackend {
                         StorageError::Io(format!("create temp failed: {e}"))
                     }
                 })?;
+            let mut guard = TempFileGuard::new(temp_path.clone());
             while let Some(chunk) = data.next().await {
                 let chunk = chunk?;
                 tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
@@ -1215,12 +1258,11 @@ impl LocalBackend {
                 .await
                 .map_err(|e| StorageError::Io(format!("flush failed: {e}")))?;
             drop(file);
-            publish_new_file(&temp_path, path).await
+            publish_new_file(&temp_path, path).await?;
+            guard.disarm();
+            Ok(())
         }
         .await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_file(&temp_path).await;
-        }
         if result.is_ok() {
             self.extensions.insert(id.to_string(), ext.to_string());
             self.meta_cache.remove(id);
@@ -1290,5 +1332,38 @@ fn etag_from_metadata(meta: &std::fs::Metadata) -> String {
                 .unwrap_or(0),
             meta.len()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temp_file_guard_removes_partial_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".live.f1.tmp");
+        std::fs::write(&path, b"partial").unwrap();
+
+        {
+            let _guard = TempFileGuard::new(path.clone());
+            assert!(path.exists());
+        }
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn temp_file_guard_keeps_published_file_when_disarmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".live.f2.tmp");
+        std::fs::write(&path, b"partial").unwrap();
+
+        {
+            let mut guard = TempFileGuard::new(path.clone());
+            guard.disarm();
+        }
+
+        assert!(path.exists());
     }
 }

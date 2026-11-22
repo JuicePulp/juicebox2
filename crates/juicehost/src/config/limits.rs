@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::config::{ConfigError, LimitsFile};
+use crate::config::{ConfigError, LimitsFile, MAX_RANGE_RESPONSE_MB};
 
 /// Byte sizes are already converted from GB and MB.
 #[derive(Debug)]
@@ -69,9 +69,21 @@ impl LimitsSettings {
     }
 
     pub fn load(file: &LimitsFile, allowed_ttl_hours: &[f64]) -> Result<Self, ConfigError> {
-        let min_free_space_bytes = file.min_free_space_gb * 1024 * 1024 * 1024;
-        let max_file_size_bytes = file.max_file_size_mb * 1024 * 1024;
-        let min_file_size_bytes = file.size_scale.min_file_size_mb * 1024 * 1024;
+        let min_free_space_bytes = file
+            .min_free_space_gb
+            .checked_mul(1024 * 1024 * 1024)
+            .ok_or_else(|| ConfigError::InvalidLimits("min_free_space_gb is too large".into()))?;
+        let max_file_size_bytes = file
+            .max_file_size_mb
+            .checked_mul(1024 * 1024)
+            .ok_or_else(|| ConfigError::InvalidLimits("max_file_size_mb is too large".into()))?;
+        let min_file_size_bytes = file
+            .size_scale
+            .min_file_size_mb
+            .checked_mul(1024 * 1024)
+            .ok_or_else(|| {
+                ConfigError::InvalidLimits("size_scale.min_file_size_mb is too large".into())
+            })?;
         if file.size_scale.budget_gib_hours.is_some() {
             tracing::warn!("[limits.size_scale].budget_gib_hours is deprecated; caps are cubic");
         }
@@ -87,7 +99,32 @@ impl LimitsSettings {
         } else {
             BTreeMap::new()
         };
-        let max_range_response_bytes = file.max_range_response_mb * 1024 * 1024;
+        if file.max_range_response_mb == 0 {
+            return Err(ConfigError::InvalidLimits(
+                "max_range_response_mb must be at least 1".into(),
+            ));
+        }
+        if file.max_range_response_mb > MAX_RANGE_RESPONSE_MB {
+            return Err(ConfigError::InvalidLimits(format!(
+                "max_range_response_mb must not exceed {MAX_RANGE_RESPONSE_MB}"
+            )));
+        }
+        let max_range_response_bytes = file
+            .max_range_response_mb
+            .checked_mul(1024 * 1024)
+            .ok_or_else(|| {
+                ConfigError::InvalidLimits("max_range_response_mb is too large".into())
+            })?;
+        if file.max_concurrent_uploads == 0 {
+            return Err(ConfigError::InvalidLimits(
+                "max_concurrent_uploads must be at least 1".into(),
+            ));
+        }
+        if file.max_concurrent_downloads == 0 {
+            return Err(ConfigError::InvalidLimits(
+                "max_concurrent_downloads must be at least 1".into(),
+            ));
+        }
         let max_concurrent_uploads = file.max_concurrent_uploads;
         let max_concurrent_downloads = file.max_concurrent_downloads;
         let max_concat_parts = file.max_concat_parts;

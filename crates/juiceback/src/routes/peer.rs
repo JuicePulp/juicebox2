@@ -81,6 +81,8 @@ pub struct PeerRejectionResponse {
 
 /// Bounds the relay's batch so one announce cannot pin a DB worker.
 const MAX_AUTHORIZE_IDS: usize = 1000;
+/// Bounds the heartbeat's id list so one request cannot build a huge query.
+const MAX_HEARTBEAT_IDS: usize = 1000;
 
 fn validate_register(payload: &PeerRegisterRequest) -> Result<String, AppError> {
     if !crate::utils::is_valid_id(&payload.id) {
@@ -90,7 +92,10 @@ fn validate_register(payload: &PeerRegisterRequest) -> Result<String, AppError> 
             crate::constants::MAX_CUSTOM_ID_LEN,
         )));
     }
-    if payload.password.as_deref().is_some_and(|p| !p.trim().is_empty())
+    if payload
+        .password
+        .as_deref()
+        .is_some_and(|p| !p.trim().is_empty())
         || payload.is_encrypted
     {
         return Err(AppError::BadRequest(
@@ -105,7 +110,9 @@ fn validate_register(payload: &PeerRegisterRequest) -> Result<String, AppError> 
         return Err(AppError::BadRequest("mime_type is required".into()));
     }
     if payload.size_bytes < 0 {
-        return Err(AppError::BadRequest("size_bytes must be non-negative".into()));
+        return Err(AppError::BadRequest(
+            "size_bytes must be non-negative".into(),
+        ));
     }
     if !payload.ttl_hours.is_finite() || payload.ttl_hours <= 0.0 {
         return Err(AppError::BadRequest("ttl_hours must be positive".into()));
@@ -168,7 +175,9 @@ pub async fn register_handler(
     let device_id = claims.sub.clone();
     let existing_id = payload.id.clone();
     let existing = state
-        .db_call("peer_get_existing", move |db| db::get_file(db, &existing_id))
+        .db_call("peer_get_existing", move |db| {
+            db::get_file(db, &existing_id)
+        })
         .await?;
     let existing_token = check_existing(existing, &device_id)?;
 
@@ -194,7 +203,9 @@ pub async fn register_handler(
 
     let to_insert = record.clone();
     state
-        .db_call("replace_peer_file", move |db| db::replace_peer_file(db, &to_insert))
+        .db_call("replace_peer_file", move |db| {
+            db::replace_peer_file(db, &to_insert)
+        })
         .await?;
 
     let (url, raw_url, download_url) = crate::utils::share_links(
@@ -258,6 +269,15 @@ pub async fn heartbeat_handler(
     DeviceAuth(claims): DeviceAuth,
     Json(payload): Json<PeerHeartbeatRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    if payload
+        .ids
+        .as_ref()
+        .is_some_and(|ids| ids.len() > MAX_HEARTBEAT_IDS)
+    {
+        return Err(AppError::BadRequest(format!(
+            "too many ids (max {MAX_HEARTBEAT_IDS})"
+        )));
+    }
     let now = chrono::Utc::now().timestamp();
     let device_id = claims.sub.clone();
     let ids = payload.ids;
@@ -285,9 +305,7 @@ fn authorize_ids(
         let reason = match db::get_file(db, id)? {
             None => Some("not found"),
             Some(record) if !record.is_peer() => Some("not a peer file"),
-            Some(record)
-                if !crate::utils::constant_time_eq(&record.peer_device_id, device_id) =>
-            {
+            Some(record) if !crate::utils::constant_time_eq(&record.peer_device_id, device_id) => {
                 Some("owned by another device")
             }
             Some(record) if record.expires_at < now => Some("expired"),

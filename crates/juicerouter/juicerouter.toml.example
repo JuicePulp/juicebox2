@@ -12,6 +12,9 @@ juiceback_url = "http://127.0.0.1:6401"
 public_base_url = "https://f-r.juicey.dev"
 # Where files with no storage_host live (the local juicehost).
 home_url = "https://f.juicey.dev"
+# Browser origins allowed on routing/status endpoints. When empty, the origins
+# of home_url/public_base_url and loopback dev origins are allowed.
+# allowed_origins = ["https://f.juicey.dev"]
 # Storage nodes reject /internal calls without this header when they set
 # [security] allowed_origins.
 juiceback_origin = "https://box.juicey.dev"

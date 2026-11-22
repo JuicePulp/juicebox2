@@ -52,7 +52,11 @@ pub fn proxy_target(path: &str) -> Option<Upstream> {
         || path.starts_with("/file/")
     {
         Some(Upstream::Juiceback)
-    } else if path.starts_with("/f/") || path.starts_with("/v/") || path.starts_with("/d/") {
+    } else if path.starts_with("/f/")
+        || path.starts_with("/v/")
+        || path.starts_with("/d/")
+        || path.starts_with("/e/")
+    {
         Some(Upstream::Juicehost)
     } else {
         None
@@ -138,7 +142,7 @@ pub async fn proxy_handler(
                 %method,
                 path = %path,
                 status = %response.status(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
+                elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 "proxied request"
             );
             response
@@ -292,6 +296,7 @@ mod tests {
         assert!(matches!(proxy_target("/f/xyz"), Some(Upstream::Juicehost)));
         assert!(matches!(proxy_target("/v/xyz"), Some(Upstream::Juicehost)));
         assert!(matches!(proxy_target("/d/xyz"), Some(Upstream::Juicehost)));
+        assert!(matches!(proxy_target("/e/xyz"), Some(Upstream::Juicehost)));
         assert!(proxy_target("/c/xyz").is_none());
         assert!(proxy_target("/").is_none());
         assert!(proxy_target("/admin").is_none());

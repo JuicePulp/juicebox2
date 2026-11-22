@@ -224,6 +224,20 @@ async fn local_get_not_found() {
 }
 
 #[tokio::test]
+async fn local_get_range_stream_rejects_inverted_range() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("range", "f.txt", Bytes::from_static(b"0123456789"), None)
+        .await
+        .unwrap();
+    // start > end previously reached `end - start + 1` and underflowed.
+    assert!(backend.get_range_stream("range", 7, 3).await.is_err());
+    // start == size is out of bounds too.
+    assert!(backend.get_range_stream("range", 10, 10).await.is_err());
+    assert!(backend.get_range_stream("range", 0, 9).await.is_ok());
+}
+
+#[tokio::test]
 async fn local_concat() {
     let (_dir, backend) = setup_local_backend().await;
     backend

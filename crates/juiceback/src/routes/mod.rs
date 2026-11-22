@@ -202,6 +202,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .allow_origin(origins)
             .allow_methods([
                 Method::GET,
+                Method::HEAD,
                 Method::POST,
                 Method::PATCH,
                 Method::DELETE,
@@ -215,6 +216,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 header::HeaderName::from_static("upload-length"),
                 header::HeaderName::from_static("upload-offset"),
                 header::HeaderName::from_static("upload-metadata"),
+                header::HeaderName::from_static("x-reserve-id"),
                 header::HeaderName::from_static("tus-resumable"),
                 header::HeaderName::from_static(juiceproto::headers::DELETE_TOKEN),
                 header::HeaderName::from_static(juiceproto::headers::FILE_PASSWORD),

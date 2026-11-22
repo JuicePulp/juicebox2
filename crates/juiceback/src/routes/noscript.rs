@@ -106,12 +106,13 @@ pub async fn report_submit_handler(
         })
         .await?;
 
-    let report_reason = &form.reason;
+    let url_len = file_url.len();
+    let reason_len = form.reason.trim().len();
     let report_ip = hashed_ip
         .as_ref()
         .map(|h| crate::utils::truncate_hash(h))
         .unwrap_or("unknown");
-    tracing::info!("report #{report_id}: url={file_url} reason={report_reason} ip={report_ip}");
+    tracing::info!("report #{report_id}: url_len={url_len} reason_len={reason_len} ip={report_ip}");
 
     notify::dispatch_report_notifications(
         &state,
@@ -194,13 +195,13 @@ pub async fn feedback_submit_handler(
         .await?;
 
     let message_len = message.len();
-    let feedback_email = &form.email;
+    let email_len = email_val.as_ref().map_or(0, String::len);
     let feedback_ip = hashed_ip
         .as_ref()
         .map(|h| crate::utils::truncate_hash(h))
         .unwrap_or("unknown");
     tracing::info!(
-        "feedback #{feedback_id}: len={message_len} email={feedback_email} ip={feedback_ip}"
+        "feedback #{feedback_id}: len={message_len} email_len={email_len} ip={feedback_ip}"
     );
 
     Ok(Redirect::to("/feedback?submitted=1"))
@@ -377,8 +378,7 @@ pub fn wants_html(headers: &axum::http::HeaderMap) -> bool {
     headers
         .get(header::ACCEPT)
         .and_then(|v| v.to_str().ok())
-        .map(|a| a.contains("text/html"))
-        .unwrap_or(false)
+        .is_some_and(|a| a.contains("text/html"))
 }
 
 #[cfg(test)]

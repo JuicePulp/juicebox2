@@ -92,35 +92,44 @@ pub fn record_site_visit(conn: &Connection, ip_hash: &str, now: i64) -> Result<(
 }
 
 pub fn file_stats_for_ids(conn: &Connection, ids: &[String]) -> Result<Vec<FileStatsAggregate>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for chunk in ids.chunks(crate::constants::SQL_PARAM_CHUNK_SIZE) {
+        let unique: Vec<&String> = chunk.iter().filter(|id| seen.insert(id.as_str())).collect();
+        if unique.is_empty() {
+            continue;
+        }
+        let placeholders: String = (1..=unique.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT file_id,
+                COALESCE(SUM(views > 0), 0),
+                COALESCE(SUM(views), 0),
+                COALESCE(SUM(downloads > 0), 0),
+                COALESCE(SUM(downloads), 0),
+                MAX(last_seen_at)
+             FROM file_stats WHERE file_id IN ({placeholders}) GROUP BY file_id"
+        );
+        let params: Vec<&dyn rusqlite::ToSql> =
+            unique.iter().map(|s| *s as &dyn rusqlite::ToSql).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok(FileStatsAggregate {
+                file_id: row.get(0)?,
+                viewers: row.get(1)?,
+                views: row.get(2)?,
+                downloaders: row.get(3)?,
+                downloads: row.get(4)?,
+                last_seen_at: row.get(5)?,
+            })
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
     }
-    let placeholders: String = (1..=ids.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT file_id,
-            COALESCE(SUM(views > 0), 0),
-            COALESCE(SUM(views), 0),
-            COALESCE(SUM(downloads > 0), 0),
-            COALESCE(SUM(downloads), 0),
-            MAX(last_seen_at)
-         FROM file_stats WHERE file_id IN ({placeholders}) GROUP BY file_id"
-    );
-    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params.as_slice(), |row| {
-        Ok(FileStatsAggregate {
-            file_id: row.get(0)?,
-            viewers: row.get(1)?,
-            views: row.get(2)?,
-            downloaders: row.get(3)?,
-            downloads: row.get(4)?,
-            last_seen_at: row.get(5)?,
-        })
-    })?;
-    rows.collect()
+    Ok(out)
 }
 
 pub fn site_overview(conn: &Connection) -> Result<SiteOverview> {

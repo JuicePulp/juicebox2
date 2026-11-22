@@ -2,23 +2,24 @@ import {
   startUpload,
   generateId,
   extractServerId
-} from "./upload-engine.js?v=2.2.0-r10";
+} from "./upload-engine.js?v=2.2.0-r13";
 import {
   UPLOAD_URL,
   readUploadMode,
   uploadMethodFor,
   lastUploadBps
-} from "./upload-config.js?v=2.2.0-r10";
-import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r10";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r10";
+} from "./upload-config.js?v=2.2.0-r13";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r13";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r13";
 import {
   loadQueueItems,
   queueItem,
   queueItemNow,
   removeQueueItem,
   flushQueue
-} from "./upload-store.js?v=2.2.0-r10";
-import { announce, isTerminal } from "./util.js?v=2.2.0-r10";
+} from "./upload-store.js?v=2.2.0-r13";
+import { announce, isTerminal } from "./util.js?v=2.2.0-r13";
+import { E } from "./upload-errors.js?v=2.2.0-r13";
 const listeners = new Set;
 let items = [];
 const persistedIds = new Set;
@@ -46,7 +47,7 @@ function hydrateRecord(record) {
       ...record,
       state: "paused",
       pausedAt: Date.now(),
-      errorCode: "",
+      errorCode: 0,
       errorMessage: ""
     };
     // Do not write the paused state yet: another tab's worker may still be uploading it.
@@ -140,9 +141,16 @@ let workerValidating = false;
 const workerInputs = new Map;
 const workerAckTimers = new Map;
 const workerAcked = new Set;
+// Only item/snapshot deliveries advance this — pong/probe-ok are answered on the
+// tab's own port and cannot prove that broadcasts still reach any tab.
+let lastItemAt = 0;
 // The worker must ack an enqueue within this window or the upload restarts locally.
 const WORKER_ACK_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 8000;
+// No item/snapshot for this long while an upload is tracked means the worker can
+// answer pings but can no longer broadcast. Longer than any normal quiet phase
+// (TUS health polls, ticket finalisation) so busy uploads are not retired.
+const DEAF_WORKER_MS = 45000;
 const PONG_TIMEOUT_MS = 6000;
 const WORKER_PROBE_TIMEOUT_MS = 4000;
 // A failed handshake disables the worker only briefly; another tab may have fixed it.
@@ -221,6 +229,13 @@ function startHeartbeat() {
     }
     if (workerInputs.size === 0 && workerAcked.size === 0)
       return;
+    // A worker can keep answering pings on this tab's port while its broadcast
+    // Set is empty, so no item/snapshot ever arrives. A long silent stretch while
+    // this tab has an upload in flight means it is deaf: retire it and fall back.
+    if (workerInputs.size > 0 && lastItemAt && Date.now() - lastItemAt > DEAF_WORKER_MS) {
+      restartWithoutWorker();
+      return;
+    }
     if (pingStartedAt) {
       if (Date.now() - pingStartedAt >= PONG_TIMEOUT_MS)
         restartWithoutWorker();
@@ -234,41 +249,15 @@ function startHeartbeat() {
     }
   }, HEARTBEAT_INTERVAL_MS);
 }
-// Worker-acked items restart as paused; that transfer may still be running.
-function restartWithoutWorker() {
-  pingStartedAt = 0;
-  if (workerHelloTimer) {
-    clearTimeout(workerHelloTimer);
-    workerHelloTimer = null;
-  }
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
+function collectWorkerUploads() {
   const pending = [];
   for (const [id, input] of workerInputs) {
     if (!workerAcked.has(id))
       pending.push([id, input]);
   }
-  const acked = [...workerAcked];
-  if (port) {
-    for (const [id] of pending) {
-      try { port.postMessage({ type: "cancel", id }); } catch {}
-    }
-    try { port.close(); } catch {}
-  }
-  for (const done of workerProbes.values())
-    done(false);
-  workerProbes.clear();
-  port = null;
-  workerDead = true;
-  workerRetryAt = Date.now() + WORKER_RETRY_MS;
-  workerValidating = false;
-  for (const id of workerInputs.keys())
-    clearWorkerTimer(id);
-  workerInputs.clear();
-  workerAcked.clear();
-
+  return { pending, acked: [...workerAcked] };
+}
+function fallbackLocalUploads(pending, acked) {
   for (const [id, input] of pending) {
     const item = items.find((i) => i.id === id);
     if (!item || isTerminal(item.state))
@@ -282,11 +271,31 @@ function restartWithoutWorker() {
         ...item,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: "",
       });
     }
   }
+}
+// Bumps the generation so the next ensurePort() opens a genuinely new
+// SharedWorker (and new script URL), then restarts this tab's uploads locally.
+function retireWithFallback() {
+  const { pending, acked } = collectWorkerUploads();
+  if (port) {
+    // Cancel acked ids too: that transfer is still running in the worker we abandon.
+    for (const id of [...pending.map(([id]) => id), ...acked]) {
+      try { port.postMessage({ type: "cancel", id }); } catch {}
+    }
+  }
+  retireWorker();
+  fallbackLocalUploads(pending, acked);
+}
+// Worker-acked items restart as paused; that transfer may still be running.
+function restartWithoutWorker() {
+  pingStartedAt = 0;
+  retireWithFallback();
+  workerDead = true;
+  workerRetryAt = Date.now() + WORKER_RETRY_MS;
 }
 function onWorkerMessage(e) {
   workerHeard = true;
@@ -296,11 +305,17 @@ function onWorkerMessage(e) {
   if (msg.type === "probe-ok" && msg.nonce) {
     const done = workerProbes.get(msg.nonce);
     const expected = workerVersion();
+    let ok = !expected || !msg.version || msg.version === expected;
+    // A worker reporting a long broadcast idle while this tab has also seen no
+    // item/snapshot is a second, independent signal that it has gone deaf.
+    if (ok && (workerInputs.size || workerAcked.size) && typeof msg.idleMs === "number" && Date.now() - lastItemAt > DEAF_WORKER_MS && msg.idleMs > DEAF_WORKER_MS)
+      ok = false;
     if (done)
-      done(!expected || !msg.version || msg.version === expected);
+      done(ok);
     return;
   }
   if (msg.type === "snapshot" && Array.isArray(msg.items)) {
+    lastItemAt = Date.now();
     const active = [];
     for (const it of msg.items) {
       if (!it || !it.id)
@@ -322,6 +337,7 @@ function onWorkerMessage(e) {
       } catch {}
     }
   } else if (msg.type === "item" && msg.item) {
+    lastItemAt = Date.now();
     noteWorkerAlive(msg.item.id);
     if (isTerminal(msg.item.state))
       forgetWorkerItem(msg.item.id);
@@ -357,11 +373,18 @@ function ensurePort() {
       type: "module",
     });
     sw.port.onmessage = onWorkerMessage;
-    sw.onerror = () => {
+    // ping/probe are answered on this port directly; an error or an uncloneable
+    // message here means the protocol is broken even if pings still succeed.
+    const onWorkerError = () => {
       restartWithoutWorker();
     };
+    sw.onerror = onWorkerError;
+    sw.onmessageerror = onWorkerError;
+    sw.port.onmessageerror = onWorkerError;
+    sw.port.onerror = onWorkerError;
     sw.port.start();
     port = sw.port;
+    lastItemAt = Date.now();
     startHeartbeat();
     workerValidating = true;
     workerHeard = false;
@@ -410,10 +433,16 @@ async function checkWorker() {
     return null;
   if (await probeWorker(p, WORKER_PROBE_TIMEOUT_MS))
     return p;
-  // Do not replace a worker that may still be carrying this tab's uploads.
-  if (workerInputs.size > 0 || workerAcked.size > 0)
+  const hasUploads = workerInputs.size > 0 || workerAcked.size > 0;
+  // A worker answering probes but delivering no item/snapshot for two ack
+  // windows is deaf, not busy. Only a worker with fresh item activity is kept.
+  const stale = !lastItemAt || Date.now() - lastItemAt > DEAF_WORKER_MS;
+  if (hasUploads && !stale)
     return null;
-  retireWorker();
+  if (hasUploads)
+    retireWithFallback();
+  else
+    retireWorker();
   p = ensurePort();
   if (p && await probeWorker(p, WORKER_PROBE_TIMEOUT_MS))
     return p;
@@ -431,6 +460,13 @@ function ensureHealthyPort() {
   }
   return workerCheck;
 }
+// Control APIs are synchronous while ensureHealthyPort() is async, so at minimum
+// never post them to a port already known to be dead; callers fall back locally.
+function controlPort() {
+  if (workerDead || !port)
+    return null;
+  return port;
+}
 const localItems = new Map;
 const localHandles = new Map;
 function localUpsert(patch) {
@@ -443,7 +479,7 @@ function localUpsert(patch) {
         ...patch,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: ""
       };
     }
@@ -595,7 +631,7 @@ export async function resumeUpload(id, file, options = {}, fingerprint = "") {
     password: options.password || "",
     resumeAttempt: true,
     pausedAt: 0,
-    errorCode: "",
+    errorCode: 0,
     errorMessage: ""
   };
   upsertItem(next);
@@ -648,7 +684,7 @@ export function connectUploads() {
   void ensureHealthyPort();
 }
 export function cancelUpload(id) {
-  const p = ensurePort();
+  const p = controlPort();
   if (p) {
     try {
       p.postMessage({ type: "cancel", id });
@@ -665,7 +701,7 @@ export function removeUpload(id) {
     for (const tusId of uniqueTusIds(item))
       deleteTus(UPLOAD_URL, tusId);
   }
-  const p = ensurePort();
+  const p = controlPort();
   if (p) {
     try {
       p.postMessage({ type: "remove", id });
@@ -678,7 +714,7 @@ export function removeUpload(id) {
   removeItem(id);
 }
 export function updateUpload(id, patch) {
-  const p = ensurePort();
+  const p = controlPort();
   if (p) {
     try {
       p.postMessage({ type: "patch", id, patch });

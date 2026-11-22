@@ -3,18 +3,20 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{HeaderMap, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Redirect, Response},
 };
 use juiceproto::config::HostConfigResponse;
 use serde_json::json;
 
-use super::common::{BackendStatus, RangeResult, parse_range};
+use super::common::{
+    BackendStatus, ByteResponseHeaders, RangeResult, apply_byte_response_headers, parse_range,
+};
 use crate::{
     error::{JuicehostError, StorageError, not_found_html},
     state::AppState,
     storage,
-    storage::valid_component as is_valid_id,
+    storage::{R2Store, valid_component as is_valid_id},
 };
 
 #[utoipa::path(
@@ -227,6 +229,8 @@ pub(crate) async fn serve_stored_bytes(
     serve_stored_bytes_with_limit(state, headers, id, state.max_range_response_bytes).await
 }
 
+// The ciphertext endpoint keeps its own opaque-byte headers and permit
+// handling; only the 416 path uses the shared `ByteResponseHeaders` helper.
 async fn serve_stored_bytes_with_limit(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -259,6 +263,7 @@ async fn serve_stored_bytes_with_limit(
         && body.get("tier").and_then(|v| v.as_str()) == Some("hot")
         && let Some(key) = body.get("r2_key").and_then(|v| v.as_str())
         && key.starts_with("hot/")
+        && R2Store::valid_hot_key(key)
         && let Some(r2) = state.r2.as_ref()
     {
         if let Some(range_header) = headers.get(axum::http::header::RANGE)
@@ -289,13 +294,18 @@ async fn serve_stored_bytes_with_limit(
                     }
                 }
                 RangeResult::Unsatisfiable => {
-                    return Response::builder()
-                        .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(
-                            axum::http::header::CONTENT_RANGE,
-                            format!("bytes */{total_size}"),
-                        )
-                        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                    let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                    apply_byte_response_headers(
+                        &mut builder,
+                        ByteResponseHeaders {
+                            csp_mime: Some("application/octet-stream"),
+                            etag: Some(meta.etag.as_str()),
+                            content_range: Some(format!("bytes */{total_size}")),
+                            content_length: None,
+                            accept_ranges: true,
+                        },
+                    );
+                    return builder
                         .body(Body::empty())
                         .map_err(|_| JuicehostError::Internal);
                 }
@@ -350,13 +360,18 @@ async fn serve_stored_bytes_with_limit(
                     .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Unsatisfiable => {
-                return Response::builder()
-                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(
-                        axum::http::header::CONTENT_RANGE,
-                        format!("bytes */{total_size}"),
-                    )
-                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some("application/octet-stream"),
+                        etag: Some(meta.etag.as_str()),
+                        content_range: Some(format!("bytes */{total_size}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
+                return builder
                     .body(Body::empty())
                     .map_err(|_| JuicehostError::Internal);
             }
