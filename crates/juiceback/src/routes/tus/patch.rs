@@ -63,7 +63,7 @@ pub async fn patch_upload_handler(
                 id = %id,
                 req_offset,
                 content_length,
-                resp_offset = r.headers().get("upload-offset").and_then(|v| v.to_str().ok().map(str::to_string)),
+                resp_offset = r.headers().get("upload-offset").and_then(|v| v.to_str().ok()).map(str::to_string),
                 status = r.status().as_u16(),
                 elapsed_ms = elapsed.as_millis() as u64,
                 "tus_patch ok"

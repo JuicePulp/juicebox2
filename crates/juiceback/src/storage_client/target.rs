@@ -180,48 +180,54 @@ pub(crate) async fn resolve_host_public(
     port: u16,
     allow_private: bool,
 ) -> Result<(), HostError> {
+    resolve_public_addrs(host, port, allow_private)
+        .await
+        .map(|_| ())
+}
+
+/// Returns the exact addresses a host resolves to, so a caller can pin the
+/// connection to the set that passed the public-address check.
+async fn resolve_public_addrs(
+    host: &str,
+    port: u16,
+    allow_private: bool,
+) -> Result<Vec<std::net::SocketAddr>, HostError> {
     let normalized = host
         .trim_start_matches('[')
         .trim_end_matches(']')
         .to_ascii_lowercase();
-    if allow_private {
-        return Ok(());
-    }
-    if let Ok(ip) = normalized.parse::<std::net::IpAddr>() {
-        return if is_public_ip(ip) {
-            Ok(())
-        } else {
-            Err(HostError::NonPublicAddress(format!(
+    let mut addrs = if let Ok(ip) = normalized.parse::<std::net::IpAddr>() {
+        if !allow_private && !is_public_ip(ip) {
+            return Err(HostError::NonPublicAddress(format!(
                 "refusing to reach non-public address: {ip}"
-            )))
-        };
+            )));
+        }
+        vec![std::net::SocketAddr::new(ip, port)]
+    } else {
+        tokio::net::lookup_host((normalized.as_str(), port))
+            .await
+            .map_err(|e| HostError::Dns(format!("dns lookup failed for {normalized}: {e}")))?
+            .collect::<Vec<_>>()
+    };
+    if addrs.is_empty() {
+        return Err(HostError::Unresolved(format!(
+            "host did not resolve: {normalized}"
+        )));
     }
-    let addrs = tokio::net::lookup_host((normalized.as_str(), port))
-        .await
-        .map_err(|e| HostError::Dns(format!("dns lookup failed for {normalized}: {e}")))?;
-    let mut any = false;
-    for addr in addrs {
-        any = true;
-        if !is_public_ip(addr.ip()) {
+    if !allow_private {
+        if let Some(addr) = addrs.iter().find(|addr| !is_public_ip(addr.ip())) {
             return Err(HostError::NonPublicAddress(format!(
                 "refusing to reach non-public address: {}",
                 addr.ip()
             )));
         }
     }
-    if any {
-        Ok(())
-    } else {
-        Err(HostError::Unresolved(format!(
-            "host did not resolve: {normalized}"
-        )))
-    }
+    addrs.sort_unstable();
+    addrs.dedup();
+    Ok(addrs)
 }
 
-pub(crate) async fn check_outbound_url(
-    raw: &str,
-    allow_private: bool,
-) -> Result<String, HostError> {
+fn parse_outbound_url(raw: &str) -> Result<(url::Url, String, u16), HostError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(HostError::Empty("url is required"));
@@ -250,8 +256,48 @@ pub(crate) async fn check_outbound_url(
     let port = parsed
         .port_or_known_default()
         .ok_or(HostError::MissingPort("url must include a valid port"))?;
-    resolve_host_public(&host, port, allow_private).await?;
+    Ok((parsed, host, port))
+}
+
+pub(crate) async fn check_outbound_url(
+    raw: &str,
+    allow_private: bool,
+) -> Result<String, HostError> {
+    let (parsed, host, port) = parse_outbound_url(raw)?;
+    resolve_public_addrs(&host, port, allow_private).await?;
     Ok(parsed.to_string())
+}
+
+/// Validates a URL and pins a client to the exact addresses that passed the
+/// public-address check. `resolve_to_addrs` keeps the URL host as the Host
+/// header and TLS SNI name, so DNS rebinding cannot redirect the connection
+/// after validation.
+pub(crate) async fn validated_outbound_client(
+    raw: &str,
+    allow_private: bool,
+) -> Result<(String, reqwest::Client), HostError> {
+    // Full URL validation first; the subsequent resolution used for pinning is
+    // itself checked too, so a rebind between the two cannot slip through.
+    let normalized = crate::storage_client::check_outbound_url(raw, allow_private).await?;
+    let (parsed, host, port) = parse_outbound_url(&normalized)?;
+    let addrs = resolve_public_addrs(&host, port, allow_private).await?;
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::constants::HTTP_CONNECT_TIMEOUT_SECS,
+        ))
+        .pool_idle_timeout(std::time::Duration::from_secs(
+            crate::constants::HTTP_IDLE_TIMEOUT_SECS,
+        ))
+        .pool_max_idle_per_host(4);
+    if host.parse::<std::net::IpAddr>().is_err() {
+        builder = builder.resolve_to_addrs(&host, &addrs);
+    }
+    let client = builder
+        .build()
+        .map_err(|e| HostError::ClientBuild(format!("failed to build pinned media client: {e}")))?;
+    Ok((parsed.to_string(), client))
 }
 
 pub(crate) async fn check_storage_host(

@@ -108,6 +108,7 @@ function normalizeFile(f) {
     download_url: f.download_url ?? "",
     delete_token: f.delete_token ?? "",
     storage_host: f.storage_host ?? "",
+    status: f.status ?? "",
   };
 }
 
@@ -478,6 +479,17 @@ function enhanceCard(card, el, f, locale) {
     tag.textContent = t(locale, "files.stored_on", { host: stripHost(storageHost) });
     headerEl.append(tag);
   }
+  const status = f.status || el.getAttribute("data-status") || "";
+  if ((status === "peer" || status === "peer_offline") && headerEl && !headerEl.querySelector(".peer-status-tag")) {
+    const offline = status === "peer_offline";
+    const label = offline ? "On your device (offline)" : "On your device";
+    const badge = document.createElement("span");
+    badge.className = "storage-host-tag peer-status-tag" + (offline ? " storage-host-tag--peer-offline" : "");
+    badge.textContent = label;
+    badge.title = offline ? "Peer offline" : label;
+    badge.setAttribute("aria-label", badge.title);
+    headerEl.append(badge);
+  }
   if (f.protected && headerEl && !headerEl.querySelector(".storage-host-tag--locked")) {
     const lock = document.createElement("span");
     lock.className = "storage-host-tag storage-host-tag--locked";
@@ -643,6 +655,7 @@ export function initFilesCard() {
       expires_at: Number(el.getAttribute("data-expires")) || 0,
       url: el.getAttribute("data-url") || "",
       storage_host: el.getAttribute("data-storage-host") || "",
+      status: el.getAttribute("data-status") || "",
     };
     enhanceCard(card, el, data, locale);
   });
@@ -723,6 +736,7 @@ async function backfillMissing(card, locale) {
         expires_at: Number(el.getAttribute("data-expires")) || 0,
         url: el.getAttribute("data-url") || "",
         storage_host: el.getAttribute("data-storage-host") || "",
+        status: el.getAttribute("data-status") || "",
       };
       enhanceCard(card, el, data, locale);
     });

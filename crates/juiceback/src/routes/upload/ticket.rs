@@ -11,14 +11,10 @@ use crate::{
 
 /// Snaps to the nearest allowed value or the default.
 #[must_use]
-pub fn clamp_ttl_hours(
-    allowed_ttl: &[f64],
-    default_ttl_hours: f64,
-    ttl_hours: Option<f64>,
-) -> f64 {
-    ttl_hours
-        .map(|hours| crate::constants::clamp_to_nearest(hours, allowed_ttl))
-        .unwrap_or(default_ttl_hours)
+pub fn clamp_ttl_hours(allowed_ttl: &[f64], default_ttl_hours: f64, ttl_hours: Option<f64>) -> f64 {
+    ttl_hours.map_or(default_ttl_hours, |hours| {
+        crate::constants::clamp_to_nearest(hours, allowed_ttl)
+    })
 }
 
 /// Snaps to the nearest allowed value or the default; returns seconds.
@@ -96,6 +92,43 @@ pub async fn insert_owned_pending(
     Ok(record)
 }
 
+/// Shared by the direct and parallel complete handlers: the ticket must name
+/// this file/session and the pending row must be owned by the caller.
+pub async fn verify_ticket_and_ownership(
+    state: &Arc<AppState>,
+    ticket: &str,
+    file_id: &str,
+    user_id: &str,
+    get_op: &'static str,
+    own_op: &'static str,
+) -> Result<FileRecord, AppError> {
+    let claims = juiceproto::ticket::verify(ticket, &state.config.ticket_jwt_secret)
+        .map_err(|_| AppError::Unauthorized("Invalid upload ticket".into()))?;
+    if claims.file_id != file_id || claims.user_id != user_id {
+        return Err(AppError::Unauthorized(
+            "Upload ticket does not match session".into(),
+        ));
+    }
+    let lookup_id = file_id.to_string();
+    let file = state
+        .db_call(get_op, move |db| db::get_file(db, &lookup_id))
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let owner_id = user_id.to_string();
+    let owned_id = file_id.to_string();
+    let owned = state
+        .db_call(own_op, move |db| {
+            db::client_owns_file(db, &owner_id, &owned_id)
+        })
+        .await?;
+    if !owned {
+        return Err(AppError::Unauthorized(
+            "Upload is not owned by this session".into(),
+        ));
+    }
+    Ok(file)
+}
+
 /// The middle URL bypasses the viewer page; the last is a direct download.
 pub fn public_urls_for(state: &Arc<AppState>, record: &FileRecord) -> (String, String, String) {
     crate::utils::share_links(
@@ -142,34 +175,30 @@ pub async fn notify_device(
         "download_url": download_url,
     })
     .to_string();
-    if let Some(guard) = state.connected_devices.get(user_id) {
-        for dev in guard.value().iter() {
-            let matches = dev
-                .try_lock()
-                .map(|l| l.device_id == device_id)
-                .unwrap_or(false);
-            if matches {
-                if let Ok(locked) = dev.try_lock() {
-                    let _ = locked.sender.send(upload_request).await;
-                }
-                break;
-            }
-        }
+    // Clone the sender and release both the DashMap ref and device lock before
+    // awaiting, so a slow/blocked channel cannot hold either lock.
+    let sender = state.connected_devices.get(user_id).and_then(|guard| {
+        guard
+            .value()
+            .iter()
+            .filter_map(|dev| dev.try_lock().ok())
+            .find(|locked| locked.device_id == device_id)
+            .map(|locked| locked.sender.clone())
+    });
+    if let Some(sender) = sender
+        && let Err(err) = sender.send(upload_request).await
+    {
+        tracing::warn!("device {device_id} upload notification dropped: {err}");
     }
 }
 
 pub fn device_connected(state: &Arc<AppState>, user_id: &str, device_id: &str) -> bool {
-    state
-        .connected_devices
-        .get(user_id)
-        .map(|guard| {
-            guard.value().iter().any(|d| {
-                d.try_lock()
-                    .map(|l| l.device_id == device_id)
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    state.connected_devices.get(user_id).is_some_and(|guard| {
+        guard
+            .value()
+            .iter()
+            .any(|d| d.try_lock().is_ok_and(|l| l.device_id == device_id))
+    })
 }
 
 #[cfg(test)]

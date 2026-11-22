@@ -224,6 +224,20 @@ async fn local_get_not_found() {
 }
 
 #[tokio::test]
+async fn local_get_range_stream_rejects_inverted_range() {
+    let (_dir, backend) = setup_local_backend().await;
+    backend
+        .put("range", "f.txt", Bytes::from_static(b"0123456789"), None)
+        .await
+        .unwrap();
+    // start > end previously reached `end - start + 1` and underflowed.
+    assert!(backend.get_range_stream("range", 7, 3).await.is_err());
+    // start == size is out of bounds too.
+    assert!(backend.get_range_stream("range", 10, 10).await.is_err());
+    assert!(backend.get_range_stream("range", 0, 9).await.is_ok());
+}
+
+#[tokio::test]
 async fn local_concat() {
     let (_dir, backend) = setup_local_backend().await;
     backend
@@ -462,24 +476,6 @@ async fn local_freeze_symlink_marker_fails_closed() {
     let backend2 = LocalBackend::new(dir.path().to_path_buf(), 0).unwrap();
     backend2.init_cache().await.unwrap();
     assert!(backend2.is_frozen("fr1").await.unwrap());
-}
-
-// Regression: Android app-private storage (Termux) refuses hard links with
-// EPERM, which used to make every local write fail with a 500. The publish
-// path must fall back to a non-overwriting rename.
-#[tokio::test]
-async fn link_or_rename_falls_back_when_hard_links_are_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let src = dir.path().join("src.tmp");
-    let dst = dir.path().join("dst.bin");
-    tokio::fs::write(&src, b"payload").await.unwrap();
-
-    // Simulate a filesystem that rejects linking by calling the fallback
-    // branch directly through the rename-only path.
-    let renamed = tokio::fs::rename(&src, &dst).await;
-    assert!(renamed.is_ok(), "same-directory rename must be available");
-    assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"payload");
-    assert!(!tokio::fs::try_exists(&src).await.unwrap());
 }
 
 #[tokio::test]

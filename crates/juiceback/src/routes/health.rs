@@ -5,6 +5,7 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
 };
+use juiceproto::config::HostConfigResponse;
 use serde_json::json;
 use utoipa::OpenApi;
 
@@ -35,7 +36,7 @@ pub async fn health_handler() -> Json<serde_json::Value> {
     ),
     tag = "General",
 )]
-pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<HostConfigResponse> {
     let jh = match state.juicehost_config() {
         Ok(cfg) => {
             if state.juicehost_config_stale() {
@@ -49,49 +50,62 @@ pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_js
         Err(_) => state.refresh_juicehost_config().await.ok(),
     };
 
+    // Peer capabilities are backend-owned, so they must survive both the
+    // healthy and degraded config paths.
+    let peer_relay_url = state.config.peer_relay_url.clone();
+    let peer_enabled = peer_relay_url.is_some();
+
     match jh.as_ref() {
         Some(cfg) => {
-            let danger_level_str = cfg.danger_level.as_str();
-            Json(json!({
-                "status": "ok",
-                "version": env!("CARGO_PKG_VERSION"),
-                "max_file_size_bytes": cfg.max_file_size_bytes,
-                "max_file_size_hard_bytes": cfg.hard_max_file_size_bytes,
-                "max_file_size_by_ttl_hours": cfg.max_file_size_by_ttl_hours,
-                "default_ttl_hours": cfg.default_ttl_hours,
-                "allowed_ttl_hours": cfg.allowed_ttl_hours,
-                "danger_level": danger_level_str,
-                "quick_link": cfg.quick_link,
-                "custom_id": cfg.custom_id_enabled,
-                "direct_upload": state.config.direct_upload_enabled
-                    && !state.config.public_juicehost_url.is_empty(),
-                "upload_mode": if state.config.dte_enabled
-                    && state.config.direct_upload_enabled
-                    && !state.config.public_juicehost_url.is_empty()
-                {
-                    "direct-prefer"
-                } else {
-                    "standard"
-                },
-                "cobalt": state.config.cobalt_enabled,
-                "encrypted": state.config.storage_file_key().is_ok(),
-                "fetch_rate_limit_per_minute": crate::constants::COBALT_FETCH_RATE_LIMIT_PER_MINUTE,
-                // Native clients size chunks and parts from these instead of
-                // hardcoding server limits.
-                "tus_patch_max_bytes": crate::constants::TUS_PATCH_MAX_BYTES,
-                "max_tus_parallel_parts": crate::constants::MAX_TUS_PARALLEL_PARTS,
-                "direct_parallel_max_parts": crate::routes::upload::parallel::DIRECT_MAX_PARTS,
-                "direct_parallel_max_part_bytes": crate::routes::upload::parallel::DIRECT_MAX_PART_BYTES,
-                "public_base_url": state.config.public_base_url,
-                "rate_limit_per_minute": state.config.rate_limit_per_minute,
-                "quic": cfg!(feature = "quic"),
-                "juicehost_url": state.config.juicehost_url,
-            }))
+            let direct_upload =
+                state.config.direct_upload_enabled && !state.config.public_juicehost_url.is_empty();
+            Json(HostConfigResponse {
+                status: Some("ok".to_owned()),
+                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                max_file_size_bytes: Some(cfg.max_file_size_bytes),
+                max_file_size_hard_bytes: Some(cfg.hard_max_file_size_bytes),
+                max_file_size_by_ttl_hours: Some(cfg.max_file_size_by_ttl_hours.clone()),
+                default_ttl_hours: Some(cfg.default_ttl_hours),
+                allowed_ttl_hours: Some(cfg.allowed_ttl_hours.clone()),
+                danger_level: Some(cfg.danger_level.as_str().to_owned()),
+                quick_link: Some(cfg.quick_link),
+                custom_id: Some(cfg.custom_id_enabled),
+                direct_upload: Some(direct_upload),
+                upload_mode: Some(
+                    if state.config.dte_enabled && direct_upload {
+                        "direct-prefer"
+                    } else {
+                        "standard"
+                    }
+                    .to_owned(),
+                ),
+                cobalt: Some(state.config.cobalt_enabled),
+                encrypted: Some(state.config.storage_file_key().is_ok()),
+                fetch_rate_limit_per_minute: Some(
+                    crate::constants::COBALT_FETCH_RATE_LIMIT_PER_MINUTE,
+                ),
+                tus_patch_max_bytes: Some(crate::constants::TUS_PATCH_MAX_BYTES),
+                max_tus_parallel_parts: Some(crate::constants::MAX_TUS_PARALLEL_PARTS),
+                direct_parallel_max_parts: Some(crate::routes::upload::parallel::DIRECT_MAX_PARTS),
+                direct_parallel_max_part_bytes: Some(
+                    crate::routes::upload::parallel::DIRECT_MAX_PART_BYTES,
+                ),
+                public_base_url: Some(state.config.public_base_url.clone()),
+                rate_limit_per_minute: Some(state.config.rate_limit_per_minute),
+                quic: Some(cfg!(feature = "quic")),
+                juicehost_url: Some(state.config.juicehost_url.clone()),
+                peer_relay_url,
+                peer_enabled,
+                ..Default::default()
+            })
         }
-        None => Json(json!({
-            "status": "degraded",
-            "error": "juicehost config unavailable",
-        })),
+        None => Json(HostConfigResponse {
+            status: Some("degraded".to_owned()),
+            error: Some("juicehost config unavailable".to_owned()),
+            peer_relay_url,
+            peer_enabled,
+            ..Default::default()
+        }),
     }
 }
 

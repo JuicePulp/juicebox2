@@ -34,19 +34,28 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
     tracing::debug!("cleanup: starting sweep");
 
     let now = Utc::now().timestamp();
-    let report_cutoff =
-        now - state.config.report_retention_days as i64 * crate::constants::SECONDS_PER_DAY;
-    let feedback_cutoff =
-        now - state.config.feedback_retention_days as i64 * crate::constants::SECONDS_PER_DAY;
-    match state
-        .db_call("cleanup_ephemeral_data", move |db| {
-            db::cleanup_ephemeral_data(db, now, report_cutoff, feedback_cutoff)
-        })
-        .await
-    {
-        Ok(count) if count > 0 => tracing::info!("cleanup: purged {count} ephemeral rows"),
-        Err(error) => tracing::error!("cleanup: ephemeral data purge failed: {:?}", error),
-        _ => {}
+    let cutoff = |days: u64| -> Option<i64> {
+        i64::try_from(days)
+            .ok()
+            .and_then(|d| d.checked_mul(crate::constants::SECONDS_PER_DAY))
+            .and_then(|s| now.checked_sub(s))
+    };
+    if let (Some(report_cutoff), Some(feedback_cutoff)) = (
+        cutoff(state.config.report_retention_days),
+        cutoff(state.config.feedback_retention_days),
+    ) {
+        match state
+            .db_call("cleanup_ephemeral_data", move |db| {
+                db::cleanup_ephemeral_data(db, now, report_cutoff, feedback_cutoff)
+            })
+            .await
+        {
+            Ok(count) if count > 0 => tracing::info!("cleanup: purged {count} ephemeral rows"),
+            Err(error) => tracing::error!("cleanup: ephemeral data purge failed: {:?}", error),
+            _ => {}
+        }
+    } else {
+        tracing::warn!("cleanup: invalid retention days, skipping ephemeral data sweep");
     }
 
     match state
@@ -101,7 +110,9 @@ async fn run_cleanup_once(state: &Arc<AppState>) {
     let stale_ids: Vec<String> = state
         .tus
         .iter()
-        .filter(|e| now - e.last_activity > crate::constants::STALE_UPLOAD_TIMEOUT_SECS)
+        .filter(|e| {
+            now.saturating_sub(e.last_activity) > crate::constants::STALE_UPLOAD_TIMEOUT_SECS
+        })
         .map(|e| e.id.clone())
         .collect();
     for id in &stale_ids {

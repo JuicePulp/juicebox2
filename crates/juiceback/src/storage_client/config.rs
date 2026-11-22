@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use juiceproto::config::HostConfigResponse;
+
 use super::target::require_juicehost_url;
 
 #[derive(Debug, Clone)]
@@ -53,62 +55,35 @@ pub async fn fetch_juicehost_config(
         ));
     }
 
-    let cfg: serde_json::Value = resp
+    let cfg: HostConfigResponse = resp
         .json()
         .await
         .map_err(|e| format!("juicehost config parse error: {e}"))?;
 
     let max_file_size_bytes = cfg
-        .get("max_file_size_bytes")
-        .and_then(serde_json::Value::as_u64)
+        .max_file_size_bytes
         .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
     let hard_max_file_size_bytes = cfg
-        .get("max_file_size_hard_bytes")
-        .and_then(serde_json::Value::as_u64)
+        .max_file_size_hard_bytes
         .unwrap_or(max_file_size_bytes)
         .max(max_file_size_bytes);
-    let max_file_size_by_ttl_hours = cfg
-        .get("max_file_size_by_ttl_hours")
-        .and_then(serde_json::Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(ttl, size)| {
-                    size.as_u64().map(|size| (ttl.clone(), size))
-                })
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
+    let max_file_size_by_ttl_hours = cfg.max_file_size_by_ttl_hours.unwrap_or_default();
 
     let default_ttl_hours = cfg
-        .get("default_ttl_hours")
-        .and_then(serde_json::Value::as_f64)
+        .default_ttl_hours
         .unwrap_or(juiceutils::config::defaults::DEFAULT_TTL_HOURS);
 
     let allowed_ttl_hours = cfg
-        .get("allowed_ttl_hours")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(serde_json::Value::as_f64)
-                .collect::<Vec<f64>>()
-        })
+        .allowed_ttl_hours
+        .filter(|allowed| !allowed.is_empty())
         .unwrap_or_else(|| juiceutils::config::defaults::ALLOWED_TTL_HOURS.to_vec());
 
-    let danger_level_str = cfg
-        .get("danger_level")
-        .and_then(|v| v.as_str())
-        .unwrap_or("high");
+    let danger_level_str = cfg.danger_level.as_deref().unwrap_or("high");
     let danger_level = crate::file_validation::ProtectionLevel::parse(danger_level_str);
 
-    let quick_link = cfg
-        .get("quick_link")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+    let quick_link = cfg.quick_link.unwrap_or(true);
 
-    let custom_id_enabled = cfg
-        .get("custom_id")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+    let custom_id_enabled = cfg.custom_id.unwrap_or(true);
 
     tracing::debug!(
         "juicehost config: max_file_size={}MB hard={}MB scaled_ttls={} default_ttl={}h danger={} quick_link={} custom_id={}",

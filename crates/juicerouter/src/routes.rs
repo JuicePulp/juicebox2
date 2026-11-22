@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Path, Query, State},
-    http::{HeaderMap, Request, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -17,7 +17,9 @@ use tower_http::{
 
 use crate::{
     config::LocalMode,
-    state::{AppState, HealthState, NodeHealth, RouteDecision, RouteKind, Selection},
+    state::{
+        AppState, HealthState, NodeHealth, RouteDecision, RouteKind, Selection, safe_relative_path,
+    },
 };
 
 /// Responses are never cached so failover takes effect immediately.
@@ -31,17 +33,46 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/f/{*path}", get(redirect))
         .route("/d/{*path}", get(redirect))
         .route("/e/{*path}", get(redirect))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([axum::http::Method::GET])
-                .allow_headers(Any),
-        )
+        .layer(cors_layer(&state.config))
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-store"),
         ))
         .with_state(state)
+}
+
+/// CORS is limited to explicitly configured browser origins. Until every
+/// deployment sets `[router] allowed_origins`, the configured public origins
+/// and loopback dev origins are also allowed.
+// TODO: drop the fallback and require `allowed_origins` once all clients send it.
+fn cors_layer(config: &crate::config::Config) -> CorsLayer {
+    let configured: Vec<HeaderValue> = config
+        .router
+        .allowed_origins
+        .iter()
+        .filter_map(|origin| origin.trim().parse().ok())
+        .collect();
+    let origins = if configured.is_empty() {
+        let mut fallback: Vec<HeaderValue> = Vec::new();
+        for base in [&config.router.home_url, &config.router.public_base_url] {
+            if let Ok(url) = url::Url::parse(base) {
+                if let Ok(origin) = url.origin().ascii_serialization().parse() {
+                    fallback.push(origin);
+                }
+            }
+        }
+        fallback.extend([
+            HeaderValue::from_static("http://localhost:6400"),
+            HeaderValue::from_static("http://127.0.0.1:6400"),
+        ]);
+        fallback
+    } else {
+        configured
+    };
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([axum::http::Method::GET])
+        .allow_headers(Any)
 }
 
 #[derive(Serialize)]
@@ -107,6 +138,11 @@ async fn route_info(
 ) -> Result<Json<RouteDecision>, ApiError> {
     let id = parse_id(&id)?;
     let route = clean_route(query.route.as_deref().unwrap_or("v"));
+    if let Some(provided) = query.path.as_deref()
+        && safe_relative_path(&route, &id, provided).is_none()
+    {
+        return Err(ApiError::BadRequest("invalid file path"));
+    }
     let path = query.path.unwrap_or_else(|| id.clone());
     let record = state
         .resolve(&id)
@@ -180,6 +216,9 @@ async fn redirect(
         .next()
         .map_or("f", clean_route);
     let id = parse_id(path.split('.').next().unwrap_or(&path))?;
+    if safe_relative_path(route, &id, &path).is_none() {
+        return Err(ApiError::BadRequest("invalid file path"));
+    }
 
     let record = state
         .resolve(&id)

@@ -3,16 +3,29 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use crate::{db, state::AppState};
 
 const BATCH_MAX: usize = 100;
-/// Plain HTTP is what the free tier offers.
-const GEO_ENDPOINT: &str = "http://ip-api.com/batch";
+/// Plain HTTP is what the free tier offers; override via `GEO_IP_ENDPOINT`.
+const DEFAULT_GEO_ENDPOINT: &str = "http://ip-api.com/batch";
+
+fn geo_endpoint() -> String {
+    std::env::var("GEO_IP_ENDPOINT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_GEO_ENDPOINT.to_string())
+}
 
 pub async fn run_geo_loop(state: Arc<AppState>) {
-    geo_sweep_once(&state).await;
+    let endpoint = geo_endpoint();
+    if reqwest::Url::parse(&endpoint).is_ok_and(|url| url.scheme() == "http") {
+        tracing::warn!(
+            "geo: GEO_IP_ENDPOINT uses plain HTTP; decrypted IPs are sent in the clear to {endpoint}"
+        );
+    }
+    geo_sweep_once(&state, &endpoint).await;
     let mut ticker = tokio::time::interval(Duration::from_secs(60));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
-        geo_sweep_once(&state).await;
+        geo_sweep_once(&state, &endpoint).await;
     }
 }
 
@@ -30,7 +43,7 @@ fn is_routable(ip: &str) -> bool {
     }
 }
 
-async fn geo_sweep_once(state: &Arc<AppState>) {
+async fn geo_sweep_once(state: &Arc<AppState>, endpoint: &str) {
     let mut targets: Vec<Target> = Vec::new();
 
     let queued = state
@@ -117,7 +130,7 @@ async fn geo_sweep_once(state: &Arc<AppState>) {
         .collect();
     let resp = state
         .http
-        .post(GEO_ENDPOINT)
+        .post(endpoint)
         .json(&body)
         .timeout(Duration::from_secs(30))
         .send()

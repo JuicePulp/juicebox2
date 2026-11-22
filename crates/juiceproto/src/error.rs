@@ -28,10 +28,11 @@ pub fn service_error_message(error: &str) -> &str {
     error
         .strip_prefix('[')
         .and_then(|s| s.find("] "))
-        .map(|i| &error[i + 2..])
-        .and_then(|s| s.rsplit_once(" (status="))
-        .map(|(msg, _)| msg)
-        .unwrap_or(error)
+        // `i` indexes the suffix after '[', so the message starts one char
+        // later in `error` (past '[' + ']' + the separating space).
+        .map_or(error, |i| &error[i + 3..])
+        .rsplit_once(" (status=")
+        .map_or(error, |(msg, _)| msg)
 }
 
 /// Strips tags and truncates so error strings stay log-safe.
@@ -89,7 +90,7 @@ mod tests {
     #[test]
     fn message_round_trips() {
         let rendered = format_service_error(507, r#"{"error":"X","message":"out of space"}"#);
-        assert_eq!(service_error_message(&rendered).trim(), "out of space");
+        assert_eq!(service_error_message(&rendered), "out of space");
         assert_eq!(service_error_message("plain failure"), "plain failure");
     }
 }

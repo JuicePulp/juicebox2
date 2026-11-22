@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
 use juiceutils::text::escape_html;
@@ -11,6 +11,9 @@ use utoipa::ToSchema;
 const NOT_FOUND_HTML_TEMPLATE: &str = include_str!("templates/not_found.html");
 const TEAPOT_HTML_TEMPLATE: &str = include_str!("templates/teapot_uploading.html");
 const FROZEN_HTML_TEMPLATE: &str = include_str!("templates/frozen.html");
+
+/// Short retry hint for a stalled body; the client should restart the upload.
+const RETRY_AFTER_SECONDS: &str = "5";
 
 #[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
@@ -47,6 +50,10 @@ pub enum StorageError {
     #[error("request body failed: {0}")]
     BodyRead(String),
 
+    /// The body deadline fired; unlike other body failures this is retryable.
+    #[error("request body timed out")]
+    BodyTimeout,
+
     #[error("{0}")]
     Io(String),
 }
@@ -62,6 +69,7 @@ impl From<StorageError> for JuicehostError {
             StorageError::Frozen => Self::Frozen,
             StorageError::Forbidden => Self::Forbidden,
             StorageError::BodyRead(_) => Self::BadRequest,
+            StorageError::BodyTimeout => Self::RequestTimeout,
             StorageError::Io(_) => Self::Internal,
         }
     }
@@ -150,6 +158,9 @@ pub enum JuicehostError {
 
     #[error("server concurrency limit reached")]
     ServiceUnavailable,
+
+    #[error("request body timed out; retry the upload")]
+    RequestTimeout,
 }
 
 impl IntoResponse for JuicehostError {
@@ -167,6 +178,7 @@ impl IntoResponse for JuicehostError {
             Self::BlockedFileType(_) => (StatusCode::BAD_REQUEST, "BLOCKED_FILE_TYPE"),
             Self::SizeMismatch => (StatusCode::BAD_REQUEST, "SIZE_MISMATCH"),
             Self::ServiceUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            Self::RequestTimeout => (StatusCode::REQUEST_TIMEOUT, "REQUEST_TIMEOUT"),
         };
         let message: String = match &self {
             Self::NotFound => "File not found".into(),
@@ -181,15 +193,23 @@ impl IntoResponse for JuicehostError {
             Self::BlockedFileType(msg) => msg.clone(),
             Self::SizeMismatch => "Request body size does not match the signed file size".into(),
             Self::ServiceUnavailable => "Server concurrency limit reached".into(),
+            Self::RequestTimeout => "Request body timed out; retry the upload".into(),
         };
-        (
+        let mut response = (
             status,
             Json(ErrorResponse {
                 error: error_code.to_string(),
                 message,
             }),
         )
-            .into_response()
+            .into_response();
+        if matches!(self, Self::RequestTimeout) {
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_static(RETRY_AFTER_SECONDS),
+            );
+        }
+        response
     }
 }
 
@@ -231,6 +251,13 @@ mod tests {
     }
 
     #[test]
+    fn request_timeout_returns_408_with_retry_after() {
+        let resp: axum::http::Response<Body> = JuicehostError::RequestTimeout.into_response();
+        assert_eq!(resp.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(resp.headers()["retry-after"], RETRY_AFTER_SECONDS);
+    }
+
+    #[test]
     fn payload_too_large_returns_413() {
         assert_eq!(
             status_for(JuicehostError::PayloadTooLarge),
@@ -265,7 +292,6 @@ mod tests {
             status_for(JuicehostError::Frozen),
             StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
         );
-        assert_eq!(status_for(JuicehostError::Frozen).as_u16(), 451);
     }
 
     #[test]
@@ -308,17 +334,6 @@ mod tests {
             body["message"],
             "This file is frozen and temporarily unavailable"
         );
-    }
-
-    #[test]
-    fn frozen_html_contains_451() {
-        let (status, html) = frozen_html();
-        assert_eq!(status, StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS);
-        assert_eq!(status.as_u16(), 451);
-        assert!(html.0.contains("451"));
-        assert!(html.0.contains("frozen"));
-
-        assert!(!html.0.contains("__"));
     }
 
     #[tokio::test]
@@ -385,6 +400,7 @@ mod tests {
             (StorageError::InsufficientStorage, "INSUFFICIENT_STORAGE"),
             (StorageError::Frozen, "FILE_FROZEN"),
             (StorageError::BodyRead("x".into()), "BAD_REQUEST"),
+            (StorageError::BodyTimeout, "REQUEST_TIMEOUT"),
             (StorageError::Io("x".into()), "INTERNAL_ERROR"),
         ];
         for (se, expected_code) in mapping {

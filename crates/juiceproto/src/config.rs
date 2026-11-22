@@ -2,69 +2,189 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// `/api/config` as served by juicehost. Every field is optional because older
-/// hosts omit newer settings.
+/// Serde skip predicate: omit the default-false peer flag from older payloads.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Public `/api/config` payload, shared by both services.
+///
+/// juicehost emits the host-owned fields; juiceback emits the same fields plus
+/// its backend-owned ones. Every field is optional because older nodes omit
+/// newer settings, and clients must tolerate both services' subsets.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HostConfigResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+
     /// Legacy/default-retention cap. Older clients still read this field.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_file_size_bytes: Option<u64>,
     /// Hard cap used for request-body limits and storage.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_file_size_hard_bytes: Option<u64>,
     /// Per-retention caps keyed by the TTL in hours, e.g. `"72": 5368709120`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_file_size_by_ttl_hours: Option<BTreeMap<String, u64>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_ttl_hours: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_ttl_hours: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ttl_hours: Option<Vec<f64>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub danger_level: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_link: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_id: Option<bool>,
-    #[serde(default)]
-    pub quic: Option<bool>,
-    #[serde(default)]
-    pub cobalt: Option<bool>,
-    #[serde(default)]
-    pub upload_mode: Option<String>,
-    #[serde(default)]
-    pub fetch_rate_limit_per_minute: Option<u64>,
-    #[serde(default)]
-    pub public_base_url: Option<String>,
-    #[serde(default)]
-    pub version: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frontend_url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_links: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at_rest_via_juiceback: Option<bool>,
-    #[serde(default)]
+
+    /// Fields below are owned by juiceback, not by individual hosts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_upload: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cobalt: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encrypted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quic: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetch_rate_limit_per_minute: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub juicehost_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_per_minute: Option<u32>,
+    /// Native clients size chunks and parts from these instead of hardcoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tus_patch_max_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tus_parallel_parts: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_parallel_max_parts: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_parallel_max_part_bytes: Option<u64>,
+
+    /// Public relay URL advertised to native peers by juiceback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_relay_url: Option<String>,
+    /// Whether peer-to-peer serving is enabled on this deployment.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub peer_enabled: bool,
 }
 
 /// Joins a base URL with the internal file-status path.
 #[must_use]
 pub fn file_status_url(backend_url: &str, id: &str) -> String {
-    format!("{backend_url}/internal/file/{id}/status")
+    internal_file_url(backend_url, id, "status")
 }
 
 /// Joins a base URL with the internal file-resolution path.
 #[must_use]
 pub fn resolve_file_url(backend_url: &str, id: &str) -> String {
-    format!("{backend_url}/internal/resolve/{id}")
+    format!(
+        "{}/internal/resolve/{}",
+        backend_url.trim_end_matches('/'),
+        safe_id_component(id)
+    )
 }
 
 /// Joins a juicehost base URL with its config endpoint.
 #[must_use]
 pub fn config_url(juicehost_url: &str) -> String {
-    format!("{juicehost_url}/api/config")
+    format!("{}/api/config", juicehost_url.trim_end_matches('/'))
+}
+
+fn internal_file_url(backend_url: &str, id: &str, action: &str) -> String {
+    format!(
+        "{}/internal/file/{}/{}",
+        backend_url.trim_end_matches('/'),
+        safe_id_component(id),
+        action
+    )
+}
+
+/// `juiceproto` has no `juiceutils`/`url` dependency, so enforce the same
+/// single-component id rule locally. An invalid id becomes a harmless sentinel
+/// instead of being interpolated into a path (no separators or traversal).
+fn safe_id_component(id: &str) -> &str {
+    if !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        id
+    } else {
+        "invalid"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_payloads_parse_and_unset_fields_stay_omitted() {
+        let raw = r#"{"max_file_size_bytes":123,"danger_level":"medium"}"#;
+        let cfg: HostConfigResponse = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.max_file_size_bytes, Some(123));
+        assert_eq!(cfg.danger_level.as_deref(), Some("medium"));
+        assert_eq!(cfg.quick_link, None);
+        assert_eq!(
+            serde_json::to_value(cfg).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+    }
+
+    #[test]
+    fn internal_urls_trim_base_and_reject_unsafe_ids() {
+        assert_eq!(
+            file_status_url("http://box:6401/", "abc-1"),
+            "http://box:6401/internal/file/abc-1/status"
+        );
+        assert_eq!(
+            resolve_file_url("http://box:6401/", "abc-1"),
+            "http://box:6401/internal/resolve/abc-1"
+        );
+        assert_eq!(config_url("http://box:6402/"), "http://box:6402/api/config");
+        assert_eq!(
+            resolve_file_url("http://box:6401", "../admin"),
+            "http://box:6401/internal/resolve/invalid"
+        );
+    }
+
+    #[test]
+    fn peer_fields_default_and_round_trip() {
+        let raw = r#"{"peer_relay_url":"wss://ff.juicey.dev/peer/ws","peer_enabled":true}"#;
+        let cfg: HostConfigResponse = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            cfg.peer_relay_url.as_deref(),
+            Some("wss://ff.juicey.dev/peer/ws")
+        );
+        assert!(cfg.peer_enabled);
+        assert_eq!(
+            serde_json::to_value(&cfg).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+
+        let legacy: HostConfigResponse = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.peer_relay_url, None);
+        assert!(!legacy.peer_enabled);
+        assert_eq!(serde_json::to_value(legacy).unwrap(), serde_json::json!({}));
+    }
 }

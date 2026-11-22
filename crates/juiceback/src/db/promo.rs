@@ -80,31 +80,36 @@ pub fn read_promo_state(
     ids: &[String],
 ) -> Result<HashMap<String, (i64, i64, i64)>> {
     let mut out = HashMap::new();
-    if ids.is_empty() {
-        return Ok(out);
-    }
-    let placeholders: String = (1..=ids.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT file_id, views_seen, downloads_seen, checked_at FROM promo_state WHERE file_id IN ({placeholders})"
-    );
-    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params.as_slice(), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            (
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ),
-        ))
-    })?;
-    for row in rows {
-        let (id, state) = row?;
-        out.insert(id, state);
+    let mut seen = std::collections::HashSet::new();
+    for chunk in ids.chunks(crate::constants::SQL_PARAM_CHUNK_SIZE) {
+        let unique: Vec<&String> = chunk.iter().filter(|id| seen.insert(id.as_str())).collect();
+        if unique.is_empty() {
+            continue;
+        }
+        let placeholders: String = (1..=unique.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT file_id, views_seen, downloads_seen, checked_at FROM promo_state WHERE file_id IN ({placeholders})"
+        );
+        let params: Vec<&dyn rusqlite::ToSql> =
+            unique.iter().map(|s| *s as &dyn rusqlite::ToSql).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ),
+            ))
+        })?;
+        for row in rows {
+            let (id, state) = row?;
+            out.insert(id, state);
+        }
     }
     Ok(out)
 }

@@ -1,6 +1,6 @@
-import { t } from "./i18n.js?v=2.2.0-r10";
-import { announce, formatSize } from "./util.js?v=2.2.0-r10";
-import { playSound } from "./sounds.js?v=2.2.0-r10";
+import { t } from "./i18n.js?v=2.2.0-r13";
+import { announce, formatSize } from "./util.js?v=2.2.0-r13";
+import { playSound } from "./sounds.js?v=2.2.0-r13";
 import {
   iconHTML,
   iconForMime,
@@ -11,7 +11,7 @@ import {
   urlVariantLabels,
   createDeleteButton,
   vanityMsg,
-} from "./copy.js?v=2.2.0-r10";
+} from "./copy.js?v=2.2.0-r13";
 import {
   UPLOAD_URL,
   readMaxFileSize,
@@ -19,9 +19,9 @@ import {
   readUploadPassword,
   readSafeUploadEnabled,
   TUS_THRESHOLD,
-} from "./upload-config.js?v=2.2.0-r10";
-import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r10";
-import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r10";
+} from "./upload-config.js?v=2.2.0-r13";
+import { apiFetch, apiFetchJob, publicFile } from "./api.js?v=2.2.0-r13";
+import { enhanceRetention, rebuildRetention } from "./enhance-retention.js?v=2.2.0-r13";
 import {
   enhanceHostSelector,
   readSelectedHost,
@@ -29,11 +29,11 @@ import {
   readDangerLevel,
   initHostGlow,
   updateDropMaxSize,
-} from "./enhance-host.js?v=2.2.0-r10";
-import { connectPresence } from "./presence.js?v=2.2.0-r10";
-import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r10";
-import { validateFileClient } from "./file-validation.js?v=2.2.0-r10";
-import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r10";
+} from "./enhance-host.js?v=2.2.0-r13";
+import { connectPresence } from "./presence.js?v=2.2.0-r13";
+import { resolveUploadHost } from "./upload-router.js?v=2.2.0-r13";
+import { validateFileClient } from "./file-validation.js?v=2.2.0-r13";
+import { upsertLocalFile } from "./upload-storage.js?v=2.2.0-r13";
 import {
   enqueueUpload,
   cancelUpload,
@@ -44,9 +44,10 @@ import {
   connectUploads,
   findPausedUpload,
   resumeUpload,
-} from "./upload-client-loader.js?v=2.2.0-r10";
-import { extractServerId } from "./upload-engine.js?v=2.2.0-r10";
-import { initHostSelector } from "./host-selector.js?v=2.2.0-r10";
+} from "./upload-client-loader.js?v=2.2.0-r13";
+import { extractServerId } from "./upload-engine.js?v=2.2.0-r13";
+import { initHostSelector } from "./host-selector.js?v=2.2.0-r13";
+import { classifyFailure, normalizeCode, ERROR_NAME, E } from "./upload-errors.js?v=2.2.0-r13";
 
 var assetVersion = (() => {
   try {
@@ -401,8 +402,18 @@ function failItem(item, pill, fill, status, errorCode, rawMessage) {
   fill.classList.remove("indeterminate");
   var spinner = item.querySelector(".spinner");
   if (spinner) spinner.remove();
-  var msg = vanityMsg(LOCALE, errorCode, rawMessage);
+  // Callers may supply integers (normal pipeline) or server string codes.
+  // Always reduce to an integer; preserve unrecognised strings verbatim.
+  var code = normalizeCode(errorCode);
+  var raw = typeof rawMessage === "string" ? rawMessage.trim() : "";
+  if (code === E.UNKNOWN && typeof errorCode === "string" && errorCode.trim() &&
+      !raw.includes("Server code: " + errorCode.trim())) {
+    raw += (raw ? " — " : "") + "Server code: " + errorCode.trim();
+  }
+  var displayCode = code || E.UPLOAD_FAILED;
+  var msg = vanityMsg(LOCALE, displayCode, raw);
   status.textContent = msg;
+  status.title = "#" + displayCode + " — " + (ERROR_NAME[displayCode] || ERROR_NAME[E.UNKNOWN]);
   announce(t(LOCALE, "upload.announce_failed", { message: msg }));
   playSound("error");
   wipeFailedReservation(item);
@@ -690,14 +701,18 @@ function startCobaltFetch(url) {
           function (err) {
             failItem(item, pill, fill, status, err.error, err.message);
           },
-          function () {
-            failItem(item, pill, fill, status, undefined, undefined);
+          function (parseErr) {
+            try {
+              if (typeof console !== "undefined" && console.error)
+                console.error("upload failed", { phase: "cobalt-response", item: item.getAttribute("data-upload-id"), err: parseErr });
+            } catch {}
+            failItem(item, pill, fill, status, E.BAD_RESPONSE, "The server returned an unreadable error response. Try again.");
           },
         );
       }
       return res.json().then(function (start) {
         if (!start.job_id) {
-          failItem(item, pill, fill, status, "BAD_RESPONSE");
+          failItem(item, pill, fill, status, E.BAD_RESPONSE);
           return;
         }
         setCobaltBarIndeterminate(fill);
@@ -705,8 +720,9 @@ function startCobaltFetch(url) {
         pollCobaltJob(start.job_id, item, fill, status, pill);
       });
     })
-    .catch(function () {
-      failItem(item, pill, fill, status, "NETWORK_ERROR");
+    .catch(function (err) {
+      var failure = classifyFailure({ phase: "cobalt", err: err });
+      failItem(item, pill, fill, status, failure.errorCode, failure.errorMessage);
     });
 }
 
@@ -926,7 +942,7 @@ async function uploadItem(file, item, fingerprint) {
       pill,
       fill,
       status,
-      "FILE_TOO_LARGE",
+      E.FILE_TOO_LARGE,
       t(LOCALE, "error.file_too_large") + " " + t(LOCALE, "upload.drop_max", { size: formatSize(maxFileSize) })
     );
     return;
@@ -938,7 +954,7 @@ async function uploadItem(file, item, fingerprint) {
       pill,
       fill,
       status,
-      "FILE_BLOCKED",
+      E.FILE_BLOCKED,
       t(LOCALE, "error.file_blocked", {
         reason: t(LOCALE, validation.reason || "error.unknown"),
       }),

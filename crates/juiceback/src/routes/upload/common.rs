@@ -97,9 +97,20 @@ pub(crate) fn compute_ticket_ttl_secs(
     if file_size_bytes == 0 {
         return min_ttl;
     }
-    let estimated = (file_size_bytes as f64 / assumed_bps).ceil() as i64;
-    let ttl = estimated * safety_mult as i64 + base_overhead_secs;
-    ttl.clamp(min_ttl, max_ttl)
+    // Scale as f64 so fractional multipliers (e.g. 1.5) are not truncated to
+    // whole integers before rounding; clamp before the cast because an
+    // overflowing float-to-int cast saturates rather than wrapping.
+    let scaled = (file_size_bytes as f64 / assumed_bps).ceil() * safety_mult;
+    let estimated = if scaled >= i64::MAX as f64 {
+        i64::MAX
+    } else if scaled <= i64::MIN as f64 {
+        i64::MIN
+    } else {
+        scaled.round() as i64
+    };
+    estimated
+        .saturating_add(base_overhead_secs)
+        .clamp(min_ttl, max_ttl)
 }
 
 pub(crate) fn dte_ticket_ttl_secs(state: &Arc<AppState>, file_size_bytes: u64) -> i64 {
@@ -282,5 +293,16 @@ mod tests {
     #[test]
     fn ttl_zero_size_returns_min() {
         assert_eq!(compute(0), crate::constants::DTE_MIN_TTL_SECS);
+    }
+
+    #[test]
+    fn ttl_fractional_safety_mult_is_not_truncated() {
+        // 10 * 1.5 = 15 (an `as i64` cast of the multiplier would give 10).
+        assert_eq!(compute_ticket_ttl_secs(10, 1.0, 1.5, 0, 0, 1000), 15);
+        assert_eq!(compute_ticket_ttl_secs(10, 1.0, 0.5, 0, 0, 1000), 5);
+        // Rounding happens once, after the multiplier is applied: 3 * 1.5 = 4.5 -> 5.
+        assert_eq!(compute_ticket_ttl_secs(5, 2.0, 1.5, 0, 0, 1000), 5);
+        // Whole multipliers keep the old behavior.
+        assert_eq!(compute_ticket_ttl_secs(10, 1.0, 2.0, 5, 0, 1000), 25);
     }
 }

@@ -90,7 +90,7 @@ impl AppState {
         let unlock_limiter = Arc::new(crate::mint_limiter::MintLimiter::new(
             config.password_try_limit,
             config.password_try_window_secs,
-            config.password_try_limit.min(3).max(1),
+            config.password_try_limit.clamp(1, 3),
         ));
 
         let max_concurrent_uploads = config.max_concurrent_uploads.max(1) as usize;
@@ -254,18 +254,34 @@ impl AppState {
         Ok(count)
     }
 
-    /// `name` only labels panic errors.
+    /// `name` only labels panic errors. Transient `SQLITE_BUSY`/`SQLITE_LOCKED`
+    /// failures are retried a couple of times before surfacing as a 503.
     pub async fn db_call<T, F>(self: &Arc<Self>, name: &'static str, f: F) -> Result<T, AppError>
     where
-        F: FnOnce(&rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
+        F: Fn(&rusqlite::Connection) -> Result<T, rusqlite::Error> + Send + 'static,
         T: Send + 'static,
     {
         let pool = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = pool
-                .get()
-                .map_err(|e| AppError::DbPoolError(e.to_string()))?;
-            f(&conn).map_err(AppError::DatabaseError)
+            let mut attempt = 0_u8;
+            loop {
+                let conn = pool
+                    .get()
+                    .map_err(|e| AppError::DbPoolError(e.to_string()))?;
+                match f(&conn) {
+                    Ok(value) => return Ok(value),
+                    Err(err) if crate::error::is_retryable_db_error(&err) && attempt < 2 => {
+                        let jitter = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.subsec_nanos() as u64 % 25);
+                        std::thread::sleep(std::time::Duration::from_millis(
+                            20 * u64::from(attempt) + jitter,
+                        ));
+                        attempt += 1;
+                    }
+                    Err(err) => return Err(AppError::from(err)),
+                }
+            }
         })
         .await
         .map_err(|_| AppError::TaskPanicked(format!("db task '{name}' panicked")))?
@@ -295,9 +311,9 @@ where
     let mut conn = pool
         .get()
         .map_err(|e| AppError::DbPoolError(e.to_string()))?;
-    let tx = conn.transaction().map_err(|e| AppError::DatabaseError(e))?;
-    let out = f(&tx).map_err(AppError::DatabaseError)?;
-    tx.commit().map_err(AppError::DatabaseError)?;
+    let tx = conn.transaction().map_err(AppError::from)?;
+    let out = f(&tx).map_err(AppError::from)?;
+    tx.commit().map_err(AppError::from)?;
     Ok(out)
 }
 

@@ -442,10 +442,12 @@ pub async fn ping_device_handler(
     let ping_msg = serde_json::json!({"type": "ping"}).to_string();
     let mut sent = 0;
     for device in &devices {
-        let Ok(inner) = device.try_lock() else {
+        // Clone the sender in a short scope so the mutex guard is dropped
+        // before the await.
+        let Some(sender) = device.try_lock().ok().map(|inner| inner.sender.clone()) else {
             continue;
         };
-        if inner.sender.send(ping_msg.clone()).await.is_ok() {
+        if sender.send(ping_msg.clone()).await.is_ok() {
             sent += 1;
         }
     }

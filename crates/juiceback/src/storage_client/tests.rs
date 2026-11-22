@@ -23,6 +23,7 @@ fn test_state() -> Arc<AppState> {
         default_storage_host: None,
         juiceback_origin: "http://127.0.0.1:6401".into(),
         router_base_url: None,
+        peer_relay_url: Some("https://ff.juicey.dev".into()),
         jwt_secret: "secret".into(),
         cors_origins: vec![],
         report_webhook_url: None,

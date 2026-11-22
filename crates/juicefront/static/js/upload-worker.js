@@ -1,13 +1,14 @@
 import {
   startUpload
-} from "./upload-engine.js?v=2.2.0-r10";
-import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0-r10";
-import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r10";
+} from "./upload-engine.js?v=2.2.0-r13";
+import { UPLOAD_URL, setUploadModeHint } from "./upload-config.js?v=2.2.0-r13";
+import { deleteTus, uniqueTusIds } from "./tus.js?v=2.2.0-r13";
+import { E } from "./upload-errors.js?v=2.2.0-r13";
 import {
   queueItem,
   queueItemNow,
   removeQueueItem
-} from "./upload-store.js?v=2.2.0-r10";
+} from "./upload-store.js?v=2.2.0-r13";
 const ctx = self;
 const WORKER_VERSION = (() => {
   try {
@@ -23,13 +24,31 @@ const ports = new Set;
 // Bounds worker memory; finished entries are evicted oldest-first once this is exceeded.
 const MAX_ITEMS = 100;
 const ACTIVE_STATES = new Set(["queued", "compressing", "uploading", "finalizing"]);
+// Latches when a broadcast last reached at least one port; reported to clients so a
+// worker that answers direct probe/ping messages but cannot broadcast is detectable.
+let lastEmitOkAt = Date.now();
 function emit(message) {
+  let payload;
+  try {
+    // Clone once outside the loop: an uncloneable payload must never purge the
+    // Set of otherwise healthy ports.
+    payload = typeof structuredClone === "function" ? structuredClone(message) : message;
+  } catch (err) {
+    try {
+      console.error("upload worker: could not clone message", { type: message?.type, name: err?.name, err });
+    } catch {}
+    return;
+  }
   for (const port of ports) {
     try {
-      port.postMessage(message);
-    } catch {
-      // Closed ports can linger because MessagePort has no standard close event.
+      port.postMessage(payload);
+      lastEmitOkAt = Date.now();
+    } catch (err) {
+      // Only the port that actually threw is closed; keep every other port.
       ports.delete(port);
+      try {
+        console.error("upload worker: postMessage failed", { type: message?.type, name: err?.name, err });
+      } catch {}
     }
   }
 }
@@ -49,7 +68,7 @@ function upsert(patch) {
         ...patch,
         state: "paused",
         pausedAt: Date.now(),
-        errorCode: "",
+        errorCode: 0,
         errorMessage: ""
       };
     }
@@ -87,11 +106,20 @@ function trim() {
 function handleEnqueue(msg, _port) {
   if (entries.has(msg.id)) {
     const existing = entries.get(msg.id);
-    if (existing && existing.item.state === "paused") {
-      // A paused item has a stale handle after reload; replace it to resume from the saved offset.
+    const state = existing?.item?.state;
+    const paused = state === "paused";
+    const terminal = state === "done" || state === "error" || state === "cancelled";
+    if (paused || (!terminal && msg.file)) {
+      // Paused items resume from the saved offset. A live entry that is re-enqueued
+      // with a fresh File must be replaced, not echoed back as a stale item.
       try {
         existing.handle?.abort();
       } catch {}
+      if (!paused) {
+        for (const tusId of uniqueTusIds(existing.item, existing.tusIds)) {
+          deleteTus(UPLOAD_URL, tusId);
+        }
+      }
       entries.delete(msg.id);
     } else {
       if (existing)
@@ -131,20 +159,34 @@ function handleEnqueue(msg, _port) {
   entries.set(item.id, entry);
   queueItemNow(item);
   entryItem(item);
-  entry.handle = startUpload(item, msg.file, {
-    update: upsert,
-    onTusCreate: (tusId, info) => {
-      if (!entry.tusIds.includes(tusId))
-        entry.tusIds.push(tusId);
-      const patch = { id: item.id, tusIds: [...entry.tusIds] };
-      if (info && info.kind === "stream")
-        patch.tusId = tusId;
-      upsert(patch);
-    },
-    onTusDelete: (tusId) => {
-      deleteTus(UPLOAD_URL, tusId);
-    }
-  });
+  try {
+    entry.handle = startUpload(item, msg.file, {
+      update: upsert,
+      onTusCreate: (tusId, info) => {
+        if (!entry.tusIds.includes(tusId))
+          entry.tusIds.push(tusId);
+        const patch = { id: item.id, tusIds: [...entry.tusIds] };
+        if (info && info.kind === "stream")
+          patch.tusId = tusId;
+        upsert(patch);
+      },
+      onTusDelete: (tusId) => {
+        deleteTus(UPLOAD_URL, tusId);
+      }
+    });
+  } catch (err) {
+    // A synchronous failure would otherwise leave the item queued with no handle.
+    entry.handle = null;
+    try {
+      console.error("upload worker: startUpload failed", { item: item.id, err });
+    } catch {}
+    upsert({
+      id: item.id,
+      state: "error",
+      errorCode: E.UPLOAD_FAILED,
+      errorMessage: err?.message || (err == null ? "" : String(err)) || "The upload worker could not start the upload",
+    });
+  }
 }
 function handleCancel(id) {
   const entry = entries.get(id);
@@ -179,7 +221,12 @@ ctx.onconnect = (event) => {
     const msg = e.data || {};
     if (msg.type === "probe" && msg.nonce) {
       try {
-        port.postMessage({ type: "probe-ok", nonce: msg.nonce, version: WORKER_VERSION });
+        port.postMessage({
+          type: "probe-ok",
+          nonce: msg.nonce,
+          version: WORKER_VERSION,
+          idleMs: Date.now() - lastEmitOkAt,
+        });
       } catch {}
     } else if (msg.type === "enqueue") {
       handleEnqueue(msg, port);
@@ -196,8 +243,9 @@ ctx.onconnect = (event) => {
           entryItem(entry.item);
       }
     } else if (msg.type === "ping") {
-      // Ping/pong is the client's liveness check; a missed pong triggers a main-thread fallback.
-      try { port.postMessage({ type: "pong" }); } catch {}
+      // Ping/pong is answered on this port directly, so it proves only that the
+      // worker thread is alive — not that item/snapshot broadcasts still work.
+      try { port.postMessage({ type: "pong", idleMs: Date.now() - lastEmitOkAt }); } catch {}
     } else if (msg.type === "disconnect") {
       // The page is going away; drop its port so broadcast work stays proportional to open tabs.
       ports.delete(port);
@@ -211,6 +259,7 @@ ctx.onconnect = (event) => {
       .filter((e) => !dismissed.has(e.item.id) && ACTIVE_STATES.has(e.item.state))
       .map((e) => e.item)
   });
+  lastEmitOkAt = Date.now();
   port.addEventListener("close", () => {
     ports.delete(port);
   });

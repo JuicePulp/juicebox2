@@ -179,17 +179,25 @@ async fn verify_password_blocking(password: String, hash: String) -> Result<bool
         .map_err(AppError::Internal)
 }
 
-/// A valid cookie short-circuits the hash check.
+/// A valid cookie short-circuits both the rate limiter and the hash check.
+/// Every password verification path (submit and content) goes through here.
 async fn credentials_ok(
     state: &Arc<AppState>,
     headers: &HeaderMap,
     query: &UnlockQuery,
     record: &db::FileRecord,
+    ip: &str,
+    explicit_password: Option<String>,
 ) -> Result<bool, AppError> {
     if valid_unlock_cookie(headers, &record.id, &state.config.jwt_secret) {
         return Ok(true);
     }
-    let Some(password) = request_password(headers, query) else {
+    if !state.unlock_limiter.allow(ip) {
+        return Err(AppError::TooManyRequests(
+            "Too many unlock attempts. Please wait and try again.".into(),
+        ));
+    }
+    let Some(password) = explicit_password.or_else(|| request_password(headers, query)) else {
         return Ok(false);
     };
     let hash = record.password_hash.clone().unwrap_or_default();
@@ -241,19 +249,7 @@ pub async fn unlock_submit_handler(
     }
 
     let ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
-    if !state.unlock_limiter.allow(&ip) {
-        return Err(AppError::TooManyRequests(
-            "Too many unlock attempts. Please wait and try again.".into(),
-        ));
-    }
-
-    let ok = match password {
-        Some(password) => {
-            let hash = record.password_hash.clone().unwrap_or_default();
-            verify_password_blocking(password, hash).await?
-        }
-        None => false,
-    };
+    let ok = credentials_ok(&state, &headers, &query, &record, &ip, password).await?;
     if !ok {
         return Err(AppError::Forbidden(FORBIDDEN_BODY.into()));
     }
@@ -318,7 +314,7 @@ fn parse_range(value: &str, total: u64) -> Result<Option<(u64, u64)>, AppError> 
         let last: u64 = end_s
             .parse()
             .map_err(|_| AppError::RangeNotSatisfiable("bad range".into()))?;
-        (last + 1).min(total)
+        last.saturating_add(1).min(total)
     };
     if end <= start {
         return Err(AppError::RangeNotSatisfiable("bad range".into()));
@@ -413,7 +409,8 @@ pub async fn content_handler(
     if !record.is_protected() {
         return Ok(Redirect::to(&public_url_for(&state, &record)).into_response());
     }
-    if !credentials_ok(&state, &headers, &query, &record).await? {
+    let ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
+    if !credentials_ok(&state, &headers, &query, &record, &ip, None).await? {
         return Err(AppError::Forbidden(FORBIDDEN_BODY.into()));
     }
 
@@ -431,8 +428,7 @@ pub async fn content_handler(
     let response = serve_protected_bytes(&state, &record, start, end, &method).await?;
 
     if method == Method::GET && response.status().is_success() {
-        let viewer_ip = crate::utils::client_ip(&headers, addr.ip(), &state).to_string();
-        let ip_hash = crate::utils::hash_ip_for_ban(&viewer_ip, &state.config.ip_pepper);
+        let ip_hash = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
         let now = chrono::Utc::now().timestamp();
         let file_id = record.id.clone();
         if let Err(error) = state

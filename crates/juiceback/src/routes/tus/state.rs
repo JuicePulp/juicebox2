@@ -91,6 +91,10 @@ pub(crate) fn release_parallel_slot(
     };
     let ours = session.part_ids.get(&pi).is_some_and(|v| v.value() == id);
     if ours && session.part_ids.remove(&pi).is_some() {
+        #[expect(
+            deprecated,
+            reason = "AtomicU64::try_update needs Rust 1.95; workspace MSRV is 1.88"
+        )]
         let _ = session
             .declared_size
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |size| {

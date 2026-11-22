@@ -60,6 +60,9 @@ pub struct RouterSettings {
     pub home_url: String,
     #[serde(default = "default_juiceback_origin")]
     pub juiceback_origin: String,
+    /// Browser origins allowed to call the routing/status endpoints.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default = "default_backend_timeout_ms")]
@@ -83,6 +86,7 @@ impl Default for RouterSettings {
             public_base_url: default_public_base_url(),
             home_url: default_home_url(),
             juiceback_origin: default_juiceback_origin(),
+            allowed_origins: Vec::new(),
             api_key: None,
             backend_timeout_ms: default_backend_timeout_ms(),
             resolve_cache_secs: default_resolve_cache_secs(),
@@ -155,20 +159,77 @@ pub struct GeoSettings {
 }
 
 impl Config {
-    /// Missing or invalid files fall back to defaults and are logged.
-    #[must_use]
-    pub fn load(path: &Path) -> Self {
-        let Ok(text) = std::fs::read_to_string(path) else {
-            tracing::info!("config: {} not found, using defaults", path.display());
-            return Self::default();
-        };
-        match toml::from_str(&text) {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::error!("config file {} invalid: {error}", path.display());
+    /// Loads a TOML config. A missing file is documented to use defaults;
+    /// unreadable, malformed or invalid files are fatal so the router never
+    /// silently starts with defaults (and an empty API key) on a bad deploy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description when the file cannot be read, cannot be parsed,
+    /// or contains invalid URLs or non-positive timeouts/ports.
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let config = match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str::<Self>(&text)
+                .map_err(|error| format!("config file {} invalid: {error}", path.display()))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::info!("config: {} not found, using defaults", path.display());
                 Self::default()
             }
+            Err(error) => {
+                return Err(format!(
+                    "config file {} unreadable: {error}",
+                    path.display()
+                ));
+            }
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Rejects values that would leave routing or health probes misconfigured.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description of the first invalid setting.
+    fn validate(&self) -> Result<(), String> {
+        if self.server.port == 0 {
+            return Err("server.port must be non-zero".to_owned());
         }
+        for (label, value, allow_empty) in [
+            ("juiceback_url", self.router.juiceback_url.as_str(), false),
+            (
+                "public_base_url",
+                self.router.public_base_url.as_str(),
+                true,
+            ),
+            ("home_url", self.router.home_url.as_str(), true),
+            (
+                "juiceback_origin",
+                self.router.juiceback_origin.as_str(),
+                false,
+            ),
+            ("local_upstream", self.router.local_upstream.as_str(), false),
+        ] {
+            if value.trim().is_empty() {
+                if allow_empty {
+                    continue;
+                }
+                return Err(format!("router.{label} must not be empty"));
+            }
+            let parsed = url::Url::parse(value)
+                .map_err(|error| format!("router.{label} is invalid: {error}"))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+                return Err(format!("router.{label} must be an absolute http(s) URL"));
+            }
+        }
+        if self.router.backend_timeout_ms == 0
+            || self.router.resolve_cache_secs == 0
+            || self.router.probe_interval_secs == 0
+            || self.router.probe_timeout_ms == 0
+        {
+            return Err("router timeouts and resolve_cache_secs must be positive".to_owned());
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -232,5 +293,33 @@ US = "us1"
             Some("us1")
         );
         assert_eq!(config.server.port, 6404);
+    }
+
+    #[test]
+    fn missing_config_uses_defaults() {
+        let path =
+            std::env::temp_dir().join(format!("juicerouter-missing-{}.toml", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(Config::load(&path).unwrap().server.port, 6404);
+    }
+
+    #[test]
+    fn malformed_config_is_an_error() {
+        let path =
+            std::env::temp_dir().join(format!("juicerouter-invalid-{}.toml", std::process::id()));
+        std::fs::write(&path, "[router]\njuiceback_url = 42\n").unwrap();
+        let error = Config::load(&path).unwrap_err();
+        assert!(error.contains("invalid"), "{error}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn invalid_values_are_rejected() {
+        let mut config = Config::default();
+        config.router.backend_timeout_ms = 0;
+        assert!(config.validate().is_err());
+        config = Config::default();
+        config.router.home_url = "ftp://example".to_owned();
+        assert!(config.validate().is_err());
     }
 }

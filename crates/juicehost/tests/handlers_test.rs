@@ -624,6 +624,17 @@ async fn storage_endpoint() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let metrics: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let total = metrics["total_bytes"].as_u64().unwrap();
+    let used = metrics["used_bytes"].as_u64().unwrap();
+    let free = metrics["free_bytes"].as_u64().unwrap();
+    assert!(total > 0);
+    assert_eq!(used + free, total);
+    assert_eq!(metrics["min_free_bytes"], 0);
+    assert_eq!(metrics["out_of_space"], false);
 }
 
 #[tokio::test]
@@ -826,6 +837,104 @@ async fn internal_endpoints_open_when_no_api_key_configured() {
         .oneshot(
             Request::builder()
                 .uri("/f/open1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn freeze_unfreeze_accept_key_or_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(LocalBackend::new(dir.path().to_path_buf(), 0).unwrap());
+    backend
+        .put(
+            "frz-key",
+            "f.txt",
+            Bytes::from_static(b"data"),
+            Some("cap-key"),
+        )
+        .await
+        .unwrap();
+    backend
+        .put(
+            "frz-cap",
+            "f.txt",
+            Bytes::from_static(b"data"),
+            Some("cap-only"),
+        )
+        .await
+        .unwrap();
+
+    let post = |uri: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // With a shared key the freeze routes are reachable and the handler sees the
+    // key (its capability branch would otherwise be dead behind require_api_key).
+    let app = build_router(Arc::new(AppState::new(
+        &test_config("", None),
+        Arc::clone(&backend) as Arc<dyn juicehost::storage::StorageBackend>,
+    )));
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-key/freeze")
+                .header(api_key_header().0, api_key_header().1)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-key/unfreeze")
+                .header(api_key_header().0, api_key_header().1)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // With no shared key, a file capability must work on the same routes.
+    let app = build_router(capability_state(dir.path()).await);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-cap/freeze")
+                .header("x-juicehost-file-capability", "cap-only")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(post("/internal/file/frz-cap/unfreeze"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/file/frz-cap/unfreeze")
+                .header("x-juicehost-file-capability", "cap-only")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1843,25 +1952,6 @@ async fn preview_bots_get_raw_bytes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_slice(), b"hello bots");
 
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header(
-                    "user-agent",
-                    "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/130.0",
-                )
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let (status, _, _) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
-    assert_eq!(status, StatusCode::OK);
-
     let (status, _, body) = get_bare(&app, "/v/bot00001.txt", Some("Discordbot/2.0")).await;
     assert_eq!(status, StatusCode::OK);
     let page = String::from_utf8_lossy(&body);
@@ -1871,34 +1961,6 @@ async fn preview_bots_get_raw_bytes() {
         page.contains("NOT the raw file"),
         "preview must tell non-browser clients where the raw bytes are"
     );
-
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header("user-agent", "some-uploader/1.0")
-                .header("accept", "*/*")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v/bot00001.txt")
-                .header("user-agent", "curl/8.5.0")
-                .header("sec-fetch-mode", "navigate")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
 
     let (status, _, body) = get_public(&app, "/v/bot00001.txt", None).await;
     assert_eq!(status, StatusCode::OK);

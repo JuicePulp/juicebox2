@@ -277,8 +277,8 @@ fn modals_html(
         .copied()
         .or(config.max_file_size_bytes)
         .unwrap_or(juiceutils::config::defaults::MAX_FILE_SIZE_BYTES);
-    let max_bytes_by_ttl = serde_json::to_string(&max_bytes_by_ttl_map)
-        .unwrap_or_else(|_| "{}".to_string());
+    let max_bytes_by_ttl =
+        serde_json::to_string(&max_bytes_by_ttl_map).unwrap_or_else(|_| "{}".to_string());
     ModalsTpl {
         cx: cx.clone(),
         flags: ServerFlags {
@@ -1185,6 +1185,7 @@ struct FileRow {
     short_id: String,
     index: usize,
     protected: bool,
+    status: String,
 }
 
 fn extract_short_id(url: &str) -> String {
@@ -1266,7 +1267,7 @@ fn file_rows(
                     .trim_start_matches("https://")
                     .to_owned(),
                 can_rename: custom_id && !file.url.is_empty(),
-                expired: file.expires_at * 1000 <= timestamp,
+                expired: file.expires_at.saturating_mul(1000) <= timestamp,
                 ttl_label: format::remaining_label(locale, file.expires_at, timestamp),
                 ttl_pct: format::pct_remaining(file.expires_at, file.uploaded_at, timestamp),
                 short_id: extract_short_id(&file.url),
@@ -1282,6 +1283,7 @@ fn file_rows(
                 storage_host: host,
                 index,
                 protected: file.protected,
+                status: file.status,
             }
         })
         .collect()

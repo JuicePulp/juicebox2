@@ -486,7 +486,7 @@ fn bundle_filename(source_url: &str) -> String {
     };
     let id = parsed
         .as_ref()
-        .and_then(|url| url.path_segments()?.filter(|s| !s.is_empty()).last())
+        .and_then(|url| url.path_segments()?.filter(|s| !s.is_empty()).next_back())
         .unwrap_or("bundle");
     let safe: String = id
         .chars()

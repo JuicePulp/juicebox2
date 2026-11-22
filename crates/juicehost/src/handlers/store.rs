@@ -9,13 +9,23 @@ use axum::{
 use bytes::Bytes;
 use futures::StreamExt;
 
-use super::common::optional_file_capability;
+use super::common::{body_is_timeout, optional_file_capability};
 use crate::{
     error::{JuicehostError, StorageError},
     state::AppState,
     storage,
     storage::valid_component as is_valid_id,
 };
+
+/// Multipart/field parse failures are bad requests unless the body deadline
+/// fired, in which case the client must be told to retry.
+fn body_error(error: impl std::error::Error + 'static) -> JuicehostError {
+    if body_is_timeout(&error) {
+        JuicehostError::RequestTimeout
+    } else {
+        JuicehostError::BadRequest
+    }
+}
 
 #[utoipa::path(
     post,
@@ -46,24 +56,17 @@ pub async fn store_file(
     let mut filename = String::new();
     let mut file_data: Option<Bytes> = None;
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| JuicehostError::BadRequest)?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(body_error)? {
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "id" => {
-                file_id = field.text().await.map_err(|_| JuicehostError::BadRequest)?;
+                file_id = field.text().await.map_err(body_error)?;
             }
             "filename" => {
-                filename = field.text().await.map_err(|_| JuicehostError::BadRequest)?;
+                filename = field.text().await.map_err(body_error)?;
             }
             "file" => {
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|_| JuicehostError::BadRequest)?;
+                let data = field.bytes().await.map_err(body_error)?;
                 if data.len() as u64 > state.max_file_size_bytes {
                     return Err(JuicehostError::PayloadTooLarge);
                 }
@@ -163,7 +166,7 @@ pub(crate) async fn sniff_and_validate(
                 }
                 prefix.extend_from_slice(&chunk);
             }
-            Some(Err(_)) => return Err(JuicehostError::BadRequest),
+            Some(Err(error)) => return Err(body_error(error)),
             None => break,
         }
     }
@@ -435,6 +438,7 @@ pub(crate) fn sized_stream(
                     }
                     Ok(Some((chunk, (stream, next))))
                 }
+                Some(Err(error)) if body_is_timeout(&error) => Err(StorageError::BodyTimeout),
                 Some(Err(error)) => Err(StorageError::BodyRead(format!(
                     "request body failed: {error}"
                 ))),

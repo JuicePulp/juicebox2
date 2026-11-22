@@ -42,8 +42,8 @@ impl TicketClaims {
             mime_type: mime_type.into(),
             file_size,
             file_capability: capability.into(),
-            iat: now.max(0) as u64,
-            exp: (now + ttl_secs).max(0) as u64,
+            iat: u64::try_from(now.max(0)).unwrap_or(0),
+            exp: u64::try_from(now.saturating_add(ttl_secs).max(0)).unwrap_or(0),
             iss: ISSUER.to_string(),
         }
     }
@@ -99,7 +99,7 @@ mod tests {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap();
-        now.as_secs() as i64
+        i64::try_from(now.as_secs()).unwrap_or(i64::MAX)
     }
 
     fn claims(ttl_secs: i64) -> TicketClaims {

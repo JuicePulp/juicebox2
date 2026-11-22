@@ -28,4 +28,6 @@ pub struct ServerFile {
     pub protected: bool,
     #[serde(default)]
     pub is_encrypted: bool,
+    #[serde(default)]
+    pub status: String,
 }

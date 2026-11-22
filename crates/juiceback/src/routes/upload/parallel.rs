@@ -13,15 +13,10 @@ use super::{
     common::{UploadResponse, enforce_mint_limit, region_host, upload_json_response},
     ticket::{
         clamp_ttl_hours, clamp_ttl_seconds, encrypted_client_ip, insert_owned_pending, mint_ticket,
-        public_urls_for, reject_blocked_filename, ticket_ttl_secs,
+        public_urls_for, reject_blocked_filename, ticket_ttl_secs, verify_ticket_and_ownership,
     },
 };
-use crate::{
-    db::{self, FileRecord},
-    error::AppError,
-    routes::UserId,
-    state::AppState,
-};
+use crate::{db::FileRecord, error::AppError, routes::UserId, state::AppState};
 
 /// Earlier parts may be a byte larger; the parts sum exactly.
 pub(crate) fn direct_part_sizes(total: u64, n: usize) -> Vec<u64> {
@@ -110,13 +105,18 @@ pub async fn direct_parallel_reserve_handler(
     }
     reject_blocked_filename(&body.filename, danger)?;
 
-    let min_parts = (body.file_size.div_ceil(DIRECT_MAX_PART_BYTES) as usize).max(2);
+    let min_parts = usize::try_from(body.file_size.div_ceil(DIRECT_MAX_PART_BYTES))
+        .map_err(|_| AppError::PayloadTooLarge)?
+        .max(2);
     if min_parts > DIRECT_MAX_PARTS {
         return Err(AppError::PayloadTooLarge);
     }
-    let mut num_parts = body
-        .num_parts
-        .unwrap_or_else(|| (body.file_size.div_ceil(32 * 1024 * 1024) as usize).clamp(2, 32));
+    let mut num_parts = match body.num_parts {
+        Some(parts) => parts,
+        None => usize::try_from(body.file_size.div_ceil(32 * 1024 * 1024))
+            .map_err(|_| AppError::PayloadTooLarge)?
+            .clamp(2, 32),
+    };
     num_parts = num_parts.clamp(2, DIRECT_MAX_PARTS).max(min_parts);
     if num_parts > DIRECT_MAX_PARTS {
         return Err(AppError::PayloadTooLarge);
@@ -255,35 +255,17 @@ pub async fn direct_parallel_complete_handler(
     headers: HeaderMap,
     Json(body): Json<DirectParallelCompleteRequest>,
 ) -> Result<Response, AppError> {
-    let claims = juiceproto::ticket::verify(&body.ticket, &state.config.ticket_jwt_secret)
-        .map_err(|_| AppError::Unauthorized("Invalid upload ticket".into()))?;
-    if claims.file_id != body.file_id || claims.user_id != user_id {
-        return Err(AppError::Unauthorized(
-            "Upload ticket does not match session".into(),
-        ));
-    }
+    let file = verify_ticket_and_ownership(
+        &state,
+        &body.ticket,
+        &body.file_id,
+        &user_id,
+        "get_direct_parallel_upload",
+        "verify_direct_parallel_upload_owner",
+    )
+    .await?;
 
     let file_id = body.file_id;
-    let lookup_id = file_id.clone();
-    let file = state
-        .db_call("get_direct_parallel_upload", move |db| {
-            db::get_file(db, &lookup_id)
-        })
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let owner_id = user_id.clone();
-    let owned_id = file_id.clone();
-    let owned = state
-        .db_call("verify_direct_parallel_upload_owner", move |db| {
-            db::client_owns_file(db, &owner_id, &owned_id)
-        })
-        .await?;
-    if !owned {
-        return Err(AppError::Unauthorized(
-            "Upload is not owned by this session".into(),
-        ));
-    }
-
     if file.status != FileRecord::STATUS_UPLOADING {
         let completed = crate::reservation::finish(
             &state,

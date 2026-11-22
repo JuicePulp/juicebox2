@@ -49,6 +49,7 @@ const MIGRATIONS: &[(&str, fn(&Connection) -> Result<()>)] = &[
     ("promo_state.embed_attempt", m16_promo_state_embed_attempt),
     ("files.video_meta", m17_files_video_meta),
     ("fetch_jobs.total_bytes", m18_fetch_jobs_total_bytes),
+    ("files.peer_metadata", m19_files_peer_metadata),
 ];
 
 fn m14_ip_geolocation(conn: &Connection) -> Result<()> {
@@ -188,6 +189,28 @@ fn m18_fetch_jobs_total_bytes(conn: &Connection) -> Result<()> {
         "ALTER TABLE fetch_jobs ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT 0",
         [],
     );
+    Ok(())
+}
+
+/// Peer rows need an owner device id and a liveness timestamp. Both columns are
+/// added defensively so existing databases migrate in place without a rewrite.
+fn m19_files_peer_metadata(conn: &Connection) -> Result<()> {
+    if !has_column(conn, "files", "peer_device_id")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN peer_device_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !has_column(conn, "files", "last_seen")? {
+        conn.execute(
+            "ALTER TABLE files ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_files_peer_device ON files(tier, peer_device_id)",
+        [],
+    )?;
     Ok(())
 }
 

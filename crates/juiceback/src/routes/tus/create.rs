@@ -14,6 +14,14 @@ use super::metadata::{
 };
 use crate::{error::AppError, state::AppState, tus::TusUpload, upload_mode::UploadMode};
 
+/// Filenames arrive as base64 TUS metadata and must be sanitized before they
+/// reach storage records or share links.
+fn metadata_filename(metadata: &[(String, String)]) -> String {
+    crate::routes::upload::common::sanitize_filename(
+        find_meta(metadata, "filename").unwrap_or("upload"),
+    )
+}
+
 /// Re-creating an existing parallel part returns `409` with the live sibling or
 /// `X-Juicebox-Part-Completing`.
 #[utoipa::path(
@@ -52,6 +60,10 @@ pub async fn create_upload_handler(
     let default_ttl = jh.default_ttl_hours;
     let allowed_ttl = jh.allowed_ttl_hours.clone();
 
+    // TODO: these limit checks and the final `state.tus.insert` are not atomic;
+    // concurrent creates can both pass and exceed MAX_TUS_SESSIONS / the per-IP
+    // cap. Making it exact needs a counter owned by AppState (sessions are
+    // removed from several other modules), so it is left as a best-effort cap.
     if state.tus.len() >= crate::constants::MAX_TUS_SESSIONS {
         return Err(AppError::RateLimited);
     }
@@ -69,9 +81,7 @@ pub async fn create_upload_handler(
     }
 
     let metadata = parse_tus_metadata(headers.get("upload-metadata"));
-    let filename = find_meta(&metadata, "filename")
-        .unwrap_or("upload")
-        .to_string();
+    let filename = metadata_filename(&metadata);
     let mime_type = find_meta(&metadata, "mimetype")
         .unwrap_or("application/octet-stream")
         .to_string();
@@ -218,6 +228,10 @@ pub async fn create_upload_handler(
                 session.part_lengths.remove(&pi).map(|(_, length)| length)
             });
             if let Some(old_length) = old_length {
+                #[expect(
+                    deprecated,
+                    reason = "AtomicU64::try_update needs Rust 1.95; workspace MSRV is 1.88"
+                )]
                 let _ = session.declared_size.fetch_update(
                     std::sync::atomic::Ordering::SeqCst,
                     std::sync::atomic::Ordering::SeqCst,
@@ -253,18 +267,19 @@ pub async fn create_upload_handler(
                 entry.insert(id.clone());
             }
         }
-        if session
-            .declared_size
-            .fetch_update(
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-                |size| {
-                    size.checked_add(total_length)
-                        .filter(|sum| *sum <= max_size)
-                },
-            )
-            .is_err()
-        {
+        #[expect(
+            deprecated,
+            reason = "AtomicU64::try_update needs Rust 1.95; workspace MSRV is 1.88"
+        )]
+        let size_update = session.declared_size.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |size| {
+                size.checked_add(total_length)
+                    .filter(|sum| *sum <= max_size)
+            },
+        );
+        if size_update.is_err() {
             session.part_ids.remove(&pi);
             return Err(AppError::PayloadTooLarge);
         }
@@ -365,4 +380,24 @@ pub async fn create_upload_handler(
         .header("Tus-Resumable", "1.0.0")
         .body(axum::body::Body::empty())
         .map_err(|_| AppError::Internal("response build failed".into()))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metadata_filename;
+
+    fn meta(key: &str, value: &str) -> (String, String) {
+        (key.to_string(), value.to_string())
+    }
+
+    #[test]
+    fn filename_from_metadata_is_sanitized() {
+        let metadata = vec![meta("filename", "../evil\\name.txt")];
+        assert_eq!(metadata_filename(&metadata), "evilname.txt");
+    }
+
+    #[test]
+    fn missing_filename_uses_default() {
+        assert_eq!(metadata_filename(&[]), "upload");
+    }
 }

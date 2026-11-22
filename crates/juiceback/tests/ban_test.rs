@@ -33,8 +33,19 @@ async fn banned_ip_returns_403() {
 async fn unban_ip_allows_access() {
     let state = common::test_state_with_proxies();
     let hashed = juiceback::utils::hash_ip_for_ban("192.168.1.100", &state.config.ip_pepper);
-    state.banned_ips.insert(hashed.clone(), ());
-    state.banned_ips.remove(&hashed);
+    state
+        .ban_ip(&hashed, "spam", "admin")
+        .await
+        .expect("ban_ip should succeed");
+    assert!(state.banned_ips.contains_key(&hashed));
+
+    assert!(
+        state
+            .unban_ip(&hashed)
+            .await
+            .expect("unban_ip should succeed")
+    );
+    assert!(!state.banned_ips.contains_key(&hashed));
 
     let app = build_router(state);
     let resp = app

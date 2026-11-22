@@ -6,7 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use axum::{
@@ -21,7 +21,10 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use super::{
-    common::{NO_STORE, RangeResult, file_cache_control_value, parse_range},
+    common::{
+        ByteResponseHeaders, NO_STORE, RangeResult, apply_byte_response_headers,
+        file_cache_control_value, if_none_matches, parse_range,
+    },
     shell::{GateDecision, ShellMode, gate_decision, remaining_ttl_secs},
 };
 use crate::{
@@ -37,6 +40,10 @@ const CACHE_VERSION: u32 = 14;
 const PREVIEW_WAIT: Duration = Duration::from_secs(3);
 const CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const TEMP_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+/// Idle per-id embed locks are dropped after an hour, mirroring the ZIP index
+/// and rate-limiter caches.
+const LOCK_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+const LOCK_PRUNE_THRESHOLD: usize = 1_024;
 const THUMBNAIL_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 const THUMBNAIL_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const TITLE_MAX_CHARS: usize = 96;
@@ -430,10 +437,16 @@ pub async fn ensure_video(
     if !is_valid_id(&id) || !eligible(&state, &meta) {
         return None;
     }
+    if state.audio_embed_locks.len() > LOCK_PRUNE_THRESHOLD {
+        state
+            .audio_embed_locks
+            .retain(|_, (inserted, _)| inserted.elapsed() < LOCK_MAX_AGE);
+    }
     let lock = state
         .audio_embed_locks
         .entry(id.clone())
-        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .or_insert_with(|| (Instant::now(), Arc::new(tokio::sync::Mutex::new(()))))
+        .1
         .clone();
     let _guard = lock.lock().await;
     if let Some(cached) = read_cache(
@@ -1658,12 +1671,7 @@ pub async fn audio_embed_media(
     );
     let cache_control = embed_cache_control(&state, &id).await;
     let cache_tag = (cache_control != NO_STORE).then(|| format!("juicebox:{id}"));
-    if let Some(value) = headers.get(header::IF_NONE_MATCH)
-        && let Ok(value) = value.to_str()
-        && value
-            .split(',')
-            .any(|candidate| candidate.trim().trim_matches('"') == etag.trim_matches('"'))
-    {
+    if if_none_matches(&headers, &etag) {
         let mut builder = Response::builder()
             .status(StatusCode::NOT_MODIFIED)
             .header(header::ETAG, &etag)
@@ -1701,9 +1709,18 @@ pub async fn audio_embed_media(
                     .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Unsatisfiable => {
+                let mut builder = builder.status(StatusCode::RANGE_NOT_SATISFIABLE);
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(content_type),
+                        etag: Some(&etag),
+                        content_range: Some(format!("bytes */{total}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
                 return builder
-                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(header::CONTENT_RANGE, format!("bytes */{total}"))
                     .body(Body::empty())
                     .map_err(|_| JuicehostError::Internal);
             }
@@ -1815,9 +1832,9 @@ async fn prune_cache(state: &AppState) {
         }
     }
 
-    state
-        .audio_embed_locks
-        .retain(|_, lock| Arc::strong_count(lock) > 1);
+    state.audio_embed_locks.retain(|_, (created, lock)| {
+        created.elapsed() < CACHE_MAX_AGE && Arc::strong_count(lock) > 1
+    });
 
     if expired > 0 || evicted > 0 {
         tracing::info!(

@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::{db, state::AppState};
+use crate::{db, error::AppError, state::AppState};
 
 /// Extraction fails when the middleware did not install it: a wiring bug, not a
 /// client error.
@@ -90,7 +90,7 @@ pub(crate) async fn user_identity_middleware(
         let token = crate::auth::new_session_token();
         let hash = crate::auth::session_token_hash(&token);
         let uid = user_id.clone();
-        if state
+        match state
             .db_call("create_session", move |db| {
                 db::create_session(
                     db,
@@ -101,11 +101,23 @@ pub(crate) async fn user_identity_middleware(
                 )
             })
             .await
-            .is_ok()
         {
-            Some(token)
-        } else {
-            None
+            Ok(()) => Some(token),
+            Err(err) => {
+                // Serving on with a throwaway id would make every later
+                // reserve/complete fail with 401; fail closed so the browser
+                // retries bootstrap instead.
+                tracing::error!("session bootstrap failed: {err}");
+                let mut resp = AppError::DbPoolError(
+                    "session initialization temporarily unavailable - please retry".into(),
+                )
+                .into_response();
+                if !resp.headers().contains_key(header::RETRY_AFTER) {
+                    resp.headers_mut()
+                        .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+                }
+                return resp;
+            }
         }
     } else {
         None

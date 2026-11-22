@@ -49,7 +49,8 @@ impl R2Store {
     }
 
     /// Restricts keys to short ASCII path segments and rejects traversal.
-    fn valid_key(key: &str) -> bool {
+    /// Shared with the handlers that read a `hot/` key from backend metadata.
+    pub fn valid_hot_key(key: &str) -> bool {
         if key.is_empty() || key.len() > 256 || key.starts_with('/') || key.contains("..") {
             return false;
         }
@@ -63,7 +64,7 @@ impl R2Store {
     }
 
     async fn get_path(&self, key: &str) -> Result<object_store::GetResult, StorageError> {
-        if !Self::valid_key(key) {
+        if !Self::valid_hot_key(key) {
             return Err(StorageError::NotFound);
         }
         self.client
@@ -90,7 +91,7 @@ impl R2Store {
         start: u64,
         end: u64,
     ) -> Result<crate::storage::ByteStream, StorageError> {
-        if !Self::valid_key(key) {
+        if !Self::valid_hot_key(key) {
             return Err(StorageError::NotFound);
         }
         let result = self
@@ -120,6 +121,9 @@ impl R2Store {
         bytes: Bytes,
         content_type: &str,
     ) -> Result<(), StorageError> {
+        if !Self::valid_hot_key(key) {
+            return Err(StorageError::Io("invalid R2 hot key".into()));
+        }
         let mut attributes = object_store::Attributes::new();
         if !content_type.is_empty() {
             attributes.insert(
@@ -148,6 +152,9 @@ impl R2Store {
     }
 
     pub async fn delete_prefix(&self, prefix: &str) -> Result<usize, StorageError> {
+        if !Self::valid_hot_key(prefix) {
+            return Err(StorageError::Io("invalid R2 hot prefix".into()));
+        }
         let mut list = self
             .client
             .list(Some(&object_store::path::Path::from(prefix)));

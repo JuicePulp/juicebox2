@@ -171,7 +171,7 @@ where
     let decoder = GzipDecoder::new(BufReader::new(StreamReader::new(Box::pin(stream))));
 
     tokio::pin!(decoder);
-    let mut buf = [0_u8; crate::constants::GZIP_READ_BUFFER_SIZE];
+    let mut buf = vec![0_u8; crate::constants::GZIP_READ_BUFFER_SIZE];
     let mut sniff: Vec<u8> = Vec::new();
     let mut validated = false;
     let mut forwarded_any = false;
@@ -266,25 +266,7 @@ pub async fn stream_gzip_upload_to_juicehost(
 
     let read_start = std::time::Instant::now();
 
-    let wire_cap = max_size;
-    let chunk_stream = futures::stream::unfold((field, 0_i64), |(mut f, mut total)| async move {
-        match f.chunk().await {
-            Ok(Some(chunk)) => {
-                total += chunk.len() as i64;
-                if total > wire_cap {
-                    let err =
-                        std::io::Error::new(std::io::ErrorKind::Other, "wire size limit exceeded");
-                    return Some((Err(err), (f, total)));
-                }
-                Some((Ok(chunk), (f, total)))
-            }
-            Ok(None) => None,
-            Err(e) => {
-                let err = std::io::Error::new(std::io::ErrorKind::Other, e.body_text());
-                Some((Err(err), (f, total)))
-            }
-        }
-    });
+    let chunk_stream = multipart_chunk_stream(field, max_size);
 
     let decode_result =
         pipe_gunzip_to_sender(Box::pin(chunk_stream), &tx, filename, danger, max_size).await;
@@ -386,6 +368,30 @@ pub async fn stream_protected_upload_to_juicehost(
     Ok((total_bytes, header))
 }
 
+/// Bounds the compressed bytes before decompression, shared by both gzip paths.
+fn multipart_chunk_stream<'a>(
+    field: axum::extract::multipart::Field<'a>,
+    wire_cap: i64,
+) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'a {
+    futures::stream::unfold((field, 0_i64), move |(mut f, mut total)| async move {
+        match f.chunk().await {
+            Ok(Some(chunk)) => {
+                total += chunk.len() as i64;
+                if total > wire_cap {
+                    let err = std::io::Error::other("wire size limit exceeded");
+                    return Some((Err(err), (f, total)));
+                }
+                Some((Ok(chunk), (f, total)))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                let err = std::io::Error::other(e.body_text());
+                Some((Err(err), (f, total)))
+            }
+        }
+    })
+}
+
 /// The decoded prefix is validated before any ciphertext is produced.
 #[expect(
     clippy::too_many_arguments,
@@ -404,25 +410,7 @@ pub async fn stream_protected_gzip_upload_to_juicehost(
     dek: &crate::crypto_file::FileKey,
 ) -> Result<(i64, [u8; crate::crypto_file::HEADER_LEN]), AppError> {
     let (spool_tx, spool_handle) = crate::routes::upload::protected::spawn_spool_task(max_size);
-    let wire_cap = max_size;
-    let chunk_stream = futures::stream::unfold((field, 0_i64), |(mut f, mut total)| async move {
-        match f.chunk().await {
-            Ok(Some(chunk)) => {
-                total += chunk.len() as i64;
-                if total > wire_cap {
-                    let err =
-                        std::io::Error::new(std::io::ErrorKind::Other, "wire size limit exceeded");
-                    return Some((Err(err), (f, total)));
-                }
-                Some((Ok(chunk), (f, total)))
-            }
-            Ok(None) => None,
-            Err(e) => {
-                let err = std::io::Error::new(std::io::ErrorKind::Other, e.body_text());
-                Some((Err(err), (f, total)))
-            }
-        }
-    });
+    let chunk_stream = multipart_chunk_stream(field, max_size);
 
     pipe_gunzip_to_sender(
         Box::pin(chunk_stream),

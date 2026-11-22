@@ -29,6 +29,7 @@ pub mod identity;
 pub mod manage;
 pub mod noscript;
 pub mod pairing;
+pub mod peer;
 pub mod presence;
 pub mod register;
 pub mod stats;
@@ -201,6 +202,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             .allow_origin(origins)
             .allow_methods([
                 Method::GET,
+                Method::HEAD,
                 Method::POST,
                 Method::PATCH,
                 Method::DELETE,
@@ -214,6 +216,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 header::HeaderName::from_static("upload-length"),
                 header::HeaderName::from_static("upload-offset"),
                 header::HeaderName::from_static("upload-metadata"),
+                header::HeaderName::from_static("x-reserve-id"),
                 header::HeaderName::from_static("tus-resumable"),
                 header::HeaderName::from_static(juiceproto::headers::DELETE_TOKEN),
                 header::HeaderName::from_static(juiceproto::headers::FILE_PASSWORD),
@@ -293,6 +296,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(manage::put_client_files_handler),
         )
         .route("/api/register", post(register::register_handler))
+        .route("/api/peer/register", post(peer::register_handler))
+        .route("/api/peer/revoke/{id}", post(peer::revoke_handler))
+        .route("/api/peer/heartbeat", post(peer::heartbeat_handler))
         .merge(abuse_routes)
         .layer(DefaultBodyLimit::max(64 * 1024));
 
@@ -335,6 +341,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(upload::file_status_handler),
         )
         .route("/internal/resolve/{id}", get(upload::resolve_file_handler))
+        .route("/internal/peer/authorize", post(peer::authorize_handler))
         .route(
             "/internal/alias/{old_id}",
             get(manage::resolve_alias_handler),

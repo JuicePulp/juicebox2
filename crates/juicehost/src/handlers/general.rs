@@ -3,17 +3,20 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{HeaderMap, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Redirect, Response},
 };
+use juiceproto::config::HostConfigResponse;
 use serde_json::json;
 
-use super::common::{BackendStatus, RangeResult, parse_range};
+use super::common::{
+    BackendStatus, ByteResponseHeaders, RangeResult, apply_byte_response_headers, parse_range,
+};
 use crate::{
     error::{JuicehostError, StorageError, not_found_html},
     state::AppState,
     storage,
-    storage::valid_component as is_valid_id,
+    storage::{R2Store, valid_component as is_valid_id},
 };
 
 #[utoipa::path(
@@ -109,29 +112,29 @@ pub async fn storage_handler(State(state): State<Arc<AppState>>) -> Json<storage
     ),
     tag = "General",
 )]
-pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let danger_level_str = state.danger_level.as_str();
+pub async fn config_handler(State(state): State<Arc<AppState>>) -> Json<HostConfigResponse> {
     let default_max_file_size_bytes = state
         .max_file_size_by_ttl_hours
         .get(&juiceutils::size_scale::ttl_key(state.default_ttl_hours))
         .copied()
         .unwrap_or(state.max_file_size_bytes);
-    Json(serde_json::json!({
-        "max_file_size_bytes": default_max_file_size_bytes,
-        "max_file_size_hard_bytes": state.max_file_size_bytes,
-        "max_file_size_by_ttl_hours": &state.max_file_size_by_ttl_hours,
-        "version": env!("CARGO_PKG_VERSION"),
-        "default_ttl_hours": state.default_ttl_hours,
-        "allowed_ttl_hours": state.allowed_ttl_hours,
-        "danger_level": danger_level_str,
-        "quick_link": state.quick_link,
-        "custom_id": state.custom_id,
-        "backend_url": state.backend_url,
-        "frontend_url": state.frontend_url,
-        "password_links": true,
-        "at_rest_via_juiceback": true,
-        "encrypted": true,
-    }))
+    Json(HostConfigResponse {
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        max_file_size_bytes: Some(default_max_file_size_bytes),
+        max_file_size_hard_bytes: Some(state.max_file_size_bytes),
+        max_file_size_by_ttl_hours: Some(state.max_file_size_by_ttl_hours.clone()),
+        default_ttl_hours: Some(state.default_ttl_hours),
+        allowed_ttl_hours: Some(state.allowed_ttl_hours.clone()),
+        danger_level: Some(state.danger_level.as_str().to_owned()),
+        quick_link: Some(state.quick_link),
+        custom_id: Some(state.custom_id),
+        backend_url: state.backend_url.clone(),
+        frontend_url: state.frontend_url.clone(),
+        password_links: Some(true),
+        at_rest_via_juiceback: Some(true),
+        encrypted: Some(true),
+        ..Default::default()
+    })
 }
 
 #[utoipa::path(
@@ -226,6 +229,8 @@ pub(crate) async fn serve_stored_bytes(
     serve_stored_bytes_with_limit(state, headers, id, state.max_range_response_bytes).await
 }
 
+// The ciphertext endpoint keeps its own opaque-byte headers and permit
+// handling; only the 416 path uses the shared `ByteResponseHeaders` helper.
 async fn serve_stored_bytes_with_limit(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -258,6 +263,7 @@ async fn serve_stored_bytes_with_limit(
         && body.get("tier").and_then(|v| v.as_str()) == Some("hot")
         && let Some(key) = body.get("r2_key").and_then(|v| v.as_str())
         && key.starts_with("hot/")
+        && R2Store::valid_hot_key(key)
         && let Some(r2) = state.r2.as_ref()
     {
         if let Some(range_header) = headers.get(axum::http::header::RANGE)
@@ -288,13 +294,18 @@ async fn serve_stored_bytes_with_limit(
                     }
                 }
                 RangeResult::Unsatisfiable => {
-                    return Response::builder()
-                        .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(
-                            axum::http::header::CONTENT_RANGE,
-                            format!("bytes */{total_size}"),
-                        )
-                        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                    let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                    apply_byte_response_headers(
+                        &mut builder,
+                        ByteResponseHeaders {
+                            csp_mime: Some("application/octet-stream"),
+                            etag: Some(meta.etag.as_str()),
+                            content_range: Some(format!("bytes */{total_size}")),
+                            content_length: None,
+                            accept_ranges: true,
+                        },
+                    );
+                    return builder
                         .body(Body::empty())
                         .map_err(|_| JuicehostError::Internal);
                 }
@@ -349,13 +360,18 @@ async fn serve_stored_bytes_with_limit(
                     .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Unsatisfiable => {
-                return Response::builder()
-                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(
-                        axum::http::header::CONTENT_RANGE,
-                        format!("bytes */{total_size}"),
-                    )
-                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some("application/octet-stream"),
+                        etag: Some(meta.etag.as_str()),
+                        content_range: Some(format!("bytes */{total_size}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
+                return builder
                     .body(Body::empty())
                     .map_err(|_| JuicehostError::Internal);
             }

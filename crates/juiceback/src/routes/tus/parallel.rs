@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 use super::{completion::finish_tus_upload, state::await_storage_push, types::TusUploadMeta};
 use crate::{
@@ -22,16 +22,16 @@ pub(crate) fn note_part_finalized(
     session.finalized_parts.len() >= total
 }
 
-/// Returns ordered parts once; the winner marks `finalizing` so a late part
-/// cannot resume.
+/// Returns ordered parts once, together with the part TUS ids needed for
+/// teardown; the winner marks `finalizing` so a late part cannot resume. The
+/// caller tears down only after the concat succeeds, so a failure stays
+/// retryable.
 pub(crate) fn try_collect_finalized_parts(
     state: &Arc<AppState>,
     session_id: &str,
     part_index: usize,
     total: usize,
-) -> Option<(Vec<String>, u64)> {
-    use std::sync::atomic::Ordering;
-
+) -> Option<(Vec<String>, u64, Vec<String>)> {
     if part_index >= total {
         return None;
     }
@@ -64,16 +64,65 @@ pub(crate) fn try_collect_finalized_parts(
     }
 
     let part_tus_ids: Vec<String> = session.part_ids.iter().map(|e| e.value().clone()).collect();
-    drop(session);
-    state.part_sessions.remove(session_id);
+    Some((part_ids, full_size, part_tus_ids))
+}
 
-    for pid in &part_tus_ids {
+/// Drops all part state after a successful concat. `finalizing` stays set so a
+/// late part cannot start a second assembly.
+pub(crate) fn cleanup_finalized_parts(
+    state: &Arc<AppState>,
+    session_id: &str,
+    part_tus_ids: &[String],
+) {
+    state.part_sessions.remove(session_id);
+    for pid in part_tus_ids {
         state.tus.remove(pid);
         state.tus_senders.remove(pid);
         state.push_handles.remove(pid);
     }
+}
 
-    Some((part_ids, full_size))
+/// A failed, or cancelled, concat releases the guard so the client can retry
+/// the final part. All part state is left untouched for re-collection.
+fn allow_finalize_retry(sessions: &crate::tus::PartSessionMap, session_id: &str) {
+    if let Some(session) = sessions.get(session_id) {
+        session.finalizing.store(false, Ordering::SeqCst);
+    }
+}
+
+/// RAII release for `PartSession::finalizing`.
+///
+/// The final PATCH can be aborted (browser watchdog or user cancel) while
+/// `finalize_concat` is in flight, dropping its future before a success or
+/// error branch runs. Holding this guard across the await guarantees the flag
+/// is cleared on cancellation; `disarm` is only called after the parts have
+/// been torn down on success.
+struct FinalizeGuard {
+    sessions: crate::tus::PartSessionMap,
+    session_id: String,
+    armed: bool,
+}
+
+impl FinalizeGuard {
+    fn new(sessions: &crate::tus::PartSessionMap, session_id: &str) -> Self {
+        Self {
+            sessions: Arc::clone(sessions),
+            session_id: session_id.to_string(),
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for FinalizeGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            allow_finalize_retry(&self.sessions, &self.session_id);
+        }
+    }
 }
 
 /// `None` if an index is missing or the sum overflows.
@@ -147,7 +196,7 @@ pub(crate) async fn finalize_concat(
         .await
         .map_err(|e| {
             tracing::error!("concat failed for session {session_id}: {e}");
-            AppError::Internal(format!("concat failed: {e}"))
+            AppError::from_concat_error(e)
         })?;
     }
 
@@ -226,7 +275,7 @@ pub(crate) async fn complete_parallel_part(
         let mut expected = session
             .completion_reserve_id
             .lock()
-            .expect("part session completion lock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match expected.as_ref() {
             Some(reserve_id) if reserve_id != &meta.reserve_id => {
                 return Err(AppError::BadRequest(
@@ -245,8 +294,19 @@ pub(crate) async fn complete_parallel_part(
     }
 
     match try_collect_finalized_parts(state, session_id, part_index, total) {
-        Some((part_ids, full_size)) => {
-            finalize_concat(state, &meta, session_id, &part_ids, full_size).await
+        Some((part_ids, full_size, part_tus_ids)) => {
+            // The guard releases `finalizing` if this future is dropped while
+            // the concat is in flight, so a cancelled PATCH stays retryable.
+            let mut guard = FinalizeGuard::new(&state.part_sessions, session_id);
+            let result = finalize_concat(state, &meta, session_id, &part_ids, full_size).await;
+            match result {
+                Ok(value) => {
+                    cleanup_finalized_parts(state, session_id, &part_tus_ids);
+                    guard.disarm();
+                    Ok(value)
+                }
+                Err(err) => Err(err),
+            }
         }
         None => Ok(serde_json::json!({
             "status": "part_complete",
@@ -309,4 +369,56 @@ async fn finalized_parallel_part(
         is_encrypted,
     })
     .unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    };
+
+    use super::*;
+    use crate::upload_mode::UploadMode;
+
+    fn test_session() -> Arc<crate::tus::PartSession> {
+        Arc::new(crate::tus::PartSession {
+            session_id: "session".into(),
+            total_parts: 2,
+            filename: "file.bin".into(),
+            mime_type: "application/octet-stream".into(),
+            storage_host: None,
+            ttl_hours: 24.0,
+            reserve_id: None,
+            reservation_token: None,
+            capability: "cap".into(),
+            user_id: "user".into(),
+            upload_mode: UploadMode::Standard,
+            declared_size: AtomicU64::new(0),
+            finalized_parts: dashmap::DashMap::new(),
+            finalizing: AtomicBool::new(true),
+            part_ids: dashmap::DashMap::new(),
+            part_lengths: dashmap::DashMap::new(),
+            completion_reserve_id: std::sync::Mutex::new(None),
+        })
+    }
+
+    #[test]
+    fn guard_releases_finalizing_on_drop_but_not_when_disarmed() {
+        let sessions = crate::tus::new_part_session_map();
+        let session = test_session();
+        sessions.insert("session".into(), Arc::clone(&session));
+
+        {
+            let mut guard = FinalizeGuard::new(&sessions, "session");
+            guard.disarm();
+        }
+        assert!(session.finalizing.load(Ordering::SeqCst));
+
+        {
+            let _guard = FinalizeGuard::new(&sessions, "session");
+            assert!(session.finalizing.load(Ordering::SeqCst));
+        }
+        assert!(!session.finalizing.load(Ordering::SeqCst));
+    }
 }

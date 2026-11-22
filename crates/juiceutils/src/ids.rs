@@ -12,8 +12,8 @@ pub fn is_valid_custom_id(id: &str, min_len: usize, max_len: usize) -> bool {
         && id.len() >= min_len
         && id.len() <= max_len
         && id
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[must_use]
@@ -58,6 +58,13 @@ mod tests {
         assert!(!is_valid_custom_id("has space", 3, 32));
         assert!(!is_valid_custom_id("file.txt", 3, 32));
         assert!(!is_valid_custom_id("a/b", 3, 32));
+    }
+
+    #[test]
+    fn custom_id_rejects_unicode() {
+        assert!(!is_valid_custom_id("café", 3, 32));
+        assert!(!is_valid_custom_id("日本語", 3, 32));
+        assert!(!is_valid_custom_id("a‑b", 3, 32));
     }
 
     #[test]

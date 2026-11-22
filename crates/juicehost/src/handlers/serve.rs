@@ -14,7 +14,8 @@ use futures::StreamExt;
 
 use super::{
     common::{
-        NO_STORE, RangeResult, backend_file_status, backend_request, file_cache_control_value,
+        ByteResponseHeaders, NO_STORE, RangeResult, apply_byte_response_headers,
+        backend_file_status, backend_request, file_cache_control_value, if_none_matches,
         parse_range, prevent_file_caching,
     },
     preview::is_bot,
@@ -269,18 +270,8 @@ fn live_body_stream(
     Body::from_stream(stream)
 }
 
-/// Media documents fetch their own source from the media element. An opaque
-/// sandbox origin turns that into a cross-origin request, which browsers block
-/// without CORS. `allow-same-origin` keeps the request same-origin; scripts are
-/// still disabled because `allow-scripts` is absent.
-pub(crate) fn raw_content_security_policy(mime: &str) -> &'static str {
-    let base = mime.split(';').next().unwrap_or(mime).trim();
-    if base.starts_with("video/") || base.starts_with("audio/") || base == "application/ogg" {
-        "sandbox allow-downloads allow-same-origin"
-    } else {
-        "sandbox allow-downloads"
-    }
-}
+// Kept here because other handlers historically import it from this module.
+pub(crate) use super::common::raw_content_security_policy;
 
 async fn serve_live_upload(
     state: &Arc<AppState>,
@@ -309,6 +300,9 @@ async fn serve_live_upload(
         author: None,
     };
     let download_name = download_filename(id, &extension, Some(&backend_meta));
+    // Live uploads are deliberately specialized: these headers (uploading,
+    // uploaded, total) only exist here. Range responses still get the shared
+    // validator/security headers from `apply_byte_response_headers`.
     let with_headers = |mut builder: axum::http::response::Builder| {
         builder = builder.header(header::CACHE_CONTROL, NO_STORE);
         builder = builder.header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
@@ -345,18 +339,21 @@ async fn serve_live_upload(
             RangeResult::Satisfiable(start, end) => {
                 let end = end.min(snapshot.available.saturating_sub(1));
                 if snapshot.available == 0 || end < start {
+                    let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                    apply_byte_response_headers(
+                        &mut builder,
+                        ByteResponseHeaders {
+                            csp_mime: Some(&mime),
+                            etag: None,
+                            content_range: Some(format!("bytes */{}", snapshot.total_size)),
+                            content_length: None,
+                            accept_ranges: true,
+                        },
+                    );
                     return Ok(Some(
-                        with_headers(
-                            Response::builder()
-                                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                                .header(
-                                    header::CONTENT_RANGE,
-                                    format!("bytes */{}", snapshot.total_size),
-                                )
-                                .header(header::ACCEPT_RANGES, "bytes"),
-                        )
-                        .body(Body::empty())
-                        .map_err(|_| JuicehostError::Internal)?,
+                        with_headers(builder)
+                            .body(Body::empty())
+                            .map_err(|_| JuicehostError::Internal)?,
                     ));
                 }
                 let content_len = end - start + 1;
@@ -386,18 +383,21 @@ async fn serve_live_upload(
                 ));
             }
             RangeResult::Unsatisfiable => {
+                let mut builder = Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE);
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(&mime),
+                        etag: None,
+                        content_range: Some(format!("bytes */{}", snapshot.total_size)),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
                 return Ok(Some(
-                    with_headers(
-                        Response::builder()
-                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                            .header(
-                                header::CONTENT_RANGE,
-                                format!("bytes */{}", snapshot.total_size),
-                            )
-                            .header(header::ACCEPT_RANGES, "bytes"),
-                    )
-                    .body(Body::empty())
-                    .map_err(|_| JuicehostError::Internal)?,
+                    with_headers(builder)
+                        .body(Body::empty())
+                        .map_err(|_| JuicehostError::Internal)?,
                 ));
             }
             RangeResult::Ignore => {}
@@ -495,18 +495,20 @@ async fn serve_r2_response(
         }
     };
 
-    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
-        && let Ok(val) = if_none_match.to_str()
-        && val.trim_matches('"') == etag.trim_matches('"')
-    {
+    if if_none_matches(headers, &etag) {
         count_hit(&viewer_ip);
-        return with_cache_headers(
-            Response::builder()
-                .status(StatusCode::NOT_MODIFIED)
-                .header(header::ETAG, &etag),
-        )
-        .body(Body::empty())
-        .ok();
+        let mut builder = with_cache_headers(Response::builder().status(StatusCode::NOT_MODIFIED));
+        apply_byte_response_headers(
+            &mut builder,
+            ByteResponseHeaders {
+                csp_mime: Some(&mime_str),
+                etag: Some(&etag),
+                content_range: None,
+                content_length: None,
+                accept_ranges: false,
+            },
+        );
+        return builder.body(Body::empty()).ok();
     }
 
     let permit = Arc::clone(&state.download_semaphore)
@@ -527,30 +529,38 @@ async fn serve_r2_response(
                     })
                 });
                 count_hit(&viewer_ip);
-                return with_disposition(with_cache_headers(
+                let mut builder = with_disposition(with_cache_headers(
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
-                        .header(header::CONTENT_TYPE, &mime_str)
-                        .header(header::CONTENT_LENGTH, content_len)
-                        .header(
-                            header::CONTENT_RANGE,
-                            format!("bytes {start}-{end}/{total_size}"),
-                        )
-                        .header(header::ETAG, &etag)
-                        .header(header::ACCEPT_RANGES, "bytes"),
-                ))
-                .body(Body::from_stream(stream))
-                .ok();
+                        .header(header::CONTENT_TYPE, &mime_str),
+                ));
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(&mime_str),
+                        etag: Some(&etag),
+                        content_range: Some(format!("bytes {start}-{end}/{total_size}")),
+                        content_length: Some(content_len),
+                        accept_ranges: true,
+                    },
+                );
+                return builder.body(Body::from_stream(stream)).ok();
             }
             RangeResult::Unsatisfiable => {
-                return with_cache_headers(
-                    Response::builder()
-                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
-                        .header(header::ACCEPT_RANGES, "bytes"),
-                )
-                .body(Body::empty())
-                .ok();
+                let mut builder = with_cache_headers(
+                    Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE),
+                );
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(&mime_str),
+                        etag: Some(&etag),
+                        content_range: Some(format!("bytes */{total_size}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
+                return builder.body(Body::empty()).ok();
             }
             RangeResult::Ignore => {}
         }
@@ -774,18 +784,22 @@ pub(crate) async fn serve_file_inner(
         );
     };
 
-    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
-        && let Ok(val) = if_none_match.to_str()
-        && val.trim_matches('"') == etag.trim_matches('"')
-    {
+    if if_none_matches(&headers, etag) {
         count_hit(&viewer_ip);
-        return with_cache_headers(
-            Response::builder()
-                .status(StatusCode::NOT_MODIFIED)
-                .header(header::ETAG, etag),
-        )
-        .body(Body::empty())
-        .map_err(|_| JuicehostError::Internal);
+        let mut builder = with_cache_headers(Response::builder().status(StatusCode::NOT_MODIFIED));
+        apply_byte_response_headers(
+            &mut builder,
+            ByteResponseHeaders {
+                csp_mime: Some(&mime_str),
+                etag: Some(etag.as_str()),
+                content_range: None,
+                content_length: None,
+                accept_ranges: false,
+            },
+        );
+        return builder
+            .body(Body::empty())
+            .map_err(|_| JuicehostError::Internal);
     }
 
     let total_size = file_meta.size;
@@ -817,30 +831,42 @@ pub(crate) async fn serve_file_inner(
                     item
                 });
                 count_hit(&viewer_ip);
-                return with_disposition(with_cache_headers(
+                let mut builder = with_disposition(with_cache_headers(
                     Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
-                        .header(header::CONTENT_TYPE, &mime_str)
-                        .header(header::CONTENT_LENGTH, content_len)
-                        .header(
-                            header::CONTENT_RANGE,
-                            format!("bytes {start}-{end}/{total_size}"),
-                        )
-                        .header(header::ETAG, etag)
-                        .header(header::ACCEPT_RANGES, "bytes"),
-                ))
-                .body(Body::from_stream(stream))
-                .map_err(|_| JuicehostError::Internal);
+                        .header(header::CONTENT_TYPE, &mime_str),
+                ));
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(&mime_str),
+                        etag: Some(etag.as_str()),
+                        content_range: Some(format!("bytes {start}-{end}/{total_size}")),
+                        content_length: Some(content_len),
+                        accept_ranges: true,
+                    },
+                );
+                return builder
+                    .body(Body::from_stream(stream))
+                    .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Unsatisfiable => {
-                return with_cache_headers(
-                    Response::builder()
-                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
-                        .header(header::ACCEPT_RANGES, "bytes"),
-                )
-                .body(Body::empty())
-                .map_err(|_| JuicehostError::Internal);
+                let mut builder = with_cache_headers(
+                    Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE),
+                );
+                apply_byte_response_headers(
+                    &mut builder,
+                    ByteResponseHeaders {
+                        csp_mime: Some(&mime_str),
+                        etag: Some(etag.as_str()),
+                        content_range: Some(format!("bytes */{total_size}")),
+                        content_length: None,
+                        accept_ranges: true,
+                    },
+                );
+                return builder
+                    .body(Body::empty())
+                    .map_err(|_| JuicehostError::Internal);
             }
             RangeResult::Ignore => {}
         }

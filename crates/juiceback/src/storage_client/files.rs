@@ -314,8 +314,10 @@ pub async fn concat_files(
         tracing::debug!("concatenated {:?} into {target_id} on juicehost", part_ids);
         Ok(())
     } else {
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let body_text = resp.text().await.unwrap_or_default();
+        // The numeric status is kept so callers can map transient storage
+        // failures (503/507) to retryable errors instead of a flat 500.
         Err(format!(
             "juicehost concat failed: status={status} body={body_text}"
         ))

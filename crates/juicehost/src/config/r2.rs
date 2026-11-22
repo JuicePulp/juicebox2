@@ -1,4 +1,4 @@
-use crate::config::{ConfigError, R2File};
+use crate::config::{ConfigError, R2File, secret::SecretString};
 
 /// Missing bucket or credentials disables the hot tier.
 #[derive(Debug)]
@@ -7,8 +7,8 @@ pub struct R2Settings {
     endpoint: Option<String>,
     /// R2 region; `auto` is the correct value for Cloudflare.
     region: String,
-    access_key: Option<String>,
-    secret_key: Option<String>,
+    access_key: Option<SecretString>,
+    secret_key: Option<SecretString>,
 }
 
 impl R2Settings {
@@ -40,8 +40,10 @@ impl R2Settings {
 
 impl R2Settings {
     pub fn load(file: &R2File) -> Result<Self, ConfigError> {
-        let access_key = juiceutils::config::optional_secret("R2_ACCESS_KEY");
-        let secret_key = juiceutils::config::optional_secret("R2_SECRET_KEY");
+        let access_key =
+            juiceutils::config::optional_secret("R2_ACCESS_KEY").map(SecretString::from);
+        let secret_key =
+            juiceutils::config::optional_secret("R2_SECRET_KEY").map(SecretString::from);
         Ok(Self {
             bucket: file.bucket.clone(),
             endpoint: file.endpoint.clone(),

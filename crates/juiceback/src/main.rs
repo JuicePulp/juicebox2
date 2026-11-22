@@ -4,7 +4,6 @@ use mimalloc::MiMalloc;
 use tokio::net::TcpSocket;
 #[cfg(feature = "quic")]
 use tokio::sync::Notify;
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -60,32 +59,13 @@ fn main() {
         Ok(config) => config,
         Err(error) => juiceutils::exit_on_config_error("juiceback", error),
     };
-    let _sentry_guard = juiceutils::config::optional_secret("SENTRY_DSN_JUICEBACK")
-        .or_else(|| juiceutils::config::optional_secret("SENTRY_DSN"))
-        .map(|dsn| {
-            let traces_sample_rate = std::env::var("SENTRY_TRACES_SAMPLE_RATE")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|rate| rate.clamp(0.0, 1.0))
-                .unwrap_or(0.05);
-            sentry::init((
-                dsn.as_str(),
-                sentry::ClientOptions::default()
-                    .maybe_release(sentry::release_name!())
-                    .environment(config.sentry_environment.clone())
-                    .traces_sample_rate(traces_sample_rate)
-                    .send_default_pii(false),
-            ))
-        });
+    let _sentry_guard = juiceutils::bootstrap::init_sentry(
+        "SENTRY_DSN_JUICEBACK",
+        &config.sentry_environment,
+        sentry::release_name!(),
+    );
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| config.log_level.clone().into()),
-        )
-        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
-        .with(sentry_tracing::layer())
-        .init();
+    juiceutils::bootstrap::init_tracing(&config.log_level, true, true);
 
     tracing::info!("juiceback v{} starting", env!("CARGO_PKG_VERSION"));
     tracing::info!(
@@ -264,7 +244,9 @@ fn main() {
             // Race HTTP and QUIC so a shutdown signal also stops the QUIC server.
             tokio::select! {
                 () = async {
-                    juiceutils::start_quic_server(quic_router, quic_listen, quic_shutdown, "juiceback", quic_cert).await;
+                    if let Err(error) = juiceutils::start_quic_server(quic_router, quic_listen, quic_shutdown, "juiceback", quic_cert).await {
+                        tracing::error!("QUIC server failed: {error}");
+                    }
                 } => {}
                 () = async {
                     tracing::info!("juiceback listening on http://{addr}");

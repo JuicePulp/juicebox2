@@ -85,7 +85,9 @@ pub struct AppState {
 
     pub audio_embed: AudioEmbedSettings,
 
-    pub audio_embed_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per-id embed locks with the time they were first inserted, so idle
+    /// entries can be pruned instead of growing without bound.
+    pub audio_embed_locks: Arc<DashMap<String, (Instant, Arc<tokio::sync::Mutex<()>>)>>,
 
     pub audio_embed_semaphore: Arc<tokio::sync::Semaphore>,
 

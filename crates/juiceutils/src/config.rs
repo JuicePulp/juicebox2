@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -11,6 +14,8 @@ pub enum ConfigError {
     Empty { name: String },
     #[error("{name} must be a boolean (true/false/1/0)")]
     InvalidBoolean { name: String },
+    #[error("{name} must be a non-negative integer")]
+    InvalidInteger { name: String },
     #[error(
         "TICKET_JWT_SECRET is not set. Set TICKET_JWT_SECRET (or JWT_SECRET) to a real secret."
     )]
@@ -147,6 +152,9 @@ pub fn load_dotenv() {
         }
         let value = value.trim().trim_matches('"').trim_matches('\'');
 
+        // SAFETY: `load_dotenv` runs once during single-threaded startup, before
+        // any worker threads are spawned, so no other thread can be reading the
+        // environment while it is mutated. Values are trimmed, non-empty keys.
         unsafe {
             std::env::set_var(key, value);
         }
@@ -171,12 +179,17 @@ pub fn required_secret(name: &str) -> Result<String, ConfigError> {
         })
 }
 
-#[must_use]
-pub fn optional_secret(name: &str) -> Option<String> {
+/// Trimmed, non-empty environment value; shared by the typed env helpers.
+fn env_raw(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+#[must_use]
+pub fn optional_secret(name: &str) -> Option<String> {
+    env_raw(name)
 }
 
 #[must_use]
@@ -197,6 +210,33 @@ pub fn env_bool(name: &str) -> Result<Option<bool>, ConfigError> {
         },
         _ => Ok(None),
     }
+}
+
+/// Parses a trimmed environment value, returning `default` when it is unset or
+/// blank. A set-but-invalid value is an error rather than a silent fallback.
+pub fn env_parsed<T: FromStr>(name: &str, default: T) -> Result<T, ConfigError> {
+    match env_raw(name) {
+        Some(raw) => raw.parse::<T>().map_err(|_| ConfigError::InvalidInteger {
+            name: name.to_owned(),
+        }),
+        None => Ok(default),
+    }
+}
+
+/// Like [`env_parsed`], but with no default: unset, blank or invalid all yield
+/// `None`.
+#[must_use]
+pub fn optional_env_parsed<T: FromStr>(name: &str) -> Option<T> {
+    env_raw(name).and_then(|raw| raw.parse::<T>().ok())
+}
+
+/// Trims a URL-style environment value and drops trailing slashes; blank and
+/// slash-only values count as unset.
+#[must_use]
+pub fn optional_env_url(name: &str) -> Option<String> {
+    env_raw(name)
+        .map(|value| value.trim_end_matches('/').to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn ticket_secret(fallback: &str) -> Result<String, ConfigError> {

@@ -131,13 +131,21 @@ pub struct FileRecord {
 
     /// Crypto format version; `1` means per-file key material is present.
     pub key_version: i64,
+
+    /// Device that announced a peer row; empty for ordinary uploads.
+    pub peer_device_id: String,
+
+    /// Last peer heartbeat, Unix seconds; `0` for ordinary uploads.
+    pub last_seen: i64,
 }
 
 impl FileRecord {
     pub const STATUS_UPLOADING: &str = "uploading";
     pub const STATUS_READY: &str = "ready";
+    pub const STATUS_PEER: &str = "peer";
     pub const TIER_STANDARD: &str = "standard";
     pub const TIER_HOT: &str = "hot";
+    pub const TIER_PEER: &str = "peer";
 
     #[expect(
         clippy::too_many_arguments,
@@ -179,7 +187,61 @@ impl FileRecord {
             dek_salt: None,
             dek_escrow: None,
             key_version: 0,
+            peer_device_id: String::new(),
+            last_seen: 0,
         }
+    }
+
+    /// Metadata-only row for a file served from a device's local juicehost.
+    /// `storage_path` is a unique placeholder: no bytes are ever written here.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "peer registration threads the established context (ids, token, device, host); bundling it churns the single caller"
+    )]
+    #[must_use]
+    pub fn new_peer(
+        id: String,
+        filename: String,
+        mime_type: String,
+        size_bytes: i64,
+        delete_token: String,
+        uploaded_at: i64,
+        expires_at: i64,
+        peer_relay_url: &str,
+        peer_device_id: String,
+    ) -> Self {
+        Self {
+            storage_path: format!("peer:{id}"),
+            id,
+            filename,
+            mime_type,
+            title: String::new(),
+            author: String::new(),
+            size_bytes,
+            delete_token,
+            uploaded_at,
+            expires_at,
+            uploader_ip: None,
+            storage_host: Some(peer_relay_url.to_string()),
+            status: Self::STATUS_PEER.to_string(),
+            tier: Self::TIER_PEER.to_string(),
+            r2_key: String::new(),
+            tier_pinned: false,
+            password_hash: None,
+            is_encrypted: false,
+            enc_header: None,
+            dek_wrapped: None,
+            dek_salt: None,
+            dek_escrow: None,
+            key_version: 0,
+            peer_device_id,
+            last_seen: uploaded_at,
+        }
+    }
+
+    #[must_use]
+    pub fn is_peer(&self) -> bool {
+        self.tier == Self::TIER_PEER
     }
 
     #[must_use]

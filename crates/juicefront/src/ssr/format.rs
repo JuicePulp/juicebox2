@@ -1,23 +1,6 @@
 /// Binary units, one decimal below 10, rounded otherwise; caps at TB.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
 pub fn format_size(bytes: u64) -> String {
-    if bytes == 0 {
-        return "0 B".to_owned();
-    }
-    let units = ["B", "KB", "MB", "GB", "TB"];
-    let index = (bytes as f64).log(1024_f64) as usize;
-    let index = index.min(units.len() - 1);
-    let value = bytes as f64 / 1024_f64.powi(index as i32);
-    if value >= 10.0 || index == 0 {
-        format!("{} {}", value.round() as u64, units[index])
-    } else {
-        format!("{value:.1} {}", units[index])
-    }
+    juiceutils::size::format_size(bytes, juiceutils::size::SizeStyle::Compact)
 }
 
 #[allow(
@@ -83,7 +66,7 @@ pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     if expires_at == 0 {
         return "???".to_owned();
     }
-    let left = expires_at * 1000 - now_ms;
+    let left = expires_at.saturating_mul(1000).saturating_sub(now_ms);
     if left <= 0 {
         return crate::i18n::t(locale, "files.expired");
     }
@@ -109,11 +92,11 @@ pub fn remaining_label(locale: &str, expires_at: i64, now_ms: i64) -> String {
     clippy::cast_sign_loss
 )]
 pub fn pct_remaining(expires_at: i64, uploaded_at: i64, now_ms: i64) -> u64 {
-    let total = (expires_at - uploaded_at) * 1000;
+    let total = expires_at.saturating_sub(uploaded_at).saturating_mul(1000);
     if total <= 0 {
         return 0;
     }
-    let left = expires_at * 1000 - now_ms;
+    let left = expires_at.saturating_mul(1000).saturating_sub(now_ms);
     ((left.max(0) as f64 / total as f64) * 100.0).round() as u64
 }
 

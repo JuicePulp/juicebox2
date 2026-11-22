@@ -31,7 +31,7 @@ use secret::SecretSettings;
 use security::SecuritySettings;
 use thread::ThreadSettings;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub public_host: String,
 
@@ -141,6 +141,34 @@ pub struct Config {
     pub audio_embed: AudioEmbedSettings,
 
     pub sentry: juiceutils::config::SentrySettings,
+}
+
+/// Credentials are deliberately omitted: `Config` must be safe to log even when
+/// tracing is configured at debug level.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("public_host", &self.public_host)
+            .field("public_port", &self.public_port)
+            .field("quic_host", &self.quic_host)
+            .field("quic_port", &self.quic_port)
+            .field("worker_threads", &self.worker_threads)
+            .field("files_dir", &self.files_dir)
+            .field("api_key", &"<redacted>")
+            .field("ticket_jwt_secret", &"<redacted>")
+            .field("ip_pepper", &"<redacted>")
+            .field("s3_access_key", &"<redacted>")
+            .field("s3_secret_key", &"<redacted>")
+            .field("r2_access_key", &"<redacted>")
+            .field("r2_secret_key", &"<redacted>")
+            .field("s3_bucket", &self.s3_bucket)
+            .field("r2_bucket", &self.r2_bucket)
+            .field("danger_level", &self.danger_level)
+            .field("max_file_size_bytes", &self.max_file_size_bytes)
+            .field("max_range_response_bytes", &self.max_range_response_bytes)
+            .field("audio_embed", &self.audio_embed)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -378,6 +406,10 @@ fn default_r2_region() -> String {
     String::from("auto")
 }
 
+/// A single range response larger than this is almost always a misconfiguration
+/// (1 TiB); reject it at load time instead of allowing unbounded memory use.
+pub(crate) const MAX_RANGE_RESPONSE_MB: u64 = 1024 * 1024;
+
 /// Caps expressed in GB, MB, and seconds before conversion.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LimitsFile {
@@ -489,8 +521,10 @@ const fn default_max_concat_parts() -> usize {
     128
 }
 
+/// Twice a browser's typical 30s idle watchdog, so the client gives up before
+/// the server does and a stalled upload is reported as a retryable timeout.
 const fn default_tcp_body_inactivity() -> u64 {
-    30
+    60
 }
 
 const fn default_tcp_request_total() -> u64 {
@@ -699,6 +733,8 @@ mod tests {
             "BACKEND_URL",
             "FRONTEND_URL",
         ] {
+            // SAFETY: the test's ENV_LOCK mutex serializes all env mutation in
+            // this test binary, so no other thread reads these variables.
             unsafe {
                 std::env::remove_var(name);
             }
@@ -709,12 +745,15 @@ mod tests {
     fn missing_api_key_is_optional() {
         let _guard = ENV_LOCK.lock().unwrap();
         clear_juicehost_env();
+        // SAFETY: ENV_LOCK is held for the duration of this test; no other
+        // test reads the environment concurrently.
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
         let result = Config::from_env();
         assert!(result.is_ok(), "from_env failed: {:?}", result.err());
         assert!(result.unwrap().api_key.is_empty());
+        // SAFETY: ENV_LOCK is held; the variable is only read by this test.
         unsafe {
             std::env::remove_var("TICKET_JWT_SECRET");
         }
@@ -738,6 +777,7 @@ mod tests {
     fn whitespace_api_key_becomes_empty() {
         let _guard = ENV_LOCK.lock().unwrap();
         clear_juicehost_env();
+        // SAFETY: ENV_LOCK is held; no other test reads these variables.
         unsafe {
             std::env::set_var("JUICEHOST_API_KEY", "   ");
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
@@ -745,6 +785,7 @@ mod tests {
         let result = Config::from_env();
         assert!(result.is_ok());
         assert!(result.unwrap().api_key.is_empty());
+        // SAFETY: ENV_LOCK is held; the variable is only read by this test.
         unsafe {
             std::env::remove_var("TICKET_JWT_SECRET");
         }
@@ -753,6 +794,8 @@ mod tests {
     #[test]
     fn toml_values_flow_into_config() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: ENV_LOCK is held for the duration of this test; no other
+        // test reads the environment concurrently.
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
@@ -761,6 +804,7 @@ mod tests {
         )
         .unwrap();
         let cfg = Config::try_load_from(&file).unwrap();
+        // SAFETY: ENV_LOCK is held; the variable is only read by this test.
         unsafe {
             std::env::remove_var("TICKET_JWT_SECRET");
         }
@@ -774,6 +818,8 @@ mod tests {
     #[test]
     fn size_scale_builds_caps_from_allowed_ttls() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: ENV_LOCK is held for the duration of this test; no other
+        // test reads the environment concurrently.
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
@@ -782,6 +828,7 @@ mod tests {
         )
         .unwrap();
         let cfg = Config::try_load_from(&file).unwrap();
+        // SAFETY: ENV_LOCK is held; the variable is only read by this test.
         unsafe {
             std::env::remove_var("TICKET_JWT_SECRET");
         }
@@ -811,6 +858,8 @@ mod tests {
     #[test]
     fn size_scale_disabled_keeps_one_cap() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: ENV_LOCK is held for the duration of this test; no other
+        // test reads the environment concurrently.
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
@@ -819,6 +868,7 @@ mod tests {
         )
         .unwrap();
         let cfg = Config::try_load_from(&file).unwrap();
+        // SAFETY: ENV_LOCK is held; the variable is only read by this test.
         unsafe {
             std::env::remove_var("TICKET_JWT_SECRET");
         }
@@ -830,6 +880,8 @@ mod tests {
     fn backend_url_env_overrides_file() {
         let _guard = ENV_LOCK.lock().unwrap();
         clear_juicehost_env();
+        // SAFETY: ENV_LOCK is held for the duration of this test; no other
+        // test reads the environment concurrently.
         unsafe {
             std::env::set_var("TICKET_JWT_SECRET", "test-ticket-secret");
         }
@@ -838,6 +890,7 @@ mod tests {
         )
         .unwrap();
 
+        // SAFETY: ENV_LOCK is held; no other test reads BACKEND_URL.
         unsafe {
             std::env::set_var("BACKEND_URL", "http://env.example/");
         }
@@ -845,6 +898,7 @@ mod tests {
         assert_eq!(cfg.backend_url.as_deref(), Some("http://env.example"));
         assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
 
+        // SAFETY: ENV_LOCK is held; no other test reads these variables.
         unsafe {
             std::env::set_var("BACKEND_URL", "none");
             std::env::remove_var("FRONTEND_URL");
@@ -853,6 +907,7 @@ mod tests {
         assert_eq!(cfg.backend_url, None);
         assert_eq!(cfg.frontend_url.as_deref(), Some("http://front.example"));
 
+        // SAFETY: ENV_LOCK is held; these variables were set by this test.
         unsafe {
             std::env::remove_var("BACKEND_URL");
             std::env::remove_var("TICKET_JWT_SECRET");

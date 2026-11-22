@@ -50,6 +50,18 @@ pub fn share_link(
     share_link_for(config, "v", storage_host, id, filename)
 }
 
+/// Peer rows store the relay as their storage host. Matching on that host
+/// keeps `share_links`' signature unchanged while routing only peer rows to
+/// the relay; every other file keeps its existing host/router behavior.
+#[must_use]
+pub fn is_peer_relay_host(config: &crate::config::Config, storage_host: Option<&str>) -> bool {
+    let Some(relay) = config.peer_relay_url.as_deref() else {
+        return false;
+    };
+    storage_host
+        .is_some_and(|host| host.trim().trim_end_matches('/') == relay.trim().trim_end_matches('/'))
+}
+
 #[must_use]
 pub fn share_link_for(
     config: &crate::config::Config,
@@ -58,6 +70,10 @@ pub fn share_link_for(
     id: &str,
     filename: &str,
 ) -> String {
+    if is_peer_relay_host(config, storage_host) {
+        let relay = config.peer_relay_url.as_deref().unwrap_or_default();
+        return public_url_for_route(route, relay, None, id, filename);
+    }
     if let Some(router) = config
         .router_base_url
         .as_deref()
@@ -103,8 +119,9 @@ pub async fn client_ip_middleware(
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|value| value.0.ip())
-        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        .map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |value| {
+            value.0.ip()
+        });
     let ip = client_ip(req.headers(), peer, &state);
     req.extensions_mut().insert(ClientIp(ip));
     tracing::Span::current().record("client_ip", tracing::field::display(ip));

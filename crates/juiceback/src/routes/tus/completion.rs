@@ -8,6 +8,21 @@ use crate::{
     state::AppState,
 };
 
+/// The spool is removed on every path, including a failed push; a retry cannot
+/// safely reuse bytes that may never have reached juicehost.
+struct SpoolCleanup(std::path::PathBuf);
+
+impl Drop for SpoolCleanup {
+    fn drop(&mut self) {
+        // Best-effort temp cleanup: an already-removed spool is not an error.
+        if let Err(e) = std::fs::remove_file(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to remove tus spool {:?}: {e}", self.0);
+        }
+    }
+}
+
 /// Protected bytes never enter the push stream, so there is nothing to wait
 /// for.
 pub(crate) async fn complete_tus_upload(
@@ -29,6 +44,7 @@ pub(crate) async fn finish_tus_upload(
         if meta.password_hash.is_some() {
             let target_id = meta.reserve_id.as_deref().unwrap_or(&meta.id);
             let spool = crate::routes::upload::protected::tus_spool_path(&meta.id);
+            let _spool_cleanup = SpoolCleanup(spool.clone());
             let spooled = tokio::fs::metadata(&spool)
                 .await
                 .map_err(|_| AppError::Internal("protected upload spool missing".into()))?;
@@ -87,7 +103,6 @@ pub(crate) async fn finish_tus_upload(
                 &dek,
             )
             .await?;
-            let _ = tokio::fs::remove_file(&spool).await;
             let mut material = material;
             material.enc_header = Some(hex::encode(header));
             Some((material, dek))
@@ -120,7 +135,8 @@ pub(crate) async fn finish_tus_upload(
                 delete_token: reservation_token,
                 filename: meta.filename.clone(),
                 mime_type: meta.mime_type.clone(),
-                size_bytes: meta.total_length as i64,
+                size_bytes: i64::try_from(meta.total_length)
+                    .map_err(|_| AppError::PayloadTooLarge)?,
                 uploader_ip: Some(meta.encrypted_ip.clone()),
             },
             crate::reservation::FinishPolicy::Strict,
@@ -140,7 +156,7 @@ pub(crate) async fn finish_tus_upload(
             meta.id.clone(),
             meta.filename,
             meta.mime_type,
-            meta.total_length as i64,
+            i64::try_from(meta.total_length).map_err(|_| AppError::PayloadTooLarge)?,
             meta.ttl_hours,
             meta.delete_token,
             Some(meta.encrypted_ip),

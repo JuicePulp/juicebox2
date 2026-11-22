@@ -2,12 +2,29 @@ use std::{sync::Arc, time::Duration};
 
 use crate::state::AppState;
 
+/// The body carries the IP pepper, so only HTTPS hosts (or explicit loopback
+/// targets for local development) may receive it.
+fn is_allowed_ban_target(host: &str) -> bool {
+    match reqwest::Url::parse(host) {
+        Ok(url) if url.scheme() == "https" => true,
+        Ok(url) if url.scheme() == "http" => matches!(
+            url.host_str(),
+            Some("localhost" | "127.0.0.1" | "::1" | "[::1]")
+        ),
+        _ => false,
+    }
+}
+
 /// No-op without the internal API key; per-host failures are only logged.
 async fn post_to_hosts(state: &Arc<AppState>, path: &str, body: serde_json::Value) {
     if state.config.juicehost_api_key.is_empty() {
         return;
     }
     for host in state.hosts.ban_targets() {
+        if !is_allowed_ban_target(host) {
+            tracing::warn!("ban push: skipping non-HTTPS, non-loopback target {host}");
+            continue;
+        }
         let url = format!("{host}{path}");
         let resp = state
             .http
