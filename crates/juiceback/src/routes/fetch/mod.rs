@@ -4,6 +4,7 @@ pub mod handlers;
 pub mod job;
 pub mod meta;
 pub mod store;
+pub mod twitter;
 pub mod types;
 pub mod validation;
 pub mod ytdlp;
