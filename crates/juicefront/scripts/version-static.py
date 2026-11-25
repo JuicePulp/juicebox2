@@ -6,7 +6,8 @@ A browser keeps one module graph for the lifetime of a tab, and module imports
 do not inherit the query string of their parent. Without a fresh specifier on
 each import, a CDN can serve a mix of old and new modules after a deploy. This
 mirrors the FNV-1a hash in crates/juicefront/build.rs, copies the source tree to
-the destination, and appends that version to relative .js/.mjs specifiers.
+the destination, appends that version to relative .js/.mjs specifiers, and
+restores the separately-built juiceplayer bundle under static/juiceplayer.
 """
 
 from __future__ import annotations
@@ -60,6 +61,8 @@ def stamp_modules(root: Path, version: str) -> tuple[int, int]:
     for path in sorted(root.rglob("*")):
         if path.suffix not in {".js", ".mjs"} or not path.is_file():
             continue
+        if "juiceplayer" in path.relative_to(root).parts:
+            continue
         source = path.read_text()
         updated, count = MODULE_SPECIFIER.subn(
             lambda match: (
@@ -107,6 +110,9 @@ def main() -> None:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(source, dest)
+    player_src = repo_root / "crates/juicehost/assets/juiceplayer/dist"
+    if player_src.is_dir():
+        shutil.copytree(player_src, dest / "juiceplayer")
     files, specifiers = stamp_modules(dest, version)
     print(f"asset_version={version}")
     print(f"stamped {specifiers} module specifiers in {files} files")
