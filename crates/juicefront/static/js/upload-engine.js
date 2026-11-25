@@ -24,6 +24,7 @@ import {
   DIRECT_PARALLEL_RESERVE_URL,
   DIRECT_PARALLEL_COMPLETE_URL,
   DIRECT_PARALLEL_THRESHOLD,
+  REMOTE_STREAM_MAX_BYTES,
   STREAM_START_CHUNK,
   STREAM_MIN_CHUNK,
   STREAM_MAX_CHUNK,
@@ -322,6 +323,12 @@ export function startUpload(item, file, controls) {
     } catch {}
     updateMethod(controls, item, "direct");
     return startDirectUpload(item, file, controls);
+  }
+  // A selected storage host is behind Cloudflare; never stream a file large
+  // enough to cross its ~100MB request-body limit in a single push.
+  if (item.customHost && file.size >= REMOTE_STREAM_MAX_BYTES) {
+    updateMethod(controls, item, "direct-parallel");
+    return startDirectParallelUpload(item, file, controls);
   }
   const mode = item.clientMode || readUploadMode();
   if (mode === "direct-prefer") {

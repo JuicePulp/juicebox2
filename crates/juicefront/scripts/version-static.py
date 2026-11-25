@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 FNV_OFFSET = 0xCBF29CE484222325
@@ -114,6 +115,10 @@ def main() -> None:
     if player_src.is_dir():
         shutil.copytree(player_src, dest / "juiceplayer")
     files, specifiers = stamp_modules(dest, version)
+    # Copied files inherit the source context; SELinux can deny the service
+    # read access unless the destination tree is relabeled.
+    if shutil.which("restorecon"):
+        subprocess.run(["restorecon", "-R", str(dest)], check=False)
     print(f"asset_version={version}")
     print(f"stamped {specifiers} module specifiers in {files} files")
 
