@@ -313,6 +313,15 @@ async function waitForReservedFile(id, signal, timeoutMs = 60000) {
 
 /** Entry point for one upload; resume state on `item` wins over a fresh transport choice. Returns `{ abort }`. */
 export function startUpload(item, file, controls) {
+  // A selected storage host is behind Cloudflare; never stream a file large
+  // enough to cross its ~100MB request-body limit in a single push. This has
+  // to run before resume handling, or an already-started TUS session keeps
+  // streaming into the same wall on every retry.
+  if (item.customHost && file.size >= REMOTE_STREAM_MAX_BYTES) {
+    item.method = "direct-parallel";
+    updateMethod(controls, item, "direct-parallel");
+    return startDirectParallelUpload(item, file, controls);
+  }
   if (item.method === "direct-stream" && item.tusId)
     return startTusStreamUpload(item, file, controls);
   if (item.method === "tus" && item.tusSessionId)
@@ -323,12 +332,6 @@ export function startUpload(item, file, controls) {
     } catch {}
     updateMethod(controls, item, "direct");
     return startDirectUpload(item, file, controls);
-  }
-  // A selected storage host is behind Cloudflare; never stream a file large
-  // enough to cross its ~100MB request-body limit in a single push.
-  if (item.customHost && file.size >= REMOTE_STREAM_MAX_BYTES) {
-    updateMethod(controls, item, "direct-parallel");
-    return startDirectParallelUpload(item, file, controls);
   }
   const mode = item.clientMode || readUploadMode();
   if (mode === "direct-prefer") {
