@@ -909,6 +909,11 @@ fn player_script_html(page: &PreviewPage) -> String {
   player.addEventListener('error', function (event) {
     var detail = event && event.detail;
     if (detail && detail.fatal === false) return;
+    // Decode failures are not player-load failures. Keep the custom element so
+    // it can render its own error panel instead of swapping in a native <video>
+    // that will fail on the same bytes and look like JavaScript never loaded.
+    var code = detail && detail.code;
+    if (code === 'video-error' || code === 'decode-error') return;
     mountNative();
   });
   setTimeout(function () {
