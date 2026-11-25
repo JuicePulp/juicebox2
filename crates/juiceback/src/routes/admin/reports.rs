@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::common::{AdminUser, ListParams};
 use crate::{db, error::AppError, state::AppState};
 
-/// `reporter_ip_hash` is truncated; `has_password` says preview can decrypt.
+/// `reporter_ip_hash` is the full ban hash; `has_password` says preview can decrypt.
 #[derive(Serialize, ToSchema)]
 pub struct AdminReportEntry {
     pub id: i64,
@@ -81,10 +81,7 @@ pub async fn list_reports_handler(
                 .reporter_ip
                 .as_ref()
                 .and_then(|enc| crate::utils::decrypt_ip(enc, &state.config.ip_encryption_key))
-                .map(|ip| {
-                    let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
-                    crate::utils::truncate_hash(&h).to_string()
-                });
+                .map(|ip| crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper));
             AdminReportEntry {
                 id: r.id,
                 file_url: r.file_url,

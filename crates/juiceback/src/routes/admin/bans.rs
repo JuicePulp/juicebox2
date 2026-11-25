@@ -13,6 +13,12 @@ use utoipa::ToSchema;
 use super::common::{AdminUser, ListParams};
 use crate::{db, error::AppError, state::AppState};
 
+/// Bans are keyed by the full 64-character HMAC-SHA256 hash. A truncated hash
+/// (e.g. the 12-character display form) can never match a request.
+fn is_full_ban_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct AdminBansResponse {
     pub items: Vec<db::BanRecord>,
@@ -150,6 +156,13 @@ pub async fn ban_ip_handler(
         return Err(AppError::BadRequest("hash or ip is required".into()));
     }
 
+    if !is_full_ban_hash(&ban_hash) {
+        return Err(AppError::BadRequest(
+            "hash must be a full 64-character hex ban hash; use the IP field for a raw address"
+                .into(),
+        ));
+    }
+
     let reason = if payload.reason.trim().is_empty() {
         "no reason given".to_string()
     } else {
@@ -270,6 +283,11 @@ pub async fn import_bans_handler(
 
         if ban_hash.is_empty() {
             errors.push(format!("entry {entry_no}: empty hash or ip"));
+            continue;
+        }
+
+        if !is_full_ban_hash(&ban_hash) {
+            errors.push(format!("entry {entry_no}: hash must be a full 64-character hex hash"));
             continue;
         }
 
