@@ -75,10 +75,7 @@ pub async fn list_feedback_handler(
                 .reporter_ip
                 .as_ref()
                 .and_then(|enc| crate::utils::decrypt_ip(enc, &state.config.ip_encryption_key))
-                .map(|ip| {
-                    let h = crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper);
-                    crate::utils::truncate_hash(&h).to_string()
-                });
+                .map(|ip| crate::utils::hash_ip_for_ban(&ip, &state.config.ip_pepper));
             AdminFeedbackEntry {
                 id: r.id,
                 message: r.message,
