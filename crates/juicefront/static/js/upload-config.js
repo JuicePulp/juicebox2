@@ -74,7 +74,11 @@ export function readUploadMode() {
   return document.getElementById("server-config")?.getAttribute("data-upload-mode") || "standard";
 }
 /** `direct-prefer` returns only direct variants: stream for slow links, parallel for large files, ticket otherwise. */
-export function uploadMethodFor(mode, size, lastBps) {
+export function uploadMethodFor(mode, size, lastBps, host) {
+  // A custom storage host is reached through Cloudflare, which rejects request
+  // bodies over ~100MB. Large uploads must use bounded parallel parts.
+  if (host && size >= REMOTE_STREAM_MAX_BYTES)
+    return "direct-parallel";
   if (mode === "direct-prefer") {
     if (preferStream(mode, size, lastBps))
       return "direct-stream";
@@ -106,6 +110,8 @@ export function readSafeUploadEnabled() {
 }
 // Thresholds and chunk sizes in bytes; the `*_SECS` values are tuning targets, not timeouts.
 export const TUS_THRESHOLD = 30 * 1024 * 1024;
+/** Cloudflare caps proxied request bodies at ~100MB; keep remote streams below it. */
+export const REMOTE_STREAM_MAX_BYTES = 96 * 1024 * 1024;
 export const TUS_START_CHUNK = 16 * 1024 * 1024;
 export const TUS_MIN_CHUNK = 8 * 1024 * 1024;
 export const TUS_MAX_CHUNK = 64 * 1024 * 1024;

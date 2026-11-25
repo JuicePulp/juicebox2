@@ -515,7 +515,7 @@ export async function enqueueUpload(input) {
     size: input.file.size,
     lastModified: input.file.lastModified,
     clientMode,
-    method: uploadMethodFor(clientMode, input.file.size, lastUploadBps()),
+    method: uploadMethodFor(clientMode, input.file.size, lastUploadBps(), input.customHost),
     state: "queued",
     progress: 0,
     ttlHours: input.ttlHours,
