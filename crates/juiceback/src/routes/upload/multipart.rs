@@ -217,7 +217,18 @@ pub async fn upload_handler(
         reservation_token,
         fresh_capability,
     ))
-    .await?;
+    .await
+    .map_err(|error| {
+        if matches!(error, AppError::InsufficientStorage(_)) {
+            tracing::warn!(
+                "upload_out_of_storage: user_id={} ip={} error={}",
+                user_id,
+                crate::utils::truncate_hash(&hashed_ip),
+                error
+            );
+        }
+        error
+    })?;
     tracing::debug!("multipart parse total took {:?}", parse_start.elapsed());
 
     let now = chrono::Utc::now().timestamp();
