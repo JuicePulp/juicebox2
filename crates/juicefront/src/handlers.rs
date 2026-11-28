@@ -967,6 +967,43 @@ pub async fn upload_target_proxy(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+/// Forwards the router's node list so the frontend can fall back to another
+/// healthy host when a targeted upload lookup fails.
+pub async fn router_hosts_proxy(
+    State(state): State<Arc<AppState>>,
+) -> Response<Body> {
+    let Some(router_url) = state
+        .config
+        .router_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "router not configured").into_response();
+    };
+    let url = format!("{}/hosts", router_url.trim_end_matches('/'));
+    let response = match state.http.get(url).timeout(Duration::from_millis(1_500)).send().await {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            tracing::warn!("router hosts returned {}", response.status());
+            return (StatusCode::SERVICE_UNAVAILABLE, "router unavailable").into_response();
+        }
+        Err(error) => {
+            tracing::warn!("router hosts failed: {error}");
+            return (StatusCode::SERVICE_UNAVAILABLE, "router unavailable").into_response();
+        }
+    };
+    let Ok(body) = response.bytes().await else {
+        return (StatusCode::BAD_GATEWAY, "router response error").into_response();
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
 /// Methods other than GET are handed to the reverse proxy.
 pub async fn index(
     State(state): axum::extract::State<Arc<AppState>>,
